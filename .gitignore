@@ -44,7 +44,6 @@ nosetests.xml
 coverage.xml
 *,cover
 .hypothesis/
-.napari_cache
 
 # Translations
 *.mo
@@ -82,3 +81,7 @@ venv/
 
 # written by setuptools_scm
 **/_version.py
+
+image-datasets/
+
+playground/

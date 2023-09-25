@@ -5,9 +5,8 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/ngff-stitcher.svg?color=green)](https://python.org)
 [![tests](https://github.com/m-albert/ngff-stitcher/workflows/tests/badge.svg)](https://github.com/m-albert/ngff-stitcher/actions)
 [![codecov](https://codecov.io/gh/m-albert/ngff-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/m-albert/ngff-stitcher)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/ngff-stitcher)](https://napari-hub.org/plugins/ngff-stitcher)
 
-A toolbox for rthe registration and fusion of chunked 2-3D image datasets
+A toolbox for the registration and fusion of chunked 2-3D image datasets
 
 ----------------------------------
 
