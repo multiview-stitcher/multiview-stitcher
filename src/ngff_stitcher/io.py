@@ -194,14 +194,16 @@ def save_sim_as_tif(path, sim):
     # with dask_config.set(scheduler="single-threaded"):
     #     da.store(sim.data, z)
 
-    N_tries = 1
+    N_tries = 10
     success = False
     for _ in range(N_tries):
         try:
             # writing with tifffile is not thread safe,
             # so we need to disable dask's multithreading
+            # or is it?
             with dask_config.set(scheduler="single-threaded"):
                 da.store(sim.data, z)
+
             success = True
             break
         except ValueError:

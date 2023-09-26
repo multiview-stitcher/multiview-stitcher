@@ -4,7 +4,6 @@ import warnings
 import dask.array as da
 import numpy as np
 import xarray as xr
-from scipy import ndimage
 
 from ngff_stitcher import spatial_image_utils, transformation
 
@@ -242,7 +241,9 @@ def fuse_field(
 
         field_w = xr.zeros_like(sim)
         field_w.data = get_smooth_border_weight_from_shape(
-            sim.shape[-ndim:], widths=blending_widths
+            sim.shape[-ndim:],
+            chunks=sim.chunks,
+            widths=blending_widths,
         )
 
         field_w_t = transformation.transform_sim(
@@ -254,6 +255,7 @@ def fuse_field(
             output_origin=output_origin,
             order=1,
         )
+
         field_ws_t.append(field_w_t.data)
 
     field_ims_t = da.stack(field_ims_t)
@@ -484,14 +486,11 @@ def smooth_transition(x, x_offset=0.5, x_stretch=None, k=3):
     if x_stretch is None:
         x_stretch = x_offset
 
-    w = np.zeros(x.shape).astype(np.float32)
-
-    xp = x.astype(np.float32)
+    xp = x
     xp = xp - x_offset  # w is 0 at offset
     xp = xp / x_stretch / 2.0  # w is +/-0.5 at offset +/- x_stretch
 
-    mask = (xp > -0.5) * (xp < 0.5)
-    w[mask] = 1 - 1 / (1 + (1 / (xp[mask] + 0.5) - 1) ** (-k))
+    w = 1 - 1 / (1 + (1 / (xp + 0.5) - 1) ** (-k))
 
     w[xp <= -0.5] = 0.0
     w[xp >= 0.5] = 1.0
@@ -499,26 +498,45 @@ def smooth_transition(x, x_offset=0.5, x_stretch=None, k=3):
     return w
 
 
-def get_smooth_border_weight_from_shape(shape, widths=None):
+def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
     """
     Get a weight image for blending that is 0 at the border and 1 at the center.
     Transition widths can be specified for each dimension.
+
+    20230926: this adds too many small dask tasks, need to optimize
+
+    Possible better strategy:
+
+    Assume that only the border chunks of the input files need to be different
+    from da.ones.
+
+    OR: multiscale strategy
+    - first fuse smallest scale
+    - then go on with only those chunks that need to be filled in
+    - not clear if it's beneficial, as it's already known which chunks are needed
+
+    OR: Manually construct output array
+
+    [!!] OR: Use interpolation to calculate distance map
+    - reduce input to one value per chunk, i.e. chunksize of [1]*ndim
+    - use this to define which input chunk is required for fusion
+    - also use this to calculate weights at border
+      (only where above coarse interpolation step gave < 1)
+
     """
 
     ndim = len(shape)
 
     # get distance to border for each dim
 
-    # zero at the border
-    # dim_dists = [ndimage.distance_transform_edt(
-    #                 ndimage.binary_erosion(
-    #                     np.ones(shape[dim]).astype(bool)))
-    #                         for dim in range(ndim)]
-
-    # nonzero at the border
     dim_dists = [
-        ndimage.distance_transform_edt(np.ones(shape[dim]).astype(bool))
+        da.arange(shape[dim], chunks=chunks[dim]).astype(float)
         for dim in range(ndim)
+    ]
+
+    dim_dists = [
+        da.min(da.abs(da.stack([dd, dd - shape[idim]])), axis=0)
+        for idim, dd in enumerate(dim_dists)
     ]
 
     dim_ws = [
@@ -529,7 +547,7 @@ def get_smooth_border_weight_from_shape(shape, widths=None):
     ]
 
     # get product of weights for each dim
-    w = np.ones(shape).astype(np.float32)
+    w = da.ones(shape, chunks=chunks, dtype=float)
     for dim in range(len(shape)):
         tmp_dim_w = dim_ws[dim]
         for _ in range(ndim - dim - 1):
