@@ -29,6 +29,8 @@ def generate_tiled_dataset(
     tiles_z=1,
     overlap=5,
     zoom=6,
+    random_data=False,
+    chunksize=128,
     dtype=np.uint16,
     spacing_x=0.5,
     spacing_y=0.5,
@@ -91,15 +93,22 @@ def generate_tiled_dataset(
             ],
             dtype=np.uint16,
         )
-        tl = tiles.map_blocks(
-            transform_input,
-            shifts,
-            drifts,
-            im_gt,
-            zoom=zoom,
-            overlap=overlap,
-            dtype=tiles.dtype,
-        )
+
+        if random_data:
+            tl = da.random.randint(
+                0, 200, tiles.shape, dtype=dtype, chunks=tiles.chunks
+            )
+        else:
+            tl = tiles.map_blocks(
+                transform_input,
+                shifts,
+                drifts,
+                im_gt,
+                zoom=zoom,
+                overlap=overlap,
+                dtype=tiles.dtype,
+            )
+
         tls.append(tl[None])
 
     tls = da.concatenate(tls, axis=0)
@@ -141,6 +150,7 @@ def generate_tiled_dataset(
         sim.attrs["transforms"] = xr.Dataset({transform_key: affine_xr})
 
         # sim.name = 'tile_' + '_'.join([str(ti) for ti in tile_index])
+        sim.data = sim.data.rechunk((1, 1) + (chunksize,) * ndim)
 
         sims.append(sim)
 
