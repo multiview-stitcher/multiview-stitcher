@@ -232,12 +232,24 @@ def set_affine_transform(
 
 
 def ensure_time_dim(msim):
+
     if "t" in msim["scale0/image"].dims:
         return msim
 
     scale_keys = get_sorted_scale_keys(msim)
     for sk in scale_keys:
-        msim[sk] = spatial_image_utils.ensure_time_dim(msim[sk])
+        for data_var in msim[sk].data_vars:
+
+            if data_var == "image":
+                msim[sk][data_var] = spatial_image_utils.ensure_time_dim(
+                    msim[sk][data_var])
+            else:
+
+                if "t" in msim[sk][data_var].dims:
+                    continue
+                else:
+                    msim[sk][data_var] =\
+                         msim[sk][data_var].expand_dims(["t"], axis=0)
 
     return msim
 
