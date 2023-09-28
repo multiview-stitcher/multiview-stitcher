@@ -5,14 +5,14 @@ import dask.array as da
 import numpy as np
 import pytest
 
-from ngff_stitcher import (
+from multiview_stitcher import (
     fusion,
     io,
     msi_utils,
     registration,
     sample_data,
 )
-from ngff_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 @pytest.mark.parametrize(

@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from ngff_stitcher import (
+from multiview_stitcher import (
     io,
     # spatial_image_utils,
     msi_utils,
     mv_graph,
     sample_data,
 )
-from ngff_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 @pytest.mark.parametrize(

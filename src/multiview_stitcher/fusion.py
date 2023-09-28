@@ -5,7 +5,7 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 
-from ngff_stitcher import spatial_image_utils, transformation
+from multiview_stitcher import spatial_image_utils, transformation
 
 
 def combine_stack_props(stack_props_list):

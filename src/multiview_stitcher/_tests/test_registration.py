@@ -4,7 +4,7 @@ import pytest
 import xarray as xr
 from scipy import ndimage
 
-from ngff_stitcher import (
+from multiview_stitcher import (
     io,
     msi_utils,
     mv_graph,
@@ -12,7 +12,7 @@ from ngff_stitcher import (
     sample_data,
     spatial_image_utils,
 )
-from ngff_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 def test_pairwise():

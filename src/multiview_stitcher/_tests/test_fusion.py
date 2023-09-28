@@ -4,8 +4,8 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 
-from ngff_stitcher import fusion, io, sample_data, spatial_image_utils
-from ngff_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher import fusion, io, sample_data, spatial_image_utils
+from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 def test_fuse_field():

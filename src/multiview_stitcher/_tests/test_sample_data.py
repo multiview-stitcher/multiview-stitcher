@@ -1,6 +1,6 @@
 import pytest
 
-from ngff_stitcher import sample_data
+from multiview_stitcher import sample_data
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,7 @@ import multiscale_spatial_image as msi
 import spatial_image as si
 import xarray as xr
 
-from ngff_stitcher import spatial_image_utils
+from multiview_stitcher import spatial_image_utils
 
 
 def get_store_decorator(store_path, store_overwrite=False):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools_scm]
-write_to = "src/ngff_stitcher/_version.py"
+write_to = "src/multiview_stitcher/_version.py"
 
 [tool.black]
 line-length = 79

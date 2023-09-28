@@ -13,7 +13,7 @@ from Geometry3D import (
 # 20230924: set_eps line above created problems
 # potentially because it had been called multiple times
 # commenting out for now
-from ngff_stitcher import msi_utils, spatial_image_utils
+from multiview_stitcher import msi_utils, spatial_image_utils
 
 
 def build_view_adjacency_graph_from_msims(

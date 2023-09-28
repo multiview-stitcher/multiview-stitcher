@@ -11,13 +11,13 @@ from dask_image import ndfilters
 from scipy import ndimage
 from tqdm import tqdm
 
-from ngff_stitcher import (
+from multiview_stitcher import (
     msi_utils,
     mv_graph,
     spatial_image_utils,
     transformation,
 )
-from ngff_stitcher._skimage_monkey_patch import _modified_disambiguate_shift
+from multiview_stitcher._skimage_monkey_patch import _modified_disambiguate_shift
 
 
 class NotEnoughOverlapError(Exception):

@@ -5,8 +5,8 @@ import numpy as np
 import xarray as xr
 from scipy import ndimage
 
-from ngff_stitcher import registration
-from ngff_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher import registration
+from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 def get_mosaic_sample_data_path():

@@ -4,7 +4,7 @@ import numpy as np
 import spatial_image as si
 from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 
-from ngff_stitcher import spatial_image_utils
+from multiview_stitcher import spatial_image_utils
 
 
 def transform_sim(

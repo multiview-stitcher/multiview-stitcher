@@ -7,7 +7,7 @@ from aicsimageio import AICSImage
 from dask import config as dask_config
 from tifffile import imread, imwrite
 
-from ngff_stitcher import registration, spatial_image_utils
+from multiview_stitcher import registration, spatial_image_utils
 
 METADATA_TRANSFORM_KEY = "affine_metadata"
 
