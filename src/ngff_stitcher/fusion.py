@@ -181,7 +181,7 @@ def fuse(
     #             compute=False,
     #         )
 
-    res = spatial_image_utils.get_sim_from_sim(res)
+    res = spatial_image_utils.get_sim_from_xim(res)
     spatial_image_utils.set_sim_affine(
         res,
         spatial_image_utils.identity_transform(len(sdims), res.coords["t"]),

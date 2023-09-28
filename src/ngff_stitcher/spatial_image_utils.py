@@ -135,27 +135,28 @@ def ensure_time_dim(sim):
     else:
         sim = sim.expand_dims(["t"], axis=0)
 
-    sim = get_sim_from_sim(sim)
+    sim = get_sim_from_xim(sim)
 
     sim.attrs.update(copy.deepcopy(sim.attrs))
 
     return sim
 
 
-def get_sim_from_sim(sim):
-    spacing = get_spacing_from_sim(sim)
-    origin = get_origin_from_sim(sim)
+def get_sim_from_xim(xim):
+
+    spacing = get_spacing_from_sim(xim)
+    origin = get_origin_from_sim(xim)
 
     sim = si.to_spatial_image(
-        sim,
-        dims=sim.dims,
+        xim,
+        dims=xim.dims,
         scale=spacing,
         translation=origin,
-        t_coords=sim.coords["t"] if "t" in sim.dims else None,
-        c_coords=sim.coords["c"] if "c" in sim.dims else None,
+        t_coords=xim.coords["t"] if "t" in xim.dims else None,
+        c_coords=xim.coords["c"] if "c" in xim.dims else None,
     )
 
-    sim.attrs.update(copy.deepcopy(sim.attrs))
+    sim.attrs.update(copy.deepcopy(xim.attrs))
 
     return sim
 

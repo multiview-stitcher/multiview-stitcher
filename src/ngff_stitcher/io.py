@@ -72,7 +72,7 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     for iview, view in enumerate(views):
         view_sim = sim.sel(m=view)
 
-        view_sim = spatial_image_utils.get_sim_from_sim(view_sim)
+        view_sim = spatial_image_utils.get_sim_from_xim(view_sim)
 
         tile_mosaic_position = aicsim.get_mosaic_tile_position(view)
         origin_values = {
