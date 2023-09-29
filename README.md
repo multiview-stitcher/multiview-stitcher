@@ -57,6 +57,7 @@ Improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
 - Supported fusion methods:
   - [x] weighted average
   - [ ] multi-view deconvolution
+- [ ] fusion of overlapping label maps
 
 ### Data formats
 - [x] zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: [multiscale-spatial-data](https://github.com/spatial-image/multiscale-spatial-image)
