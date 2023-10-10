@@ -19,4 +19,4 @@ WARNING: THIS IS WORK IN PROGRESS, THE API IS NOT YET STABLE.
 
 ### Previous work
 
-`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
+`multiview-stitcher` improves and replaces [MVRegFus](https://github.com/m-albert/MVRegFus).

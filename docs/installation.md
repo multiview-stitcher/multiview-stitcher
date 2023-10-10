@@ -1,8 +1,8 @@
 # Installation
 
-## Pip
+## pip
 
-[TODO] You can install `napari-stitcher` via [pip]:
+[TODO] You can install `napari-stitcher` via pip:
 
     `pip install https://github.com/m-albert/multiview-stitcher`
 
