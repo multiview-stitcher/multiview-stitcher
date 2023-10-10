@@ -19,7 +19,7 @@ It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial
 
 ### Napari plugin
 
-There's an associated napari plugin: [napari-stitcher](https://github.com/napari-stitcher).
+There's an associated napari plugin: [napari-stitcher](https://github.com/m-albert/napari-stitcher).
 
 ### Work in progress
 
@@ -48,7 +48,7 @@ If you encounter any problems, please [file an issue](https://github.com/m-alber
 
 ## Contributing
 
-Contributions are welcome!
+Contributions are welcome! At the same time, we're still improving.
 
 ## License
 
