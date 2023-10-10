@@ -1,12 +1,4 @@
-# multiview-stitcher
-
-<!--
-[![License BSD-3](https://img.shields.io/pypi/l/multiview-stitcher.svg?color=green)](https://github.com/m-albert/multiview-stitcher/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/multiview-stitcher.svg?color=green)](https://pypi.org/project/multiview-stitcher)
-[![Python Version](https://img.shields.io/pypi/pyversions/multiview-stitcher.svg?color=green)](https://python.org)
-[![tests](https://github.com/m-albert/multiview-stitcher/workflows/tests/badge.svg)](https://github.com/m-albert/multiview-stitcher/actions)
-[![codecov](https://codecov.io/gh/m-albert/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/m-albert/multiview-stitcher)
--->
+# Overview
 
 [`multiview-stitcher`](https://github.com/m-albert/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
@@ -28,29 +20,3 @@ WARNING: THIS IS WORK IN PROGRESS, THE API IS NOT YET STABLE.
 ### Previous work
 
 `multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
-
-
-----------------------------------
-## Installation
-
-[TODO] You can install `napari-stitcher` via [pip]:
-
-    `pip install https://github.com/m-albert/multiview-stitcher`
-
-To install latest development version :
-
-    pip install git+https://github.com/m-albert/multiview-stitcher.git
-
-
-## Issues
-
-If you encounter any problems, please [file an issue] along with a detailed description.
-
-## Contributing
-
-Contributions are welcome!
-
-## License
-
-Distributed under the terms of the [BSD-3] license,
-"multiview-stitcher" is free and open source software.

@@ -1,0 +1,51 @@
+site_name: multiview-stitcher
+site_url: https://m-albert.github.io/multiview-stitcher
+site_description: A toolbox for registering / fusing / stitching multi-view / multi-positioning image datasets in 2-3D.
+
+repo_name: multiview-stitcher
+repo_url: https://github.com/m-albert/multiview-stitcher
+# edit_uri: edit/main/docs/
+# use_directory_urls: false
+
+nav:
+  - multiview-stitcher:
+      - index.md
+      - installation.md
+      - getting_started.md
+      - features.md
+      - data_formats.md
+      - implementation_details.md
+      - napari_stitcher.md
+      - related_projects.md
+      - contributing.md
+  - napari-stitcher
+
+theme:
+  name: "material"
+  features:
+    - content.tabs.link
+    - content.code.annotate
+    - content.code.copy
+    - navigation.tabs
+    - navigation.footer  # next/previous links in footer
+  icon:
+    logo: fontawesome/solid/clone
+    repo: fontawesome/brands/github
+  favicon:
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: dark blue
+      accent: dark blue
+      toggle:
+        icon: material/lightbulb-outline
+        name: "Switch to dark mode"
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: light green
+      toggle:
+        icon: material/lightbulb
+        name: "Switch to light mode"
