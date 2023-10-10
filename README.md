@@ -14,7 +14,7 @@ For visualization, the associated [`napari-stitcher`](https://github.com/m-alber
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 
-It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) classes for image metadata handling and [`dask`](https://github.com/dask) (and [`dask-image`]https://(github.com/dask-image)) for chunked and distributed image processing.
+It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) classes for image metadata handling and [`dask`](https://github.com/dask) and [`dask-image`](https://github.com/dask-image) for chunked and distributed image processing.
 
 
 ### Napari plugin
@@ -33,7 +33,7 @@ WARNING: THIS IS WORK IN PROGRESS, THE API IS NOT YET STABLE.
 ----------------------------------
 ## Installation
 
-[TODO] You can install `napari-stitcher` via [pip]:
+[TODO] You can install `napari-stitcher` via pip:
 
     `pip install https://github.com/m-albert/multiview-stitcher`
 
@@ -44,7 +44,7 @@ To install latest development version :
 
 ## Issues
 
-If you encounter any problems, please [file an issue] along with a detailed description.
+If you encounter any problems, please [file an issue](https://github.com/m-albert/multiview-stitcher/issues) along with a detailed description.
 
 ## Contributing
 
@@ -52,5 +52,5 @@ Contributions are welcome!
 
 ## License
 
-Distributed under the terms of the [BSD-3] license,
+Distributed under the terms of the BSD-3 license,
 "multiview-stitcher" is free and open source software.
