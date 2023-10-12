@@ -7,21 +7,32 @@ repo_url: https://github.com/multiview-stitcher/multiview-stitcher
 # edit_uri: edit/main/docs/
 # use_directory_urls: false
 
+plugins:
+  - mike:
+      canonical_version: main
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+          python:
+            paths: [src]
 nav:
   - multiview-stitcher:
-      - index.md
-      - installation.md
-      - getting_started.md
-      - features.md
-      - data_formats.md
-      - implementation_details.md
-      - napari_stitcher.md
-      - related_projects.md
-      - contributing.md
-  - napari-stitcher
+    - index.md
+    - installation.md
+    - getting_started.md
+    - features.md
+    - data_formats.md
+    - implementation_details.md
+    - napari_stitcher.md
+    - related_projects.md
+    - contributing.md
+  - API:
+    - api/registration.md
+    - api/transformation.md
+    - api/fusion.md
 
 theme:
-  name: "material"
+  name: material
   features:
     - content.tabs.link
     - content.code.annotate
@@ -40,7 +51,7 @@ theme:
       accent: dark blue
       toggle:
         icon: material/lightbulb-outline
-        name: "Switch to dark mode"
+        name: Switch to dark mode
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
@@ -48,4 +59,9 @@ theme:
       accent: light green
       toggle:
         icon: material/lightbulb
-        name: "Switch to light mode"
+        name: Switch to light mode
+
+extra:
+  version:
+    provider: mike
+    

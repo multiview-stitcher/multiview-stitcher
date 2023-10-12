@@ -85,3 +85,6 @@ venv/
 image-datasets/
 
 playground/
+
+# mkdocs documentation
+site/
