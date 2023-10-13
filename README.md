@@ -27,7 +27,7 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 
 ### Previous work
 
-`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/multiview-stitcher/MVRegFus).
+`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
 
 
 ----------------------------------
