@@ -23,7 +23,7 @@ There's an associated napari plugin: [napari-stitcher](https://github.com/m-albe
 
 ### Work in progress
 
-WARNING: THIS IS WORK IN PROGRESS, THE API IS NOT YET STABLE.
+WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open but has not been released yet.
 
 ### Previous work
 
