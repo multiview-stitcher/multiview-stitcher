@@ -1,16 +1,16 @@
 # multiview-stitcher
 
 <!--
-[![License BSD-3](https://img.shields.io/pypi/l/multiview-stitcher.svg?color=green)](https://github.com/m-albert/multiview-stitcher/raw/main/LICENSE)
+[![License BSD-3](https://img.shields.io/pypi/l/multiview-stitcher.svg?color=green)](https://github.com/multiview-stitcher/multiview-stitcher/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/multiview-stitcher.svg?color=green)](https://pypi.org/project/multiview-stitcher)
 [![Python Version](https://img.shields.io/pypi/pyversions/multiview-stitcher.svg?color=green)](https://python.org)
-[![tests](https://github.com/m-albert/multiview-stitcher/workflows/tests/badge.svg)](https://github.com/m-albert/multiview-stitcher/actions)
-[![codecov](https://codecov.io/gh/m-albert/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/m-albert/multiview-stitcher)
+[![tests](https://github.com/multiview-stitcher/multiview-stitcher/workflows/tests/badge.svg)](https://github.com/multiview-stitcher/multiview-stitcher/actions)
+[![codecov](https://codecov.io/gh/multiview-stitcher/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/multiview-stitcher/multiview-stitcher)
 -->
 
-[`multiview-stitcher`](https://github.com/m-albert/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
+[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
-For visualization, the associated [`napari-stitcher`](https://github.com/m-albert/napari-sticher) provides visualization functionality using the Napari viewer, including a standalone widget.
+For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-sticher) provides visualization functionality using the Napari viewer, including a standalone widget.
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 
@@ -19,7 +19,7 @@ It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial
 
 ### Napari plugin
 
-There's an associated napari plugin: [napari-stitcher](https://github.com/m-albert/napari-stitcher).
+There's an associated napari plugin: [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
 
 ### Work in progress
 
@@ -27,7 +27,7 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 
 ### Previous work
 
-`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
+`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/multiview-stitcher/MVRegFus).
 
 
 ----------------------------------
@@ -35,16 +35,16 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 
 [TODO] You can install `napari-stitcher` via pip:
 
-    `pip install https://github.com/m-albert/multiview-stitcher`
+    `pip install https://github.com/multiview-stitcher/multiview-stitcher`
 
 To install latest development version :
 
-    pip install git+https://github.com/m-albert/multiview-stitcher.git
+    pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
 
 ## Issues
 
-If you encounter any problems, please [file an issue](https://github.com/m-albert/multiview-stitcher/issues) along with a detailed description.
+If you encounter any problems, please [file an issue](https://github.com/multiview-stitcher/multiview-stitcher/issues) along with a detailed description.
 
 ## Contributing
 

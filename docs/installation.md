@@ -4,11 +4,11 @@
 
 [TODO] You can install `napari-stitcher` via pip:
 
-    `pip install https://github.com/m-albert/multiview-stitcher`
+    `pip install https://github.com/multiview-stitcher/multiview-stitcher`
 
 To install latest development version :
 
-    pip install git+https://github.com/m-albert/multiview-stitcher.git
+    pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
 ## conda-forge
 
