@@ -7,8 +7,8 @@ on:
 
 jobs:
   docs-main:
-    permissions:
-      pages: write
+    # permissions:
+    #   pages: write
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -26,4 +26,9 @@ jobs:
         git config --global user.name Docs deploy
         git config --global user.email docs@dummy.bot.com
     - name: Build docs website
-      run: mike deploy main --push && mike set-default main --push
+      run: mike deploy main && mike set-default main
+    - name: Deploy
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./site

@@ -7,8 +7,8 @@ on:
 jobs:
   build:
     name: Deploy docs to GitHub Pages
-    permissions:
-      pages: write
+    # permissions:
+    #   pages: write
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -30,4 +30,9 @@ jobs:
         export RELEASE_TAG_VERSION="${{ github.event.release.tag_name }}"
         echo RELEASE_TAG_VERSION="${RELEASE_TAG_VERSION:1}" >> "$GITHUB_ENV"
     - name: Build docs website
-      run: mike deploy "${RELEASE_TAG_VERSION}" --push
+      run: mike deploy "${RELEASE_TAG_VERSION}"
+    - name: Deploy
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./site
