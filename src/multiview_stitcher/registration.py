@@ -17,7 +17,9 @@ from multiview_stitcher import (
     spatial_image_utils,
     transformation,
 )
-from multiview_stitcher._skimage_monkey_patch import _modified_disambiguate_shift
+from multiview_stitcher._skimage_monkey_patch import (
+    _modified_disambiguate_shift,
+)
 
 
 class NotEnoughOverlapError(Exception):
@@ -450,12 +452,35 @@ def get_node_params_from_reg_graph(g_reg):
 
 
 def register(
-    msims,
-    reg_channel_index=None,
-    transform_key=None,
-    new_transform_key=None,
-    registration_binning=None,
-):
+    msims: [multiscale_spatial_image],
+    reg_channel_index: int = None,
+    transform_key: unknown = None,
+    new_transform_key: unknown = None,
+    registration_binning: unknown = None,
+) -> [parameters]:
+    """Finds the affine transformation between k images that will give the best alignment into a single image.
+
+    Note:
+        It looks like a section, but it will be rendered as an admonition.
+
+    Tip: You can even choose a title.
+        This admonition has a custom title!
+
+    Warning:
+        Something is Wrong.
+
+    ![No Image](images/20230929_screenshot.png)
+
+    Parameters:
+        msims:
+        reg_channel_index: The channel index of the msims which we want to do the registration with.
+        transform_key:
+        new_transform_key:
+        registration_binning:
+
+    Returns:
+        The parameters needed for the transformation of all k images.
+    """
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if reg_channel_index is None:
