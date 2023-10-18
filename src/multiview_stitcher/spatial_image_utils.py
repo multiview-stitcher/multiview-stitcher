@@ -143,7 +143,6 @@ def ensure_time_dim(sim):
 
 
 def get_sim_from_xim(xim):
-
     spacing = get_spacing_from_sim(xim)
     origin = get_origin_from_sim(xim)
 
@@ -295,16 +294,16 @@ def invert_xparams(xparams):
     )
 
 
-def get_world_affine_from_data_affine(
+def get_affine_from_intrinsic_affine(
     data_affine,
     sim_fixed,
     sim_moving,
     transform_key_fixed=None,
     transform_key_moving=None,
 ):
-    # Determine transform between physical coordinate systems
-
     """
+    Determine transform between extrinsic coordinate systems given
+    a transform between intrinsic coordinate systems
 
     x_f_P = D_to_P_f * x_f_D
 
@@ -321,8 +320,6 @@ def get_world_affine_from_data_affine(
     D_to_P_f * M_D * inv(D_to_P_c) = M_P
 
     D_to_W_f * M_D * inv(D_to_W_c) = M_W
-
-
 
     x_f_P = D_to_P_f * x_f_D
 

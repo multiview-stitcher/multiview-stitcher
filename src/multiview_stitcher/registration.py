@@ -216,6 +216,16 @@ def sims_to_intrinsic_coord_system(
         for isim, sim in enumerate(reg_sims_b)
     ]
 
+    # attach transforms
+    for _, sim in enumerate(reg_sims_b_t):
+        spatial_image_utils.set_sim_affine(
+            sim,
+            spatial_image_utils.get_affine_from_sim(
+                sim1, transform_key=transform_key
+            ),
+            transform_key=transform_key,
+        )
+
     return reg_sims_b_t[0], reg_sims_b_t[1]
 
 
@@ -274,24 +284,43 @@ def phase_correlation_registration(
     # into transformation between input images placed in
     # extrinsic coordinate system
 
-    affines = [
-        sim.attrs["transforms"][transform_key].squeeze().data
-        for sim in [sim1, sim2]
-    ]
+    shift = shift_pc * spacing
+    shift_matrix = shift_to_matrix(shift)
 
-    shift = -shift_pc * spacing
+    ext_param = spatial_image_utils.get_affine_from_intrinsic_affine(
+        data_affine=shift_matrix,
+        sim_fixed=sims_intrinsic_cs[0],
+        sim_moving=sims_intrinsic_cs[1],
+        transform_key_fixed=transform_key,
+        transform_key_moving=transform_key,
+    )
 
-    displ_endpts = [np.zeros(ndim), shift]
-    pt_world = [
-        np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
-        for pt in displ_endpts
-    ]
-    displ_world = pt_world[1] - pt_world[0]
+    return get_xparam_from_param(ext_param)
 
-    param = shift_to_matrix(-displ_world)
+    # displ_endpts = [np.zeros(ndim), shift]
+    # pt_world = [
+    #     np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
+    #     for pt in displ_endpts
+    # ]
+    # displ_world = pt_world[1] - pt_world[0]
 
-    xparam = get_xparam_from_param(param)
-    return xparam
+    # param = shift_to_matrix(-displ_world)
+
+    # xparam = get_xparam_from_param(param)
+
+    # shift = -shift_pc * spacing
+
+    # displ_endpts = [np.zeros(ndim), shift]
+    # pt_world = [
+    #     np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
+    #     for pt in displ_endpts
+    # ]
+    # displ_world = pt_world[1] - pt_world[0]
+
+    # param = shift_to_matrix(-displ_world)
+
+    # xparam = get_xparam_from_param(param)
+    # return xparam
 
 
 def register_pair_of_msims(
