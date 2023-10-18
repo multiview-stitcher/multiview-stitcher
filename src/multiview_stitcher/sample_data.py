@@ -12,7 +12,7 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 def get_mosaic_sample_data_path():
     sample_path = (
         Path(__file__).parent.parent.parent
-        / "image-datasets"
+        / "test-datasets"
         / "mosaic_test.czi"
     )
 
