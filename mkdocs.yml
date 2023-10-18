@@ -21,6 +21,7 @@ nav:
     - installation.md
     - getting_started.md
     - features.md
+    - objects.md
     - data_formats.md
     - implementation_details.md
     - napari_stitcher.md
@@ -64,4 +65,3 @@ theme:
 extra:
   version:
     provider: mike
-    
