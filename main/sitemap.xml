@@ -41,6 +41,11 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/objects/</loc>
+         <lastmod>2023-10-18</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/related_projects/</loc>
          <lastmod>2023-10-18</lastmod>
          <changefreq>daily</changefreq>
