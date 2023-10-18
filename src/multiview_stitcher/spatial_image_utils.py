@@ -4,7 +4,6 @@ import numpy as np
 import spatial_image as si
 import transformations as tfs
 import xarray as xr
-from skimage import transform
 
 SPATIAL_DIMS = ["z", "y", "x"]
 
@@ -143,7 +142,6 @@ def ensure_time_dim(sim):
 
 
 def get_sim_from_xim(xim):
-
     spacing = get_spacing_from_sim(xim)
     origin = get_origin_from_sim(xim)
 
@@ -293,91 +291,3 @@ def invert_xparams(xparams):
         # dask='allowed',
         dask="parallelized",
     )
-
-
-def get_world_affine_from_data_affine(
-    data_affine,
-    sim_fixed,
-    sim_moving,
-    transform_key_fixed=None,
-    transform_key_moving=None,
-):
-    # Determine transform between physical coordinate systems
-
-    """
-
-    x_f_P = D_to_P_f * x_f_D
-
-    x_f_D = M_D * x_c_D
-    x_f_P = M_P * x_c_P
-    x_f_W = M_W * x_c_W
-
-
-    D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
-    x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
-    =>
-    M_D = inv(D_to_P_f) * M_P * D_to_P_c
-    =>
-    D_to_P_f * M_D * inv(D_to_P_c) = M_P
-
-    D_to_W_f * M_D * inv(D_to_W_c) = M_W
-
-
-
-    x_f_P = D_to_P_f * x_f_D
-
-    x_f_D = M_D * x_c_D
-    x_f_P = M_P * x_c_P
-    D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
-    x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
-    =>
-    M_D = inv(D_to_P_f) * M_P * D_to_P_c
-    =>
-    D_to_P_f * M_D * inv(D_to_P_c) = M_P
-    """
-
-    if transform_key_fixed is None:
-        phys2world_fixed = np.eye(data_affine.shape[0])
-    else:
-        phys2world_fixed = np.array(
-            sim_fixed.attrs["transforms"][transform_key_moving]
-        )
-
-    if transform_key_moving is None:
-        phys2world_moving = np.eye(data_affine.shape[0])
-    else:
-        phys2world_moving = np.array(
-            sim_moving.attrs["transforms"][transform_key_moving]
-        )
-
-    D_to_P_f = np.matmul(
-        transform.SimilarityTransform(
-            translation=get_origin_from_sim(sim_moving, asarray=True)
-        ).params,
-        transform.SimilarityTransform(
-            scale=get_spacing_from_sim(sim_moving, asarray=True)
-        ).params,
-    )
-    P_to_W_f = phys2world_moving
-    D_to_W_f = np.matmul(
-        P_to_W_f,
-        D_to_P_f,
-    )
-
-    D_to_P_c = np.matmul(
-        transform.SimilarityTransform(
-            translation=get_origin_from_sim(sim_fixed, asarray=True)
-        ).params,
-        transform.SimilarityTransform(
-            scale=get_spacing_from_sim(sim_fixed, asarray=True)
-        ).params,
-    )
-    P_to_W_c = phys2world_fixed
-    D_to_W_c = np.matmul(
-        P_to_W_c,
-        D_to_P_c,
-    )
-
-    M_W = np.matmul(D_to_W_f, np.matmul(data_affine, np.linalg.inv(D_to_W_c)))
-
-    return M_W

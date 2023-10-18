@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import skimage.exposure
 import skimage.registration
+import skimage.registration._phase_cross_correlation  # skimage uses lazy importing
 import xarray as xr
 from dask import compute, delayed
 from dask_image import ndfilters
@@ -216,6 +217,16 @@ def sims_to_intrinsic_coord_system(
         for isim, sim in enumerate(reg_sims_b)
     ]
 
+    # attach transforms
+    for _, sim in enumerate(reg_sims_b_t):
+        spatial_image_utils.set_sim_affine(
+            sim,
+            spatial_image_utils.get_affine_from_sim(
+                sim1, transform_key=transform_key
+            ),
+            transform_key=transform_key,
+        )
+
     return reg_sims_b_t[0], reg_sims_b_t[1]
 
 
@@ -237,7 +248,7 @@ def phase_correlation_registration(
     )
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
-    spacing = spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+    spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
 
     def skimage_phase_corr_no_runtime_warning_and_monkey_patched(
         *args, **kwargs
@@ -255,7 +266,7 @@ def phase_correlation_registration(
             )
         return result
 
-    shift_pc = da.from_delayed(
+    shift = da.from_delayed(
         delayed(np.array)(
             # delayed(skimage.registration.phase_cross_correlation)(
             delayed(skimage_phase_corr_no_runtime_warning_and_monkey_patched)(
@@ -270,28 +281,117 @@ def phase_correlation_registration(
         dtype=float,
     )
 
+    shift_matrix = shift_to_matrix(shift)
+
     # transform shift obtained in intrinsic coordinate system
     # into transformation between input images placed in
     # extrinsic coordinate system
 
-    affines = [
-        sim.attrs["transforms"][transform_key].squeeze().data
-        for sim in [sim1, sim2]
-    ]
+    ext_param = get_affine_from_intrinsic_affine(
+        data_affine=shift_matrix,
+        sim_fixed=sims_intrinsic_cs[0],
+        sim_moving=sims_intrinsic_cs[1],
+        transform_key_fixed=transform_key,
+        transform_key_moving=transform_key,
+    )
 
-    shift = -shift_pc * spacing
+    return get_xparam_from_param(ext_param)
 
-    displ_endpts = [np.zeros(ndim), shift]
-    pt_world = [
-        np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
-        for pt in displ_endpts
-    ]
-    displ_world = pt_world[1] - pt_world[0]
 
-    param = shift_to_matrix(-displ_world)
+def get_affine_from_intrinsic_affine(
+    data_affine,
+    sim_fixed,
+    sim_moving,
+    transform_key_fixed=None,
+    transform_key_moving=None,
+):
+    """
+    Determine transform between extrinsic coordinate systems given
+    a transform between intrinsic coordinate systems
 
-    xparam = get_xparam_from_param(param)
-    return xparam
+    x_f_P = D_to_P_f * x_f_D
+
+    x_f_D = M_D * x_c_D
+    x_f_P = M_P * x_c_P
+    x_f_W = M_W * x_c_W
+
+
+    D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
+    x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
+    =>
+    M_D = inv(D_to_P_f) * M_P * D_to_P_c
+    =>
+    D_to_P_f * M_D * inv(D_to_P_c) = M_P
+
+    D_to_W_f * M_D * inv(D_to_W_c) = M_W
+
+    x_f_P = D_to_P_f * x_f_D
+
+    x_f_D = M_D * x_c_D
+    x_f_P = M_P * x_c_P
+    D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
+    x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
+    =>
+    M_D = inv(D_to_P_f) * M_P * D_to_P_c
+    =>
+    D_to_P_f * M_D * inv(D_to_P_c) = M_P
+    """
+
+    if transform_key_fixed is None:
+        phys2world_fixed = np.eye(data_affine.shape[0])
+    else:
+        phys2world_fixed = np.array(
+            sim_fixed.attrs["transforms"][transform_key_moving]
+        )
+
+    if transform_key_moving is None:
+        phys2world_moving = np.eye(data_affine.shape[0])
+    else:
+        phys2world_moving = np.array(
+            sim_moving.attrs["transforms"][transform_key_moving]
+        )
+
+    D_to_P_f = np.matmul(
+        shift_to_matrix(
+            spatial_image_utils.get_origin_from_sim(sim_moving, asarray=True)
+        ),
+        np.diag(
+            list(
+                spatial_image_utils.get_spacing_from_sim(
+                    sim_moving, asarray=True
+                )
+            )
+            + [1]
+        ),
+    )
+    P_to_W_f = phys2world_moving
+    D_to_W_f = np.matmul(
+        P_to_W_f,
+        D_to_P_f,
+    )
+
+    D_to_P_c = np.matmul(
+        shift_to_matrix(
+            spatial_image_utils.get_origin_from_sim(sim_fixed, asarray=True)
+        ),
+        np.diag(
+            list(
+                spatial_image_utils.get_spacing_from_sim(
+                    sim_fixed, asarray=True
+                )
+            )
+            + [1]
+        ),
+    )
+    P_to_W_c = phys2world_fixed
+    D_to_W_c = np.matmul(
+        P_to_W_c,
+        D_to_P_c,
+    )
+
+    M_W = np.matmul(D_to_W_f, np.matmul(data_affine, np.linalg.inv(D_to_W_c)))
+
+    return M_W
 
 
 def register_pair_of_msims(

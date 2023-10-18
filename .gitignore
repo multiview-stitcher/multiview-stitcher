@@ -84,7 +84,8 @@ venv/
 
 image-datasets/
 
-playground/
+_playground/
 
 # mkdocs documentation
 site/
+notebooks/fused.tif
