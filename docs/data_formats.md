@@ -1,17 +1,21 @@
 # Data formats
 
-The in-memory image representation of image datasets is based on the classes implemented in [`spatial-image`](https://github.com/spatial-data). Instances of [`multiscale-spatial-image`](https://github.com/multiscale-spatial-data) can be serialized to and from NGFF.
+For use with `multiview-stitcher`, data needs to be transformed into a [modified `multiscaleimage.MultiscaleImage`](./objects/#image).
 
-## NGFF
+## TIFF
 
-Problem: The latest NGFF spec does not fully support the transformations required for stitching applications (yet). Therefore, the question arises how to best help extending the NGFF spec and deal with this requirement for yet unsupported features, both technically and in terms of community interaction.
-
-Therefore, `multiview-stitcher` currently defines its own data format, see [here](features/Coordinate systems).
+Manual reading of tif files is supported with a convenience function.
 
 ## CZI
 
-Mosaic czi files supports thanks to [aicsimageio].
+Mosaic czi file support thanks to [aicsimageio].
 
 ## LIF
 
-## Other file formats
+Mosaic lif file support thanks to [aicsimageio].
+
+## NGFF
+
+Support provided by `multiscaleimage.MultiscaleImage`.
+
+The latest NGFF spec does not fully support the transformations required for stitching applications (yet). Therefore, `multiview-stitcher` currently defines its own data format, see [here](features/Coordinate systems).
