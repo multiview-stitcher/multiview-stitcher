@@ -8,6 +8,7 @@ import skimage.registration
 import xarray as xr
 from dask import compute, delayed
 from dask_image import ndfilters
+from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage
 from tqdm import tqdm
 
@@ -67,10 +68,6 @@ def get_optimal_registration_binning(
 
     if use_only_overlap_region:
         raise (NotImplementedError("use_only_overlap_region"))
-
-        # _, overlap_structure = mv_graph.get_overlap_between_pair_of_sims(sim1, sim2)
-        # # overlap = overlap_coords[1] - overlap_coords[0]
-        # overlap = {dim: overlap_coords[1][dim] - overlap_coords[0][dim] for dim in spatial_dims}
 
     overlap = {
         dim: max(sim1.shape[idim], sim2.shape[idim])
@@ -177,13 +174,135 @@ def get_overlap_bboxes(
     return lowers, uppers
 
 
+def sims_to_intrinsic_coord_system(
+    sim1,
+    sim2,
+    transform_key,
+    overlap_bboxes,
+):
+    """
+    Transform images into intrinsic coordinate system of fixed image.
+
+    Return: transformed spatial images
+    """
+
+    reg_sims_b = [sim1, sim2]
+    lowers, uppers = overlap_bboxes
+
+    # get images into the same physical space (that of sim1)
+    spatial_image_utils.get_ndim_from_sim(reg_sims_b[0])
+    # spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(reg_sims_b[0])
+    spacing = spatial_image_utils.get_spacing_from_sim(
+        reg_sims_b[0], asarray=True
+    )
+
+    # transform images into intrinsic coordinate system of fixed image
+    affines = [
+        sim.attrs["transforms"][transform_key].squeeze().data
+        for sim in reg_sims_b
+    ]
+    transf_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+
+    reg_sims_b_t = [
+        transformation.transform_sim(
+            sim,
+            [None, transf_affine][isim],
+            output_origin=lowers[0],
+            output_spacing=spacing,
+            output_shape=np.floor(
+                np.array(uppers[0] - lowers[0] + 1) / spacing
+            ).astype(np.uint16),
+        )
+        for isim, sim in enumerate(reg_sims_b)
+    ]
+
+    return reg_sims_b_t[0], reg_sims_b_t[1]
+
+
+def phase_correlation_registration(
+    sim1,
+    sim2,
+    transform_key,
+    overlap_bboxes,
+):
+    """
+    Perform phase correlation registration between two spatial images.
+    """
+
+    sims_intrinsic_cs = sims_to_intrinsic_coord_system(
+        sim1,
+        sim2,
+        transform_key,
+        overlap_bboxes,
+    )
+
+    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
+    spacing = spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+
+    def skimage_phase_corr_no_runtime_warning_and_monkey_patched(
+        *args, **kwargs
+    ):
+        # monkey patching needs to be done here in order to work
+        # with dask distributed
+        skimage.registration._phase_cross_correlation._disambiguate_shift = (
+            _modified_disambiguate_shift
+        )
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            result = skimage.registration.phase_cross_correlation(
+                *args, **kwargs
+            )
+        return result
+
+    shift_pc = da.from_delayed(
+        delayed(np.array)(
+            # delayed(skimage.registration.phase_cross_correlation)(
+            delayed(skimage_phase_corr_no_runtime_warning_and_monkey_patched)(
+                delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
+                delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
+                upsample_factor=(10 if ndim == 2 else 2),
+                disambiguate=True,
+                normalization="phase",
+            )[0]
+        ),
+        shape=(ndim,),
+        dtype=float,
+    )
+
+    # transform shift obtained in intrinsic coordinate system
+    # into transformation between input images placed in
+    # extrinsic coordinate system
+
+    affines = [
+        sim.attrs["transforms"][transform_key].squeeze().data
+        for sim in [sim1, sim2]
+    ]
+
+    shift = -shift_pc * spacing
+
+    displ_endpts = [np.zeros(ndim), shift]
+    pt_world = [
+        np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
+        for pt in displ_endpts
+    ]
+    displ_world = pt_world[1] - pt_world[0]
+
+    param = shift_to_matrix(-displ_world)
+
+    xparam = get_xparam_from_param(param)
+    return xparam
+
+
 def register_pair_of_msims(
     msim1,
     msim2,
     transform_key=None,
     registration_binning=None,
     use_only_overlap_region=True,
-) -> dict:
+    pairwise_reg_func=phase_correlation_registration,
+    **kwargs,
+):
     """
     Register input spatial images. Assume there's no C and T.
 
@@ -191,7 +310,7 @@ def register_pair_of_msims(
     """
 
     spatial_dims = msi_utils.get_spatial_dims(msim1)
-    ndim = len(spatial_dims)
+    # ndim = len(spatial_dims)
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
@@ -237,7 +356,7 @@ def register_pair_of_msims(
     else:
         reg_sims_b = reg_sims
 
-    # # CLAHE
+    # # Optionally perform CLAHE before registration
     # for i in range(2):
     #     # reg_sims_b[i].data = da.from_delayed(
     #     #     delayed(skimage.exposure.equalize_adapthist)(
@@ -254,78 +373,13 @@ def register_pair_of_msims(
     #         dtype=float
     #         )
 
-    # get images into the same physical space (that of sim1)
-    ndim = spatial_image_utils.get_ndim_from_sim(reg_sims_b[0])
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(reg_sims_b[0])
-    spacing = spatial_image_utils.get_spacing_from_sim(
-        reg_sims_b[0], asarray=True
+    return pairwise_reg_func(
+        reg_sims_b[0],
+        reg_sims_b[1],
+        transform_key=transform_key,
+        overlap_bboxes=(lowers, uppers),
+        **kwargs,
     )
-
-    # transform images into intrinsic coordinate system of fixed image
-    affines = [
-        sim.attrs["transforms"][transform_key].squeeze().data
-        for sim in reg_sims_b
-    ]
-    transf_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
-
-    reg_sims_b_t = [
-        transformation.transform_sim(
-            sim,
-            [None, transf_affine][isim],
-            output_origin=lowers[0],
-            output_spacing=spacing,
-            output_shape=np.floor(
-                np.array(uppers[0] - lowers[0] + 1) / spacing
-            ).astype(np.uint16),
-        )
-        for isim, sim in enumerate(reg_sims_b)
-    ]
-
-    def skimage_phase_corr_no_runtime_warning_and_monkey_patched(
-        *args, **kwargs
-    ):
-        # monkey patching needs to be done here in order to work
-        # with dask distributed
-        skimage.registration._phase_cross_correlation._disambiguate_shift = (
-            _modified_disambiguate_shift
-        )
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            result = skimage.registration.phase_cross_correlation(
-                *args, **kwargs
-            )
-        return result
-
-    shift_pc = da.from_delayed(
-        delayed(np.array)(
-            # delayed(skimage.registration.phase_cross_correlation)(
-            delayed(skimage_phase_corr_no_runtime_warning_and_monkey_patched)(
-                delayed(lambda x: np.array(x))(reg_sims_b_t[0].data),
-                delayed(lambda x: np.array(x))(reg_sims_b_t[1].data),
-                upsample_factor=(10 if ndim == 2 else 2),
-                disambiguate=True,
-                normalization="phase",
-            )[0]
-        ),
-        shape=(ndim,),
-        dtype=float,
-    )
-
-    shift = -shift_pc * spacing
-
-    displ_endpts = [np.zeros(ndim), shift]
-    pt_world = [
-        np.dot(affines[0], np.concatenate([pt, np.ones(1)]))[:ndim]
-        for pt in displ_endpts
-    ]
-    displ_world = pt_world[1] - pt_world[0]
-
-    param = shift_to_matrix(-displ_world)
-
-    xparam = get_xparam_from_param(param)
-
-    return xparam
 
 
 def register_pair_of_msims_over_time(
@@ -452,12 +506,12 @@ def get_node_params_from_reg_graph(g_reg):
 
 
 def register(
-    msims: [multiscale_spatial_image],
-    reg_channel_index: int = None,
-    transform_key: unknown = None,
-    new_transform_key: unknown = None,
-    registration_binning: unknown = None,
-) -> [parameters]:
+    msims: [MultiscaleSpatialImage],
+    reg_channel_index=None,
+    transform_key=None,
+    new_transform_key=None,
+    registration_binning=None,
+):
     """Finds the affine transformation between k images that will give the best alignment into a single image.
 
     Note:
