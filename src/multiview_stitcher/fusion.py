@@ -109,8 +109,9 @@ def fuse(
         output_stack_properties["shape"] = [output_shape[dim] for dim in sdims]
 
     xds = xr.Dataset(
-        {(view, "sim"): sims[view] for view in range(len(sims))}
-        | {(view, "param"): params[view] for view in range(len(sims))},
+        # For python >= 3.9 we can use the union '|' operator to merge to dict
+        {**{(view, "sim"): sims[view] for view in range(len(sims))},
+        **{(view, "param"): params[view] for view in range(len(sims))}},
     )
 
     merges = []
