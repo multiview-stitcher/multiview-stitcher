@@ -3,6 +3,7 @@ import warnings
 
 import dask.array as da
 import numpy as np
+import spatial_image as si
 import xarray as xr
 
 from multiview_stitcher import spatial_image_utils, transformation
@@ -110,8 +111,10 @@ def fuse(
 
     xds = xr.Dataset(
         # For python >= 3.9 we can use the union '|' operator to merge to dict
-        {**{(view, "sim"): sims[view] for view in range(len(sims))},
-        **{(view, "param"): params[view] for view in range(len(sims))}},
+        {
+            **{(view, "sim"): sims[view] for view in range(len(sims))},
+            **{(view, "param"): params[view] for view in range(len(sims))},
+        },
     )
 
     merges = []
@@ -222,6 +225,7 @@ def fuse_field(
 
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
     field_ims_t = []
     field_ws_t = []
@@ -314,11 +318,15 @@ def fuse_field(
     if fused_field.dtype != input_dtype:
         fused_field = fused_field.astype(input_dtype)
 
-    fused_field = xr.DataArray(fused_field, dims=sims[0].dims)
-
-    fused_field = spatial_image_utils.assign_si_coords_from_params(
+    fused_field = si.to_spatial_image(
         fused_field,
-        spatial_image_utils.compose_params(output_origin, output_spacing),
+        dims=spatial_dims,
+        scale={
+            dim: output_spacing[idim] for idim, dim in enumerate(spatial_dims)
+        },
+        translation={
+            dim: output_origin[idim] for idim, dim in enumerate(spatial_dims)
+        },
     )
 
     return fused_field
