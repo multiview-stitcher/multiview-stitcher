@@ -131,13 +131,13 @@ def generate_tiled_dataset(
         sim = xr.DataArray(
             tile,
             dims=["c", "t"] + spatial_dims,
-            coords={
+            coords={**{
                 spatial_dims[dim]:
                 # origin[dim] +\
                 np.arange(tile.shape[2 + dim]) * spacing[dim]
                 for dim in range(ndim)
-            }
-            | {"c": ["channel " + str(c) for c in range(N_c)]},
+            },
+            **{"c": ["channel " + str(c) for c in range(N_c)]}},
         )
 
         affine = registration.shift_to_matrix(origin)
