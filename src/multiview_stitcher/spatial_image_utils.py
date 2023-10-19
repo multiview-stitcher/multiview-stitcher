@@ -2,7 +2,7 @@ import copy
 
 import numpy as np
 import spatial_image as si
-import transformations as tfs
+import transforms3d as t3d
 import xarray as xr
 
 SPATIAL_DIMS = ["z", "y", "x"]
@@ -24,10 +24,9 @@ def assign_si_coords_from_params(sim, p=None):
         M[1:, 1:] = p
         p = M.copy()
 
-    scale, shear, angles, translate, perspective = tfs.decompose_matrix(p)
-    direction_matrix = tfs.euler_matrix(
-        angles[0], angles[1], angles[2]
-    )  # use tfs.compose_matrix here for consistency
+    translate, angles, scale, _ = t3d.affines.decompose(p)
+    direction_matrix = angles
+    # use t3d.affines.compose here for consistency
 
     if ndim == 2:
         scale = scale[1:]
@@ -53,7 +52,7 @@ def compose_params(origin, spacing):
         origin = np.concatenate([[0.0], origin])
         spacing = np.concatenate([[1.0], spacing])
 
-    M = tfs.compose_matrix(scale=spacing, translate=origin)
+    M = t3d.affines.compose(T=origin, R=np.identity(3, np.float64), Z=spacing)
 
     if ndim == 2:
         M = M[1:, 1:]
