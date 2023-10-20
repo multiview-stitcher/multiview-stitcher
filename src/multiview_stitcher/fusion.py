@@ -6,7 +6,7 @@ import numpy as np
 import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import spatial_image_utils, transformation
+from multiview_stitcher import param_utils, spatial_image_utils, transformation
 
 
 def combine_stack_props(stack_props_list):
@@ -84,7 +84,7 @@ def fuse(
         for sim in sims
     ]
 
-    params = [spatial_image_utils.invert_xparams(param) for param in params]
+    params = [param_utils.invert_xparams(param) for param in params]
 
     if output_spacing is None:
         output_spacing = spatial_image_utils.get_spacing_from_sim(
@@ -188,7 +188,7 @@ def fuse(
     res = spatial_image_utils.get_sim_from_xim(res)
     spatial_image_utils.set_sim_affine(
         res,
-        spatial_image_utils.identity_transform(len(sdims), res.coords["t"]),
+        param_utils.identity_transform(len(sdims), res.coords["t"]),
         transform_key,
     )
 

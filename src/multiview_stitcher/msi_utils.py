@@ -6,7 +6,7 @@ import multiscale_spatial_image as msi
 import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import spatial_image_utils
+from multiview_stitcher import param_utils, spatial_image_utils
 
 
 def get_store_decorator(store_path, store_overwrite=False):
@@ -221,7 +221,7 @@ def set_affine_transform(
         xaffine = xr.DataArray(xaffine, dims=["t", "x_in", "x_out"])
 
     if base_transform_key is not None:
-        xaffine = spatial_image_utils.matmul_xparams(
+        xaffine = param_utils.matmul_xparams(
             xaffine,
             get_transform_from_msim(msim, transform_key=base_transform_key),
         )
@@ -232,24 +232,23 @@ def set_affine_transform(
 
 
 def ensure_time_dim(msim):
-
     if "t" in msim["scale0/image"].dims:
         return msim
 
     scale_keys = get_sorted_scale_keys(msim)
     for sk in scale_keys:
         for data_var in msim[sk].data_vars:
-
             if data_var == "image":
                 msim[sk][data_var] = spatial_image_utils.ensure_time_dim(
-                    msim[sk][data_var])
+                    msim[sk][data_var]
+                )
             else:
-
                 if "t" in msim[sk][data_var].dims:
                     continue
                 else:
-                    msim[sk][data_var] =\
-                         msim[sk][data_var].expand_dims(["t"], axis=0)
+                    msim[sk][data_var] = msim[sk][data_var].expand_dims(
+                        ["t"], axis=0
+                    )
 
     return msim
 
