@@ -44,18 +44,17 @@ def identity_transform(ndim, t_coords=None):
     return params
 
 
-# def affine_to_xaffine(affine, t_coords=None):
+def affine_to_xaffine(affine, t_coords=None):
+    if t_coords is None:
+        params = xr.DataArray(affine, dims=["x_in", "x_out"])
+    else:
+        params = xr.DataArray(
+            len(t_coords) * [affine],
+            dims=["t", "x_in", "x_out"],
+            coords={"t": t_coords},
+        )
 
-#     if t_coords is None:
-#         params = xr.DataArray(affine, dims=["x_in", "x_out"])
-#     else:
-#         params = xr.DataArray(
-#             len(t_coords) * [affine],
-#             dims=["t", "x_in", "x_out"],
-#             coords={"t": t_coords},
-#         )
-
-#     return params
+    return params
 
 
 def matmul_xparams(xparams1, xparams2):
