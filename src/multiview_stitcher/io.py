@@ -7,7 +7,7 @@ from aicsimageio import AICSImage
 from dask import config as dask_config
 from tifffile import imread, imwrite
 
-from multiview_stitcher import registration, spatial_image_utils
+from multiview_stitcher import param_utils, spatial_image_utils
 
 METADATA_TRANSFORM_KEY = "affine_metadata"
 
@@ -83,7 +83,7 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
         if "z" in spatial_dims:
             origin_values["z"] = 0
 
-        affine = registration.shift_to_matrix(
+        affine = param_utils.affine_from_translation(
             np.array([origin_values[dim] for dim in spatial_dims])
         )
 

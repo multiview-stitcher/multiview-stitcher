@@ -5,7 +5,7 @@ import numpy as np
 import xarray as xr
 from scipy import ndimage
 
-from multiview_stitcher import registration
+from multiview_stitcher import param_utils
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
@@ -131,16 +131,19 @@ def generate_tiled_dataset(
         sim = xr.DataArray(
             tile,
             dims=["c", "t"] + spatial_dims,
+            # For python >= 3.9 we can use the union '|' operator to merge to dict
             coords={
-                spatial_dims[dim]:
-                # origin[dim] +\
-                np.arange(tile.shape[2 + dim]) * spacing[dim]
-                for dim in range(ndim)
-            }
-            | {"c": ["channel " + str(c) for c in range(N_c)]},
+                **{
+                    spatial_dims[dim]:
+                    # origin[dim] +\
+                    np.arange(tile.shape[2 + dim]) * spacing[dim]
+                    for dim in range(ndim)
+                },
+                "c": ["channel " + str(c) for c in range(N_c)],
+            },
         )
 
-        affine = registration.shift_to_matrix(origin)
+        affine = param_utils.affine_from_translation(origin)
 
         affine_xr = xr.DataArray(
             np.stack([affine] * len(sim.coords["t"])),

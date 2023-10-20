@@ -3,9 +3,10 @@ import warnings
 
 import dask.array as da
 import numpy as np
+import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import spatial_image_utils, transformation
+from multiview_stitcher import param_utils, spatial_image_utils, transformation
 
 
 def combine_stack_props(stack_props_list):
@@ -83,7 +84,7 @@ def fuse(
         for sim in sims
     ]
 
-    params = [spatial_image_utils.invert_xparams(param) for param in params]
+    params = [param_utils.invert_xparams(param) for param in params]
 
     if output_spacing is None:
         output_spacing = spatial_image_utils.get_spacing_from_sim(
@@ -109,8 +110,11 @@ def fuse(
         output_stack_properties["shape"] = [output_shape[dim] for dim in sdims]
 
     xds = xr.Dataset(
-        {(view, "sim"): sims[view] for view in range(len(sims))}
-        | {(view, "param"): params[view] for view in range(len(sims))},
+        # For python >= 3.9 we can use the union '|' operator to merge to dict
+        {
+            **{(view, "sim"): sims[view] for view in range(len(sims))},
+            **{(view, "param"): params[view] for view in range(len(sims))},
+        },
     )
 
     merges = []
@@ -184,7 +188,7 @@ def fuse(
     res = spatial_image_utils.get_sim_from_xim(res)
     spatial_image_utils.set_sim_affine(
         res,
-        spatial_image_utils.identity_transform(len(sdims), res.coords["t"]),
+        param_utils.identity_transform(len(sdims), res.coords["t"]),
         transform_key,
     )
 
@@ -221,6 +225,7 @@ def fuse_field(
 
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
     field_ims_t = []
     field_ws_t = []
@@ -313,11 +318,15 @@ def fuse_field(
     if fused_field.dtype != input_dtype:
         fused_field = fused_field.astype(input_dtype)
 
-    fused_field = xr.DataArray(fused_field, dims=sims[0].dims)
-
-    fused_field = spatial_image_utils.assign_si_coords_from_params(
+    fused_field = si.to_spatial_image(
         fused_field,
-        spatial_image_utils.compose_params(output_origin, output_spacing),
+        dims=spatial_dims,
+        scale={
+            dim: output_spacing[idim] for idim, dim in enumerate(spatial_dims)
+        },
+        translation={
+            dim: output_origin[idim] for idim, dim in enumerate(spatial_dims)
+        },
     )
 
     return fused_field

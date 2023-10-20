@@ -2,63 +2,10 @@ import copy
 
 import numpy as np
 import spatial_image as si
-import transformations as tfs
-import xarray as xr
+
+from multiview_stitcher import param_utils
 
 SPATIAL_DIMS = ["z", "y", "x"]
-
-
-def assign_si_coords_from_params(sim, p=None):
-    """
-    Assume that matrix p (shape ndim+1) is given with dim order
-    equal to those in im (should be Z, Y, X)
-    """
-
-    spatial_dims = [dim for dim in ["z", "y", "x"] if dim in sim.dims]
-    ndim = len(spatial_dims)
-
-    # if ndim==2 temporarily expand to three dims to use
-    # transformations.py for decomposition
-    if ndim == 2:
-        M = np.eye(4)
-        M[1:, 1:] = p
-        p = M.copy()
-
-    scale, shear, angles, translate, perspective = tfs.decompose_matrix(p)
-    direction_matrix = tfs.euler_matrix(
-        angles[0], angles[1], angles[2]
-    )  # use tfs.compose_matrix here for consistency
-
-    if ndim == 2:
-        scale = scale[1:]
-        translate = translate[1:]
-        direction_matrix = direction_matrix[1:, 1:]
-
-    # assign new coords
-    for idim, dim in enumerate(spatial_dims):
-        coords = np.linspace(0, len(sim.coords[dim]) - 1, len(sim.coords[dim]))
-        coords *= scale[idim]
-        coords += translate[idim]
-        sim.coords[dim] = coords
-
-    sim.attrs["direction"] = direction_matrix
-
-    return sim
-
-
-def compose_params(origin, spacing):
-    ndim = len(origin)
-
-    if ndim == 2:
-        origin = np.concatenate([[0.0], origin])
-        spacing = np.concatenate([[1.0], spacing])
-
-    M = tfs.compose_matrix(scale=spacing, translate=origin)
-
-    if ndim == 2:
-        M = M[1:, 1:]
-
-    return M
 
 
 def get_data_to_world_matrix_from_spatial_image(sim):
@@ -183,7 +130,7 @@ def set_sim_affine(sim, xaffine, transform_key=None, base_transform_key=None):
         sim.attrs["transforms"] = {}
 
     if base_transform_key is not None:
-        xaffine = matmul_xparams(
+        xaffine = param_utils.matmul_xparams(
             xaffine, get_affine_from_sim(sim, transform_key=base_transform_key)
         )
 
@@ -240,54 +187,3 @@ def sim_sel_coords(sim, sel_dict):
                 ].sel({k: v})
 
     return ssim
-
-
-def identity_transform(ndim, t_coords=None):
-    if t_coords is None:
-        params = xr.DataArray(np.eye(ndim + 1), dims=["x_in", "x_out"])
-    else:
-        params = xr.DataArray(
-            len(t_coords) * [np.eye(ndim + 1)],
-            dims=["t", "x_in", "x_out"],
-            coords={"t": t_coords},
-        )
-
-    return params
-
-
-def affine_to_xr(affine, t_coords=None):
-    if t_coords is None:
-        params = xr.DataArray(affine, dims=["x_in", "x_out"])
-    else:
-        params = xr.DataArray(
-            len(t_coords) * [affine],
-            dims=["t", "x_in", "x_out"],
-            coords={"t": t_coords},
-        )
-
-    return params
-
-
-def matmul_xparams(xparams1, xparams2):
-    return xr.apply_ufunc(
-        np.matmul,
-        xparams1,
-        xparams2,
-        input_core_dims=[["x_in", "x_out"]] * 2,
-        output_core_dims=[["x_in", "x_out"]],
-        dask="parallelized",
-        vectorize=True,
-        join="inner",
-    )
-
-
-def invert_xparams(xparams):
-    return xr.apply_ufunc(
-        np.linalg.inv,
-        xparams,
-        input_core_dims=[["x_in", "x_out"]],
-        output_core_dims=[["x_in", "x_out"]],
-        vectorize=False,
-        # dask='allowed',
-        dask="parallelized",
-    )

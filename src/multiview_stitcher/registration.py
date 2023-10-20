@@ -16,6 +16,7 @@ from tqdm import tqdm
 from multiview_stitcher import (
     msi_utils,
     mv_graph,
+    param_utils,
     spatial_image_utils,
     transformation,
 )
@@ -281,7 +282,7 @@ def phase_correlation_registration(
         dtype=float,
     )
 
-    shift_matrix = shift_to_matrix(shift)
+    shift_matrix = param_utils.affine_from_translation(shift)
 
     # transform shift obtained in intrinsic coordinate system
     # into transformation between input images placed in
@@ -352,7 +353,7 @@ def get_affine_from_intrinsic_affine(
         )
 
     D_to_P_f = np.matmul(
-        shift_to_matrix(
+        param_utils.affine_from_translation(
             spatial_image_utils.get_origin_from_sim(sim_moving, asarray=True)
         ),
         np.diag(
@@ -371,7 +372,7 @@ def get_affine_from_intrinsic_affine(
     )
 
     D_to_P_c = np.matmul(
-        shift_to_matrix(
+        param_utils.affine_from_translation(
             spatial_image_utils.get_origin_from_sim(sim_fixed, asarray=True)
         ),
         np.diag(
@@ -588,7 +589,7 @@ def get_node_params_from_reg_graph(g_reg):
                 },
             )
         else:
-            path_params = spatial_image_utils.identity_transform(ndim)
+            path_params = param_utils.identity_transform(ndim)
 
         for pair in path_pairs:
             path_params = xr.apply_ufunc(
@@ -892,7 +893,7 @@ def get_stabilization_parameters_from_sim(sim, sigma=2):
     )
 
     params = [
-        shift_to_matrix(
+        param_utils.affine_from_translation(
             params[it]
             * spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
         )
@@ -918,13 +919,6 @@ def get_xparam_from_param(params):
     xparam = xr.DataArray(params, dims=["x_in", "x_out"])
 
     return xparam
-
-
-def shift_to_matrix(shift):
-    ndim = len(shift)
-    M = np.concatenate([shift, [1]], axis=0)
-    M = np.concatenate([np.eye(ndim + 1)[:, :ndim], M[:, None]], axis=1)
-    return M
 
 
 def get_drift_correction_parameters(tl, sigma=2):
