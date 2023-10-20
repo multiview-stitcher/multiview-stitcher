@@ -2,67 +2,67 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/contributing/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/data_formats/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/features/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/getting_started/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/implementation_details/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/installation/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/napari_stitcher/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/objects/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/related_projects/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/api/fusion/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/api/registration/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/api/transformation/</loc>
-         <lastmod>2023-10-18</lastmod>
+         <lastmod>2023-10-20</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>
