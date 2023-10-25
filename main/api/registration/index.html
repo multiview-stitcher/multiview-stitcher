@@ -610,6 +610,26 @@
     register()
   </a>
   
+    <nav class="md-nav" aria-label="register()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.registration.register--parameters" class="md-nav__link">
+    Parameters
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.registration.register--returns" class="md-nav__link">
+    Returns
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -704,6 +724,26 @@
     register()
   </a>
   
+    <nav class="md-nav" aria-label="register()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.registration.register--parameters" class="md-nav__link">
+    Parameters
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.registration.register--returns" class="md-nav__link">
+    Returns
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -759,153 +799,36 @@
 
   <div class="doc doc-contents ">
   
-      <p>Finds the affine transformation between k images that will give the best alignment into a single image.</p>
-
-<details class="note" open>
-  <summary>Note</summary>
-  <p>It looks like a section, but it will be rendered as an admonition.</p>
-</details>
-<details class="tip" open>
-  <summary>You can even choose a title.</summary>
-  <p>This admonition has a custom title!</p>
-</details>
-<details class="warning" open>
-  <summary>Warning</summary>
-  <p>Something is Wrong.</p>
-</details>      <p><img alt="No Image" src="images/20230929_screenshot.png" /></p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>msims</code></td>
-          <td>
-                <code>[<span title="multiscale_spatial_image.MultiscaleSpatialImage">MultiscaleSpatialImage</span>]</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr>
-          <td><code>reg_channel_index</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The channel index of the msims which we want to do the registration with.</p>
-            </div>
-          </td>
-          <td>
-                <code>None</code>
-          </td>
-        </tr>
-        <tr>
-          <td><code>transform_key</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              
-            </div>
-          </td>
-          <td>
-                <code>None</code>
-          </td>
-        </tr>
-        <tr>
-          <td><code>new_transform_key</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              
-            </div>
-          </td>
-          <td>
-                <code>None</code>
-          </td>
-        </tr>
-        <tr>
-          <td><code>registration_binning</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              
-            </div>
-          </td>
-          <td>
-                <code>None</code>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The parameters needed for the transformation of all k images.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
+      <p>Register a list of views to a common extrinsic coordinate system.</p>
+<p>This function is the main entry point for registration.</p>
+<p>1) Build a graph of pairwise overlaps between views
+2) Determine registration pairs from this graph
+3) Register each pair of views.
+   Need to add option to pass registration functions here.
+4) Determine the parameters mapping each view into the new extrinsic
+   coordinate system.
+   Currently done by determining a reference view and concatenating for reach
+   view the pairwise transforms along the shortest paths towards the ref view.</p>
+<h4 id="multiview_stitcher.registration.register--parameters">Parameters</h4>
+<p>msims : list of MultiscaleSpatialImage
+    Input views
+reg_channel_index : int, optional
+    Index of channel to be used for registration, by default None
+transform_key : str, optional
+    Extrinsic coordinate system to use as a starting point
+    for the registration, by default None
+new_transform_key : str, optional
+    If set, the registration result will be registered as a new extrinsic
+    coordinate system in the input views (with the given name), by default None
+registration_binning : dict, optional
+    Binning applied to each dimensionn during registration, by default None</p>
+<h4 id="multiview_stitcher.registration.register--returns">Returns</h4>
+<p>list of xr.DataArray
+    Parameters mapping each view into a new extrinsic coordinate system</p>
 
           <details class="quote">
             <summary>Source code in <code>src/multiview_stitcher/registration.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">609</span>
-<span class="normal">610</span>
-<span class="normal">611</span>
-<span class="normal">612</span>
-<span class="normal">613</span>
-<span class="normal">614</span>
-<span class="normal">615</span>
-<span class="normal">616</span>
-<span class="normal">617</span>
-<span class="normal">618</span>
-<span class="normal">619</span>
-<span class="normal">620</span>
-<span class="normal">621</span>
-<span class="normal">622</span>
-<span class="normal">623</span>
-<span class="normal">624</span>
-<span class="normal">625</span>
-<span class="normal">626</span>
-<span class="normal">627</span>
-<span class="normal">628</span>
-<span class="normal">629</span>
-<span class="normal">630</span>
-<span class="normal">631</span>
-<span class="normal">632</span>
-<span class="normal">633</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">633</span>
 <span class="normal">634</span>
 <span class="normal">635</span>
 <span class="normal">636</span>
@@ -966,36 +889,86 @@
 <span class="normal">691</span>
 <span class="normal">692</span>
 <span class="normal">693</span>
-<span class="normal">694</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">694</span>
+<span class="normal">695</span>
+<span class="normal">696</span>
+<span class="normal">697</span>
+<span class="normal">698</span>
+<span class="normal">699</span>
+<span class="normal">700</span>
+<span class="normal">701</span>
+<span class="normal">702</span>
+<span class="normal">703</span>
+<span class="normal">704</span>
+<span class="normal">705</span>
+<span class="normal">706</span>
+<span class="normal">707</span>
+<span class="normal">708</span>
+<span class="normal">709</span>
+<span class="normal">710</span>
+<span class="normal">711</span>
+<span class="normal">712</span>
+<span class="normal">713</span>
+<span class="normal">714</span>
+<span class="normal">715</span>
+<span class="normal">716</span>
+<span class="normal">717</span>
+<span class="normal">718</span>
+<span class="normal">719</span>
+<span class="normal">720</span>
+<span class="normal">721</span>
+<span class="normal">722</span>
+<span class="normal">723</span>
+<span class="normal">724</span>
+<span class="normal">725</span>
+<span class="normal">726</span>
+<span class="normal">727</span>
+<span class="normal">728</span>
+<span class="normal">729</span>
+<span class="normal">730</span>
+<span class="normal">731</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
 <span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Finds the affine transformation between k images that will give the best alignment into a single image.</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 
-<span class="sd">    Note:</span>
-<span class="sd">        It looks like a section, but it will be rendered as an admonition.</span>
+<span class="sd">    Register a list of views to a common extrinsic coordinate system.</span>
 
-<span class="sd">    Tip: You can even choose a title.</span>
-<span class="sd">        This admonition has a custom title!</span>
+<span class="sd">    This function is the main entry point for registration.</span>
 
-<span class="sd">    Warning:</span>
-<span class="sd">        Something is Wrong.</span>
+<span class="sd">    1) Build a graph of pairwise overlaps between views</span>
+<span class="sd">    2) Determine registration pairs from this graph</span>
+<span class="sd">    3) Register each pair of views.</span>
+<span class="sd">       Need to add option to pass registration functions here.</span>
+<span class="sd">    4) Determine the parameters mapping each view into the new extrinsic</span>
+<span class="sd">       coordinate system.</span>
+<span class="sd">       Currently done by determining a reference view and concatenating for reach</span>
+<span class="sd">       view the pairwise transforms along the shortest paths towards the ref view.</span>
 
-<span class="sd">    ![No Image](images/20230929_screenshot.png)</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    msims : list of MultiscaleSpatialImage</span>
+<span class="sd">        Input views</span>
+<span class="sd">    reg_channel_index : int, optional</span>
+<span class="sd">        Index of channel to be used for registration, by default None</span>
+<span class="sd">    transform_key : str, optional</span>
+<span class="sd">        Extrinsic coordinate system to use as a starting point</span>
+<span class="sd">        for the registration, by default None</span>
+<span class="sd">    new_transform_key : str, optional</span>
+<span class="sd">        If set, the registration result will be registered as a new extrinsic</span>
+<span class="sd">        coordinate system in the input views (with the given name), by default None</span>
+<span class="sd">    registration_binning : dict, optional</span>
+<span class="sd">        Binning applied to each dimensionn during registration, by default None</span>
 
-<span class="sd">    Parameters:</span>
-<span class="sd">        msims:</span>
-<span class="sd">        reg_channel_index: The channel index of the msims which we want to do the registration with.</span>
-<span class="sd">        transform_key:</span>
-<span class="sd">        new_transform_key:</span>
-<span class="sd">        registration_binning:</span>
-
-<span class="sd">    Returns:</span>
-<span class="sd">        The parameters needed for the transformation of all k images.</span>
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of xr.DataArray</span>
+<span class="sd">        Parameters mapping each view into a new extrinsic coordinate system</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+
     <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
 
     <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
