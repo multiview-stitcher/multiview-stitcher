@@ -9,32 +9,6 @@ import xarray as xr
 from multiview_stitcher import param_utils, spatial_image_utils, transformation
 
 
-def combine_stack_props(stack_props_list):
-    combined_stack_props = {}
-    combined_stack_props["origin"] = np.min(
-        [sp["origin"] for sp in stack_props_list], axis=0
-    )
-    combined_stack_props["spacing"] = np.min(
-        [sp["spacing"] for sp in stack_props_list], axis=0
-    )
-    combined_stack_props["shape"] = np.max(
-        [
-            np.ceil(
-                (
-                    sp["origin"]
-                    + sp["shape"] * sp["spacing"]
-                    - combined_stack_props["origin"]
-                )
-                / combined_stack_props["spacing"]
-            )
-            for sp in stack_props_list
-        ],
-        axis=0,
-    ).astype(np.uint16)
-
-    return combined_stack_props
-
-
 def fusion_method_weighted_average(
     transformed_views,
     blending_weights,
@@ -43,6 +17,22 @@ def fusion_method_weighted_average(
 ):
     """
     Simple weighted average fusion.
+
+    Parameters
+    ----------
+    transformed_views : list of ndarrays
+        transformed input views
+    blending_weights : list of ndarrays
+        blending weights for each view
+    fusion_weights : list of ndarrays, optional
+        additional view weights for fusion, e.g. contrast weighted scores.
+        By default None.
+    params : _type_, optional
+
+    Returns
+    -------
+    ndarray
+        Fusion of input views
     """
 
     if fusion_weights is None:
@@ -68,7 +58,46 @@ def fuse(
     # multiscale_output=True,
 ):
     """
-    Fuse all fields from CT(Z)YX views
+
+    Fuse input views.
+
+    This function fuses all (Z)YX views ("fields") contained in the
+    input list of images, which can additionally contain C and T dimensions.
+
+    Parameters
+    ----------
+    sims : list of SpatialImage
+        Input views.
+    transform_key : str, optional
+        Which (extrinsic coordinate system) to use as transformation parameters.
+        By default None (intrinsic coordinate system).
+    fusion_method : func, optional
+        Fusion function to be applied. This function receives the following
+        inputs: transformed_views, blending_weights, fusion_weights, params.
+        By default fusion_method_weighted_average
+    weights_method : func, optional
+        Function to calculate fusion weights. This function receives the
+        following inputs: transformed_views. By default None.
+    output_spacing : dict, optional
+        Spacing of the fused image for each spatial dimension, by default None
+    output_stack_mode : str, optional
+        Mode to determine output stack properties. Can be one of
+        "union", "intersection", "sample". By default "union"
+    output_origin : dict, optional
+        Origin of the fused image for each spatial dimension, by default None
+    output_shape : _type_, optional
+        Shape of the fused image for each spatial dimension, by default None
+    output_chunksize : int, optional
+        Chunksize of the dask data array of the fused image, by default 512
+    interpolate_missing_pixels : bool, optional
+        If True, pixels in the fused image that do not map onto any input view
+        are assigned interpolated values. If None, determine automatically.
+        By default None
+
+    Returns
+    -------
+    SpatialImage
+        Fused image.
     """
 
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
@@ -163,46 +192,12 @@ def fuse(
     else:
         res = merge
 
-    # if not tmpdir is None:
-    #     res.data = da.from_delayed(delayed(
-    #         da.to_zarr)(
-    #             res.data,
-    #             os.path.join(tmpdir.name, res.data.name+'.zarr'),
-    #             return_stored=True,
-    #             overwrite=True,
-    #             compute=True,
-    #         ),
-    #         shape=res.data.shape,
-    #         dtype=res.data.dtype,
-    #     )
-
-    # if not tmpdir is None:
-    #     res.data = da.to_zarr(
-    #             res.data,
-    #             os.path.join(tmpdir.name, res.data.name+'.zarr'),
-    #             return_stored=True,
-    #             overwrite=True,
-    #             compute=False,
-    #         )
-
     res = spatial_image_utils.get_sim_from_xim(res)
     spatial_image_utils.set_sim_affine(
         res,
         param_utils.identity_transform(len(sdims), res.coords["t"]),
         transform_key,
     )
-
-    # if multiscale_output:
-    #     res = msi_utils.get_msim_from_sim(res)
-
-    # if not tmpdir is None:
-    #     res.data = da.to_zarr(
-    #         res.data,
-    #         os.path.join(tmpdir.name, res.data.name+'.zarr'),
-    #         return_stored=True,
-    #         overwrite=True,
-    #         compute=False,
-    #         )
 
     return res
 
@@ -219,8 +214,33 @@ def fuse_field(
     interpolate_missing_pixels=True,
 ):
     """
-    fuse tiles from single timepoint and channel
-    todo: use _transformations and avoid duplication
+    Fuse tiles from a single timepoint and channel (a (Z)YX "field").
+
+    Parameters
+    ----------
+    sims : list of SpatialImage
+        Input images containing only spatial dimensions.
+    params : list of xarray.DataArray
+        Transformation parameters for each view.
+    fusion_method : func, optional
+        See docstring of `fuse`.
+    weights_method : func, optional
+        See docstring of `fuse`.
+    output_origin : dict, optional
+        See docstring of `fuse`.
+    output_spacing : dict, optional
+        See docstring of `fuse`.
+    output_shape : dict, optional
+        See docstring of `fuse`.
+    output_chunksize : int, optional
+       See docstring of `fuse`.
+    interpolate_missing_pixels : bool, optional
+        See docstring of `fuse`.
+
+    Returns
+    -------
+    SpatialImage
+        Fused image of the field.
     """
 
     input_dtype = sims[0].dtype
@@ -339,7 +359,28 @@ def calc_stack_properties_from_sims_and_params(
     mode="union",
 ):
     """
-    considers time
+    Calculate fusion stack properties from input views
+    and transformation parameters.
+
+    Parameters
+    ----------
+    sims : list of SpatialImage
+        Input views.
+    params : list of xarray.DataArray
+        Transformation parameters for each view.
+    spacing : ndarray
+        Spacing of the output stack.
+    mode : str, optional
+        'union': output stack entirely contains all (transformed) input views
+        'intersection': output stack entirely contains the intersection of
+            all (transformed) input views.
+        'sample': output stack contains the front (z=0) plane of each input view.
+        By default "union".
+
+    Returns
+    -------
+    dict
+        Stack properties (shape, spacing, origin).
     """
 
     views_props = []
@@ -396,10 +437,27 @@ def calc_stack_properties_from_view_properties_and_params(
     mode="union",
 ):
     """
-    view props contains
-    - shape
-    - spacing
-    - origin
+    Calculate fusion stack properties.
+
+    Parameters
+    ----------
+    views_props : list of dict
+        Stack properties of input views.
+    params : list of xarray.DataArray
+        Transformation parameters for each view.
+    spacing : ndarray
+        Spacing of the output stack.
+    mode : str, optional
+        'union': output stack entirely contains all (transformed) input views
+        'intersection': output stack entirely contains the intersection of
+            all (transformed) input views.
+        'sample': output stack contains the front (z=0) plane of each input view.
+        By default "union".
+
+    Returns
+    -------
+    dict
+        Stack properties (shape, spacing, origin).
     """
 
     spacing = np.array(spacing).astype(float)
@@ -443,6 +501,47 @@ def calc_stack_properties_from_view_properties_and_params(
     stack_properties = calc_stack_properties_from_volume(volume, spacing)
 
     return stack_properties
+
+
+def combine_stack_props(stack_props_list):
+    """
+    Combine stack properties from multiple timepoints.
+
+    TODO: This should probably be replaced by simply reusing
+    calc_stack_properties_from_view_properties_and_params.
+
+    Parameters
+    ----------
+    stack_props_list : list of dict
+
+    Returns
+    -------
+    dict
+        Combined stack properties
+    """
+    combined_stack_props = {}
+    combined_stack_props["origin"] = np.min(
+        [sp["origin"] for sp in stack_props_list], axis=0
+    )
+    combined_stack_props["spacing"] = np.min(
+        [sp["spacing"] for sp in stack_props_list], axis=0
+    )
+    combined_stack_props["shape"] = np.max(
+        [
+            np.ceil(
+                (
+                    sp["origin"]
+                    + sp["shape"] * sp["spacing"]
+                    - combined_stack_props["origin"]
+                )
+                / combined_stack_props["spacing"]
+            )
+            for sp in stack_props_list
+        ],
+        axis=0,
+    ).astype(np.uint16)
+
+    return combined_stack_props
 
 
 def get_transformed_stack_vertices(

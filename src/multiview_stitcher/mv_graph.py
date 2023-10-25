@@ -21,9 +21,25 @@ def build_view_adjacency_graph_from_msims(
 ):
     """
     Build graph representing view overlap relationships from list of xarrays.
-    Will be used for
+
+    Used for
       - groupwise registration
       - determining visualization colors
+
+    Parameters
+    ----------
+    msims : list of MultiscaleSpatialImage
+        Input views.
+    expand : bool, optional
+        If True, spatial extents of input images is dilated, by default False
+    transform_key : _type_, optional
+        Extrinsic coordinate system to consider, by default None
+
+    Returns
+    -------
+    networkx.Graph
+        Graph containing input images as nodes and edges between overlapping images,
+        with overlap area as edge weights.
     """
 
     g = nx.Graph()

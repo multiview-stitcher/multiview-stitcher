@@ -405,9 +405,33 @@ def register_pair_of_msims(
     **kwargs,
 ):
     """
-    Register input spatial images. Assume there's no C and T.
+    Register the input images containing only spatial dimensions.
 
-    Return: Transform in homogeneous coordinates
+    Return: Transform in homogeneous coordinates.
+
+    Parameters
+    ----------
+    msim1 : MultiscaleSpatialImage
+        Fixed image.
+    msim2 : MultiscaleSpatialImage
+        Moving image.
+    transform_key : str, optional
+        Extrinsic coordinate system to consider as preregistration.
+        This affects the calculation of the overlap region and is passed on to the
+        registration func, by default None
+    registration_binning : dict, optional
+    use_only_overlap_region : bool, optional
+        If True, only the precomputed overlap between images , by default True
+    pairwise_reg_func : func, optional
+        Function used for registration, which is passed as input two spatial images,
+        a transform_key and precomputed bounding boxes. Returns a transform in
+        homogeneous coordinates. By default phase_correlation_registration
+
+    Returns
+    -------
+    xarray.DataArray
+        Transform in homogeneous coordinates mapping coordinates from the fixed
+        to the moving image.
     """
 
     spatial_dims = msi_utils.get_spatial_dims(msim1)
@@ -490,7 +514,7 @@ def register_pair_of_msims_over_time(
     transform_key=None,
 ):
     """
-    Register over time.
+    Apply register_pair_of_msims to each time point of the input images.
     """
 
     msim1 = msi_utils.ensure_time_dim(msim1)
@@ -613,29 +637,42 @@ def register(
     new_transform_key=None,
     registration_binning=None,
 ):
-    """Finds the affine transformation between k images that will give the best alignment into a single image.
-
-    Note:
-        It looks like a section, but it will be rendered as an admonition.
-
-    Tip: You can even choose a title.
-        This admonition has a custom title!
-
-    Warning:
-        Something is Wrong.
-
-    ![No Image](images/20230929_screenshot.png)
-
-    Parameters:
-        msims:
-        reg_channel_index: The channel index of the msims which we want to do the registration with.
-        transform_key:
-        new_transform_key:
-        registration_binning:
-
-    Returns:
-        The parameters needed for the transformation of all k images.
     """
+
+    Register a list of views to a common extrinsic coordinate system.
+
+    This function is the main entry point for registration.
+
+    1) Build a graph of pairwise overlaps between views
+    2) Determine registration pairs from this graph
+    3) Register each pair of views.
+       Need to add option to pass registration functions here.
+    4) Determine the parameters mapping each view into the new extrinsic
+       coordinate system.
+       Currently done by determining a reference view and concatenating for reach
+       view the pairwise transforms along the shortest paths towards the ref view.
+
+    Parameters
+    ----------
+    msims : list of MultiscaleSpatialImage
+        Input views
+    reg_channel_index : int, optional
+        Index of channel to be used for registration, by default None
+    transform_key : str, optional
+        Extrinsic coordinate system to use as a starting point
+        for the registration, by default None
+    new_transform_key : str, optional
+        If set, the registration result will be registered as a new extrinsic
+        coordinate system in the input views (with the given name), by default None
+    registration_binning : dict, optional
+        Binning applied to each dimensionn during registration, by default None
+
+    Returns
+    -------
+    list of xr.DataArray
+        Parameters mapping each view into a new extrinsic coordinate system
+    """
+
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if reg_channel_index is None:

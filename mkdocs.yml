@@ -13,8 +13,8 @@ plugins:
   - mkdocstrings:
       default_handler: python
       handlers:
-          python:
-            paths: [src]
+        python:
+          paths: [src]
 nav:
   - multiview-stitcher:
     - index.md
