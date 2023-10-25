@@ -80,3 +80,13 @@ def invert_xparams(xparams):
         # dask='allowed',
         dask="parallelized",
     )
+
+
+def get_xparam_from_param(params):
+    """
+    Homogeneous matrix to xparams
+    """
+
+    xparam = xr.DataArray(params, dims=["x_in", "x_out"])
+
+    return xparam

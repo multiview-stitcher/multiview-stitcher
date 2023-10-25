@@ -117,6 +117,17 @@ def multiscale_spatial_image_from_zarr(path):
     return multiscale
 
 
+def multiscale_spatial_image_to_zarr(msim, path):
+    """
+    This is a workaround for a bug in xarray/zarr:
+    https://stackoverflow.com/questions/67476513/zarr-not-respecting-chunk-size-from-xarray-and-reverting-to-original-chunk-size
+    """
+    for scale_key in get_sorted_scale_keys(msim):
+        if "chunks" in msim[scale_key]["image"].encoding:
+            del msim[scale_key]["image"].encoding["chunks"]
+    msim.to_zarr(path)
+
+
 def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
     """
     This is currently simply downscaling z and xy until a minimum size is reached.

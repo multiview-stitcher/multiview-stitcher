@@ -212,7 +212,7 @@ def sims_to_intrinsic_coord_system(
             output_origin=lowers[0],
             output_spacing=spacing,
             output_shape=np.floor(
-                np.array(uppers[0] - lowers[0] + 1) / spacing
+                np.array(uppers[0] - lowers[0]) / spacing + 1
             ).astype(np.uint16),
         )
         for isim, sim in enumerate(reg_sims_b)
@@ -296,7 +296,7 @@ def phase_correlation_registration(
         transform_key_moving=transform_key,
     )
 
-    return get_xparam_from_param(ext_param)
+    return param_utils.get_xparam_from_param(ext_param)
 
 
 def get_affine_from_intrinsic_affine(
@@ -402,7 +402,7 @@ def register_pair_of_msims(
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
-    **kwargs,
+    reg_func_kwargs=None,
 ):
     """
     Register the input images containing only spatial dimensions.
@@ -426,6 +426,8 @@ def register_pair_of_msims(
         Function used for registration, which is passed as input two spatial images,
         a transform_key and precomputed bounding boxes. Returns a transform in
         homogeneous coordinates. By default phase_correlation_registration
+    reg_func_kwargs : dict, optional
+        Additional keyword arguments passed to the registration function
 
     Returns
     -------
@@ -434,6 +436,8 @@ def register_pair_of_msims(
         to the moving image.
     """
 
+    if reg_func_kwargs is None:
+        reg_func_kwargs = {}
     spatial_dims = msi_utils.get_spatial_dims(msim1)
     # ndim = len(spatial_dims)
 
@@ -503,20 +507,25 @@ def register_pair_of_msims(
         reg_sims_b[1],
         transform_key=transform_key,
         overlap_bboxes=(lowers, uppers),
-        **kwargs,
+        **reg_func_kwargs,
     )
 
 
 def register_pair_of_msims_over_time(
     msim1,
     msim2,
-    registration_binning=None,
     transform_key=None,
+    registration_binning=None,
+    use_only_overlap_region=True,
+    pairwise_reg_func=phase_correlation_registration,
+    reg_func_kwargs=None,
 ):
     """
     Apply register_pair_of_msims to each time point of the input images.
     """
 
+    if reg_func_kwargs is None:
+        reg_func_kwargs = {}
     msim1 = msi_utils.ensure_time_dim(msim1)
     msim2 = msi_utils.ensure_time_dim(msim2)
 
@@ -533,6 +542,9 @@ def register_pair_of_msims_over_time(
                     msi_utils.multiscale_sel_coords(msim2, {"t": t}),
                     transform_key=transform_key,
                     registration_binning=registration_binning,
+                    pairwise_reg_func=pairwise_reg_func,
+                    reg_func_kwargs=reg_func_kwargs,
+                    use_only_overlap_region=use_only_overlap_region,
                 )
                 for t in sim1.coords["t"].values
             ],
@@ -546,9 +558,14 @@ def register_pair_of_msims_over_time(
 
 def get_registration_graph_from_overlap_graph(
     g,
-    registration_binning=None,
     transform_key=None,
+    registration_binning=None,
+    use_only_overlap_region=True,
+    pairwise_reg_func=phase_correlation_registration,
+    reg_func_kwargs=None,
 ):
+    if reg_func_kwargs is None:
+        reg_func_kwargs = {}
     g_reg = g.to_directed()
 
     ref_node = mv_graph.get_node_with_masimal_overlap_from_graph(g)
@@ -578,8 +595,11 @@ def get_registration_graph_from_overlap_graph(
             )(
                 g.nodes[pair[0]]["msim"],
                 g.nodes[pair[1]]["msim"],
-                registration_binning=registration_binning,
                 transform_key=transform_key,
+                registration_binning=registration_binning,
+                use_only_overlap_region=use_only_overlap_region,
+                pairwise_reg_func=pairwise_reg_func,
+                reg_func_kwargs=reg_func_kwargs,
             )
 
     g_reg.graph["pair_finding_method"] = "shortest_paths_considering_overlap"
@@ -636,6 +656,9 @@ def register(
     transform_key=None,
     new_transform_key=None,
     registration_binning=None,
+    use_only_overlap_region=True,
+    pairwise_reg_func=phase_correlation_registration,
+    reg_func_kwargs=None,
 ):
     """
 
@@ -666,6 +689,10 @@ def register(
         coordinate system in the input views (with the given name), by default None
     registration_binning : dict, optional
         Binning applied to each dimensionn during registration, by default None
+    pairwise_reg_func : func, optional
+        Function used for registration.
+    reg_func_kwargs : dict, optional
+        Additional keyword arguments passed to the registration function
 
     Returns
     -------
@@ -673,6 +700,8 @@ def register(
         Parameters mapping each view into a new extrinsic coordinate system
     """
 
+    if reg_func_kwargs is None:
+        reg_func_kwargs = {}
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if reg_channel_index is None:
@@ -698,8 +727,11 @@ def register(
 
     g_reg = get_registration_graph_from_overlap_graph(
         g,
-        registration_binning=registration_binning,
         transform_key=transform_key,
+        registration_binning=registration_binning,
+        use_only_overlap_region=use_only_overlap_region,
+        pairwise_reg_func=pairwise_reg_func,
+        reg_func_kwargs=reg_func_kwargs,
     )
 
     if not len(g_reg.edges):
@@ -941,21 +973,13 @@ def get_stabilization_parameters_from_sim(sim, sigma=2):
     with warnings.catch_warnings():
         warnings.simplefilter(action="ignore", category=FutureWarning)
 
-        params = xr.concat([get_xparam_from_param(p) for p in params], dim="t")
+        params = xr.concat(
+            [param_utils.get_xparam_from_param(p) for p in params], dim="t"
+        )
 
     params = params.assign_coords({"t": sim.coords["t"]})
 
     return params
-
-
-def get_xparam_from_param(params):
-    """
-    Homogeneous matrix to xparams
-    """
-
-    xparam = xr.DataArray(params, dims=["x_in", "x_out"])
-
-    return xparam
 
 
 def get_drift_correction_parameters(tl, sigma=2):
