@@ -792,7 +792,7 @@
 
 
 <h2 id="multiview_stitcher.registration.register" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -821,34 +821,18 @@ new_transform_key : str, optional
     If set, the registration result will be registered as a new extrinsic
     coordinate system in the input views (with the given name), by default None
 registration_binning : dict, optional
-    Binning applied to each dimensionn during registration, by default None</p>
+    Binning applied to each dimensionn during registration, by default None
+pairwise_reg_func : func, optional
+    Function used for registration.
+reg_func_kwargs : dict, optional
+    Additional keyword arguments passed to the registration function</p>
 <h4 id="multiview_stitcher.registration.register--returns">Returns</h4>
 <p>list of xr.DataArray
     Parameters mapping each view into a new extrinsic coordinate system</p>
 
           <details class="quote">
             <summary>Source code in <code>src/multiview_stitcher/registration.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">633</span>
-<span class="normal">634</span>
-<span class="normal">635</span>
-<span class="normal">636</span>
-<span class="normal">637</span>
-<span class="normal">638</span>
-<span class="normal">639</span>
-<span class="normal">640</span>
-<span class="normal">641</span>
-<span class="normal">642</span>
-<span class="normal">643</span>
-<span class="normal">644</span>
-<span class="normal">645</span>
-<span class="normal">646</span>
-<span class="normal">647</span>
-<span class="normal">648</span>
-<span class="normal">649</span>
-<span class="normal">650</span>
-<span class="normal">651</span>
-<span class="normal">652</span>
-<span class="normal">653</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">653</span>
 <span class="normal">654</span>
 <span class="normal">655</span>
 <span class="normal">656</span>
@@ -926,12 +910,47 @@ registration_binning : dict, optional
 <span class="normal">728</span>
 <span class="normal">729</span>
 <span class="normal">730</span>
-<span class="normal">731</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">731</span>
+<span class="normal">732</span>
+<span class="normal">733</span>
+<span class="normal">734</span>
+<span class="normal">735</span>
+<span class="normal">736</span>
+<span class="normal">737</span>
+<span class="normal">738</span>
+<span class="normal">739</span>
+<span class="normal">740</span>
+<span class="normal">741</span>
+<span class="normal">742</span>
+<span class="normal">743</span>
+<span class="normal">744</span>
+<span class="normal">745</span>
+<span class="normal">746</span>
+<span class="normal">747</span>
+<span class="normal">748</span>
+<span class="normal">749</span>
+<span class="normal">750</span>
+<span class="normal">751</span>
+<span class="normal">752</span>
+<span class="normal">753</span>
+<span class="normal">754</span>
+<span class="normal">755</span>
+<span class="normal">756</span>
+<span class="normal">757</span>
+<span class="normal">758</span>
+<span class="normal">759</span>
+<span class="normal">760</span>
+<span class="normal">761</span>
+<span class="normal">762</span>
+<span class="normal">763</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span>
+    <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 
@@ -962,6 +981,10 @@ registration_binning : dict, optional
 <span class="sd">        coordinate system in the input views (with the given name), by default None</span>
 <span class="sd">    registration_binning : dict, optional</span>
 <span class="sd">        Binning applied to each dimensionn during registration, by default None</span>
+<span class="sd">    pairwise_reg_func : func, optional</span>
+<span class="sd">        Function used for registration.</span>
+<span class="sd">    reg_func_kwargs : dict, optional</span>
+<span class="sd">        Additional keyword arguments passed to the registration function</span>
 
 <span class="sd">    Returns</span>
 <span class="sd">    -------</span>
@@ -969,6 +992,8 @@ registration_binning : dict, optional
 <span class="sd">        Parameters mapping each view into a new extrinsic coordinate system</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
+    <span class="k">if</span> <span class="n">reg_func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">reg_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
     <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
 
     <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -994,8 +1019,11 @@ registration_binning : dict, optional
 
     <span class="n">g_reg</span> <span class="o">=</span> <span class="n">get_registration_graph_from_overlap_graph</span><span class="p">(</span>
         <span class="n">g</span><span class="p">,</span>
-        <span class="n">registration_binning</span><span class="o">=</span><span class="n">registration_binning</span><span class="p">,</span>
         <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
+        <span class="n">registration_binning</span><span class="o">=</span><span class="n">registration_binning</span><span class="p">,</span>
+        <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="n">use_only_overlap_region</span><span class="p">,</span>
+        <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">pairwise_reg_func</span><span class="p">,</span>
+        <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="n">reg_func_kwargs</span><span class="p">,</span>
     <span class="p">)</span>
 
     <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">g_reg</span><span class="o">.</span><span class="n">edges</span><span class="p">):</span>
