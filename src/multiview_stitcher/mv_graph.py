@@ -160,7 +160,7 @@ def get_overlap_between_pair_of_sims(
     return overlap, intersection_poly_structure_points
 
 
-def get_node_with_masimal_overlap_from_graph(g):
+def get_node_with_maximal_overlap_from_graph(g):
     """
     g: graph containing edges with 'overlap' weight
     """

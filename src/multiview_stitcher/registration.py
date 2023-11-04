@@ -568,7 +568,7 @@ def get_registration_graph_from_overlap_graph(
         reg_func_kwargs = {}
     g_reg = g.to_directed()
 
-    ref_node = mv_graph.get_node_with_masimal_overlap_from_graph(g)
+    ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(g)
 
     # invert overlap to use as weight in shortest path
     for e in g_reg.edges:

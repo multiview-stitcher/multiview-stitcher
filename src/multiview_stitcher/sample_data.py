@@ -9,16 +9,6 @@ from multiview_stitcher import param_utils
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
-def get_mosaic_sample_data_path():
-    sample_path = (
-        Path(__file__).parent.parent.parent
-        / "test-datasets"
-        / "mosaic_test.czi"
-    )
-
-    return sample_path
-
-
 def generate_tiled_dataset(
     ndim=2,
     N_c=2,
@@ -158,3 +148,15 @@ def generate_tiled_dataset(
         sims.append(sim)
 
     return sims
+
+
+def get_mosaic_sample_data_path():
+    import multiview_stitcher  # improve this
+
+    sample_path = (
+        Path(multiview_stitcher.__file__).parent
+        / "test-datasets"
+        / "mosaic_test.czi"
+    )
+
+    return sample_path
