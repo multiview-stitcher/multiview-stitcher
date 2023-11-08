@@ -10,7 +10,7 @@
 
 [`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
-For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-sticher) provides visualization functionality using the Napari viewer, including a standalone widget.
+For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget.
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 
@@ -20,6 +20,10 @@ It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial
 ### Napari plugin
 
 There's an associated napari plugin: [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
+
+![](https://github.com/multiview-stitcher/napari-stitcher/blob/dc6b571049c971709eb41064930be9b880d806f4/misc-data/20230929_screenshot.png)
+
+Image data by [Arthur Michaut](https://research.pasteur.fr/fr/member/arthur-michaut/) @ [Jérôme Gros Lab](https://research.pasteur.fr/fr/team/dynamic-regulation-of-morphogenesis/) @ Institut Pasteur.
 
 ### Work in progress
 
