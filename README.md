@@ -37,11 +37,7 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 ----------------------------------
 ## Installation
 
-[TODO] You can install `napari-stitcher` via pip:
-
-    `pip install https://github.com/multiview-stitcher/multiview-stitcher`
-
-To install latest development version :
+You can install `napari-stitcher` via pip:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
