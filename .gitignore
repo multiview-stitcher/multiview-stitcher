@@ -88,4 +88,6 @@ _playground/
 
 # mkdocs documentation
 site/
-notebooks/fused.tif
+
+notebooks/fused*
+notebooks/Grid*

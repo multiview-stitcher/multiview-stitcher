@@ -104,7 +104,11 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
 
 
 def read_tiff_into_spatial_xarray(
-    filename, scale=None, translation=None, affine_transform=None, **kwargs
+    filename,
+    scale=None,
+    translation=None,
+    affine_transform=None,
+    channel_name=None,
 ):
     if scale is None:
         scale = {ax: 1 for ax in ["z", "y", "x"]}
@@ -128,6 +132,7 @@ def read_tiff_into_spatial_xarray(
         dims=sim.dims,
         scale=scale,
         translation=translation,
+        c_coords=[channel_name if channel_name is not None else 0],
     )
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
@@ -151,8 +156,6 @@ def read_tiff_into_spatial_xarray(
 
 
 def save_sim_as_tif(path, sim):
-    # import pdb; pdb.set_trace()
-
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
 

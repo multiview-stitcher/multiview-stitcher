@@ -13,6 +13,15 @@ def affine_from_translation(translation):
     return M
 
 
+def translation_from_affine(affine):
+    """
+    Return matrix in homogeneous coords representing a translation.
+    """
+    ndim = len(affine) - 1
+    t = affine[:ndim, ndim]
+    return t
+
+
 def affine_from_rotation(angle, direction, point=None):
     """
     Return matrix in homogeneous coords to rotate around axis
