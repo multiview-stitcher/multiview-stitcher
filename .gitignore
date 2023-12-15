@@ -91,3 +91,4 @@ site/
 
 notebooks/fused*
 notebooks/Grid*
+notebooks/*.zarr

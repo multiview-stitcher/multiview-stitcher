@@ -175,7 +175,7 @@ def get_sim_from_msim(msim, scale="scale0"):
     return sim
 
 
-def get_msim_from_sim(sim, scale_factors=None):
+def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     """
     highest scale sim from msim with affine transforms
     """
@@ -208,7 +208,8 @@ def get_msim_from_sim(sim, scale_factors=None):
     if scale_factors is None:
         scale_factors = get_optimal_multi_scale_factors_from_sim(sim)
 
-    chunks = {dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims}
+    if chunks is not None:
+        chunks = {dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims}
 
     msim = msi.to_multiscale(
         sim,
