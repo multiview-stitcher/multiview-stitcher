@@ -1,11 +1,13 @@
-import dask.array as da
+import itertools
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import spatial_image as si
 import xarray as xr
 import zarr
 from aicsimageio import AICSImage
-from dask import config as dask_config
 from tifffile import imread, imwrite
+from tqdm import tqdm
 
 from multiview_stitcher import param_utils, spatial_image_utils
 
@@ -108,14 +110,8 @@ def read_tiff_into_spatial_xarray(
     scale=None,
     translation=None,
     affine_transform=None,
-    channel_name=None,
+    channel_names: Optional[Union[List, Tuple]] = None,
 ):
-    if scale is None:
-        scale = {ax: 1 for ax in ["z", "y", "x"]}
-
-    if translation is None:
-        translation = {ax: 0 for ax in ["z", "y", "x"]}
-
     aicsimage = AICSImage(filename)
     sim = aicsimage.get_xarray_dask_stack().squeeze(drop=True)
     sim = sim.rename({dim: dim.lower() for dim in sim.dims})
@@ -127,12 +123,20 @@ def read_tiff_into_spatial_xarray(
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     sim = sim.transpose(*(("t", "c") + tuple(spatial_dims)))
 
+    if scale is None:
+        scale = {ax: 1 for ax in spatial_dims}
+
+    if translation is None:
+        translation = {ax: 0 for ax in spatial_dims}
+
     sim = si.to_spatial_image(
         sim.data,
         dims=sim.dims,
         scale=scale,
         translation=translation,
-        c_coords=[channel_name if channel_name is not None else 0],
+        c_coords=tuple(channel_names)
+        if channel_names is not None
+        else list(range(len(sim.coords["c"]))),
     )
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
@@ -156,6 +160,19 @@ def read_tiff_into_spatial_xarray(
 
 
 def save_sim_as_tif(path, sim):
+    """
+    Save spatial image as tif file.
+
+    Iterate over non-spatial coordinates and write one "field"
+    (i.e. one time point and channel) at a time, because tifffile
+    is not thread safe.
+
+    Parameters
+    ----------
+    path : str
+    sim : spatial image
+    """
+
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
 
@@ -194,27 +211,19 @@ def save_sim_as_tif(path, sim):
     store = imread(path, mode="r+", aszarr=True)
     z = zarr.open(store, mode="r+")
 
-    # with dask_config.set(scheduler="single-threaded"):
-    #     da.store(sim.data, z)
+    # iterate over non-spatial dimensions and write one "field" at a time
+    nsdims = [dim for dim in sim.dims if dim not in spatial_dims]
 
-    N_tries = 10
-    success = False
-    for _ in range(N_tries):
-        try:
-            # writing with tifffile is not thread safe,
-            # so we need to disable dask's multithreading
-            # or is it?
-            with dask_config.set(scheduler="single-threaded"):
-                da.store(sim.data, z)
-
-            success = True
-            break
-        except ValueError:
-            print("Retrying tif writing...")
-            pass
-
-    if success is not True:
-        raise RuntimeError("Could not write tif file.")
+    for nsdim_indices in tqdm(
+        itertools.product(
+            *tuple([range(len(sim.coords[nsdim])) for nsdim in nsdims])
+        ),
+        total=np.prod([len(sim.coords[nsdim]) for nsdim in nsdims]),
+    ):
+        sl = tuple([slice(ind, ind + 1) for ind in nsdim_indices]) + tuple(
+            [slice(None)] * len(spatial_dims)
+        )
+        z[sl] = sim.data[sl].compute()
 
     store.close()
 
