@@ -203,7 +203,7 @@ def save_sim_as_tif(path, sim):
         resolution=tuple([1.0 / s for s in spacing[-2:]]),
         metadata={
             "axes": axes,
-            # 'unit': 'um',
+            "unit": "um",  # assume um
             "Labels": channels,
         },
     )
