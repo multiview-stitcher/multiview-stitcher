@@ -6,7 +6,12 @@ import numpy as np
 import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import param_utils, spatial_image_utils, transformation
+from multiview_stitcher import (
+    param_utils,
+    spatial_image_utils,
+    transformation,
+    weights,
+)
 
 
 def fusion_method_weighted_average(
@@ -48,6 +53,7 @@ def fuse(
     transform_key: str = None,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
+    weights_method_kwargs=None,
     output_spacing=None,
     output_stack_mode="union",
     output_origin=None,
@@ -73,11 +79,13 @@ def fuse(
         By default None (intrinsic coordinate system).
     fusion_method : func, optional
         Fusion function to be applied. This function receives the following
-        inputs: transformed_views, blending_weights, fusion_weights, params.
+        inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
         By default fusion_method_weighted_average
     weights_method : func, optional
         Function to calculate fusion weights. This function receives the
-        following inputs: transformed_views. By default None.
+        following inputs: transformed_views (as spatial images), params.
+        It returns (non-normalized) fusion weights for each view.
+        By default None.
     output_spacing : dict, optional
         Spacing of the fused image for each spatial dimension, by default None
     output_stack_mode : str, optional
@@ -167,6 +175,7 @@ def fuse(
             sparams,
             fusion_method=fusion_method,
             weights_method=weights_method,
+            weights_method_kwargs=weights_method_kwargs,
             output_origin=output_stack_properties["origin"],
             output_shape=output_stack_properties["shape"],
             output_spacing=output_stack_properties["spacing"],
@@ -207,6 +216,7 @@ def fuse_field(
     params,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
+    weights_method_kwargs=None,
     output_origin=None,
     output_spacing=None,
     output_shape=None,
@@ -243,6 +253,9 @@ def fuse_field(
         Fused image of the field.
     """
 
+    if weights_method_kwargs is None:
+        weights_method_kwargs = {}
+
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
@@ -252,6 +265,7 @@ def fuse_field(
     for isim, sim in enumerate(sims):
         blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
 
+        # transform input images
         sim_t = transformation.transform_sim(
             sim,
             params[isim],
@@ -264,6 +278,7 @@ def fuse_field(
 
         field_ims_t.append(sim_t.data)
 
+        # calculate blending weights
         field_w = xr.zeros_like(sim)
         field_w.data = get_smooth_border_weight_from_shape(
             sim.shape[-ndim:],
@@ -271,6 +286,7 @@ def fuse_field(
             widths=blending_widths,
         )
 
+        # transform blending weights
         field_w_t = transformation.transform_sim(
             field_w,
             params[isim],
@@ -286,16 +302,16 @@ def fuse_field(
     field_ims_t = da.stack(field_ims_t)
     field_ws_t = da.stack(field_ws_t)
 
-    wsum = da.nansum(field_ws_t, axis=0)
-    wsum[wsum == 0] = 1
-
-    field_ws_t = field_ws_t / wsum
+    field_ws_t = weights.normalize_weights(field_ws_t)
 
     # calculate fusion weights
+    # (this could also be done using map_overlap)
     if weights_method is not None:
         fusion_weights = weights_method(
             field_ims_t,
+            **weights_method_kwargs,
         )
+        fusion_weights = weights.normalize_weights(fusion_weights)
     else:
         fusion_weights = None
 
