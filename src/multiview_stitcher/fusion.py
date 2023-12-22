@@ -309,6 +309,7 @@ def fuse_field(
     if weights_method is not None:
         fusion_weights = weights_method(
             field_ims_t,
+            field_ws_t,
             **weights_method_kwargs,
         )
         fusion_weights = weights.normalize_weights(fusion_weights)

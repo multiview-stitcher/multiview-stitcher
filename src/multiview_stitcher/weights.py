@@ -1,9 +1,11 @@
 import dask.array as da
+import numpy as np
 from dask_image.ndfilters import gaussian_filter
 
 
 def calc_content_based_weights(
     transformed_sims,
+    blending_weights,
     params=None,
     sigma_1=5,
     sigma_2=11,
@@ -32,9 +34,20 @@ def calc_content_based_weights(
         Content based weights for each view.
     """
 
+    transformed_sims = transformed_sims.astype(np.float32)
+    transformed_sims[blending_weights == 0] = np.nan
+
     weights = [
-        gaussian_filter(
-            (sim_t - gaussian_filter(sim_t, sigma=sigma_1)) ** 2, sigma=sigma_2
+        nan_gaussian_filter_dask_image(
+            (
+                sim_t
+                - nan_gaussian_filter_dask_image(
+                    sim_t, sigma=sigma_1, mode="reflect"
+                )
+            )
+            ** 2,
+            sigma=sigma_2,
+            mode="reflect",
         )
         for sim_t in transformed_sims
     ]
@@ -42,6 +55,36 @@ def calc_content_based_weights(
     weights = da.stack(weights, axis=0)
 
     return weights
+
+
+def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
+    """
+    Gaussian filter ignoring NaNs.
+
+    https://stackoverflow.com/questions/18697532/gaussian-filtering-a-image-with-nan-in-python
+
+    Parameters
+    ----------
+    ar : da.array
+
+    Returns
+    -------
+    da.array
+        filtered array
+    """
+
+    U = ar
+    V = U.copy()
+    V[np.isnan(U)] = 0
+    VV = gaussian_filter(V, *args, **kwargs)
+
+    W = 0 * U.copy() + 1
+    W[np.isnan(U)] = 0
+    WW = gaussian_filter(W, *args, **kwargs)
+
+    Z = VV / WW
+
+    return Z
 
 
 def normalize_weights(weights):
