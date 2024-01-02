@@ -1,7 +1,6 @@
 import warnings
 
 import dask.array as da
-import numpy as np
 import xarray as xr
 
 from multiview_stitcher import fusion, io, sample_data, spatial_image_utils
@@ -28,18 +27,8 @@ def test_fuse_field():
     xfused = fusion.fuse_field(
         sims,
         params,
-        output_origin=np.min(
-            [
-                spatial_image_utils.get_origin_from_sim(sim, asarray=True)
-                for sim in sims
-            ],
-            0,
-        ),
-        output_spacing=spatial_image_utils.get_spacing_from_sim(
-            sims[0], asarray=True
-        ),
-        output_shape=spatial_image_utils.get_shape_from_sim(
-            xr.merge(sims), asarray=True
+        output_stack_properties=spatial_image_utils.get_stack_properties_from_sim(
+            sims[0]
         ),
     )
 

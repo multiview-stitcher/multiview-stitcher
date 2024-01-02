@@ -41,9 +41,13 @@ def fusion_method_weighted_average(
     """
 
     if fusion_weights is None:
-        product = transformed_views * blending_weights
+        additive_weights = blending_weights
     else:
-        product = transformed_views * blending_weights * fusion_weights
+        additive_weights = blending_weights * fusion_weights
+
+    additive_weights = weights.normalize_weights(additive_weights)
+
+    product = transformed_views * additive_weights
 
     return np.nansum(product, axis=0).astype(transformed_views.dtype)
 
@@ -58,6 +62,7 @@ def fuse(
     output_stack_mode="union",
     output_origin=None,
     output_shape=None,
+    output_stack_properties=None,
     output_chunksize=512,
     interpolate_missing_pixels=None,
     # tmpdir=None,
@@ -95,6 +100,10 @@ def fuse(
         Origin of the fused image for each spatial dimension, by default None
     output_shape : _type_, optional
         Shape of the fused image for each spatial dimension, by default None
+    output_stack_properties : dict, optional
+        Dictionary describing the output stack with keys
+        'spacing', 'origin', 'shape'. Other output_* are ignored
+        if this argument is present.
     output_chunksize : int, optional
         Chunksize of the dask data array of the fused image, by default 512
     interpolate_missing_pixels : bool, optional
@@ -123,28 +132,22 @@ def fuse(
 
     params = [param_utils.invert_xparams(param) for param in params]
 
-    if output_spacing is None:
-        output_spacing = spatial_image_utils.get_spacing_from_sim(
-            sims[0]
-        )  # , asarray=False)
+    if output_stack_properties is None:
+        if output_spacing is None:
+            output_spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
 
-    if output_stack_mode is not None:
-        output_stack_properties = calc_stack_properties_from_sims_and_params(
+        output_stack_properties = calc_fusion_stack_properties(
             sims,
-            params,
-            spacing=np.array([output_spacing[dim] for dim in sdims]),
+            params=params,
+            spacing=output_spacing,
             mode=output_stack_mode,
         )
-    else:
-        output_stack_properties = {}
 
-    if output_origin is not None:
-        output_stack_properties["origin"] = [
-            output_origin[dim] for dim in sdims
-        ]
+        if output_origin is not None:
+            output_stack_properties = output_origin
 
-    if output_shape is not None:
-        output_stack_properties["shape"] = [output_shape[dim] for dim in sdims]
+        if output_shape is not None:
+            output_stack_properties["shape"] = output_shape
 
     xds = xr.Dataset(
         # For python >= 3.9 we can use the union '|' operator to merge to dict
@@ -176,9 +179,7 @@ def fuse(
             fusion_method=fusion_method,
             weights_method=weights_method,
             weights_method_kwargs=weights_method_kwargs,
-            output_origin=output_stack_properties["origin"],
-            output_shape=output_stack_properties["shape"],
-            output_spacing=output_stack_properties["spacing"],
+            output_stack_properties=output_stack_properties,
             output_chunksize=output_chunksize,
             interpolate_missing_pixels=interpolate_missing_pixels,
         )
@@ -217,9 +218,7 @@ def fuse_field(
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
     weights_method_kwargs=None,
-    output_origin=None,
-    output_spacing=None,
-    output_shape=None,
+    output_stack_properties=None,
     output_chunksize=512,
     interpolate_missing_pixels=True,
 ):
@@ -236,12 +235,9 @@ def fuse_field(
         See docstring of `fuse`.
     weights_method : func, optional
         See docstring of `fuse`.
-    output_origin : dict, optional
-        See docstring of `fuse`.
-    output_spacing : dict, optional
-        See docstring of `fuse`.
-    output_shape : dict, optional
-        See docstring of `fuse`.
+    output_stack_properties : dict, optional
+        Dictionary describing the output stack with keys
+        'spacing', 'origin', 'shape'.
     output_chunksize : int, optional
        See docstring of `fuse`.
     interpolate_missing_pixels : bool, optional
@@ -269,10 +265,10 @@ def fuse_field(
         sim_t = transformation.transform_sim(
             sim,
             params[isim],
-            output_chunksize=tuple([output_chunksize for _ in output_shape]),
-            output_spacing=output_spacing,
-            output_shape=output_shape,
-            output_origin=output_origin,
+            output_chunksize=tuple(
+                [output_chunksize for _ in output_stack_properties["shape"]]
+            ),
+            output_stack_properties=output_stack_properties,
             order=1,
         )
 
@@ -290,10 +286,10 @@ def fuse_field(
         field_w_t = transformation.transform_sim(
             field_w,
             params[isim],
-            output_chunksize=tuple([output_chunksize for _ in output_shape]),
-            output_spacing=output_spacing,
-            output_shape=output_shape,
-            output_origin=output_origin,
+            output_chunksize=tuple(
+                [output_chunksize for _ in output_stack_properties["shape"]]
+            ),
+            output_stack_properties=output_stack_properties,
             order=1,
         )
 
@@ -358,18 +354,14 @@ def fuse_field(
     fused_field = si.to_spatial_image(
         fused_field,
         dims=spatial_dims,
-        scale={
-            dim: output_spacing[idim] for idim, dim in enumerate(spatial_dims)
-        },
-        translation={
-            dim: output_origin[idim] for idim, dim in enumerate(spatial_dims)
-        },
+        scale=output_stack_properties["spacing"],
+        translation=output_stack_properties["spacing"],
     )
 
     return fused_field
 
 
-def calc_stack_properties_from_sims_and_params(
+def calc_fusion_stack_properties(
     sims,
     params,
     spacing,
@@ -399,22 +391,12 @@ def calc_stack_properties_from_sims_and_params(
     dict
         Stack properties (shape, spacing, origin).
     """
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
-    views_props = []
-    for _, sim in enumerate(sims):
-        views_props.append(
-            {
-                "shape": spatial_image_utils.get_shape_from_sim(
-                    sim, asarray=True
-                ),
-                "spacing": spatial_image_utils.get_spacing_from_sim(
-                    sim, asarray=True
-                ),
-                "origin": spatial_image_utils.get_origin_from_sim(
-                    sim, asarray=True
-                ),
-            }
-        )
+    views_props = [
+        spatial_image_utils.get_stack_properties_from_sim(sim, asarray=False)
+        for sim in sims
+    ]
 
     params_ds = xr.Dataset(dict(enumerate(params)))
 
@@ -443,6 +425,12 @@ def calc_stack_properties_from_sims_and_params(
                 mode=mode,
             )
         )
+
+    # return properties in dict form
+    stack_properties = {
+        k: {dim: v[idim] for idim, dim in enumerate(spatial_dims)}
+        for k, v in stack_properties.items()
+    }
 
     return stack_properties
 
@@ -476,6 +464,14 @@ def calc_stack_properties_from_view_properties_and_params(
     dict
         Stack properties (shape, spacing, origin).
     """
+    spatial_dims = ["z", "y", "x"][-len(spacing) :]
+
+    # transform into array form
+    spacing = np.array([spacing[dim] for dim in spatial_dims])
+    views_props = [
+        {k: np.array([v[dim] for dim in spatial_dims]) for k, v in vp.items()}
+        for vp in views_props
+    ]
 
     spacing = np.array(spacing).astype(float)
     ndim = len(spacing)

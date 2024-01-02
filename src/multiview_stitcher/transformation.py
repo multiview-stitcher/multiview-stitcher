@@ -10,9 +10,7 @@ from multiview_stitcher import spatial_image_utils
 def transform_sim(
     sim,
     p=None,
-    output_shape=None,
-    output_spacing=None,
-    output_origin=None,
+    output_stack_properties=None,
     output_chunksize=256,
     order=1,
 ):
@@ -25,28 +23,15 @@ def transform_sim(
     if p is None:
         p = np.eye(ndim + 1)
 
-    if output_shape is None:
-        output_shape = spatial_image_utils.get_shape_from_sim(
-            sim, asarray=True
-        )
-
-    if output_spacing is None:
-        output_spacing = spatial_image_utils.get_spacing_from_sim(
-            sim, asarray=True
-        )
-
-    if output_origin is None:
-        output_origin = spatial_image_utils.get_origin_from_sim(
-            sim, asarray=True
-        )
-
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     matrix = p[:ndim, :ndim]
     offset = p[:ndim, ndim]
 
     # spacing matrices
-    Sx = np.diag(output_spacing)
+    Sx = np.diag(
+        [output_stack_properties["spacing"][dim] for dim in spatial_dims]
+    )
     Sy = np.diag(spatial_image_utils.get_spacing_from_sim(sim, asarray=True))
 
     matrix_prime = np.dot(np.linalg.inv(Sy), np.dot(matrix, Sx))
@@ -54,20 +39,25 @@ def transform_sim(
         np.linalg.inv(Sy),
         offset
         - spatial_image_utils.get_origin_from_sim(sim, asarray=True)
-        + np.dot(matrix, output_origin),
+        + np.dot(
+            matrix,
+            [output_stack_properties["origin"][dim] for dim in spatial_dims],
+        ),
     )
 
     if isinstance(output_chunksize, Iterable):
         output_chunks = output_chunksize
     else:
-        output_chunks = tuple([output_chunksize for _ in output_shape])
+        output_chunks = tuple([output_chunksize for _ in spatial_dims])
 
     out_da = dask_image_affine_transform(
         sim.data,
         matrix=matrix_prime,
         offset=offset_prime,
         order=order,
-        output_shape=tuple(output_shape),
+        output_shape=tuple(
+            [output_stack_properties["shape"][dim] for dim in spatial_dims]
+        ),
         output_chunks=output_chunks,
         mode="constant",
         cval=0.0,
@@ -76,12 +66,8 @@ def transform_sim(
     sim = si.to_spatial_image(
         out_da,
         dims=sim.dims,
-        scale={
-            dim: output_spacing[idim] for idim, dim in enumerate(spatial_dims)
-        },
-        translation={
-            dim: output_origin[idim] for idim, dim in enumerate(spatial_dims)
-        },
+        scale=output_stack_properties["spacing"],
+        translation=output_stack_properties["origin"],
     )
 
     return sim

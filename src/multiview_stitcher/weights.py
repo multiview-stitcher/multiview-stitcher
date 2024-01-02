@@ -102,7 +102,7 @@ def normalize_weights(weights):
         Normalized weights.
     """
 
-    wsum = da.nansum(weights, axis=0)
+    wsum = np.nansum(weights, axis=0)
     wsum[wsum == 0] = 1
 
     weights = weights / wsum

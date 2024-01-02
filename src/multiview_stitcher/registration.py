@@ -188,6 +188,8 @@ def sims_to_intrinsic_coord_system(
     Return: transformed spatial images
     """
 
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim1)
+
     reg_sims_b = [sim1, sim2]
     lowers, uppers = overlap_bboxes
 
@@ -205,15 +207,26 @@ def sims_to_intrinsic_coord_system(
     ]
     transf_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
 
+    shape = np.floor(np.array(uppers[0] - lowers[0]) / spacing + 1).astype(
+        np.uint16
+    )
+
     reg_sims_b_t = [
         transformation.transform_sim(
             sim,
             [None, transf_affine][isim],
-            output_origin=lowers[0],
-            output_spacing=spacing,
-            output_shape=np.floor(
-                np.array(uppers[0] - lowers[0]) / spacing + 1
-            ).astype(np.uint16),
+            output_stack_properties={
+                "origin": {
+                    dim: lowers[0][idim]
+                    for idim, dim in enumerate(spatial_dims)
+                },
+                "spacing": {
+                    dim: spacing[idim] for idim, dim in enumerate(spatial_dims)
+                },
+                "shape": {
+                    dim: shape[idim] for idim, dim in enumerate(spatial_dims)
+                },
+            },
         )
         for isim, sim in enumerate(reg_sims_b)
     ]
