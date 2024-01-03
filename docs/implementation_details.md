@@ -33,7 +33,7 @@ However, affine transformations are important for positioning views relatively t
 In the code, coordinate systems are referred to as *transform_key* (TODO: find better name, e.g. *coordinate_system*).
 
 
-## Registration using graphs
+## Registration
 
 ### Overlap graph
 An *overlap graph* is computed from the input images (represented as a directed `networkx.DiGraph`) in which the
@@ -49,3 +49,16 @@ A suitable reference view can be obtained from the overlap graph by e.g. choosin
 ### Registration graph
 
 A *registration graph* or list of registration pairs (TODO: clarify whether this should be a graph or a list of pairs) is obtained from the overlap graph by e.g. finding shortest overlap-weighted paths between the reference view and all other views.
+
+
+## Fusion
+
+### Fusion framework
+
+`multiview_stitcher.fusion.fuse` can be used in combination with fusion implementation(s) available in `multiview_stitcher.fusion` or custom functions sharing the interface of `multiview_stitcher.fusion.fusion_method_weighted_average` (default fusion func).
+
+Fusion implementations are automatically passed blending weights for the input views and can optionally receive further weights obtained by a weight calculation function passed to `multiview_stitcher.fusion.fuse` (sharing the interface of `multiview_stitcher.weights.content_based`).
+
+### Content based fusion
+
+To improve multi-view fusion in the context of strongly scattering samples, [content-based fusion](https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf) turns out to be helpful. This fusion method is available in `multiview-stitcher` by using `multiview_stitcher.weights.content_based` as an optional fusion weight function (see [above](###Fusion-framework)).

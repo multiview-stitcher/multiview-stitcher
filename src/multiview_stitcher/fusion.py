@@ -6,7 +6,12 @@ import numpy as np
 import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import param_utils, spatial_image_utils, transformation
+from multiview_stitcher import (
+    param_utils,
+    spatial_image_utils,
+    transformation,
+    weights,
+)
 
 
 def fusion_method_weighted_average(
@@ -36,9 +41,13 @@ def fusion_method_weighted_average(
     """
 
     if fusion_weights is None:
-        product = transformed_views * blending_weights
+        additive_weights = blending_weights
     else:
-        product = transformed_views * blending_weights * fusion_weights
+        additive_weights = blending_weights * fusion_weights
+
+    additive_weights = weights.normalize_weights(additive_weights)
+
+    product = transformed_views * additive_weights
 
     return np.nansum(product, axis=0).astype(transformed_views.dtype)
 
@@ -48,10 +57,12 @@ def fuse(
     transform_key: str = None,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
+    weights_method_kwargs=None,
     output_spacing=None,
     output_stack_mode="union",
     output_origin=None,
     output_shape=None,
+    output_stack_properties=None,
     output_chunksize=512,
     interpolate_missing_pixels=None,
     # tmpdir=None,
@@ -73,11 +84,13 @@ def fuse(
         By default None (intrinsic coordinate system).
     fusion_method : func, optional
         Fusion function to be applied. This function receives the following
-        inputs: transformed_views, blending_weights, fusion_weights, params.
+        inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
         By default fusion_method_weighted_average
     weights_method : func, optional
         Function to calculate fusion weights. This function receives the
-        following inputs: transformed_views. By default None.
+        following inputs: transformed_views (as spatial images), params.
+        It returns (non-normalized) fusion weights for each view.
+        By default None.
     output_spacing : dict, optional
         Spacing of the fused image for each spatial dimension, by default None
     output_stack_mode : str, optional
@@ -87,6 +100,10 @@ def fuse(
         Origin of the fused image for each spatial dimension, by default None
     output_shape : _type_, optional
         Shape of the fused image for each spatial dimension, by default None
+    output_stack_properties : dict, optional
+        Dictionary describing the output stack with keys
+        'spacing', 'origin', 'shape'. Other output_* are ignored
+        if this argument is present.
     output_chunksize : int, optional
         Chunksize of the dask data array of the fused image, by default 512
     interpolate_missing_pixels : bool, optional
@@ -115,28 +132,22 @@ def fuse(
 
     params = [param_utils.invert_xparams(param) for param in params]
 
-    if output_spacing is None:
-        output_spacing = spatial_image_utils.get_spacing_from_sim(
-            sims[0]
-        )  # , asarray=False)
+    if output_stack_properties is None:
+        if output_spacing is None:
+            output_spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
 
-    if output_stack_mode is not None:
-        output_stack_properties = calc_stack_properties_from_sims_and_params(
+        output_stack_properties = calc_fusion_stack_properties(
             sims,
-            params,
-            spacing=np.array([output_spacing[dim] for dim in sdims]),
+            params=params,
+            spacing=output_spacing,
             mode=output_stack_mode,
         )
-    else:
-        output_stack_properties = {}
 
-    if output_origin is not None:
-        output_stack_properties["origin"] = [
-            output_origin[dim] for dim in sdims
-        ]
+        if output_origin is not None:
+            output_stack_properties = output_origin
 
-    if output_shape is not None:
-        output_stack_properties["shape"] = [output_shape[dim] for dim in sdims]
+        if output_shape is not None:
+            output_stack_properties["shape"] = output_shape
 
     xds = xr.Dataset(
         # For python >= 3.9 we can use the union '|' operator to merge to dict
@@ -167,9 +178,8 @@ def fuse(
             sparams,
             fusion_method=fusion_method,
             weights_method=weights_method,
-            output_origin=output_stack_properties["origin"],
-            output_shape=output_stack_properties["shape"],
-            output_spacing=output_stack_properties["spacing"],
+            weights_method_kwargs=weights_method_kwargs,
+            output_stack_properties=output_stack_properties,
             output_chunksize=output_chunksize,
             interpolate_missing_pixels=interpolate_missing_pixels,
         )
@@ -207,9 +217,8 @@ def fuse_field(
     params,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
-    output_origin=None,
-    output_spacing=None,
-    output_shape=None,
+    weights_method_kwargs=None,
+    output_stack_properties=None,
     output_chunksize=512,
     interpolate_missing_pixels=True,
 ):
@@ -226,12 +235,9 @@ def fuse_field(
         See docstring of `fuse`.
     weights_method : func, optional
         See docstring of `fuse`.
-    output_origin : dict, optional
-        See docstring of `fuse`.
-    output_spacing : dict, optional
-        See docstring of `fuse`.
-    output_shape : dict, optional
-        See docstring of `fuse`.
+    output_stack_properties : dict, optional
+        Dictionary describing the output stack with keys
+        'spacing', 'origin', 'shape'.
     output_chunksize : int, optional
        See docstring of `fuse`.
     interpolate_missing_pixels : bool, optional
@@ -243,6 +249,9 @@ def fuse_field(
         Fused image of the field.
     """
 
+    if weights_method_kwargs is None:
+        weights_method_kwargs = {}
+
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
@@ -252,32 +261,35 @@ def fuse_field(
     for isim, sim in enumerate(sims):
         blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
 
+        # transform input images
         sim_t = transformation.transform_sim(
             sim,
             params[isim],
-            output_chunksize=tuple([output_chunksize for _ in output_shape]),
-            output_spacing=output_spacing,
-            output_shape=output_shape,
-            output_origin=output_origin,
+            output_chunksize=tuple(
+                [output_chunksize for _ in output_stack_properties["shape"]]
+            ),
+            output_stack_properties=output_stack_properties,
             order=1,
         )
 
         field_ims_t.append(sim_t.data)
 
+        # calculate blending weights
         field_w = xr.zeros_like(sim)
-        field_w.data = get_smooth_border_weight_from_shape(
+        field_w.data = weights.get_smooth_border_weight_from_shape(
             sim.shape[-ndim:],
             chunks=sim.chunks,
             widths=blending_widths,
         )
 
+        # transform blending weights
         field_w_t = transformation.transform_sim(
             field_w,
             params[isim],
-            output_chunksize=tuple([output_chunksize for _ in output_shape]),
-            output_spacing=output_spacing,
-            output_shape=output_shape,
-            output_origin=output_origin,
+            output_chunksize=tuple(
+                [output_chunksize for _ in output_stack_properties["shape"]]
+            ),
+            output_stack_properties=output_stack_properties,
             order=1,
         )
 
@@ -286,16 +298,17 @@ def fuse_field(
     field_ims_t = da.stack(field_ims_t)
     field_ws_t = da.stack(field_ws_t)
 
-    wsum = da.nansum(field_ws_t, axis=0)
-    wsum[wsum == 0] = 1
-
-    field_ws_t = field_ws_t / wsum
+    field_ws_t = weights.normalize_weights(field_ws_t)
 
     # calculate fusion weights
+    # (this could also be done using map_overlap)
     if weights_method is not None:
         fusion_weights = weights_method(
             field_ims_t,
+            field_ws_t,
+            **weights_method_kwargs,
         )
+        fusion_weights = weights.normalize_weights(fusion_weights)
     else:
         fusion_weights = None
 
@@ -341,18 +354,14 @@ def fuse_field(
     fused_field = si.to_spatial_image(
         fused_field,
         dims=spatial_dims,
-        scale={
-            dim: output_spacing[idim] for idim, dim in enumerate(spatial_dims)
-        },
-        translation={
-            dim: output_origin[idim] for idim, dim in enumerate(spatial_dims)
-        },
+        scale=output_stack_properties["spacing"],
+        translation=output_stack_properties["spacing"],
     )
 
     return fused_field
 
 
-def calc_stack_properties_from_sims_and_params(
+def calc_fusion_stack_properties(
     sims,
     params,
     spacing,
@@ -382,22 +391,12 @@ def calc_stack_properties_from_sims_and_params(
     dict
         Stack properties (shape, spacing, origin).
     """
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
-    views_props = []
-    for _, sim in enumerate(sims):
-        views_props.append(
-            {
-                "shape": spatial_image_utils.get_shape_from_sim(
-                    sim, asarray=True
-                ),
-                "spacing": spatial_image_utils.get_spacing_from_sim(
-                    sim, asarray=True
-                ),
-                "origin": spatial_image_utils.get_origin_from_sim(
-                    sim, asarray=True
-                ),
-            }
-        )
+    views_props = [
+        spatial_image_utils.get_stack_properties_from_sim(sim, asarray=False)
+        for sim in sims
+    ]
 
     params_ds = xr.Dataset(dict(enumerate(params)))
 
@@ -426,6 +425,12 @@ def calc_stack_properties_from_sims_and_params(
                 mode=mode,
             )
         )
+
+    # return properties in dict form
+    stack_properties = {
+        k: {dim: v[idim] for idim, dim in enumerate(spatial_dims)}
+        for k, v in stack_properties.items()
+    }
 
     return stack_properties
 
@@ -459,6 +464,14 @@ def calc_stack_properties_from_view_properties_and_params(
     dict
         Stack properties (shape, spacing, origin).
     """
+    spatial_dims = ["z", "y", "x"][-len(spacing) :]
+
+    # transform into array form
+    spacing = np.array([spacing[dim] for dim in spatial_dims])
+    views_props = [
+        {k: np.array([v[dim] for dim in spatial_dims]) for k, v in vp.items()}
+        for vp in views_props
+    ]
 
     spacing = np.array(spacing).astype(float)
     ndim = len(spacing)
@@ -583,86 +596,6 @@ def calc_stack_properties_from_volume(volume, spacing):
     properties_dict["origin"] = origin
 
     return properties_dict
-
-
-def smooth_transition(x, x_offset=0.5, x_stretch=None, k=3):
-    """
-    Transform the distance from the border to a weight for blending.
-    """
-    # https://math.stackexchange.com/questions/1832177/sigmoid-function-with-fixed-bounds-and-variable-steepness-partially-solved
-
-    if x_stretch is None:
-        x_stretch = x_offset
-
-    xp = x
-    xp = xp - x_offset  # w is 0 at offset
-    xp = xp / x_stretch / 2.0  # w is +/-0.5 at offset +/- x_stretch
-
-    w = 1 - 1 / (1 + (1 / (xp + 0.5) - 1) ** (-k))
-
-    w[xp <= -0.5] = 0.0
-    w[xp >= 0.5] = 1.0
-
-    return w
-
-
-def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
-    """
-    Get a weight image for blending that is 0 at the border and 1 at the center.
-    Transition widths can be specified for each dimension.
-
-    20230926: this adds too many small dask tasks, need to optimize
-
-    Possible better strategy:
-
-    Assume that only the border chunks of the input files need to be different
-    from da.ones.
-
-    OR: multiscale strategy
-    - first fuse smallest scale
-    - then go on with only those chunks that need to be filled in
-    - not clear if it's beneficial, as it's already known which chunks are needed
-
-    OR: Manually construct output array
-
-    [!!] OR: Use interpolation to calculate distance map
-    - reduce input to one value per chunk, i.e. chunksize of [1]*ndim
-    - use this to define which input chunk is required for fusion
-    - also use this to calculate weights at border
-      (only where above coarse interpolation step gave < 1)
-
-    """
-
-    ndim = len(shape)
-
-    # get distance to border for each dim
-
-    dim_dists = [
-        da.arange(shape[dim], chunks=chunks[dim]).astype(float)
-        for dim in range(ndim)
-    ]
-
-    dim_dists = [
-        da.min(da.abs(da.stack([dd, dd - shape[idim]])), axis=0)
-        for idim, dd in enumerate(dim_dists)
-    ]
-
-    dim_ws = [
-        smooth_transition(
-            dim_dists[dim], x_offset=widths[dim], x_stretch=widths[dim]
-        )
-        for dim in range(ndim)
-    ]
-
-    # get product of weights for each dim
-    w = da.ones(shape, chunks=chunks, dtype=float)
-    for dim in range(len(shape)):
-        tmp_dim_w = dim_ws[dim]
-        for _ in range(ndim - dim - 1):
-            tmp_dim_w = tmp_dim_w[:, None]
-        w *= tmp_dim_w
-
-    return w
 
 
 # from scipy import interpolate

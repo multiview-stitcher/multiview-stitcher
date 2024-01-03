@@ -75,6 +75,14 @@ def get_spacing_from_sim(sim, asarray=False):
     return spacing
 
 
+def get_stack_properties_from_sim(sim, asarray=False):
+    return {
+        "shape": get_shape_from_sim(sim, asarray=asarray),
+        "spacing": get_spacing_from_sim(sim, asarray=asarray),
+        "origin": get_origin_from_sim(sim, asarray=asarray),
+    }
+
+
 def ensure_time_dim(sim):
     if "t" in sim.dims:
         return sim
