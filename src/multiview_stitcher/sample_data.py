@@ -132,6 +132,8 @@ def generate_tiled_dataset(
                 "c": ["channel " + str(c) for c in range(N_c)],
             },
         )
+        # spatial-image expects t to be the first dimension
+        sim = sim.transpose(*(("t", "c") + tuple(spatial_dims)))
 
         affine = param_utils.affine_from_translation(origin)
 
