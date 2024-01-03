@@ -30,7 +30,7 @@ Below is a list of features which are either already implemented or are on the r
 - [ ] modular API to plug in different fusion functions including:
 - Supported weights:
   - [x] blending
-  - [ ] content-based
+  - [x] content-based
 - Supported fusion methods:
   - [x] weighted average
   - [ ] multi-view deconvolution

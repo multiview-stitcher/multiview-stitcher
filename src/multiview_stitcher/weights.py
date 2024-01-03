@@ -3,7 +3,7 @@ import numpy as np
 from dask_image.ndfilters import gaussian_filter
 
 
-def calc_content_based_weights(
+def content_based(
     transformed_sims,
     blending_weights,
     params=None,
