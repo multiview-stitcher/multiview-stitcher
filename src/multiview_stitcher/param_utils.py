@@ -13,6 +13,19 @@ def affine_from_translation(translation):
     return M
 
 
+def affine_from_linear_affine(linear_affine):
+    """
+    Return matrix in homogeneous coords representing a translation.
+    """
+    ndim = 3 if len(linear_affine) == 12 else 2
+
+    M = np.eye(ndim + 1)
+    M[:ndim, :ndim] = linear_affine[: ndim**2].reshape((ndim, ndim))
+    M[:ndim, ndim] = linear_affine[-ndim:]
+
+    return M
+
+
 def translation_from_affine(affine):
     """
     Return matrix in homogeneous coords representing a translation.

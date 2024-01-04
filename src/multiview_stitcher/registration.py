@@ -1,3 +1,6 @@
+import contextlib
+import os
+import tempfile
 import warnings
 
 import dask.array as da
@@ -12,6 +15,9 @@ from dask_image import ndfilters
 from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage
 from tqdm import tqdm
+
+with contextlib.suppress(ImportError):
+    import ants
 
 from multiview_stitcher import (
     msi_utils,
@@ -315,7 +321,6 @@ def get_affine_from_intrinsic_affine(
     x_f_D = M_D * x_c_D
     x_f_P = M_P * x_c_P
     x_f_W = M_W * x_c_W
-
 
     D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
     x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
@@ -742,7 +747,10 @@ def register(
             )
         )
 
-    g_reg_computed = mv_graph.compute_graph_edges(g_reg)
+    g_reg_computed = mv_graph.compute_graph_edges(
+        g_reg,
+        # scheduler='single-threaded',
+    )
 
     g_reg_nodes = get_node_params_from_reg_graph(g_reg_computed)
 
@@ -1072,3 +1080,148 @@ def crop_sim_to_references(
     )
 
     return sim_cropped
+
+
+def register_using_ants(
+    fixed_np,
+    moving_np,
+    scale_fixed,
+    scale_moving,
+    origin_fixed,
+    origin_moving,
+    init_affine,
+    transform_types,
+):
+    try:
+        _ = ants
+    except NameError:
+        raise (
+            Exception(
+                """
+            Please install the antspyx package to use ANTsPy for registration.
+            E.g. using pip:
+            - `pip install multiview-stitcher[ants]` or
+            - `pip install antspyx`
+            """
+            )
+        ) from None
+
+    ndim = len(scale_fixed)
+
+    # convert input images to ants images
+    fixed_ants = ants.from_numpy(
+        fixed_np.astype(np.float32),
+        origin=list(origin_fixed),
+        spacing=list(scale_fixed),
+    )
+    moving_ants = ants.from_numpy(
+        moving_np.astype(np.float32),
+        origin=list(origin_moving),
+        spacing=list(scale_moving),
+    )
+
+    init_aff = ants.ants_transform_io.create_ants_transform(
+        transform_type="AffineTransform",
+        dimension=ndim,
+        matrix=init_affine[:ndim, :ndim],
+        offset=init_affine[:ndim, ndim],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        init_transform_path = os.path.join(tmpdir, "init_aff.txt")
+        ants.ants_transform_io.write_transform(init_aff, init_transform_path)
+
+        for transform_type in transform_types:
+            aff = ants.registration(
+                fixed=fixed_ants,
+                moving=moving_ants,
+                type_of_transform=transform_type,
+                random_seed=0,
+                initial_transform=[init_transform_path],
+                write_composite_transform=False,
+                aff_metric="meansquares",
+                # aff_metric='mattes',
+                verbose=False,
+                aff_random_sampling_rate=0.2,
+                # aff_iterations=(2000, 2000, 1000, 100),
+                # aff_iterations=(2000, 2000, 1000, 100),
+                # aff_smoothing_sigmas=(4, 2, 1, 0),
+                # aff_shrink_factors=(6, 4, 2, 1),
+            )
+
+            # ants.registration(fixed, moving, type_of_transform='SyN', initial_transform=None, outprefix='', mask=None, moving_mask=None, mask_all_stages=False,
+            # grad_step=0.2, flow_sigma=3, total_sigma=0, aff_metric='mattes', aff_sampling=32, aff_random_sampling_rate=0.2,
+            # syn_metric='mattes', syn_sampling=32, reg_iterations=(40, 20, 0),
+            # aff_iterations=(2100, 1200, 1200, 10), aff_shrink_factors=(6, 4, 2, 1), aff_smoothing_sigmas=(3, 2, 1, 0),
+            # write_composite_transform=False, random_seed=None, verbose=False, multivariate_extras=None, restrict_transformation=None, smoothing_in_mm=False, **kwargs)
+
+            result_transform_path = aff["fwdtransforms"][0]
+            result_transform = ants.ants_transform_io.read_transform(
+                result_transform_path
+            )
+
+            curr_init_transform = result_transform
+            ants.ants_transform_io.write_transform(
+                curr_init_transform, init_transform_path
+            )
+
+    # p = transf_affine
+    p = param_utils.affine_from_linear_affine(result_transform.parameters)
+
+    # return p
+    return p, aff
+
+
+def registration_ANTsPy(
+    sim1,
+    sim2,
+    transform_key,
+    overlap_bboxes,
+    # transform_types=("Translation", "Rigid", "Similarity", "Affine", "Affine"),
+    transform_types=("Translation", "Rigid", "Similarity"),
+):
+    """
+    Use ANTsPy to perform registration between two spatial images.
+    """
+
+    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
+    spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+
+    # obtain initial transform parameters
+    affines = [
+        spatial_image_utils.get_affine_from_sim(
+            sim, transform_key=transform_key
+        )
+        .squeeze()
+        .data
+        for sim in [sim1, sim2]
+    ]
+    init_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+
+    out_affine = da.from_delayed(
+        delayed(np.array)(
+            # delayed(skimage.registration.phase_cross_correlation)(
+            delayed(register_using_ants)(
+                delayed(lambda x: np.array(x))(sim1.data),
+                delayed(lambda x: np.array(x))(sim2.data),
+                spatial_image_utils.get_spacing_from_sim(sim1, asarray=True),
+                spatial_image_utils.get_spacing_from_sim(sim2, asarray=True),
+                spatial_image_utils.get_origin_from_sim(sim1, asarray=True),
+                spatial_image_utils.get_origin_from_sim(sim2, asarray=True),
+                init_affine,
+                transform_types,
+            )[0]
+        ),
+        shape=(ndim + 1, ndim + 1),
+        dtype=float,
+    )
+
+    p_final = np.matmul(
+        affines[1], np.matmul(out_affine, np.linalg.inv(affines[0]))
+    )
+
+    p_final = np.linalg.inv(
+        p_final
+    )  # needed because graph is directed wrongly currently (TODO)
+
+    return param_utils.get_xparam_from_param(p_final)
