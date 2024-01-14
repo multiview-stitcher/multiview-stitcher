@@ -16,6 +16,11 @@ With a focus on interoperability and integration with existing tools and the eco
 
 It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) classes for image metadata handling and [`dask`](https://github.com/dask) and [`dask-image`](https://github.com/dask-image) for chunked and distributed image processing.
 
+## Quickstart
+
+### Notebooks
+
+Check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks).
 
 ### Napari plugin
 
