@@ -5,12 +5,11 @@ import networkx as nx
 import numpy as np
 import skimage.exposure
 import skimage.registration
-import skimage.registration._phase_cross_correlation  # skimage uses lazy importing
 import xarray as xr
 from dask import compute, delayed
 from dask_image import ndfilters
 from multiscale_spatial_image import MultiscaleSpatialImage
-from scipy import ndimage
+from scipy import ndimage, stats
 from tqdm import tqdm
 
 from multiview_stitcher import (
@@ -19,9 +18,6 @@ from multiview_stitcher import (
     param_utils,
     spatial_image_utils,
     transformation,
-)
-from multiview_stitcher._skimage_monkey_patch import (
-    _modified_disambiguate_shift,
 )
 
 
@@ -251,30 +247,64 @@ def phase_correlation_registration(
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
     spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
 
-    def skimage_phase_corr_no_runtime_warning_and_monkey_patched(
-        *args, **kwargs
-    ):
-        # monkey patching needs to be done here in order to work
-        # with dask distributed
-        skimage.registration._phase_cross_correlation._disambiguate_shift = (
-            _modified_disambiguate_shift
-        )
-
+    def skimage_phase_corr_no_runtime_warning(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            result = skimage.registration.phase_cross_correlation(
-                *args, **kwargs
+            t = skimage.registration.phase_cross_correlation(
+                *args, disambiguate=False, **kwargs
+            )[0]
+
+        # disambiguate shift manually
+        # there seems to be a problem with the scikit-image implementation
+        # of disambiguate_shift, but this needs to be checked
+
+        im0 = args[0]
+        im1 = args[1]
+
+        corrs = []
+        t_candidates = []
+
+        ndim = im0.ndim
+        for s in np.ndindex(tuple([4] * ndim)):
+            t_candidate = []
+            for d in range(ndim):
+                if s[d] == 0:
+                    t_candidate.append(t[d])
+                elif s[d] == 1:
+                    t_candidate.append(-t[d])
+                elif s[d] == 2:
+                    t_candidate.append(-(t[d] - im1.shape[d]))
+                elif s[d] == 3:
+                    t_candidate.append(-t[d] - im1.shape[d])
+            t_candidates.append(t_candidate)
+
+        for t_ in t_candidates:
+            im1t = ndimage.affine_transform(
+                im1 + 1,
+                param_utils.affine_from_translation(list(t_)),
+                order=1,
+                mode="constant",
+                cval=0,
             )
-        return result
+            mask = im1t > 0
+            if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
+                corr = -1
+            else:
+                corr = stats.spearmanr(im0[mask], im1t[mask]).correlation
+            corrs.append(corr)
+
+        t = t_candidates[np.nanargmax(corrs)]
+
+        return [t]
 
     shift = da.from_delayed(
         delayed(np.array)(
             # delayed(skimage.registration.phase_cross_correlation)(
-            delayed(skimage_phase_corr_no_runtime_warning_and_monkey_patched)(
+            delayed(skimage_phase_corr_no_runtime_warning)(
                 delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
                 delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
                 upsample_factor=(10 if ndim == 2 else 2),
-                disambiguate=True,
+                # disambiguate=False,
                 normalization="phase",
             )[0]
         ),
@@ -611,6 +641,9 @@ def get_node_params_from_reg_graph(g_reg):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
+
+    Output parameters P for each view map coordinates in the view
+    into the coordinates of a new coordinate system.
     """
 
     ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
@@ -645,7 +678,7 @@ def get_node_params_from_reg_graph(g_reg):
                 vectorize=True,
             )
 
-        g_reg.nodes[n]["transforms"] = path_params
+        g_reg.nodes[n]["transforms"] = param_utils.invert_xparams(path_params)
 
     return g_reg
 
