@@ -5,6 +5,7 @@ import dask.array as da
 import numpy as np
 import spatial_image as si
 import xarray as xr
+from dask import delayed
 
 from multiview_stitcher import param_utils, spatial_image_utils, transformation
 
@@ -162,8 +163,31 @@ def fuse(
         ssims = [sim.sel(sim_coord_dict) for sim in sims]
         sparams = [param.sel(params_coord_dict) for param in params]
 
-        merge = fuse_field(
-            ssims,
+        # convert ssims into dask arrays + metadata to get them
+        # through fuse_field without triggering compute
+        # https://dask.discourse.group/t/passing-dask-objects-to-delayed-computations-without-triggering-compute/1441
+        sims_datas = [
+            delayed(da.Array)(
+                ssim.data.dask,
+                ssim.data.name,
+                ssim.data.chunks,
+                ssim.data.dtype,
+            )
+            for ssim in ssims
+        ]
+
+        sims_metas = [
+            {
+                "dims": ssim.dims,
+                "scale": spatial_image_utils.get_spacing_from_sim(ssim),
+                "translation": spatial_image_utils.get_origin_from_sim(ssim),
+            }
+            for ssim in ssims
+        ]
+
+        merge_d = delayed(fuse_field)(
+            sims_datas,
+            sims_metas,
             sparams,
             fusion_method=fusion_method,
             weights_method=weights_method,
@@ -172,6 +196,34 @@ def fuse(
             output_spacing=output_stack_properties["spacing"],
             output_chunksize=output_chunksize,
             interpolate_missing_pixels=interpolate_missing_pixels,
+        )
+
+        merge_d = delayed(lambda x: x.data)(merge_d)
+
+        merge_data = da.from_delayed(
+            merge_d,
+            shape=output_stack_properties["shape"],
+            dtype=sims[0].dtype,
+        )
+
+        merge_data = merge_data.rechunk([output_chunksize] * len(sdims))
+
+        merge_data = merge_data.map_blocks(
+            lambda x: x.compute(),
+            dtype=sims[0].dtype,
+        )
+
+        merge = si.to_spatial_image(
+            merge_data,
+            dims=sdims,
+            scale={
+                dim: output_stack_properties["spacing"][idim]
+                for idim, dim in enumerate(sdims)
+            },
+            translation={
+                dim: output_stack_properties["origin"][idim]
+                for idim, dim in enumerate(sdims)
+            },
         )
 
         merge = merge.expand_dims(nsdims)
@@ -203,7 +255,8 @@ def fuse(
 
 
 def fuse_field(
-    sims,
+    sims_datas,
+    sims_metas,
     params,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
@@ -242,6 +295,16 @@ def fuse_field(
     SpatialImage
         Fused image of the field.
     """
+
+    sims = [
+        si.to_spatial_image(
+            sim_data,
+            dims=sim_meta["dims"],
+            scale=sim_meta["scale"],
+            translation=sim_meta["translation"],
+        )
+        for sim_meta, sim_data in zip(sims_metas, sims_datas)
+    ]
 
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
