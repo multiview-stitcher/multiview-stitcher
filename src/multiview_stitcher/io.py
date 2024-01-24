@@ -223,9 +223,12 @@ def save_sim_as_tif(path, sim):
         ),
         total=np.prod([len(sim.coords[nsdim]) for nsdim in nsdims]),
     ):
-        sl = tuple([slice(ind, ind + 1) for ind in nsdim_indices]) + tuple(
-            [slice(None)] * len(spatial_dims)
-        )
+        sl = [None] * len(sim.dims)
+        for nsdim, ind in zip(nsdims, nsdim_indices):
+            sl[sim.dims.index(nsdim)] = slice(ind, ind + 1)
+        for spatial_dim in spatial_dims:
+            sl[sim.dims.index(spatial_dim)] = slice(None)
+        sl = tuple(sl)
         z[sl] = sim.data[sl].compute()
 
     store.close()
