@@ -3,13 +3,13 @@ import warnings
 import dask.array as da
 import networkx as nx
 import numpy as np
-import skimage.exposure
 import skimage.registration
 import xarray as xr
 from dask import compute, delayed
 from dask_image import ndfilters
 from multiscale_spatial_image import MultiscaleSpatialImage
-from scipy import ndimage, stats
+from scipy import ndimage
+from skimage.metrics import structural_similarity
 from tqdm import tqdm
 
 from multiview_stitcher import (
@@ -189,7 +189,6 @@ def sims_to_intrinsic_coord_system(
 
     # get images into the same physical space (that of sim1)
     spatial_image_utils.get_ndim_from_sim(reg_sims_b[0])
-    # spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(reg_sims_b[0])
     spacing = spatial_image_utils.get_spacing_from_sim(
         reg_sims_b[0], asarray=True
     )
@@ -205,7 +204,15 @@ def sims_to_intrinsic_coord_system(
         transformation.transform_sim(
             sim,
             [None, transf_affine][isim],
-            output_origin=lowers[0],
+            output_origin=np.max(
+                [
+                    lowers[0],
+                    spatial_image_utils.get_origin_from_sim(
+                        reg_sims_b[0], asarray=True
+                    ),
+                ],
+                axis=0,
+            ),  # after binning the origin moves slightly
             output_spacing=spacing,
             output_shape=np.floor(
                 np.array(uppers[0] - lowers[0]) / spacing + 1
@@ -247,12 +254,24 @@ def phase_correlation_registration(
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
     spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
 
-    def skimage_phase_corr_no_runtime_warning(*args, **kwargs):
+    def skimage_modified_phase_corr(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            t = skimage.registration.phase_cross_correlation(
-                *args, disambiguate=False, **kwargs
-            )[0]
+
+            # strategy: compute phase correlation with and without
+            # normalization and keep the one with the highest
+            # structural similarity score during manual "disambiguation"
+            # (which should be a metric orthogonal to the corr coef)
+            shift_candidates = []
+            for normalization in ["phase", None]:
+                shift_candidates.append(
+                    skimage.registration.phase_cross_correlation(
+                        *args,
+                        disambiguate=False,
+                        normalization=normalization,
+                        **kwargs,
+                    )[0]
+                )
 
         # disambiguate shift manually
         # there seems to be a problem with the scikit-image implementation
@@ -261,22 +280,37 @@ def phase_correlation_registration(
         im0 = args[0]
         im1 = args[1]
 
+        # assume that the shift along any dimension isn't larger than the overlap
+        # in the dimension with smallest overlap
+        # e.g. if overlap is 50 pixels in x and 200 pixels in y, assume that
+        # the shift along x and y is smaller than 50 pixels
+        max_shift_per_dim = np.max([im.shape for im in [im0, im1]])
+
+        data_range = np.max([im0, im1]) - np.min([im0, im1])
+
         corrs = []
         t_candidates = []
 
         ndim = im0.ndim
-        for s in np.ndindex(tuple([4] * ndim)):
-            t_candidate = []
-            for d in range(ndim):
-                if s[d] == 0:
-                    t_candidate.append(t[d])
-                elif s[d] == 1:
-                    t_candidate.append(-t[d])
-                elif s[d] == 2:
-                    t_candidate.append(-(t[d] - im1.shape[d]))
-                elif s[d] == 3:
-                    t_candidate.append(-t[d] - im1.shape[d])
-            t_candidates.append(t_candidate)
+        for shift_candidate in shift_candidates:
+            for s in np.ndindex(tuple([4] * ndim)):
+                t_candidate = []
+                for d in range(ndim):
+                    if s[d] == 0:
+                        t_candidate.append(shift_candidate[d])
+                    elif s[d] == 1:
+                        t_candidate.append(-shift_candidate[d])
+                    elif s[d] == 2:
+                        t_candidate.append(
+                            -(shift_candidate[d] - im1.shape[d])
+                        )
+                    elif s[d] == 3:
+                        t_candidate.append(-shift_candidate[d] - im1.shape[d])
+                if np.max(np.abs(t_candidate)) < max_shift_per_dim:
+                    t_candidates.append(t_candidate)
+
+        if not len(t_candidates):
+            return [np.zeros(ndim)]
 
         for t_ in t_candidates:
             im1t = ndimage.affine_transform(
@@ -290,7 +324,9 @@ def phase_correlation_registration(
             if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
                 corr = -1
             else:
-                corr = stats.spearmanr(im0[mask], im1t[mask]).correlation
+                corr = structural_similarity(
+                    im0[mask], im1t[mask], data_range=data_range
+                )
             corrs.append(corr)
 
         t = t_candidates[np.nanargmax(corrs)]
@@ -300,12 +336,10 @@ def phase_correlation_registration(
     shift = da.from_delayed(
         delayed(np.array)(
             # delayed(skimage.registration.phase_cross_correlation)(
-            delayed(skimage_phase_corr_no_runtime_warning)(
+            delayed(skimage_modified_phase_corr)(
                 delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
                 delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
                 upsample_factor=(10 if ndim == 2 else 2),
-                # disambiguate=False,
-                normalization="phase",
             )[0]
         ),
         shape=(ndim,),
@@ -469,7 +503,6 @@ def register_pair_of_msims(
     if reg_func_kwargs is None:
         reg_func_kwargs = {}
     spatial_dims = msi_utils.get_spatial_dims(msim1)
-    # ndim = len(spatial_dims)
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
