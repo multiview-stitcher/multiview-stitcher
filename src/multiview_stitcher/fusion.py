@@ -55,9 +55,6 @@ def fuse(
     output_origin=None,
     output_shape=None,
     output_chunksize=512,
-    interpolate_missing_pixels=None,
-    # tmpdir=None,
-    # multiscale_output=True,
 ):
     """
 
@@ -91,10 +88,6 @@ def fuse(
         Shape of the fused image for each spatial dimension, by default None
     output_chunksize : int, optional
         Chunksize of the dask data array of the fused image, by default 512
-    interpolate_missing_pixels : bool, optional
-        If True, pixels in the fused image that do not map onto any input view
-        are assigned interpolated values. If None, determine automatically.
-        By default None
 
     Returns
     -------
@@ -104,9 +97,6 @@ def fuse(
 
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
     nsdims = [dim for dim in sims[0].dims if dim not in sdims]
-
-    if interpolate_missing_pixels is None:
-        interpolate_missing_pixels = sdims == 2
 
     params = [
         spatial_image_utils.get_affine_from_sim(
@@ -196,19 +186,20 @@ def fuse(
             output_shape=output_stack_properties["shape"],
             output_spacing=output_stack_properties["spacing"],
             output_chunksize=output_chunksize,
-            interpolate_missing_pixels=interpolate_missing_pixels,
         )
 
-        merge_d = delayed(lambda x: x.data)(merge_d)
-
+        # continue working with dask array
         merge_data = da.from_delayed(
-            merge_d,
+            delayed(lambda x: x.data)(merge_d),
             shape=output_stack_properties["shape"],
             dtype=sims[0].dtype,
         )
 
+        # rechunk to get a chunked dask array from the delayed object
+        # (hacky, is there a better way to do this?)
         merge_data = merge_data.rechunk([output_chunksize] * len(sdims))
 
+        # trigger compute here
         merge_data = merge_data.map_blocks(
             lambda x: x.compute(),
             dtype=sims[0].dtype,
@@ -231,16 +222,14 @@ def fuse(
         merge = merge.assign_coords(
             {ns_coord.name: [ns_coord.values] for ns_coord in ns_coords}
         )
-
         merges.append(merge)
 
     if len(merges) > 1:
-        # if sims are named, combine_by_coord returns a dataset
-
         # suppress pandas future warning occuring within xarray.concat
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
 
+            # if sims are named, combine_by_coord returns a dataset
             res = xr.combine_by_coords([m.rename(None) for m in merges])
     else:
         res = merge
@@ -265,7 +254,6 @@ def fuse_field(
     output_spacing=None,
     output_shape=None,
     output_chunksize=512,
-    interpolate_missing_pixels=True,
 ):
     """
     Fuse tiles from a single timepoint and channel (a (Z)YX "field").
@@ -288,8 +276,6 @@ def fuse_field(
         See docstring of `fuse`.
     output_chunksize : int, optional
        See docstring of `fuse`.
-    interpolate_missing_pixels : bool, optional
-        See docstring of `fuse`.
 
     Returns
     -------
@@ -297,6 +283,8 @@ def fuse_field(
         Fused image of the field.
     """
 
+    # reassemble sims from data and metadata
+    # this way we can pass them to fuse_field without triggering compute
     sims = [
         si.to_spatial_image(
             sim_data,
@@ -322,6 +310,10 @@ def fuse_field(
             widths=blending_widths,
         )
         field_ws.append(field_w)
+
+    ###
+    # Build output array
+    ###
 
     # calculate output array properties
     normalized_chunks = da.core.normalize_chunks(
@@ -351,6 +343,8 @@ def fuse_field(
 
         empty_chunk = True
         field_ims_t, field_ws_t = [], []
+
+        # for each block, add contributing chunks from each input view
         for iview, (param, sim) in enumerate(zip(params, sims)):
             matrix = np.array(param[:ndim, :ndim])
             offset = np.array(param[:ndim, ndim])
@@ -780,7 +774,6 @@ def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
     return w
 
 
-# from scipy import interpolate
 def get_interpolated_image(
     image: np.ndarray,
     mask: np.ndarray,
