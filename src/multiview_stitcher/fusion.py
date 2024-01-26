@@ -362,19 +362,26 @@ def fuse_field(
             rel_image_i = np.min(rel_image_edges, 0) - output_spacing
             rel_image_f = np.max(rel_image_edges, 0) + output_spacing
 
-            sim_reduced = sim.sel(
-                {
-                    dim: slice(int(rel_image_i[idim]), int(rel_image_f[idim]))
+            maps_outside = np.max(
+                [
+                    rel_image_i[idim] > sim.coords[dim][-1]
+                    or rel_image_f[idim] < sim.coords[dim][0]
                     for idim, dim in enumerate(spatial_dims)
-                }
+                ]
             )
 
-            if np.min(sim_reduced.shape) == 0:
-                # import pdb; pdb.set_trace()
+            if maps_outside:
                 fused_blocks[block_ind] = da.zeros(
                     out_chunk_shape, dtype=input_dtype
                 )
                 continue
+
+            sim_reduced = sim.sel(
+                {
+                    dim: slice(rel_image_i[idim], rel_image_f[idim])
+                    for idim, dim in enumerate(spatial_dims)
+                }
+            )
 
             empty_chunk = False
 
