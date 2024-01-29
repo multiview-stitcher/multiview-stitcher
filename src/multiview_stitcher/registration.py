@@ -629,41 +629,54 @@ def get_registration_graph_from_overlap_graph(
 ):
     if reg_func_kwargs is None:
         reg_func_kwargs = {}
+
     g_reg = g.to_directed()
 
-    ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(g)
+    ccs = nx.connected_components(g)
 
-    # invert overlap to use as weight in shortest path
-    for e in g_reg.edges:
-        g_reg.edges[e]["overlap_inv"] = 1 / (
-            g_reg.edges[e]["overlap"] + 1
-        )  # overlap can be zero
+    for cc in ccs:
+        print(cc)
+        subgraph = g_reg.subgraph(list(cc))
 
-    # get shortest paths to ref_node
-    paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(subgraph)
 
-    # get all pairs of views that are connected by a shortest path
-    for n, sp in paths.items():
-        g_reg.nodes[n]["reg_path"] = sp
+        # invert overlap to use as weight in shortest path
+        for e in g_reg.edges:
+            g_reg.edges[e]["overlap_inv"] = 1 / (
+                g_reg.edges[e]["overlap"] + 1
+            )  # overlap can be zero
 
-        if len(sp) < 2:
-            continue
-
-        # add registration edges
-        for i in range(len(sp) - 1):
-            pair = (sp[i], sp[i + 1])
-
-            g_reg.edges[(pair[0], pair[1])]["transform"] = (
-                register_pair_of_msims_over_time
-            )(
-                g.nodes[pair[0]]["msim"],
-                g.nodes[pair[1]]["msim"],
-                transform_key=transform_key,
-                registration_binning=registration_binning,
-                use_only_overlap_region=use_only_overlap_region,
-                pairwise_reg_func=pairwise_reg_func,
-                reg_func_kwargs=reg_func_kwargs,
+        # get shortest paths to ref_node
+        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        paths = {
+            n: nx.shortest_path(
+                g_reg, target=n, source=ref_node, weight="overlap_inv"
             )
+            for n in cc
+        }
+
+        # get all pairs of views that are connected by a shortest path
+        for n, sp in paths.items():
+            g_reg.nodes[n]["reg_path"] = sp
+
+            if len(sp) < 2:
+                continue
+
+            # add registration edges
+            for i in range(len(sp) - 1):
+                pair = (sp[i], sp[i + 1])
+
+                g_reg.edges[(pair[0], pair[1])]["transform"] = (
+                    register_pair_of_msims_over_time
+                )(
+                    g.nodes[pair[0]]["msim"],
+                    g.nodes[pair[1]]["msim"],
+                    transform_key=transform_key,
+                    registration_binning=registration_binning,
+                    use_only_overlap_region=use_only_overlap_region,
+                    pairwise_reg_func=pairwise_reg_func,
+                    reg_func_kwargs=reg_func_kwargs,
+                )
 
     g_reg.graph["pair_finding_method"] = "shortest_paths_considering_overlap"
 
