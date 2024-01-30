@@ -792,7 +792,7 @@
 
 
 <h2 id="multiview_stitcher.registration.register" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -944,8 +944,8 @@ reg_func_kwargs : dict, optional
 <span class="normal">828</span>
 <span class="normal">829</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
+    <span class="n">transform_key</span><span class="p">,</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-    <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
