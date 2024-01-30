@@ -17,7 +17,9 @@ from multiview_stitcher import msi_utils, spatial_image_utils
 
 
 def build_view_adjacency_graph_from_msims(
-    msims, expand=False, transform_key=None
+    msims,
+    transform_key,
+    expand=False,
 ):
     """
     Build graph representing view overlap relationships from list of xarrays.
@@ -205,7 +207,7 @@ def get_nodes_dataset_from_graph(g, node_attribute):
     )
 
 
-def get_faces_from_sim(sim, transform_key=None):
+def get_faces_from_sim(sim, transform_key):
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
@@ -263,16 +265,6 @@ def sims_are_far_apart(sim1, sim2, transform_key):
         for sim in [sim1, sim2]
     ]
 
-    # if distance_centers > np.sum(diagonal_lengths) / 2.0:
-    #     logging.info("sims are far apart")
-    #     return True
-    # else:
-    #     logging.info(
-    #         "sims are close: %02d"
-    #         % (100 * distance_centers / (np.sum(diagonal_lengths) / 2.0))
-    #     )
-    #     return False
-
 
 def get_intersection_polyhedron_from_pair_of_sims_3D(
     sim1, sim2, transform_key
@@ -304,9 +296,7 @@ def get_intersection_polyhedron_from_pair_of_sims_3D(
         return cphs[0].intersection(cphs[1])
 
 
-def get_intersection_polygon_from_pair_of_sims_2D(
-    sim1, sim2, transform_key=None
-):
+def get_intersection_polygon_from_pair_of_sims_2D(sim1, sim2, transform_key):
     """
     For 2D, the intersection is a polygon. Still three-dimensional, but with z=0.
     """
@@ -314,22 +304,15 @@ def get_intersection_polygon_from_pair_of_sims_2D(
     if sims_are_far_apart(sim1, sim2, transform_key):
         return None
 
-    cps = []
-    for sim in [sim1, sim2]:
-        corners = np.unique(
-            get_faces_from_sim(sim, transform_key=transform_key).reshape(
-                (-1, 2)
-            ),
-            axis=0,
-        )
-        # cp = ConvexPolygon([Point([0]+list(c)) for c in corners])
-        cp = ConvexPolygon([Point(list(c[::-1]) + [0]) for c in corners])
-        cps.append(cp)
+    cps = [
+        get_poly_from_sim(sim, transform_key=transform_key)
+        for sim in [sim1, sim2]
+    ]
 
     return cps[0].intersection(cps[1])
 
 
-def points_inside_sim(pts, sim, transform_key=None):
+def points_inside_sim(pts, sim, transform_key):
     """
     Check whether points lie inside of the image domain of sim.
 
@@ -339,6 +322,21 @@ def points_inside_sim(pts, sim, transform_key=None):
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     assert len(pts[0]) == ndim
 
+    sim_domain = get_poly_from_sim(sim, transform_key=transform_key)
+
+    return np.array(
+        [sim_domain.intersection(Point(pt)) is not None for pt in pts]
+    )
+
+
+def get_poly_from_sim(sim, transform_key):
+    """
+    Get Geometry3D.ConvexPolygon or Geometry3D.ConvexPolyhedron
+    representing the image domain of sim.
+    """
+
+    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+
     if ndim == 2:
         corners = np.unique(
             get_faces_from_sim(sim, transform_key=transform_key).reshape(
@@ -347,12 +345,63 @@ def points_inside_sim(pts, sim, transform_key=None):
             axis=0,
         )
         sim_domain = ConvexPolygon([Point([0] + list(c)) for c in corners])
+
     elif ndim == 3:
         faces = get_faces_from_sim(sim, transform_key=transform_key)
         sim_domain = ConvexPolyhedron(
             [ConvexPolygon([Point(c) for c in face]) for face in faces]
         )
 
-    return np.array(
-        [sim_domain.intersection(Point(pt)) is not None for pt in pts]
+    return sim_domain
+
+
+def get_greedy_colors(sims, n_colors=2, transform_key=None):
+    """
+    Get colors (indices) from view adjacency graph analysis
+
+    Idea: use the same logic to determine relevant registration edges
+    """
+
+    view_adj_graph = build_view_adjacency_graph_from_msims(
+        [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims],
+        expand=True,
+        transform_key=transform_key,
     )
+
+    # thresholds = threshold_multiotsu(overlaps)
+
+    # strategy: remove edges with overlap values of increasing thresholds until
+    # the graph division into n_colors is successful
+
+    # modify overlap values
+    # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
+
+    edge_vals = nx.edge_betweenness_centrality(view_adj_graph)
+
+    edges = list(view_adj_graph.edges(data=True))
+    for e in edges:
+        edge_vals[tuple(e[:2])] = edge_vals[tuple(e[:2])] + e[2]["overlap"]
+
+    sorted_unique_vals = sorted(np.unique(list(edge_vals.values())))
+
+    nx.set_edge_attributes(view_adj_graph, edge_vals, name="edge_val")
+
+    thresh_ind = 0
+    while 1:
+        colors = nx.coloring.greedy_color(view_adj_graph)
+        if (
+            len(set(colors.values())) <= n_colors
+        ):  # and nx.coloring.equitable_coloring.is_equitable(view_adj_graph, colors):
+            break
+        view_adj_graph.remove_edges_from(
+            [
+                (a, b)
+                for a, b, attrs in view_adj_graph.edges(data=True)
+                if attrs["edge_val"] <= sorted_unique_vals[thresh_ind]
+            ]
+        )
+        thresh_ind += 1
+
+    greedy_colors = dict(colors.items())
+
+    return greedy_colors

@@ -97,7 +97,9 @@ def test_mv_graph_creation():
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
 
-    view_adj_graph = mv_graph.build_view_adjacency_graph_from_msims(msims)
+    view_adj_graph = mv_graph.build_view_adjacency_graph_from_msims(
+        msims, transform_key=METADATA_TRANSFORM_KEY
+    )
 
     assert len(view_adj_graph.nodes) == len(sims)
     assert len(view_adj_graph.edges) == 1

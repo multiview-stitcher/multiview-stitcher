@@ -462,7 +462,7 @@ def get_affine_from_intrinsic_affine(
 def register_pair_of_msims(
     msim1,
     msim2,
-    transform_key=None,
+    transform_key,
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
@@ -577,7 +577,7 @@ def register_pair_of_msims(
 def register_pair_of_msims_over_time(
     msim1,
     msim2,
-    transform_key=None,
+    transform_key,
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
@@ -718,8 +718,8 @@ def get_node_params_from_reg_graph(g_reg):
 
 def register(
     msims: [MultiscaleSpatialImage],
+    transform_key,
     reg_channel_index=None,
-    transform_key=None,
     new_transform_key=None,
     registration_binning=None,
     use_only_overlap_region=True,
