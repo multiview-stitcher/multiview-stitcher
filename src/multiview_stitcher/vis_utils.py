@@ -21,9 +21,6 @@ def plot_positions(
     if use_positional_colors:
         colors = ["red", "green", "blue", "yellow"]
         greedy_colors = mv_graph.get_greedy_colors(
-            # [spatial_image_utils.sim_sel_coords(
-            #     sim, {'t':sim.coords['t'][0]})
-            #     for sim in sims],
             sims,
             n_colors=n_colors,
             transform_key=transform_key,
@@ -48,8 +45,8 @@ def plot_positions(
     fig, ax = show_geometry3d_visualizer(v)
 
     ax.set_xlabel("z [μm]")
-    ax.set_ylabel("y [μm]")
-    ax.set_zlabel("x [μm]")
+    ax.set_ylabel("x [μm]")
+    ax.set_zlabel("y [μm]")
 
     ax.set_aspect("equal", adjustable="box")
 
@@ -58,6 +55,10 @@ def plot_positions(
     elif ndim == 2:
         ax.view_init(elev=0, azim=0, roll=0)
 
+    # invert y-axis to match imshow and napari view
+    ax.invert_zaxis()
+
+    plt.tight_layout()
     plt.show()
 
     return fig, ax
@@ -78,7 +79,7 @@ def show_geometry3d_visualizer(self):
         point = point_tuple[0]
         color = point_tuple[1]
         size = point_tuple[2]
-        ax.scatter(point.x, point.y, point.z, c=color, s=size)
+        ax.scatter(point.x, point.z, point.y, c=color, s=size)
 
     for segment_tuple in self.segment_set:
         segment = segment_tuple[0]
@@ -87,12 +88,6 @@ def show_geometry3d_visualizer(self):
         x = [segment.start_point.x, segment.end_point.x]
         y = [segment.start_point.y, segment.end_point.y]
         z = [segment.start_point.z, segment.end_point.z]
-        ax.plot(x, y, z, color=color, linewidth=size)
-
-    for arrow_tuple in self.arrow_set:
-        x, y, z, u, v, w, length = arrow_tuple[0].get_tuple()
-        color = arrow_tuple[1]
-        size = arrow_tuple[1]
-        ax.quiver(x, y, z, u, v, w, color=color, length=length)
+        ax.plot(x, z, y, color=color, linewidth=size)
 
     return fig, ax
