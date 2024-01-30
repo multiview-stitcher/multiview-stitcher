@@ -648,6 +648,17 @@ def get_registration_graph_from_overlap_graph(
 
     ccs = list(nx.connected_components(g))
 
+    if len(ccs) > 1:
+        warnings.warn(
+            """
+The provided tiles/views do not globally overlap, instead there
+are %s connected components composed of the following tile indices:\n"""
+            % (len(ccs))
+            + "\n".join([str(list(cc)) for cc in ccs])
+            + "\nProceeding without registering between the disconnected components.",
+            UserWarning,
+            stacklevel=1,
+        )
     if np.max([len(cc) for cc in ccs]) < 2:
         raise (NotEnoughOverlapError("Not enough overlap between views."))
     elif np.min([len(cc) for cc in ccs]) < 2:
