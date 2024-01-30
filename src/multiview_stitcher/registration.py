@@ -630,12 +630,35 @@ def get_registration_graph_from_overlap_graph(
     if reg_func_kwargs is None:
         reg_func_kwargs = {}
 
+    if not len(g.edges):
+        raise (
+            NotEnoughOverlapError(
+                "Not enough overlap between views\
+        for stitching."
+            )
+        )
+
     g_reg = g.to_directed()
 
-    ccs = nx.connected_components(g)
+    # graph registration strategy:
+    # - find connected components (CC) in overlap graph
+    # - for each CC, determine a central reference node
+    # - for each CC, determine shortest paths to reference node
+    # - register each pair of views along shortest paths
+
+    ccs = list(nx.connected_components(g))
+
+    if np.max([len(cc) for cc in ccs]) < 2:
+        raise (NotEnoughOverlapError("Not enough overlap between views."))
+    elif np.min([len(cc) for cc in ccs]) < 2:
+        warnings.warn(
+            "The following views have no overlap with other views:\n%s"
+            % list(np.where([len(cc) == 1 for cc in ccs])[0]),
+            UserWarning,
+            stacklevel=1,
+        )
 
     for cc in ccs:
-        print(cc)
         subgraph = g_reg.subgraph(list(cc))
 
         ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(subgraph)
@@ -812,14 +835,6 @@ def register(
         pairwise_reg_func=pairwise_reg_func,
         reg_func_kwargs=reg_func_kwargs,
     )
-
-    if not len(g_reg.edges):
-        raise (
-            NotEnoughOverlapError(
-                "Not enough overlap between views\
-        for stitching. Consider stabilizing the tiles instead."
-            )
-        )
 
     g_reg_computed = mv_graph.compute_graph_edges(g_reg)
 
