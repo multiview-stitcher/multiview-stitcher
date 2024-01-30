@@ -7,6 +7,29 @@ from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
 def plot_positions(
     msims, transform_key, use_positional_colors=True, n_colors=2, t=None
 ):
+    """
+    Plot tile / view positions in both 2D or 3D.
+
+    Parameters
+    ----------
+    msims : list of multiscale_spatial_image (multiview-stitcher flavor)
+        _description_
+    transform_key : str
+        Which transform_key to use for visualization
+    use_positional_colors : bool, optional
+        This colors the views such that neighboring
+        views can be distinguished better (warning: can
+        be slow for many views), by default True
+    n_colors : int, optional
+        How many different colors to use when `use_positional_colors` is True, by default 2
+    t : _type_, optional
+        t coordinate to use for visualization, by default None
+
+    Returns
+    -------
+    fig, ax : matplotlib figure and axis
+    """
+
     ndim = msi_utils.get_ndim(msims[0])
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
