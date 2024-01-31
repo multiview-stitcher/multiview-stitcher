@@ -5,7 +5,12 @@ from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
 
 
 def plot_positions(
-    msims, transform_key, use_positional_colors=True, n_colors=2, t=None
+    msims,
+    transform_key,
+    use_positional_colors=True,
+    n_colors=2,
+    t=None,
+    display_view_indices=True,
 ):
     """
     Plot tile / view positions in both 2D or 3D.
@@ -66,6 +71,18 @@ def plot_positions(
         v.add((view_domain, colors[iview], 1))
 
     fig, ax = show_geometry3d_visualizer(v)
+
+    if display_view_indices:
+        for iview, sim in enumerate(sims):
+            center = spatial_image_utils.get_center_of_sim(
+                sim, transform_key=transform_key
+            )
+            if ndim == 2:
+                y, x = center
+                z = 0
+            else:
+                z, y, x = center
+            ax.text(z, x, y, str(iview), size=10, zorder=1, color="k")
 
     ax.set_xlabel("z [μm]")
     ax.set_ylabel("x [μm]")
