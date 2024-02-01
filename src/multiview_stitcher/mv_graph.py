@@ -45,8 +45,8 @@ def build_view_adjacency_graph_from_msims(
     """
 
     g = nx.Graph()
-    for iview, msim in enumerate(msims):
-        g.add_node(iview, msim=msim)
+    for iview in range(len(msims)):
+        g.add_node(iview)
 
     for imsim1, msim1 in enumerate(msims):
         for imsim2, msim2 in enumerate(msims):
@@ -61,7 +61,6 @@ def build_view_adjacency_graph_from_msims(
             )
 
             # overlap 0 means one pixel overlap
-            # if overlap_area > -1:
             if overlap_area > 0:
                 g.add_edge(imsim1, imsim2, overlap=overlap_area)
 

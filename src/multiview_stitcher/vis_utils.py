@@ -1,3 +1,4 @@
+import numpy as np
 from Geometry3D import Visualizer
 from matplotlib import pyplot as plt
 
@@ -7,6 +8,7 @@ from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
 def plot_positions(
     msims,
     transform_key,
+    edges=None,
     use_positional_colors=True,
     n_colors=2,
     t=None,
@@ -83,6 +85,26 @@ def plot_positions(
             else:
                 z, y, x = center
             ax.text(z, x, y, str(iview), size=10, zorder=1, color="k")
+
+    if edges is not None:
+        node_poss = [
+            spatial_image_utils.get_center_of_sim(
+                sim, transform_key=transform_key
+            )
+            for sim in sims
+        ]
+        if ndim == 2:
+            node_poss = [[0, p[1], p[0]] for p in node_poss]
+
+        node_poss_mpl = [[p[0], p[2], p[1]] for p in node_poss]
+
+        # Plot the edges
+        for e in edges:
+            ax.plot(
+                *np.array([node_poss_mpl[e[0]], node_poss_mpl[e[1]]]).T,
+                linestyle="--",
+                color="k",
+            )
 
     ax.set_xlabel("z [μm]")
     ax.set_ylabel("x [μm]")

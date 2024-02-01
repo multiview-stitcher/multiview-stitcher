@@ -621,15 +621,7 @@ def register_pair_of_msims_over_time(
 
 def get_registration_graph_from_overlap_graph(
     g,
-    transform_key=None,
-    registration_binning=None,
-    use_only_overlap_region=True,
-    pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
 ):
-    if reg_func_kwargs is None:
-        reg_func_kwargs = {}
-
     if not len(g.edges):
         raise (
             NotEnoughOverlapError(
@@ -638,7 +630,9 @@ def get_registration_graph_from_overlap_graph(
             )
         )
 
-    g_reg = g.to_directed()
+    g = g.copy()
+
+    g_reg = nx.Graph(nodes=g.nodes)
 
     # graph registration strategy:
     # - find connected components (CC) in overlap graph
@@ -670,49 +664,35 @@ are %s connected components composed of the following tile indices:\n"""
         )
 
     for cc in ccs:
-        subgraph = g_reg.subgraph(list(cc))
+        subgraph = g.subgraph(list(cc))
 
         ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(subgraph)
 
         # invert overlap to use as weight in shortest path
-        for e in g_reg.edges:
-            g_reg.edges[e]["overlap_inv"] = 1 / (
-                g_reg.edges[e]["overlap"] + 1
+        for e in g.edges:
+            g.edges[e]["overlap_inv"] = 1 / (
+                g.edges[e]["overlap"] + 1
             )  # overlap can be zero
 
         # get shortest paths to ref_node
         # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
         paths = {
             n: nx.shortest_path(
-                g_reg, target=n, source=ref_node, weight="overlap_inv"
+                g, target=n, source=ref_node, weight="overlap_inv"
             )
             for n in cc
         }
 
         # get all pairs of views that are connected by a shortest path
-        for n, sp in paths.items():
-            g_reg.nodes[n]["reg_path"] = sp
-
+        for _, sp in paths.items():
             if len(sp) < 2:
                 continue
 
             # add registration edges
             for i in range(len(sp) - 1):
-                pair = (sp[i], sp[i + 1])
-
-                g_reg.edges[(pair[0], pair[1])]["transform"] = (
-                    register_pair_of_msims_over_time
-                )(
-                    g.nodes[pair[0]]["msim"],
-                    g.nodes[pair[1]]["msim"],
-                    transform_key=transform_key,
-                    registration_binning=registration_binning,
-                    use_only_overlap_region=use_only_overlap_region,
-                    pairwise_reg_func=pairwise_reg_func,
-                    reg_func_kwargs=reg_func_kwargs,
+                g_reg.add_edge(
+                    sp[i], sp[i + 1], overlap=g[sp[i]][sp[i + 1]]["overlap"]
                 )
-
-    g_reg.graph["pair_finding_method"] = "shortest_paths_considering_overlap"
 
     return g_reg
 
@@ -726,41 +706,76 @@ def get_node_params_from_reg_graph(g_reg):
     into the coordinates of a new coordinate system.
     """
 
-    ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+    # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+    ndim = (
+        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
+    )
 
-    for n in g_reg.nodes:
-        reg_path = g_reg.nodes[n]["reg_path"]
+    # invert overlap to use as weight in shortest path
+    for e in g_reg.edges:
+        g_reg.edges[e]["overlap_inv"] = 1 / (
+            g_reg.edges[e]["overlap"] + 1
+        )  # overlap can be zero
 
-        path_pairs = [
-            [reg_path[i], reg_path[i + 1]] for i in range(len(reg_path) - 1)
-        ]
+    # get directed graph and invert transforms along edges
 
-        if "t" in g_reg.nodes[n]["msim"].dims:
-            path_params = xr.DataArray(
-                [np.eye(ndim + 1) for t in g_reg.nodes[n]["msim"].coords["t"]],
-                dims=["t", "x_in", "x_out"],
-                coords={
-                    "t": msi_utils.get_sim_from_msim(
-                        g_reg.nodes[n]["msim"]
-                    ).coords["t"]
-                },
+    g_reg_di = g_reg.to_directed()
+    for e in g_reg.edges:
+        sorted_e = tuple(sorted(e))
+        g_reg_di.edges[(sorted_e[1], sorted_e[0])][
+            "transform"
+        ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
+
+    ccs = list(nx.connected_components(g_reg))
+
+    node_transforms = {}
+
+    for cc in ccs:
+        subgraph = g_reg_di.subgraph(list(cc))
+
+        ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(subgraph)
+
+        # get shortest paths to ref_node
+        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        paths = {
+            n: nx.shortest_path(
+                subgraph, target=n, source=ref_node, weight="overlap_inv"
             )
-        else:
-            path_params = param_utils.identity_transform(ndim)
+            for n in cc
+        }
 
-        for pair in path_pairs:
-            path_params = xr.apply_ufunc(
-                np.matmul,
-                g_reg.edges[(pair[0], pair[1])]["transform"],
-                path_params,
-                input_core_dims=[["x_in", "x_out"]] * 2,
-                output_core_dims=[["x_in", "x_out"]],
-                vectorize=True,
-            )
+        for n in subgraph.nodes:
+            # reg_path = g_reg.nodes[n]["reg_path"]
+            reg_path = paths[n]
 
-        g_reg.nodes[n]["transforms"] = param_utils.invert_xparams(path_params)
+            path_pairs = [
+                [reg_path[i], reg_path[i + 1]]
+                for i in range(len(reg_path) - 1)
+            ]
 
-    return g_reg
+            if len(path_pairs):
+                path_params = param_utils.identity_transform(
+                    ndim,
+                    t_coords=g_reg_di.edges[
+                        (path_pairs[0][0], path_pairs[0][1])
+                    ]["transform"].coords["t"],
+                )
+            else:
+                path_params = param_utils.identity_transform(ndim)
+
+            for pair in path_pairs:
+                path_params = xr.apply_ufunc(
+                    np.matmul,
+                    g_reg_di.edges[(pair[0], pair[1])]["transform"],
+                    path_params,
+                    input_core_dims=[["x_in", "x_out"]] * 2,
+                    output_core_dims=[["x_in", "x_out"]],
+                    vectorize=True,
+                )
+
+            node_transforms[n] = param_utils.invert_xparams(path_params)
+
+    return node_transforms
 
 
 def register(
@@ -838,8 +853,11 @@ def register(
         transform_key=transform_key,
     )
 
-    g_reg = get_registration_graph_from_overlap_graph(
-        g,
+    g_reg = get_registration_graph_from_overlap_graph(g)
+
+    g_reg_computed = compute_pairwise_registrations(
+        msims_reg,
+        g_reg,
         transform_key=transform_key,
         registration_binning=registration_binning,
         use_only_overlap_region=use_only_overlap_region,
@@ -847,14 +865,10 @@ def register(
         reg_func_kwargs=reg_func_kwargs,
     )
 
-    g_reg_computed = mv_graph.compute_graph_edges(g_reg)
+    g_reg_computed = mv_graph.compute_graph_edges(g_reg_computed)
 
-    g_reg_nodes = get_node_params_from_reg_graph(g_reg_computed)
-
-    node_transforms = mv_graph.get_nodes_dataset_from_graph(
-        g_reg_nodes, node_attribute="transforms"
-    )
-    params = [node_transforms[dv] for dv in node_transforms.data_vars]
+    params = get_node_params_from_reg_graph(g_reg_computed)
+    params = [params[iview] for iview in sorted(params.keys())]
 
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
@@ -866,6 +880,39 @@ def register(
             )
 
     return params
+
+
+def compute_pairwise_registrations(
+    msims,
+    g_reg,
+    transform_key=None,
+    registration_binning=None,
+    use_only_overlap_region=True,
+    pairwise_reg_func=phase_correlation_registration,
+    reg_func_kwargs=None,
+):
+    g_reg_computed = g_reg.copy()
+    edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
+
+    params = [
+        register_pair_of_msims_over_time(
+            msims[pair[0]],
+            msims[pair[1]],
+            transform_key=transform_key,
+            registration_binning=registration_binning,
+            use_only_overlap_region=use_only_overlap_region,
+            pairwise_reg_func=pairwise_reg_func,
+            reg_func_kwargs=reg_func_kwargs,
+        )
+        for pair in tqdm(edges)
+    ]
+
+    params = compute(params)[0]
+
+    for i, pair in enumerate(edges):
+        g_reg_computed.edges[pair]["transform"] = params[i]
+
+    return g_reg_computed
 
 
 def stabilize(sims, reg_channel_index=0, sigma=2):

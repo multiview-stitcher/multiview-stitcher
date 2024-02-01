@@ -7,7 +7,6 @@ from scipy import ndimage
 from multiview_stitcher import (
     io,
     msi_utils,
-    mv_graph,
     registration,
     sample_data,
     spatial_image_utils,
@@ -77,49 +76,6 @@ def test_register_with_single_pixel_overlap(ndim):
         msims[1],
         transform_key=METADATA_TRANSFORM_KEY,
     )
-
-
-def test_register_graph():
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
-    )
-
-    sims = [sim.sel(c=sim.coords["c"][0]) for sim in sims]
-    msims = [
-        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
-    ]
-
-    g = mv_graph.build_view_adjacency_graph_from_msims(
-        msims, transform_key=METADATA_TRANSFORM_KEY
-    )
-
-    # g_pairs = registration.get_registration_pair_graph(g)
-    g_reg = registration.get_registration_graph_from_overlap_graph(
-        g, transform_key=METADATA_TRANSFORM_KEY
-    )
-
-    assert max(["transform" in g_reg.edges[e] for e in g_reg.edges])
-
-    assert [
-        type(g_reg.edges[e]["transform"].data) == da.core.Array
-        for e in g_reg.edges
-        if "transform" in g_reg.edges[e]
-    ]
-
-    g_reg_computed = mv_graph.compute_graph_edges(
-        g_reg, scheduler="single-threaded"
-    )
-
-    assert [
-        type(g_reg_computed.edges[e]["transform"].data) == np.ndarray
-        for e in g_reg_computed.edges
-        if "transform" in g_reg_computed.edges[e]
-    ]
-
-    # get node parameters
-    g_reg_nodes = registration.get_node_params_from_reg_graph(g_reg_computed)
-
-    assert ["transforms" in g_reg_nodes.nodes[n] for n in g_reg_nodes.nodes]
 
 
 def test_get_stabilization_parameters():
