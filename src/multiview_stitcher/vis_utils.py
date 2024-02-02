@@ -1,5 +1,6 @@
 import numpy as np
 from Geometry3D import Visualizer
+from matplotlib import cm, colors
 from matplotlib import pyplot as plt
 
 from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
@@ -9,6 +10,9 @@ def plot_positions(
     msims,
     transform_key,
     edges=None,
+    edge_color_vals=None,
+    edge_cmap=None,
+    edge_clims=None,
     use_positional_colors=True,
     n_colors=2,
     t=None,
@@ -49,19 +53,19 @@ def plot_positions(
         ]
 
     if use_positional_colors:
-        colors = ["red", "green", "blue", "yellow"]
+        pos_colors = ["red", "green", "blue", "yellow"]
         greedy_colors = mv_graph.get_greedy_colors(
             sims,
             n_colors=n_colors,
             transform_key=transform_key,
         )
-        colors = [
-            colors[greedy_colors[iview] % len(colors)]
+        pos_colors = [
+            pos_colors[greedy_colors[iview] % len(pos_colors)]
             for iview in range(len(msims))
         ]
 
     else:
-        colors = ["red"] * len(msims)
+        pos_colors = ["black"] * len(msims)
 
     v = Visualizer(backend="matplotlib")
 
@@ -70,7 +74,7 @@ def plot_positions(
             sim, transform_key=transform_key
         )
 
-        v.add((view_domain, colors[iview], 1))
+        v.add((view_domain, pos_colors[iview], 1))
 
     fig, ax = show_geometry3d_visualizer(v)
 
@@ -98,13 +102,36 @@ def plot_positions(
 
         node_poss_mpl = [[p[0], p[2], p[1]] for p in node_poss]
 
+        if edge_color_vals is not None:
+            edge_color_vals = np.array(edge_color_vals).astype(float)
+
+            if edge_clims is None:
+                edge_clims = [min(edge_color_vals), max(edge_color_vals)]
+            norm = colors.Normalize(vmin=edge_clims[0], vmax=edge_clims[1])
+
+            if edge_cmap is None:
+                edge_cmap = cm.get_cmap(
+                    "Spectral",
+                )
+
+            edge_colors = [edge_cmap(norm(val)) for val in edge_color_vals]
+        else:
+            # edge_cmap = 'k'
+            edge_colors = ["k" for _ in edges]
+
         # Plot the edges
-        for e in edges:
+        for e, color in zip(edges, edge_colors):
             ax.plot(
                 *np.array([node_poss_mpl[e[0]], node_poss_mpl[e[1]]]).T,
                 linestyle="--",
-                color="k",
+                color=color,
             )
+
+        if edge_color_vals is not None:
+            sm = plt.cm.ScalarMappable(cmap=edge_cmap)
+            sm.set_array(edge_color_vals)
+            plt.colorbar(sm, label="Edge weight", ax=ax)
+            # plt.colorbar
 
     ax.set_xlabel("z [μm]")
     ax.set_ylabel("x [μm]")

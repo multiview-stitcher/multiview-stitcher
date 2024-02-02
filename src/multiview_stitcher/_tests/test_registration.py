@@ -39,7 +39,7 @@ def test_pairwise():
     p = pd.compute()
 
     assert np.allclose(
-        p.sel(t=0),
+        p["transform"].sel(t=0),
         np.array(
             [[1.0, 0.0, 1.73333333], [0.0, 1.0, 7.58333333], [0.0, 0.0, 1.0]]
         ),

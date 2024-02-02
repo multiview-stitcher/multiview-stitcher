@@ -1,3 +1,5 @@
+import warnings
+
 import networkx as nx
 import numpy as np
 import xarray as xr
@@ -8,12 +10,17 @@ from Geometry3D import (
     Point,
     Segment,
 )
+from skimage.filters import threshold_otsu
 
 # set_eps(get_eps() * 100000) # https://github.com/GouMinghao/Geometry3D/issues/8
 # 20230924: set_eps line above created problems
 # potentially because it had been called multiple times
 # commenting out for now
 from multiview_stitcher import msi_utils, spatial_image_utils
+
+
+class NotEnoughOverlapError(Exception):
+    pass
 
 
 def build_view_adjacency_graph_from_msims(
@@ -161,16 +168,16 @@ def get_overlap_between_pair_of_sims(
     return overlap, intersection_poly_structure_points
 
 
-def get_node_with_maximal_overlap_from_graph(g):
+def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
     """
-    g: graph containing edges with 'overlap' weight
+    g: graph containing edges with weight_key weights
     """
-    total_node_overlaps = {
-        node: np.sum([g.edges[e]["overlap"] for e in g.edges if node in e])
+    total_node_weights = {
+        node: np.sum([g.edges[e][weight_key] for e in g.edges if node in e])
         for node in g.nodes
     }
 
-    ref_node = max(total_node_overlaps, key=total_node_overlaps.get)
+    ref_node = max(total_node_weights, key=total_node_weights.get)
 
     return ref_node
 
@@ -404,3 +411,92 @@ def get_greedy_colors(sims, n_colors=2, transform_key=None):
     greedy_colors = dict(colors.items())
 
     return greedy_colors
+
+
+def prune_to_shortest_weighted_paths(g):
+    """
+    g contains the overlap between views as edge weights
+
+    Strategy:
+    - find connected components (CC) in overlap graph
+    - for each CC, determine a central reference node
+    - for each CC, determine shortest paths to reference node
+    - register each pair of views along shortest paths
+
+    """
+
+    g_reg = nx.Graph(nodes=g.nodes)
+
+    ccs = list(nx.connected_components(g))
+
+    if len(ccs) > 1:
+        warnings.warn(
+            """
+The provided tiles/views do not globally overlap, instead there
+are %s connected components composed of the following tile indices:\n"""
+            % (len(ccs))
+            + "\n".join([str(list(cc)) for cc in ccs])
+            + "\nProceeding without registering between the disconnected components.",
+            UserWarning,
+            stacklevel=1,
+        )
+    if np.max([len(cc) for cc in ccs]) < 2:
+        raise (NotEnoughOverlapError("Not enough overlap between views."))
+    elif np.min([len(cc) for cc in ccs]) < 2:
+        warnings.warn(
+            "The following views have no overlap with other views:\n%s"
+            % list(np.where([len(cc) == 1 for cc in ccs])[0]),
+            UserWarning,
+            stacklevel=1,
+        )
+
+    for cc in ccs:
+        subgraph = g.subgraph(list(cc))
+
+        ref_node = get_node_with_maximal_edge_weight_sum_from_graph(
+            subgraph, weight_key="overlap"
+        )
+
+        # invert overlap to use as weight in shortest path
+        for e in g.edges:
+            g.edges[e]["overlap_inv"] = 1 / (
+                g.edges[e]["overlap"] + 1
+            )  # overlap can be zero
+
+        # get shortest paths to ref_node
+        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        paths = {
+            n: nx.shortest_path(
+                g, target=n, source=ref_node, weight="overlap_inv"
+            )
+            for n in cc
+        }
+
+        # get all pairs of views that are connected by a shortest path
+        for _, sp in paths.items():
+            if len(sp) < 2:
+                continue
+
+            # add registration edges
+            for i in range(len(sp) - 1):
+                g_reg.add_edge(
+                    sp[i], sp[i + 1], overlap=g[sp[i]][sp[i + 1]]["overlap"]
+                )
+
+    return g_reg
+
+
+def filter_edges(g, weight_key="overlap", threshold=None):
+    edges_df = nx.to_pandas_edgelist(g)
+
+    if threshold is None:
+        threshold = threshold_otsu(np.array(edges_df["overlap"]))
+
+    edges_to_delete_df = edges_df[edges_df.overlap < threshold]
+
+    g_filtered = g.copy()
+    g_filtered.remove_edges_from(
+        [(r["source"], r["target"]) for ir, r in edges_to_delete_df.iterrows()]
+    )
+
+    return g_filtered

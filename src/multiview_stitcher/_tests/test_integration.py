@@ -9,6 +9,7 @@ from multiview_stitcher import (
     fusion,
     io,
     msi_utils,
+    mv_graph,
     registration,
     sample_data,
 )
@@ -54,7 +55,7 @@ def test_diversity_stitching(ndim, overlap, N_c, N_t, dtype):
             new_transform_key="affine_registered",
         )
     else:
-        with pytest.raises(registration.NotEnoughOverlapError):
+        with pytest.raises(mv_graph.NotEnoughOverlapError):
             registration.register(
                 msims,
                 reg_channel_index=0,
