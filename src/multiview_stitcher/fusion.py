@@ -201,7 +201,7 @@ def fuse(
         # continue working with dask array
         merge_data = da.from_delayed(
             delayed(lambda x: x.data)(merge_d),
-            shape=output_stack_properties["shape"],
+            shape=[output_stack_properties["shape"][dim] for dim in sdims],
             dtype=sims[0].dtype,
         )
 
@@ -218,14 +218,8 @@ def fuse(
         merge = si.to_spatial_image(
             merge_data,
             dims=sdims,
-            scale={
-                dim: output_stack_properties["spacing"][idim]
-                for idim, dim in enumerate(sdims)
-            },
-            translation={
-                dim: output_stack_properties["origin"][idim]
-                for idim, dim in enumerate(sdims)
-            },
+            scale=output_stack_properties["spacing"],
+            translation=output_stack_properties["origin"],
         )
 
         merge = merge.expand_dims(nsdims)
@@ -338,7 +332,8 @@ def fuse_field(
 
     # calculate output array properties
     normalized_chunks = da.core.normalize_chunks(
-        [output_chunksize] * ndim, tuple(output_stack_properties["shape"])
+        [output_chunksize] * ndim,
+        tuple([output_stack_properties["shape"][dim] for dim in spatial_dims]),
     )
 
     block_indices = product(*(range(len(bds)) for bds in normalized_chunks))
@@ -359,9 +354,9 @@ def fuse_field(
         ) * np.array(out_chunk_shape) + np.array(out_chunk_offset)
 
         out_chunk_edges_phys = np.array(
-            output_stack_properties["origin"]
+            [output_stack_properties["origin"][dim] for dim in spatial_dims]
         ) + np.array(out_chunk_edges) * np.array(
-            output_stack_properties["spacing"]
+            [output_stack_properties["spacing"][dim] for dim in spatial_dims]
         )
 
         empty_chunk = True
@@ -376,11 +371,17 @@ def fuse_field(
             # to define the input region relevant for the current chunk
             rel_image_edges = np.dot(matrix, out_chunk_edges_phys.T).T + offset
 
-            rel_image_i = (
-                np.min(rel_image_edges, 0) - output_stack_properties["spacing"]
+            rel_image_i = np.min(rel_image_edges, 0) - np.array(
+                [
+                    output_stack_properties["spacing"][dim]
+                    for dim in spatial_dims
+                ]
             )
-            rel_image_f = (
-                np.max(rel_image_edges, 0) + output_stack_properties["spacing"]
+            rel_image_f = np.max(rel_image_edges, 0) + np.array(
+                [
+                    output_stack_properties["spacing"][dim]
+                    for dim in spatial_dims
+                ]
             )
 
             maps_outside = np.max(
@@ -406,12 +407,26 @@ def fuse_field(
 
             empty_chunk = False
 
+            chunk_output_stack_properties = {
+                "spacing": output_stack_properties["spacing"],
+                "origin": {
+                    dim: output_stack_properties["origin"][dim]
+                    + out_chunk_offset[idim]
+                    * output_stack_properties["spacing"][dim]
+                    for idim, dim in enumerate(spatial_dims)
+                },
+                "shape": {
+                    dim: out_chunk_shape[idim]
+                    for idim, dim in enumerate(spatial_dims)
+                },
+            }
+
             field_ims_t.append(
                 transformation.transform_sim(
                     sim_reduced,
                     param,
                     output_chunksize=tuple(out_chunk_shape),
-                    output_stack_properties=output_stack_properties,
+                    output_stack_properties=chunk_output_stack_properties,
                     order=1,
                 ).data
             )
@@ -420,8 +435,8 @@ def fuse_field(
                 transformation.transform_sim(
                     field_ws[iview],
                     param,
-                    output_chunksize=out_chunk_shape,
-                    output_stack_properties=output_stack_properties,
+                    output_chunksize=tuple(out_chunk_shape),
+                    output_stack_properties=chunk_output_stack_properties,
                     order=1,
                 ).data
             )
@@ -442,6 +457,7 @@ def fuse_field(
         if weights_method is not None:
             fusion_weights = weights_method(
                 field_ims_t,
+                field_ws_t,
             )
         else:
             fusion_weights = None

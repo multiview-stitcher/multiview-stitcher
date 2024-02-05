@@ -42,7 +42,7 @@ def test_fuse_sims():
     assert xfused.dtype == sims[0].dtype
 
     # xfused.compute()
-    xfused = xfused.compute(scheduled="threads")
+    xfused = xfused.compute(scheduled="single-threaded")
 
     assert xfused.dtype == sims[0].dtype
     assert (
@@ -69,7 +69,7 @@ def test_multi_view_fusion(ndim, weights_method):
             overlap=0,
             N_c=1,
             N_t=1,
-            tile_size=20,
+            tile_size=200,
             tiles_x=1,
             tiles_y=1,
             tiles_z=1,
