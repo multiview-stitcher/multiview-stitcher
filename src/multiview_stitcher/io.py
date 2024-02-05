@@ -70,13 +70,16 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     if "z" in spatial_dims:
         pixel_sizes["z"] = aicsim.physical_pixel_sizes.Z
 
+    tile_mosaic_positions = aicsim.get_mosaic_tile_positions()
+
     view_sims = []
-    for iview, view in enumerate(views):
+    for iview, (view, tile_mosaic_position) in enumerate(
+        zip(views, tile_mosaic_positions)
+    ):
         view_sim = sim.sel(m=view)
 
         view_sim = spatial_image_utils.get_sim_from_xim(view_sim)
 
-        tile_mosaic_position = aicsim.get_mosaic_tile_position(view)
         origin_values = {
             mosaic_axis: tile_mosaic_position[ima] * pixel_sizes[mosaic_axis]
             for ima, mosaic_axis in enumerate(["y", "x"])
@@ -220,9 +223,12 @@ def save_sim_as_tif(path, sim):
         ),
         total=np.prod([len(sim.coords[nsdim]) for nsdim in nsdims]),
     ):
-        sl = tuple([slice(ind, ind + 1) for ind in nsdim_indices]) + tuple(
-            [slice(None)] * len(spatial_dims)
-        )
+        sl = [None] * len(sim.dims)
+        for nsdim, ind in zip(nsdims, nsdim_indices):
+            sl[sim.dims.index(nsdim)] = slice(ind, ind + 1)
+        for spatial_dim in spatial_dims:
+            sl[sim.dims.index(spatial_dim)] = slice(None)
+        sl = tuple(sl)
         z[sl] = sim.data[sl].compute()
 
     store.close()

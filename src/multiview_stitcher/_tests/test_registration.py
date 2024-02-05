@@ -7,7 +7,6 @@ from scipy import ndimage
 from multiview_stitcher import (
     io,
     msi_utils,
-    mv_graph,
     registration,
     sample_data,
     spatial_image_utils,
@@ -40,9 +39,9 @@ def test_pairwise():
     p = pd.compute()
 
     assert np.allclose(
-        p.sel(t=0),
+        p["transform"].sel(t=0),
         np.array(
-            [[1.0, 0.0, -1.95], [0.0, 1.0, -7.58333333], [0.0, 0.0, 1.0]]
+            [[1.0, 0.0, 1.73333333], [0.0, 1.0, 7.58333333], [0.0, 0.0, 1.0]]
         ),
     )
 
@@ -77,49 +76,6 @@ def test_register_with_single_pixel_overlap(ndim):
         msims[1],
         transform_key=METADATA_TRANSFORM_KEY,
     )
-
-
-def test_register_graph():
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
-    )
-
-    sims = [sim.sel(c=sim.coords["c"][0]) for sim in sims]
-    msims = [
-        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
-    ]
-
-    g = mv_graph.build_view_adjacency_graph_from_msims(
-        msims, transform_key=METADATA_TRANSFORM_KEY
-    )
-
-    # g_pairs = registration.get_registration_pair_graph(g)
-    g_reg = registration.get_registration_graph_from_overlap_graph(
-        g, transform_key=METADATA_TRANSFORM_KEY
-    )
-
-    assert max(["transform" in g_reg.edges[e] for e in g_reg.edges])
-
-    assert [
-        type(g_reg.edges[e]["transform"].data) == da.core.Array
-        for e in g_reg.edges
-        if "transform" in g_reg.edges[e]
-    ]
-
-    g_reg_computed = mv_graph.compute_graph_edges(
-        g_reg, scheduler="single-threaded"
-    )
-
-    assert [
-        type(g_reg_computed.edges[e]["transform"].data) == np.ndarray
-        for e in g_reg_computed.edges
-        if "transform" in g_reg_computed.edges[e]
-    ]
-
-    # get node parameters
-    g_reg_nodes = registration.get_node_params_from_reg_graph(g_reg_computed)
-
-    assert ["transforms" in g_reg_nodes.nodes[n] for n in g_reg_nodes.nodes]
 
 
 def test_get_stabilization_parameters():
@@ -173,3 +129,60 @@ def test_get_optimal_registration_binning():
 
     assert min(reg_binning.values()) > 1
     assert max(reg_binning.values()) < 4
+
+
+@pytest.mark.parametrize(
+    """
+    ndim, N_c, N_t,
+    pre_registration_pruning_method,
+    post_registration_do_quality_filter,
+    """,
+    [
+        (2, 1, 3, pre_reg_pm, True)
+        for pre_reg_pm in [
+            "shortest_paths_overlap_weighted",
+            "otsu_threshold_on_overlap",
+            None,
+        ]
+    ]
+    + [
+        (3, 1, 3, pre_reg_pm, False)
+        for pre_reg_pm in [
+            "shortest_paths_overlap_weighted",
+            "otsu_threshold_on_overlap",
+        ]
+    ],
+)
+def test_register(
+    ndim,
+    N_c,
+    N_t,
+    pre_registration_pruning_method,
+    post_registration_do_quality_filter,
+):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        N_t=N_t,
+        N_c=N_c,
+        tile_size=15,
+        tiles_x=2,
+        tiles_y=2,
+        tiles_z=2,
+        zoom=10,
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # Run registration
+    params = registration.register(
+        msims,
+        reg_channel_index=0,
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="affine_registered",
+        pre_registration_pruning_method=pre_registration_pruning_method,
+        post_registration_do_quality_filter=post_registration_do_quality_filter,
+    )
+
+    assert len(params) == 2**ndim

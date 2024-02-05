@@ -17,37 +17,7 @@ from multiview_stitcher import (
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
-def test_fuse_field():
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
-    )
-
-    for isim, sim in enumerate(sims):
-        sims[isim] = spatial_image_utils.sim_sel_coords(
-            sim, {"c": sim.coords["c"][0], "t": sim.coords["t"][0]}
-        )
-
-    params = [
-        spatial_image_utils.get_affine_from_sim(
-            sim, transform_key=METADATA_TRANSFORM_KEY
-        )
-        for sim in sims
-    ]
-
-    xfused = fusion.fuse_field(
-        sims,
-        params,
-        output_stack_properties=spatial_image_utils.get_stack_properties_from_sim(
-            sims[0]
-        ),
-    )
-
-    # check output is dask array and hasn't been converted into numpy array
-    assert type(xfused.data) == da.core.Array
-    assert xfused.dtype == sims[0].dtype
-
-
-def test_fuse_sims_two_channels():
+def test_fuse_sims():
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
         sample_data.get_mosaic_sample_data_path()
     )

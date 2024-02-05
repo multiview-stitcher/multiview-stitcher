@@ -1,10 +1,12 @@
 import itertools
 import warnings
+from itertools import product
 
 import dask.array as da
 import numpy as np
 import spatial_image as si
 import xarray as xr
+from dask import delayed
 
 from multiview_stitcher import (
     param_utils,
@@ -64,9 +66,6 @@ def fuse(
     output_shape=None,
     output_stack_properties=None,
     output_chunksize=512,
-    interpolate_missing_pixels=None,
-    # tmpdir=None,
-    # multiscale_output=True,
 ):
     """
 
@@ -106,10 +105,6 @@ def fuse(
         if this argument is present.
     output_chunksize : int, optional
         Chunksize of the dask data array of the fused image, by default 512
-    interpolate_missing_pixels : bool, optional
-        If True, pixels in the fused image that do not map onto any input view
-        are assigned interpolated values. If None, determine automatically.
-        By default None
 
     Returns
     -------
@@ -119,9 +114,6 @@ def fuse(
 
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
     nsdims = [dim for dim in sims[0].dims if dim not in sdims]
-
-    if interpolate_missing_pixels is None:
-        interpolate_missing_pixels = sdims == 2
 
     params = [
         spatial_image_utils.get_affine_from_sim(
@@ -173,31 +165,81 @@ def fuse(
         ssims = [sim.sel(sim_coord_dict) for sim in sims]
         sparams = [param.sel(params_coord_dict) for param in params]
 
-        merge = fuse_field(
-            ssims,
+        # convert ssims into dask arrays + metadata to get them
+        # through fuse_field without triggering compute
+        # https://dask.discourse.group/t/passing-dask-objects-to-delayed-computations-without-triggering-compute/1441
+        sims_datas = [
+            delayed(da.Array)(
+                ssim.data.dask,
+                ssim.data.name,
+                ssim.data.chunks,
+                ssim.data.dtype,
+            )
+            for ssim in ssims
+        ]
+
+        sims_metas = [
+            {
+                "dims": ssim.dims,
+                "scale": spatial_image_utils.get_spacing_from_sim(ssim),
+                "translation": spatial_image_utils.get_origin_from_sim(ssim),
+            }
+            for ssim in ssims
+        ]
+
+        merge_d = delayed(fuse_field)(
+            sims_datas,
+            sims_metas,
             sparams,
             fusion_method=fusion_method,
             weights_method=weights_method,
             weights_method_kwargs=weights_method_kwargs,
             output_stack_properties=output_stack_properties,
             output_chunksize=output_chunksize,
-            interpolate_missing_pixels=interpolate_missing_pixels,
+        )
+
+        # continue working with dask array
+        merge_data = da.from_delayed(
+            delayed(lambda x: x.data)(merge_d),
+            shape=output_stack_properties["shape"],
+            dtype=sims[0].dtype,
+        )
+
+        # rechunk to get a chunked dask array from the delayed object
+        # (hacky, is there a better way to do this?)
+        merge_data = merge_data.rechunk([output_chunksize] * len(sdims))
+
+        # trigger compute here
+        merge_data = merge_data.map_blocks(
+            lambda x: x.compute(),
+            dtype=sims[0].dtype,
+        )
+
+        merge = si.to_spatial_image(
+            merge_data,
+            dims=sdims,
+            scale={
+                dim: output_stack_properties["spacing"][idim]
+                for idim, dim in enumerate(sdims)
+            },
+            translation={
+                dim: output_stack_properties["origin"][idim]
+                for idim, dim in enumerate(sdims)
+            },
         )
 
         merge = merge.expand_dims(nsdims)
         merge = merge.assign_coords(
             {ns_coord.name: [ns_coord.values] for ns_coord in ns_coords}
         )
-
         merges.append(merge)
 
     if len(merges) > 1:
-        # if sims are named, combine_by_coord returns a dataset
-
         # suppress pandas future warning occuring within xarray.concat
         with warnings.catch_warnings():
             warnings.simplefilter(action="ignore", category=FutureWarning)
 
+            # if sims are named, combine_by_coord returns a dataset
             res = xr.combine_by_coords([m.rename(None) for m in merges])
     else:
         res = merge
@@ -213,14 +255,14 @@ def fuse(
 
 
 def fuse_field(
-    sims,
+    sims_datas,
+    sims_metas,
     params,
     fusion_method=fusion_method_weighted_average,
     weights_method=None,
     weights_method_kwargs=None,
     output_stack_properties=None,
     output_chunksize=512,
-    interpolate_missing_pixels=True,
 ):
     """
     Fuse tiles from a single timepoint and channel (a (Z)YX "field").
@@ -240,14 +282,36 @@ def fuse_field(
         'spacing', 'origin', 'shape'.
     output_chunksize : int, optional
        See docstring of `fuse`.
-    interpolate_missing_pixels : bool, optional
-        See docstring of `fuse`.
 
     Returns
     -------
     SpatialImage
         Fused image of the field.
     """
+
+    # reassemble sims from data and metadata
+    # this way we can pass them to fuse_field without triggering compute
+    sims = [
+        si.to_spatial_image(
+            sim_data,
+            dims=sim_meta["dims"],
+            scale=sim_meta["scale"],
+            translation=sim_meta["translation"],
+        )
+        for sim_meta, sim_data in zip(sims_metas, sims_datas)
+    ]
+
+    # reassemble sims from data and metadata
+    # this way we can pass them to fuse_field without triggering compute
+    sims = [
+        si.to_spatial_image(
+            sim_data,
+            dims=sim_meta["dims"],
+            scale=sim_meta["scale"],
+            translation=sim_meta["translation"],
+        )
+        for sim_meta, sim_data in zip(sims_metas, sims_datas)
+    ]
 
     if weights_method_kwargs is None:
         weights_method_kwargs = {}
@@ -256,100 +320,154 @@ def fuse_field(
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
-    field_ims_t = []
-    field_ws_t = []
-    for isim, sim in enumerate(sims):
-        blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
-
-        # transform input images
-        sim_t = transformation.transform_sim(
-            sim,
-            params[isim],
-            output_chunksize=tuple(
-                [output_chunksize for _ in output_stack_properties["shape"]]
-            ),
-            output_stack_properties=output_stack_properties,
-            order=1,
-        )
-
-        field_ims_t.append(sim_t.data)
-
-        # calculate blending weights
+    # get blending weights
+    blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
+    field_ws = []
+    for sim in sims:
         field_w = xr.zeros_like(sim)
         field_w.data = weights.get_smooth_border_weight_from_shape(
             sim.shape[-ndim:],
             chunks=sim.chunks,
             widths=blending_widths,
         )
+        field_ws.append(field_w)
 
-        # transform blending weights
-        field_w_t = transformation.transform_sim(
-            field_w,
-            params[isim],
-            output_chunksize=tuple(
-                [output_chunksize for _ in output_stack_properties["shape"]]
-            ),
-            output_stack_properties=output_stack_properties,
-            order=1,
-        )
+    ###
+    # Build output array
+    ###
 
-        field_ws_t.append(field_w_t.data)
-
-    field_ims_t = da.stack(field_ims_t)
-    field_ws_t = da.stack(field_ws_t)
-
-    field_ws_t = weights.normalize_weights(field_ws_t)
-
-    # calculate fusion weights
-    # (this could also be done using map_overlap)
-    if weights_method is not None:
-        fusion_weights = weights_method(
-            field_ims_t,
-            field_ws_t,
-            **weights_method_kwargs,
-        )
-        fusion_weights = weights.normalize_weights(fusion_weights)
-    else:
-        fusion_weights = None
-
-    # perform blockwise fusion
-    fused_field = da.map_overlap(
-        fusion_method,
-        *(
-            (field_ims_t, field_ws_t)
-            if fusion_weights is None
-            else (field_ims_t, field_ws_t, fusion_weights)
-        ),
-        **({"fusion_weights": None} if fusion_weights is None else {}),
-        params=params,
-        depth={idim: 0 for idim in range(ndim)},
-        drop_axis=0,
-        dtype=field_ims_t.dtype,
+    # calculate output array properties
+    normalized_chunks = da.core.normalize_chunks(
+        [output_chunksize] * ndim, tuple(output_stack_properties["shape"])
     )
 
-    if interpolate_missing_pixels:
-        # find empty spaces
-        empty_mask = da.min(da.isnan(field_ws_t), 0)
+    block_indices = product(*(range(len(bds)) for bds in normalized_chunks))
+    block_offsets = [np.cumsum((0,) + bds[:-1]) for bds in normalized_chunks]
+    numblocks = [len(bds) for bds in normalized_chunks]
 
-        # convert to input dtype
-        fused_field = fused_field.astype(input_dtype)
+    fused_blocks = np.empty(numblocks, dtype=object)
+    for _ib, block_ind in enumerate(block_indices):
+        out_chunk_shape = [
+            normalized_chunks[dim][block_ind[dim]] for dim in range(ndim)
+        ]
+        out_chunk_offset = [
+            block_offsets[dim][block_ind[dim]] for dim in range(ndim)
+        ]
 
-        fused_field = da.map_overlap(
-            get_interpolated_image,
-            fused_field,
-            empty_mask,
-            depth=tuple(
-                [0]
-                + [
-                    0 if not idim else np.min([s, output_chunksize]) // 4
-                    for idim, s in enumerate(fused_field.shape)
+        out_chunk_edges = np.array(
+            list(np.ndindex(tuple([2] * ndim)))
+        ) * np.array(out_chunk_shape) + np.array(out_chunk_offset)
+
+        out_chunk_edges_phys = np.array(
+            output_stack_properties["origin"]
+        ) + np.array(out_chunk_edges) * np.array(
+            output_stack_properties["spacing"]
+        )
+
+        empty_chunk = True
+        field_ims_t, field_ws_t = [], []
+
+        # for each block, add contributing chunks from each input view
+        for iview, (param, sim) in enumerate(zip(params, sims)):
+            matrix = np.array(param[:ndim, :ndim])
+            offset = np.array(param[:ndim, ndim])
+
+            # map output chunk edges onto input image coordinates
+            # to define the input region relevant for the current chunk
+            rel_image_edges = np.dot(matrix, out_chunk_edges_phys.T).T + offset
+
+            rel_image_i = (
+                np.min(rel_image_edges, 0) - output_stack_properties["spacing"]
+            )
+            rel_image_f = (
+                np.max(rel_image_edges, 0) + output_stack_properties["spacing"]
+            )
+
+            maps_outside = np.max(
+                [
+                    rel_image_i[idim] > sim.coords[dim][-1]
+                    or rel_image_f[idim] < sim.coords[dim][0]
+                    for idim, dim in enumerate(spatial_dims)
                 ]
-            ),
+            )
+
+            if maps_outside:
+                fused_blocks[block_ind] = da.zeros(
+                    out_chunk_shape, dtype=input_dtype
+                )
+                continue
+
+            sim_reduced = sim.sel(
+                {
+                    dim: slice(rel_image_i[idim], rel_image_f[idim])
+                    for idim, dim in enumerate(spatial_dims)
+                }
+            )
+
+            empty_chunk = False
+
+            field_ims_t.append(
+                transformation.transform_sim(
+                    sim_reduced,
+                    param,
+                    output_chunksize=tuple(out_chunk_shape),
+                    output_stack_properties=output_stack_properties,
+                    order=1,
+                ).data
+            )
+
+            field_ws_t.append(
+                transformation.transform_sim(
+                    field_ws[iview],
+                    param,
+                    output_chunksize=out_chunk_shape,
+                    output_stack_properties=output_stack_properties,
+                    order=1,
+                ).data
+            )
+
+        if empty_chunk:
+            continue
+
+        field_ims_t = da.stack(field_ims_t)
+        field_ws_t = da.stack(field_ws_t)
+
+        wsum = da.nansum(field_ws_t, axis=0)
+        wsum[wsum == 0] = 1
+
+        field_ws_t = field_ws_t / wsum
+        field_ws_t = weights.normalize_weights(field_ws_t)
+
+        # calculate fusion weights
+        if weights_method is not None:
+            fusion_weights = weights_method(
+                field_ims_t,
+            )
+        else:
+            fusion_weights = None
+
+        fused_field_chunk = delayed(fusion_method)(
+            field_ims_t,
+            field_ws_t,
+            fusion_weights,
+            params,
+        )
+
+        fused_field_chunk = delayed(lambda x: np.array(x).astype(input_dtype))(
+            fused_field_chunk
+        )
+
+        fused_field_chunk = da.from_delayed(
+            fused_field_chunk,
+            shape=tuple(out_chunk_shape),
             dtype=input_dtype,
         )
 
-    if fused_field.dtype != input_dtype:
-        fused_field = fused_field.astype(input_dtype)
+        fused_blocks[block_ind] = fused_field_chunk
+
+    fused_field = da.block(
+        fused_blocks.tolist(), allow_unknown_chunksizes=False
+    )
 
     fused_field = si.to_spatial_image(
         fused_field,
@@ -598,7 +716,6 @@ def calc_stack_properties_from_volume(volume, spacing):
     return properties_dict
 
 
-# from scipy import interpolate
 def get_interpolated_image(
     image: np.ndarray,
     mask: np.ndarray,

@@ -118,7 +118,7 @@ def get_ndim_from_sim(sim):
     return len(get_spatial_dims_from_sim(sim))
 
 
-def get_affine_from_sim(sim, transform_key=None):
+def get_affine_from_sim(sim, transform_key):
     if transform_key not in sim.attrs["transforms"]:
         raise (Exception("Transform key %s not found in sim" % transform_key))
 
@@ -133,7 +133,7 @@ def get_tranform_keys_from_sim(sim):
     return list(sim.attrs["transforms"].keys())
 
 
-def set_sim_affine(sim, xaffine, transform_key=None, base_transform_key=None):
+def set_sim_affine(sim, xaffine, transform_key, base_transform_key=None):
     if "transforms" not in sim.attrs:
         sim.attrs["transforms"] = {}
 

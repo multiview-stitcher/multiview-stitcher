@@ -35,7 +35,7 @@ def get_store_decorator(store_path, store_overwrite=False):
     return store_decorator
 
 
-def get_transform_from_msim(msim, transform_key=None):
+def get_transform_from_msim(msim, transform_key):
     """
     Get transform from msim. If transform_key is None, get the transform from the first scale.
     """

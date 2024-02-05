@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import numpy as np
 import pytest
 
 from multiview_stitcher import io, sample_data
@@ -43,9 +44,17 @@ def test_tiff_io(ndim, N_t, N_c):
             filepath, channel_names=["ch%s" % i for i in range(N_c)]
         )
 
-    assert sims[0].data.ndim == sims_io.data.ndim
+        assert sims[0].data.ndim == sims_io.data.ndim
 
-    # check that all dims have the same length
-    for dim in sims[0].dims:
-        assert len(sims[0].coords[dim]) == len(sims_io.coords[dim])
-        # assert np.allclose(sims[0].coords[dim], sims_io.coords[dim])
+        # check that all dims have the same length
+        for dim in sims[0].dims:
+            assert len(sims[0].coords[dim]) == len(sims_io.coords[dim])
+            # assert np.allclose(sims[0].coords[dim], sims_io.coords[dim])
+
+        # check image values are the same
+        # ignore coordinates for this test
+        for dim in sims[0].dims:
+            sims[0].coords[dim] = np.arange(len(sims[0].coords[dim]))
+            sims_io.coords[dim] = np.arange(len(sims_io.coords[dim]))
+
+        assert (sims[0] == sims_io).min()

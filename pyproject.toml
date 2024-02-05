@@ -8,7 +8,7 @@ write_to = "src/multiview_stitcher/_version.py"
 
 [tool.black]
 line-length = 79
-target-version = ['py38', 'py39', 'py310']
+target-version = ['py39', 'py310', 'py311']
 
 
 [tool.ruff]
@@ -54,5 +54,5 @@ exclude = [
     "*_vendor*",
 ]
 
-target-version = "py38"
+target-version = "py39"
 fix = true

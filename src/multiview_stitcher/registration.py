@@ -3,14 +3,13 @@ import warnings
 import dask.array as da
 import networkx as nx
 import numpy as np
-import skimage.exposure
 import skimage.registration
-import skimage.registration._phase_cross_correlation  # skimage uses lazy importing
 import xarray as xr
 from dask import compute, delayed
 from dask_image import ndfilters
 from multiscale_spatial_image import MultiscaleSpatialImage
-from scipy import ndimage
+from scipy import ndimage, stats
+from skimage.metrics import structural_similarity
 from tqdm import tqdm
 
 from multiview_stitcher import (
@@ -20,13 +19,6 @@ from multiview_stitcher import (
     spatial_image_utils,
     transformation,
 )
-from multiview_stitcher._skimage_monkey_patch import (
-    _modified_disambiguate_shift,
-)
-
-
-class NotEnoughOverlapError(Exception):
-    pass
 
 
 def apply_recursive_dict(func, d):
@@ -195,7 +187,6 @@ def sims_to_intrinsic_coord_system(
 
     # get images into the same physical space (that of sim1)
     spatial_image_utils.get_ndim_from_sim(reg_sims_b[0])
-    # spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(reg_sims_b[0])
     spacing = spatial_image_utils.get_spacing_from_sim(
         reg_sims_b[0], asarray=True
     )
@@ -264,34 +255,110 @@ def phase_correlation_registration(
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
     spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
 
-    def skimage_phase_corr_no_runtime_warning_and_monkey_patched(
-        *args, **kwargs
-    ):
-        # monkey patching needs to be done here in order to work
-        # with dask distributed
-        skimage.registration._phase_cross_correlation._disambiguate_shift = (
-            _modified_disambiguate_shift
-        )
-
+    def skimage_modified_phase_corr(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            result = skimage.registration.phase_cross_correlation(
-                *args, **kwargs
+
+            # strategy: compute phase correlation with and without
+            # normalization and keep the one with the highest
+            # structural similarity score during manual "disambiguation"
+            # (which should be a metric orthogonal to the corr coef)
+            shift_candidates = []
+            for normalization in ["phase", None]:
+                shift_candidates.append(
+                    skimage.registration.phase_cross_correlation(
+                        *args,
+                        disambiguate=False,
+                        normalization=normalization,
+                        **kwargs,
+                    )[0]
+                )
+
+        # disambiguate shift manually
+        # there seems to be a problem with the scikit-image implementation
+        # of disambiguate_shift, but this needs to be checked
+
+        im0 = args[0]
+        im1 = args[1]
+
+        # assume that the shift along any dimension isn't larger than the overlap
+        # in the dimension with smallest overlap
+        # e.g. if overlap is 50 pixels in x and 200 pixels in y, assume that
+        # the shift along x and y is smaller than 50 pixels
+        max_shift_per_dim = np.max([im.shape for im in [im0, im1]])
+
+        data_range = np.max([im0, im1]) - np.min([im0, im1])
+
+        disambiguate_metric_vals = []
+        quality_metric_vals = []
+        # corrs, corrs2 = [], []
+        t_candidates = []
+
+        ndim = im0.ndim
+        for shift_candidate in shift_candidates:
+            for s in np.ndindex(tuple([4] * ndim)):
+                t_candidate = []
+                for d in range(ndim):
+                    if s[d] == 0:
+                        t_candidate.append(shift_candidate[d])
+                    elif s[d] == 1:
+                        t_candidate.append(-shift_candidate[d])
+                    elif s[d] == 2:
+                        t_candidate.append(
+                            -(shift_candidate[d] - im1.shape[d])
+                        )
+                    elif s[d] == 3:
+                        t_candidate.append(-shift_candidate[d] - im1.shape[d])
+                if np.max(np.abs(t_candidate)) < max_shift_per_dim:
+                    t_candidates.append(t_candidate)
+
+        if not len(t_candidates):
+            return [np.zeros(ndim)]
+
+        for t_ in t_candidates:
+            im1t = ndimage.affine_transform(
+                im1 + 1,
+                param_utils.affine_from_translation(list(t_)),
+                order=1,
+                mode="constant",
+                cval=0,
             )
-        return result
+            mask = im1t > 0
+            if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
+                disambiguate_metric_val = -1
+            else:
+                disambiguate_metric_val = structural_similarity(
+                    im0[mask], im1t[mask], data_range=data_range
+                )
+
+                # spearman seems to be better than structural_similarity
+                # for filtering out bad links between views
+                quality_metric_val = stats.spearmanr(
+                    im0[mask], im1t[mask]
+                ).correlation
+            disambiguate_metric_vals.append(disambiguate_metric_val)
+            quality_metric_vals.append(quality_metric_val)
+
+        argmax_index = np.nanargmax(disambiguate_metric_vals)
+        t = t_candidates[argmax_index]
+
+        return [t, quality_metric_vals[argmax_index]]
+
+    shift_d, quality_d = delayed(skimage_modified_phase_corr, nout=2)(
+        delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
+        delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
+        upsample_factor=(10 if ndim == 2 else 2),
+    )
 
     shift = da.from_delayed(
-        delayed(np.array)(
-            # delayed(skimage.registration.phase_cross_correlation)(
-            delayed(skimage_phase_corr_no_runtime_warning_and_monkey_patched)(
-                delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
-                delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
-                upsample_factor=(10 if ndim == 2 else 2),
-                disambiguate=True,
-                normalization="phase",
-            )[0]
-        ),
+        delayed(np.array)(shift_d),
         shape=(ndim,),
+        dtype=float,
+    )
+
+    quality = da.from_delayed(
+        delayed(np.array)(quality_d),
+        shape=(),
         dtype=float,
     )
 
@@ -309,7 +376,16 @@ def phase_correlation_registration(
         transform_key_moving=transform_key,
     )
 
-    return param_utils.get_xparam_from_param(ext_param)
+    # ext_param = param_utils.get_xparam_from_param(ext_param)
+
+    xds = xr.Dataset(
+        data_vars={
+            "transform": param_utils.get_xparam_from_param(ext_param),
+            "quality": xr.DataArray(quality),
+        }
+    )
+
+    return xds
 
 
 def get_affine_from_intrinsic_affine(
@@ -411,7 +487,7 @@ def get_affine_from_intrinsic_affine(
 def register_pair_of_msims(
     msim1,
     msim2,
-    transform_key=None,
+    transform_key,
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
@@ -452,7 +528,6 @@ def register_pair_of_msims(
     if reg_func_kwargs is None:
         reg_func_kwargs = {}
     spatial_dims = msi_utils.get_spatial_dims(msim1)
-    # ndim = len(spatial_dims)
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
@@ -527,7 +602,7 @@ def register_pair_of_msims(
 def register_pair_of_msims_over_time(
     msim1,
     msim2,
-    transform_key=None,
+    transform_key,
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
@@ -569,109 +644,137 @@ def register_pair_of_msims_over_time(
     return xp
 
 
-def get_registration_graph_from_overlap_graph(
+def prune_view_adjacency_graph(
     g,
-    transform_key=None,
-    registration_binning=None,
-    use_only_overlap_region=True,
-    pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
+    method="shortest_paths_overlap_weighted",
 ):
-    if reg_func_kwargs is None:
-        reg_func_kwargs = {}
-    g_reg = g.to_directed()
+    """
+    Prune the view adjacency graph
+    (i.e. to edges that will be used for registration).
 
-    ref_node = mv_graph.get_node_with_maximal_overlap_from_graph(g)
-
-    # invert overlap to use as weight in shortest path
-    for e in g_reg.edges:
-        g_reg.edges[e]["overlap_inv"] = 1 / (
-            g_reg.edges[e]["overlap"] + 1
-        )  # overlap can be zero
-
-    # get shortest paths to ref_node
-    paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
-
-    # get all pairs of views that are connected by a shortest path
-    for n, sp in paths.items():
-        g_reg.nodes[n]["reg_path"] = sp
-
-        if len(sp) < 2:
-            continue
-
-        # add registration edges
-        for i in range(len(sp) - 1):
-            pair = (sp[i], sp[i + 1])
-
-            g_reg.edges[(pair[0], pair[1])]["transform"] = (
-                register_pair_of_msims_over_time
-            )(
-                g.nodes[pair[0]]["msim"],
-                g.nodes[pair[1]]["msim"],
-                transform_key=transform_key,
-                registration_binning=registration_binning,
-                use_only_overlap_region=use_only_overlap_region,
-                pairwise_reg_func=pairwise_reg_func,
-                reg_func_kwargs=reg_func_kwargs,
+    Available methods:
+    - 'shortest_paths_overlap_weighted':
+        Prune to shortest paths in overlap graph
+        (weighted by overlap).
+    - 'filter_by_overlap':
+        Prune to edges with overlap above Otsu threshold.
+        This works well for regular grid arrangements, as
+        diagonal edges will be pruned.
+    """
+    if not len(g.edges):
+        raise (
+            mv_graph.NotEnoughOverlapError(
+                "Not enough overlap between views\
+        for stitching."
             )
+        )
 
-    g_reg.graph["pair_finding_method"] = "shortest_paths_considering_overlap"
+    if method == "shortest_paths_overlap_weighted":
+        return mv_graph.prune_to_shortest_weighted_paths(g)
 
-    return g_reg
+    elif method == "otsu_threshold_on_overlap":
+        return mv_graph.filter_edges(g)
+
+    else:
+        raise ValueError(f"Unknown graph pruning method: {method}")
 
 
 def get_node_params_from_reg_graph(g_reg):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
+
+    Output parameters P for each view map coordinates in the view
+    into the coordinates of a new coordinate system.
     """
 
-    ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+    # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+    ndim = (
+        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
+    )
 
-    for n in g_reg.nodes:
-        reg_path = g_reg.nodes[n]["reg_path"]
+    # use quality as weight in shortest path (mean over tp currently)
+    for e in g_reg.edges:
+        g_reg.edges[e]["quality_mean"] = np.mean(g_reg.edges[e]["quality"])
+        g_reg.edges[e]["quality_mean_inv"] = 1 / (
+            g_reg.edges[e]["quality_mean"] + 0.5
+        )
 
-        path_pairs = [
-            [reg_path[i], reg_path[i + 1]] for i in range(len(reg_path) - 1)
-        ]
+    # get directed graph and invert transforms along edges
 
-        if "t" in g_reg.nodes[n]["msim"].dims:
-            path_params = xr.DataArray(
-                [np.eye(ndim + 1) for t in g_reg.nodes[n]["msim"].coords["t"]],
-                dims=["t", "x_in", "x_out"],
-                coords={
-                    "t": msi_utils.get_sim_from_msim(
-                        g_reg.nodes[n]["msim"]
-                    ).coords["t"]
-                },
+    g_reg_di = g_reg.to_directed()
+    for e in g_reg.edges:
+        sorted_e = tuple(sorted(e))
+        g_reg_di.edges[(sorted_e[1], sorted_e[0])][
+            "transform"
+        ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
+
+    ccs = list(nx.connected_components(g_reg))
+
+    node_transforms = {}
+
+    for cc in ccs:
+        subgraph = g_reg_di.subgraph(list(cc))
+
+        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+            subgraph, weight_key="quality"
+        )
+
+        # get shortest paths to ref_node
+        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        paths = {
+            n: nx.shortest_path(
+                subgraph, target=n, source=ref_node, weight="quality_mean_inv"
             )
-        else:
-            path_params = param_utils.identity_transform(ndim)
+            for n in cc
+        }
 
-        for pair in path_pairs:
-            path_params = xr.apply_ufunc(
-                np.matmul,
-                g_reg.edges[(pair[0], pair[1])]["transform"],
-                path_params,
-                input_core_dims=[["x_in", "x_out"]] * 2,
-                output_core_dims=[["x_in", "x_out"]],
-                vectorize=True,
-            )
+        for n in subgraph.nodes:
+            # reg_path = g_reg.nodes[n]["reg_path"]
+            reg_path = paths[n]
 
-        g_reg.nodes[n]["transforms"] = path_params
+            path_pairs = [
+                [reg_path[i], reg_path[i + 1]]
+                for i in range(len(reg_path) - 1)
+            ]
 
-    return g_reg
+            if len(path_pairs):
+                path_params = param_utils.identity_transform(
+                    ndim,
+                    t_coords=g_reg_di.edges[
+                        (path_pairs[0][0], path_pairs[0][1])
+                    ]["transform"].coords["t"],
+                )
+            else:
+                path_params = param_utils.identity_transform(ndim)
+
+            for pair in path_pairs:
+                path_params = xr.apply_ufunc(
+                    np.matmul,
+                    g_reg_di.edges[(pair[0], pair[1])]["transform"],
+                    path_params,
+                    input_core_dims=[["x_in", "x_out"]] * 2,
+                    output_core_dims=[["x_in", "x_out"]],
+                    vectorize=True,
+                )
+
+            node_transforms[n] = param_utils.invert_xparams(path_params)
+
+    return node_transforms
 
 
 def register(
     msims: [MultiscaleSpatialImage],
+    transform_key,
     reg_channel_index=None,
-    transform_key=None,
     new_transform_key=None,
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
     reg_func_kwargs=None,
+    pre_registration_pruning_method="shortest_paths_overlap_weighted",
+    post_registration_do_quality_filter=False,
+    post_registration_quality_threshold=0.2,
 ):
     """
 
@@ -706,6 +809,13 @@ def register(
         Function used for registration.
     reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function
+    pre_registration_pruning_method : str, optional
+        Method used to prune the view adjacency graph before registration,
+        by default 'shortest_paths_overlap_weighted'.
+    post_registration_do_quality_filter : bool, optional
+    post_registration_quality_threshold : float, optional
+        Threshold used to filter edges by quality after registration,
+        by default None (no filtering)
 
     Returns
     -------
@@ -733,13 +843,21 @@ def register(
         msims_reg.append(msim_reg)
 
     g = mv_graph.build_view_adjacency_graph_from_msims(
-        # [msi_utils.get_sim_from_msim(msim) for msim in msims_reg],
         msims_reg,
         transform_key=transform_key,
     )
 
-    g_reg = get_registration_graph_from_overlap_graph(
-        g,
+    if pre_registration_pruning_method is not None:
+        g_reg = prune_view_adjacency_graph(
+            g,
+            method=pre_registration_pruning_method,
+        )
+    else:
+        g_reg = g
+
+    g_reg_computed = compute_pairwise_registrations(
+        msims_reg,
+        g_reg,
         transform_key=transform_key,
         registration_binning=registration_binning,
         use_only_overlap_region=use_only_overlap_region,
@@ -747,22 +865,16 @@ def register(
         reg_func_kwargs=reg_func_kwargs,
     )
 
-    if not len(g_reg.edges):
-        raise (
-            NotEnoughOverlapError(
-                "Not enough overlap between views\
-        for stitching. Consider stabilizing the tiles instead."
-            )
+    if post_registration_do_quality_filter is not None:
+        # filter edges by quality
+        g_reg_computed = mv_graph.filter_edges(
+            g_reg_computed,
+            threshold=post_registration_quality_threshold,
+            weight_key="quality",
         )
 
-    g_reg_computed = mv_graph.compute_graph_edges(g_reg)
-
-    g_reg_nodes = get_node_params_from_reg_graph(g_reg_computed)
-
-    node_transforms = mv_graph.get_nodes_dataset_from_graph(
-        g_reg_nodes, node_attribute="transforms"
-    )
-    params = [node_transforms[dv] for dv in node_transforms.data_vars]
+    params = get_node_params_from_reg_graph(g_reg_computed)
+    params = [params[iview] for iview in sorted(params.keys())]
 
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
@@ -774,6 +886,40 @@ def register(
             )
 
     return params
+
+
+def compute_pairwise_registrations(
+    msims,
+    g_reg,
+    transform_key=None,
+    registration_binning=None,
+    use_only_overlap_region=True,
+    pairwise_reg_func=phase_correlation_registration,
+    reg_func_kwargs=None,
+):
+    g_reg_computed = g_reg.copy()
+    edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
+
+    params_xds = [
+        register_pair_of_msims_over_time(
+            msims[pair[0]],
+            msims[pair[1]],
+            transform_key=transform_key,
+            registration_binning=registration_binning,
+            use_only_overlap_region=use_only_overlap_region,
+            pairwise_reg_func=pairwise_reg_func,
+            reg_func_kwargs=reg_func_kwargs,
+        )
+        for pair in tqdm(edges)
+    ]
+
+    params = compute(params_xds)[0]
+
+    for i, pair in enumerate(edges):
+        g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
+        g_reg_computed.edges[pair]["quality"] = params[i]["quality"]
+
+    return g_reg_computed
 
 
 def stabilize(sims, reg_channel_index=0, sigma=2):

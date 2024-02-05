@@ -1,3 +1,5 @@
+import warnings
+
 import networkx as nx
 import numpy as np
 import xarray as xr
@@ -8,6 +10,7 @@ from Geometry3D import (
     Point,
     Segment,
 )
+from skimage.filters import threshold_otsu
 
 # set_eps(get_eps() * 100000) # https://github.com/GouMinghao/Geometry3D/issues/8
 # 20230924: set_eps line above created problems
@@ -16,8 +19,14 @@ from Geometry3D import (
 from multiview_stitcher import msi_utils, spatial_image_utils
 
 
+class NotEnoughOverlapError(Exception):
+    pass
+
+
 def build_view_adjacency_graph_from_msims(
-    msims, expand=False, transform_key=None
+    msims,
+    transform_key,
+    expand=False,
 ):
     """
     Build graph representing view overlap relationships from list of xarrays.
@@ -43,8 +52,8 @@ def build_view_adjacency_graph_from_msims(
     """
 
     g = nx.Graph()
-    for iview, msim in enumerate(msims):
-        g.add_node(iview, msim=msim)
+    for iview in range(len(msims)):
+        g.add_node(iview)
 
     for imsim1, msim1 in enumerate(msims):
         for imsim2, msim2 in enumerate(msims):
@@ -59,7 +68,6 @@ def build_view_adjacency_graph_from_msims(
             )
 
             # overlap 0 means one pixel overlap
-            # if overlap_area > -1:
             if overlap_area > 0:
                 g.add_edge(imsim1, imsim2, overlap=overlap_area)
 
@@ -160,16 +168,16 @@ def get_overlap_between_pair_of_sims(
     return overlap, intersection_poly_structure_points
 
 
-def get_node_with_maximal_overlap_from_graph(g):
+def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
     """
-    g: graph containing edges with 'overlap' weight
+    g: graph containing edges with weight_key weights
     """
-    total_node_overlaps = {
-        node: np.sum([g.edges[e]["overlap"] for e in g.edges if node in e])
+    total_node_weights = {
+        node: np.sum([g.edges[e][weight_key] for e in g.edges if node in e])
         for node in g.nodes
     }
 
-    ref_node = max(total_node_overlaps, key=total_node_overlaps.get)
+    ref_node = max(total_node_weights, key=total_node_weights.get)
 
     return ref_node
 
@@ -205,7 +213,7 @@ def get_nodes_dataset_from_graph(g, node_attribute):
     )
 
 
-def get_faces_from_sim(sim, transform_key=None):
+def get_faces_from_sim(sim, transform_key):
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
@@ -263,16 +271,6 @@ def sims_are_far_apart(sim1, sim2, transform_key):
         for sim in [sim1, sim2]
     ]
 
-    # if distance_centers > np.sum(diagonal_lengths) / 2.0:
-    #     logging.info("sims are far apart")
-    #     return True
-    # else:
-    #     logging.info(
-    #         "sims are close: %02d"
-    #         % (100 * distance_centers / (np.sum(diagonal_lengths) / 2.0))
-    #     )
-    #     return False
-
 
 def get_intersection_polyhedron_from_pair_of_sims_3D(
     sim1, sim2, transform_key
@@ -304,9 +302,7 @@ def get_intersection_polyhedron_from_pair_of_sims_3D(
         return cphs[0].intersection(cphs[1])
 
 
-def get_intersection_polygon_from_pair_of_sims_2D(
-    sim1, sim2, transform_key=None
-):
+def get_intersection_polygon_from_pair_of_sims_2D(sim1, sim2, transform_key):
     """
     For 2D, the intersection is a polygon. Still three-dimensional, but with z=0.
     """
@@ -314,22 +310,15 @@ def get_intersection_polygon_from_pair_of_sims_2D(
     if sims_are_far_apart(sim1, sim2, transform_key):
         return None
 
-    cps = []
-    for sim in [sim1, sim2]:
-        corners = np.unique(
-            get_faces_from_sim(sim, transform_key=transform_key).reshape(
-                (-1, 2)
-            ),
-            axis=0,
-        )
-        # cp = ConvexPolygon([Point([0]+list(c)) for c in corners])
-        cp = ConvexPolygon([Point(list(c[::-1]) + [0]) for c in corners])
-        cps.append(cp)
+    cps = [
+        get_poly_from_sim(sim, transform_key=transform_key)
+        for sim in [sim1, sim2]
+    ]
 
     return cps[0].intersection(cps[1])
 
 
-def points_inside_sim(pts, sim, transform_key=None):
+def points_inside_sim(pts, sim, transform_key):
     """
     Check whether points lie inside of the image domain of sim.
 
@@ -339,6 +328,21 @@ def points_inside_sim(pts, sim, transform_key=None):
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     assert len(pts[0]) == ndim
 
+    sim_domain = get_poly_from_sim(sim, transform_key=transform_key)
+
+    return np.array(
+        [sim_domain.intersection(Point(pt)) is not None for pt in pts]
+    )
+
+
+def get_poly_from_sim(sim, transform_key):
+    """
+    Get Geometry3D.ConvexPolygon or Geometry3D.ConvexPolyhedron
+    representing the image domain of sim.
+    """
+
+    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+
     if ndim == 2:
         corners = np.unique(
             get_faces_from_sim(sim, transform_key=transform_key).reshape(
@@ -347,12 +351,152 @@ def points_inside_sim(pts, sim, transform_key=None):
             axis=0,
         )
         sim_domain = ConvexPolygon([Point([0] + list(c)) for c in corners])
+
     elif ndim == 3:
         faces = get_faces_from_sim(sim, transform_key=transform_key)
         sim_domain = ConvexPolyhedron(
             [ConvexPolygon([Point(c) for c in face]) for face in faces]
         )
 
-    return np.array(
-        [sim_domain.intersection(Point(pt)) is not None for pt in pts]
+    return sim_domain
+
+
+def get_greedy_colors(sims, n_colors=2, transform_key=None):
+    """
+    Get colors (indices) from view adjacency graph analysis
+
+    Idea: use the same logic to determine relevant registration edges
+    """
+
+    view_adj_graph = build_view_adjacency_graph_from_msims(
+        [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims],
+        expand=True,
+        transform_key=transform_key,
     )
+
+    # thresholds = threshold_multiotsu(overlaps)
+
+    # strategy: remove edges with overlap values of increasing thresholds until
+    # the graph division into n_colors is successful
+
+    # modify overlap values
+    # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
+
+    edge_vals = nx.edge_betweenness_centrality(view_adj_graph)
+
+    edges = list(view_adj_graph.edges(data=True))
+    for e in edges:
+        edge_vals[tuple(e[:2])] = edge_vals[tuple(e[:2])] + e[2]["overlap"]
+
+    sorted_unique_vals = sorted(np.unique(list(edge_vals.values())))
+
+    nx.set_edge_attributes(view_adj_graph, edge_vals, name="edge_val")
+
+    thresh_ind = 0
+    while 1:
+        colors = nx.coloring.greedy_color(view_adj_graph)
+        if (
+            len(set(colors.values())) <= n_colors
+        ):  # and nx.coloring.equitable_coloring.is_equitable(view_adj_graph, colors):
+            break
+        view_adj_graph.remove_edges_from(
+            [
+                (a, b)
+                for a, b, attrs in view_adj_graph.edges(data=True)
+                if attrs["edge_val"] <= sorted_unique_vals[thresh_ind]
+            ]
+        )
+        thresh_ind += 1
+
+    greedy_colors = dict(colors.items())
+
+    return greedy_colors
+
+
+def prune_to_shortest_weighted_paths(g):
+    """
+    g contains the overlap between views as edge weights
+
+    Strategy:
+    - find connected components (CC) in overlap graph
+    - for each CC, determine a central reference node
+    - for each CC, determine shortest paths to reference node
+    - register each pair of views along shortest paths
+
+    """
+
+    g_reg = nx.Graph(nodes=g.nodes)
+
+    ccs = list(nx.connected_components(g))
+
+    if len(ccs) > 1:
+        warnings.warn(
+            """
+The provided tiles/views do not globally overlap, instead there
+are %s connected components composed of the following tile indices:\n"""
+            % (len(ccs))
+            + "\n".join([str(list(cc)) for cc in ccs])
+            + "\nProceeding without registering between the disconnected components.",
+            UserWarning,
+            stacklevel=1,
+        )
+    if np.max([len(cc) for cc in ccs]) < 2:
+        raise (NotEnoughOverlapError("Not enough overlap between views."))
+    elif np.min([len(cc) for cc in ccs]) < 2:
+        warnings.warn(
+            "The following views have no overlap with other views:\n%s"
+            % list(np.where([len(cc) == 1 for cc in ccs])[0]),
+            UserWarning,
+            stacklevel=1,
+        )
+
+    for cc in ccs:
+        subgraph = g.subgraph(list(cc))
+
+        ref_node = get_node_with_maximal_edge_weight_sum_from_graph(
+            subgraph, weight_key="overlap"
+        )
+
+        # invert overlap to use as weight in shortest path
+        for e in g.edges:
+            g.edges[e]["overlap_inv"] = 1 / (
+                g.edges[e]["overlap"] + 1
+            )  # overlap can be zero
+
+        # get shortest paths to ref_node
+        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+        paths = {
+            n: nx.shortest_path(
+                g, target=n, source=ref_node, weight="overlap_inv"
+            )
+            for n in cc
+        }
+
+        # get all pairs of views that are connected by a shortest path
+        for _, sp in paths.items():
+            if len(sp) < 2:
+                continue
+
+            # add registration edges
+            for i in range(len(sp) - 1):
+                g_reg.add_edge(
+                    sp[i], sp[i + 1], overlap=g[sp[i]][sp[i + 1]]["overlap"]
+                )
+
+    return g_reg
+
+
+def filter_edges(g, weight_key="overlap", threshold=None):
+    edges_df = nx.to_pandas_edgelist(g)
+
+    if threshold is None:
+        threshold = threshold_otsu(np.array(edges_df["overlap"]))
+
+    edges_to_delete_df = edges_df[edges_df.overlap < threshold]
+
+    g_filtered = g.copy()
+    g_filtered.remove_edges_from(
+        [(r["source"], r["target"]) for ir, r in edges_to_delete_df.iterrows()]
+    )
+
+    return g_filtered
