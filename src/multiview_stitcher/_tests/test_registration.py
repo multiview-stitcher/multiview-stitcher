@@ -129,3 +129,60 @@ def test_get_optimal_registration_binning():
 
     assert min(reg_binning.values()) > 1
     assert max(reg_binning.values()) < 4
+
+
+@pytest.mark.parametrize(
+    """
+    ndim, N_c, N_t,
+    pre_registration_pruning_method,
+    post_registration_do_quality_filter,
+    """,
+    [
+        (2, 1, 3, pre_reg_pm, True)
+        for pre_reg_pm in [
+            "shortest_paths_overlap_weighted",
+            "otsu_threshold_on_overlap",
+            None,
+        ]
+    ]
+    + [
+        (3, 1, 3, pre_reg_pm, False)
+        for pre_reg_pm in [
+            "shortest_paths_overlap_weighted",
+            "otsu_threshold_on_overlap",
+        ]
+    ],
+)
+def test_register(
+    ndim,
+    N_c,
+    N_t,
+    pre_registration_pruning_method,
+    post_registration_do_quality_filter,
+):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        N_t=N_t,
+        N_c=N_c,
+        tile_size=15,
+        tiles_x=2,
+        tiles_y=2,
+        tiles_z=2,
+        zoom=10,
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # Run registration
+    params = registration.register(
+        msims,
+        reg_channel_index=0,
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="affine_registered",
+        pre_registration_pruning_method=pre_registration_pruning_method,
+        post_registration_do_quality_filter=post_registration_do_quality_filter,
+    )
+
+    assert len(params) == 2**ndim

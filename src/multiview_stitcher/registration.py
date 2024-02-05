@@ -842,10 +842,13 @@ def register(
         transform_key=transform_key,
     )
 
-    g_reg = prune_view_adjacency_graph(
-        g,
-        method=pre_registration_pruning_method,
-    )
+    if pre_registration_pruning_method is not None:
+        g_reg = prune_view_adjacency_graph(
+            g,
+            method=pre_registration_pruning_method,
+        )
+    else:
+        g_reg = g
 
     g_reg_computed = compute_pairwise_registrations(
         msims_reg,
