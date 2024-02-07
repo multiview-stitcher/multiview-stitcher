@@ -99,7 +99,7 @@ def plot_positions(
             for sim in sims
         ]
         if ndim == 2:
-            node_poss = [[0, p[1], p[0]] for p in node_poss]
+            node_poss = [[0, p[0], p[1]] for p in node_poss]
 
         node_poss_mpl = [[p[0], p[2], p[1]] for p in node_poss]
 
