@@ -65,6 +65,7 @@ def generate_tiled_dataset(
     )
 
     # simulate shifts and drifts
+    np.random.seed(0)
     shifts = (np.random.random(tiles.numblocks + (ndim,)) - 0.5) * shift_scale
     drifts = np.cumsum(
         np.ones(tiles.numblocks + (ndim,)) * drift_scale, axis=0
