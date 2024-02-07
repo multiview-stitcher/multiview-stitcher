@@ -18,6 +18,7 @@ from multiview_stitcher import (
     param_utils,
     spatial_image_utils,
     transformation,
+    vis_utils,
 )
 
 
@@ -775,6 +776,7 @@ def register(
     pre_registration_pruning_method="shortest_paths_overlap_weighted",
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
+    plot_summary=False,
 ):
     """
 
@@ -816,6 +818,9 @@ def register(
     post_registration_quality_threshold : float, optional
         Threshold used to filter edges by quality after registration,
         by default None (no filtering)
+    plot_summary : bool, optional
+        If True, plot a graph showing registered stack boundaries and
+        performed pairwise registrations including correlations, by default False
 
     Returns
     -------
@@ -883,6 +888,23 @@ def register(
                 params[imsim],
                 transform_key=new_transform_key,
                 base_transform_key=transform_key,
+            )
+
+        if plot_summary:
+            edges = list(g_reg_computed.edges())
+            _fig, _ax = vis_utils.plot_positions(
+                msims,
+                transform_key=new_transform_key,
+                edges=edges,
+                edge_color_vals=np.array(
+                    [
+                        g_reg_computed.get_edge_data(*e)["quality"].mean()
+                        for e in edges
+                    ]
+                ),
+                edge_label="pairwise view correlation",
+                display_view_indices=True,
+                use_positional_colors=False,
             )
 
     return params

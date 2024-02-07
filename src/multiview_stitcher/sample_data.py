@@ -71,7 +71,6 @@ def generate_tiled_dataset(
         np.ones(tiles.numblocks + (ndim,)) * drift_scale, axis=0
     )
 
-    np.random.seed(0)
     tls = []
     for _ch in range(N_c):
         # the channel ground truth

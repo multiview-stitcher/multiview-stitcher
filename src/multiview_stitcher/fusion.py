@@ -66,6 +66,7 @@ def fuse(
     output_shape=None,
     output_stack_properties=None,
     output_chunksize=512,
+    overlap_in_pixels=None,
 ):
     """
 
@@ -196,6 +197,7 @@ def fuse(
             weights_method_kwargs=weights_method_kwargs,
             output_stack_properties=output_stack_properties,
             output_chunksize=output_chunksize,
+            overlap_in_pixels=overlap_in_pixels,
         )
 
         # continue working with dask array
@@ -257,6 +259,7 @@ def fuse_field(
     weights_method_kwargs=None,
     output_stack_properties=None,
     output_chunksize=512,
+    overlap_in_pixels=None,
 ):
     """
     Fuse tiles from a single timepoint and channel (a (Z)YX "field").
@@ -310,6 +313,12 @@ def fuse_field(
     if weights_method_kwargs is None:
         weights_method_kwargs = {}
 
+    # calculate required overlap from chosen weights method
+    if overlap_in_pixels is None:
+        overlap_in_pixels = weights.calculate_required_overlap(
+            weights_method, weights_method_kwargs
+        )
+
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
@@ -341,7 +350,7 @@ def fuse_field(
     numblocks = [len(bds) for bds in normalized_chunks]
 
     fused_blocks = np.empty(numblocks, dtype=object)
-    for _ib, block_ind in enumerate(block_indices):
+    for _, block_ind in enumerate(block_indices):
         out_chunk_shape = [
             normalized_chunks[dim][block_ind[dim]] for dim in range(ndim)
         ]
@@ -360,6 +369,29 @@ def fuse_field(
         )
 
         empty_chunk = True
+
+        chunk_output_stack_properties = {
+            "spacing": output_stack_properties["spacing"],
+            "origin": {
+                dim: output_stack_properties["origin"][dim]
+                + (
+                    out_chunk_offset[idim]
+                    - overlap_in_pixels * int(block_ind[idim] > 0)
+                )
+                * output_stack_properties["spacing"][dim]
+                for idim, dim in enumerate(spatial_dims)
+            },
+            "shape": {
+                dim: out_chunk_shape[idim]
+                + (
+                    int(block_ind[idim] > 0)
+                    + int(block_ind[idim] < (numblocks[idim] - 1))
+                )
+                * overlap_in_pixels
+                for idim, dim in enumerate(spatial_dims)
+            },
+        }
+
         field_ims_t, field_ws_t = [], []
 
         # for each block, add contributing chunks from each input view
@@ -407,25 +439,14 @@ def fuse_field(
 
             empty_chunk = False
 
-            chunk_output_stack_properties = {
-                "spacing": output_stack_properties["spacing"],
-                "origin": {
-                    dim: output_stack_properties["origin"][dim]
-                    + out_chunk_offset[idim]
-                    * output_stack_properties["spacing"][dim]
-                    for idim, dim in enumerate(spatial_dims)
-                },
-                "shape": {
-                    dim: out_chunk_shape[idim]
-                    for idim, dim in enumerate(spatial_dims)
-                },
-            }
-
             field_ims_t.append(
                 transformation.transform_sim(
                     sim_reduced,
                     param,
-                    output_chunksize=tuple(out_chunk_shape),
+                    output_chunksize=[
+                        chunk_output_stack_properties["shape"][dim]
+                        for _, dim in enumerate(spatial_dims)
+                    ],
                     output_stack_properties=chunk_output_stack_properties,
                     order=1,
                 ).data
@@ -435,7 +456,10 @@ def fuse_field(
                 transformation.transform_sim(
                     field_ws[iview],
                     param,
-                    output_chunksize=tuple(out_chunk_shape),
+                    output_chunksize=[
+                        chunk_output_stack_properties["shape"][dim]
+                        for _, dim in enumerate(spatial_dims)
+                    ],
                     output_stack_properties=chunk_output_stack_properties,
                     order=1,
                 ).data
@@ -455,9 +479,12 @@ def fuse_field(
 
         # calculate fusion weights
         if weights_method is not None:
-            fusion_weights = weights_method(
-                field_ims_t,
-                field_ws_t,
+            fusion_weights = da.from_delayed(
+                delayed(weights_method)(
+                    field_ims_t, field_ws_t, **weights_method_kwargs
+                ),
+                shape=field_ims_t.shape,
+                dtype=float,
             )
         else:
             fusion_weights = None
@@ -475,9 +502,27 @@ def fuse_field(
 
         fused_field_chunk = da.from_delayed(
             fused_field_chunk,
-            shape=tuple(out_chunk_shape),
+            shape=[
+                chunk_output_stack_properties["shape"][dim]
+                for _, dim in enumerate(spatial_dims)
+            ],
             dtype=input_dtype,
         )
+
+        if overlap_in_pixels > 0:
+            fused_field_chunk = fused_field_chunk[
+                tuple(
+                    [
+                        slice(
+                            overlap_in_pixels * int(block_ind[idim] > 0),
+                            fused_field_chunk.shape[idim]
+                            - overlap_in_pixels
+                            * int(block_ind[idim] < (numblocks[idim] - 1)),
+                        )
+                        for idim, dim in enumerate(spatial_dims)
+                    ]
+                )
+            ]
 
         fused_blocks[block_ind] = fused_field_chunk
 
@@ -489,7 +534,7 @@ def fuse_field(
         fused_field,
         dims=spatial_dims,
         scale=output_stack_properties["spacing"],
-        translation=output_stack_properties["spacing"],
+        translation=output_stack_properties["origin"],
     )
 
     return fused_field

@@ -1,6 +1,23 @@
 import dask.array as da
 import numpy as np
-from dask_image.ndfilters import gaussian_filter
+from scipy.ndimage import gaussian_filter
+
+
+def calculate_required_overlap(
+    method_func=None,
+    method_func_kwargs=None,
+):
+    """
+    Calculate the required overlap for fusion given
+    - weights method and params
+    # - fusion method and params
+    """
+    if method_func is None:
+        return 0
+    elif method_func == content_based:
+        return 2 * method_func_kwargs["sigma_2"]
+    else:
+        raise ValueError(f"Unknown weights method {method_func}")
 
 
 def content_based(
@@ -35,7 +52,7 @@ def content_based(
     """
 
     transformed_sims = transformed_sims.astype(np.float32)
-    transformed_sims[blending_weights == 0] = np.nan
+    transformed_sims[blending_weights < 1e-7] = np.nan
 
     weights = [
         nan_gaussian_filter_dask_image(
@@ -52,7 +69,8 @@ def content_based(
         for sim_t in transformed_sims
     ]
 
-    weights = da.stack(weights, axis=0)
+    weights = np.stack(weights, axis=0)
+    weights = normalize_weights(weights)
 
     return weights
 
@@ -74,15 +92,18 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
     """
 
     U = ar
+    nan_mask = np.isnan(U)
     V = U.copy()
-    V[np.isnan(U)] = 0
+    V[nan_mask] = 0
     VV = gaussian_filter(V, *args, **kwargs)
 
     W = 0 * U.copy() + 1
-    W[np.isnan(U)] = 0
+    W[nan_mask] = 0
     WW = gaussian_filter(W, *args, **kwargs)
 
     Z = VV / WW
+
+    Z[nan_mask] = np.nan
 
     return Z
 

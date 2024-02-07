@@ -69,7 +69,7 @@ def test_multi_view_fusion(ndim, weights_method):
             overlap=0,
             N_c=1,
             N_t=1,
-            tile_size=200,
+            tile_size=20,
             tiles_x=1,
             tiles_y=1,
             tiles_z=1,
