@@ -531,11 +531,11 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#registration-using-graphs" class="md-nav__link">
-    Registration using graphs
+  <a href="#registration" class="md-nav__link">
+    Registration
   </a>
   
-    <nav class="md-nav" aria-label="Registration using graphs">
+    <nav class="md-nav" aria-label="Registration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -555,6 +555,33 @@
           <li class="md-nav__item">
   <a href="#registration-graph" class="md-nav__link">
     Registration graph
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusion" class="md-nav__link">
+    Fusion
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fusion-framework" class="md-nav__link">
+    Fusion framework
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content-based-fusion" class="md-nav__link">
+    Content based fusion
   </a>
   
 </li>
@@ -827,11 +854,11 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#registration-using-graphs" class="md-nav__link">
-    Registration using graphs
+  <a href="#registration" class="md-nav__link">
+    Registration
   </a>
   
-    <nav class="md-nav" aria-label="Registration using graphs">
+    <nav class="md-nav" aria-label="Registration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -851,6 +878,33 @@
           <li class="md-nav__item">
   <a href="#registration-graph" class="md-nav__link">
     Registration graph
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusion" class="md-nav__link">
+    Fusion
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fusion-framework" class="md-nav__link">
+    Fusion framework
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content-based-fusion" class="md-nav__link">
+    Content based fusion
   </a>
   
 </li>
@@ -904,7 +958,7 @@
 - <code>spatial-image</code>: as key(name)/value pairs under a 'transform' attribute
 - <code>multiscale-spatial-image</code>: to each scale as data variables, sharing the 't' coordinate with the associated image data variable. This is compatible with reading and writing <code>multiscale_spatial_image.to_zarr()</code> and <code>datatree.open_zarr()</code>.</p>
 <p>In the code, coordinate systems are referred to as <em>transform_key</em> (TODO: find better name, e.g. <em>coordinate_system</em>).</p>
-<h2 id="registration-using-graphs">Registration using graphs</h2>
+<h2 id="registration">Registration</h2>
 <h3 id="overlap-graph">Overlap graph</h3>
 <p>An <em>overlap graph</em> is computed from the input images (represented as a directed <code>networkx.DiGraph</code>) in which the
 - nodes represent the views and
@@ -914,6 +968,12 @@
 <p>A suitable reference view can be obtained from the overlap graph by e.g. choosing the view with maximal overlap to other views.</p>
 <h3 id="registration-graph">Registration graph</h3>
 <p>A <em>registration graph</em> or list of registration pairs (TODO: clarify whether this should be a graph or a list of pairs) is obtained from the overlap graph by e.g. finding shortest overlap-weighted paths between the reference view and all other views.</p>
+<h2 id="fusion">Fusion</h2>
+<h3 id="fusion-framework">Fusion framework</h3>
+<p><code>multiview_stitcher.fusion.fuse</code> can be used in combination with fusion implementation(s) available in <code>multiview_stitcher.fusion</code> or custom functions sharing the interface of <code>multiview_stitcher.fusion.fusion_method_weighted_average</code> (default fusion func).</p>
+<p>Fusion implementations are automatically passed blending weights for the input views and can optionally receive further weights obtained by a weight calculation function passed to <code>multiview_stitcher.fusion.fuse</code> (sharing the interface of <code>multiview_stitcher.weights.content_based</code>).</p>
+<h3 id="content-based-fusion">Content based fusion</h3>
+<p>To improve multi-view fusion in the context of strongly scattering samples, <a href="https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf">content-based fusion</a> turns out to be helpful. This fusion method is available in <code>multiview-stitcher</code> by using <code>multiview_stitcher.weights.content_based</code> as an optional fusion weight function (see <a href="###Fusion-framework">above</a>).</p>
 
 
 
