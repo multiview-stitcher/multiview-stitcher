@@ -1,7 +1,10 @@
+import warnings
 from collections.abc import Iterable
+from itertools import product
 
 import numpy as np
 import spatial_image as si
+import xarray as xr
 from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 
 from multiview_stitcher import spatial_image_utils
@@ -19,9 +22,60 @@ def transform_sim(
     """
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+    nsdims = [dim for dim in sim.dims if dim not in sdims]
+
+    if len(nsdims) > 0:
+        merges = []
+        for ns_coords in product(
+            *tuple([sim.coords[nsdim] for nsdim in nsdims])
+        ):
+            nscoord_dict = {
+                ndsim: ns_coords[i] for i, ndsim in enumerate(nsdims)
+            }
+
+            sim_field = spatial_image_utils.sim_sel_coords(sim, nscoord_dict)
+
+            params_coord_dict = {
+                ndsim: ns_coords[i]
+                for i, ndsim in enumerate(nsdims)
+                if ndsim in p.dims
+            }
+            p_field = p.sel(params_coord_dict)
+
+            sim_field_t = transform_sim(
+                sim_field,
+                p=p_field,
+                output_stack_properties=output_stack_properties,
+                output_chunksize=output_chunksize,
+                order=order,
+            )
+
+            sim_field_t = sim_field_t.expand_dims(nsdims)
+            sim_field_t = sim_field_t.assign_coords(
+                {ns_coord.name: [ns_coord.values] for ns_coord in ns_coords}
+            )
+            merges.append(sim_field_t)
+
+        if len(merges) > 1:
+            # suppress pandas future warning occuring within xarray.concat
+            with warnings.catch_warnings():
+                warnings.simplefilter(action="ignore", category=FutureWarning)
+
+                # if sims are named, combine_by_coord returns a dataset
+                sim_t = xr.combine_by_coords([m.rename(None) for m in merges])
+        else:
+            sim_t = sim_field_t
+
+        return sim_t
 
     if p is None:
         p = np.eye(ndim + 1)
+
+    if output_stack_properties is None:
+        output_stack_properties = (
+            spatial_image_utils.get_stack_properties_from_sim(sim)
+        )
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)

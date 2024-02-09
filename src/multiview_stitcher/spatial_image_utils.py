@@ -138,7 +138,7 @@ def set_sim_affine(sim, xaffine, transform_key, base_transform_key=None):
         sim.attrs["transforms"] = {}
 
     if base_transform_key is not None:
-        xaffine = param_utils.matmul_xparams(
+        xaffine = param_utils.rebase_affine(
             xaffine, get_affine_from_sim(sim, transform_key=base_transform_key)
         )
 
@@ -195,3 +195,18 @@ def sim_sel_coords(sim, sel_dict):
                 ].sel({k: v})
 
     return ssim
+
+
+def get_sim_field(sim, ns_coords=None):
+    sdims = get_spatial_dims_from_sim(sim)
+    nsdims = [dim for dim in sim.dims if dim not in sdims]
+
+    if not len(nsdims):
+        return sim
+
+    if ns_coords is None:
+        ns_coords = {dim: sim.coords[dim][0] for dim in nsdims}
+
+    sim_field = sim_sel_coords(sim, ns_coords)
+
+    return sim_field

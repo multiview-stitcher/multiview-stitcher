@@ -328,9 +328,13 @@ def phase_correlation_registration(
             if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
                 disambiguate_metric_val = -1
             else:
-                disambiguate_metric_val = structural_similarity(
-                    im0[mask], im1t[mask], data_range=data_range
-                )
+                # structural_similarity requires at least 7 pixels
+                if np.sum(mask) >= 7:
+                    disambiguate_metric_val = structural_similarity(
+                        im0[mask], im1t[mask], data_range=data_range
+                    )
+                else:
+                    disambiguate_metric_val = -1
 
                 # spearman seems to be better than structural_similarity
                 # for filtering out bad links between views
@@ -657,7 +661,7 @@ def prune_view_adjacency_graph(
     - 'shortest_paths_overlap_weighted':
         Prune to shortest paths in overlap graph
         (weighted by overlap).
-    - 'filter_by_overlap':
+    - 'otsu_threshold_on_overlap':
         Prune to edges with overlap above Otsu threshold.
         This works well for regular grid arrangements, as
         diagonal edges will be pruned.
@@ -739,27 +743,23 @@ def get_node_params_from_reg_graph(g_reg):
                 for i in range(len(reg_path) - 1)
             ]
 
-            if len(path_pairs):
-                path_params = param_utils.identity_transform(
-                    ndim,
-                    t_coords=g_reg_di.edges[
-                        (path_pairs[0][0], path_pairs[0][1])
-                    ]["transform"].coords["t"],
-                )
-            else:
-                path_params = param_utils.identity_transform(ndim)
+            path_params = param_utils.identity_transform(ndim)
 
             for pair in path_pairs:
-                path_params = xr.apply_ufunc(
-                    np.matmul,
+                path_params = param_utils.rebase_affine(
                     g_reg_di.edges[(pair[0], pair[1])]["transform"],
                     path_params,
-                    input_core_dims=[["x_in", "x_out"]] * 2,
-                    output_core_dims=[["x_in", "x_out"]],
-                    vectorize=True,
                 )
 
             node_transforms[n] = param_utils.invert_xparams(path_params)
+
+    # homogenize dims and coords in node_transforms
+    # e.g. if some node's params are missing 't' dimension, add it
+    node_transforms = xr.Dataset(data_vars=node_transforms).to_array("node")
+    node_transforms = {
+        node: node_transforms.sel({"node": node}).drop("node")
+        for node in node_transforms.coords["node"].values
+    }
 
     return node_transforms
 

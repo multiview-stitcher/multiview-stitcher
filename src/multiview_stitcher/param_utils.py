@@ -99,3 +99,37 @@ def get_xparam_from_param(params):
     xparam = xr.DataArray(params, dims=["x_in", "x_out"])
 
     return xparam
+
+
+def rebase_affine(xaffine, base_affine):
+    """
+    Take two xr.DataArrays of affine transforms and
+    - align their coordinates
+    - fill missing values with identity
+    - chain transforms
+    """
+
+    ndim = len(xaffine.coords["x_in"]) - 1
+
+    xaffines_aligned = xr.align(xaffine, base_affine, join="outer")
+    xaffines_aligned_filled = [
+        xaff.fillna(identity_transform(ndim)) for xaff in xaffines_aligned
+    ]
+
+    rebased = matmul_xparams(
+        xaffines_aligned_filled[0], xaffines_aligned_filled[1]
+    )
+
+    return rebased
+
+
+def get_spatial_dims_from_params(xparams):
+    return [dim for dim in xparams.dims if dim in ["x_in", "x_out"]]
+
+
+def get_non_spatial_dims_from_params(xparams):
+    return [
+        dim
+        for dim in xparams.dims
+        if dim not in get_spatial_dims_from_params(xparams)
+    ]

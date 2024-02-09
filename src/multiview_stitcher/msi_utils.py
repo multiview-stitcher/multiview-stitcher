@@ -233,7 +233,7 @@ def set_affine_transform(
         xaffine = xr.DataArray(xaffine, dims=["t", "x_in", "x_out"])
 
     if base_transform_key is not None:
-        xaffine = param_utils.matmul_xparams(
+        xaffine = param_utils.rebase_affine(
             xaffine,
             get_transform_from_msim(msim, transform_key=base_transform_key),
         )

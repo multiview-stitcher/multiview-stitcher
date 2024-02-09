@@ -16,7 +16,7 @@ def plot_positions(
     edge_label="edge weight",
     use_positional_colors=True,
     n_colors=2,
-    t=None,
+    nscoord=None,
     display_view_indices=True,
 ):
     """
@@ -33,25 +33,33 @@ def plot_positions(
         views can be distinguished better (warning: can
         be slow for many views), by default True
     n_colors : int, optional
-        How many different colors to use when `use_positional_colors` is True, by default 2
-    t : _type_, optional
-        t coordinate to use for visualization, by default None
+        How many different colors to use when `use_positional_colors` is True,
+        by default 2
+    nscoord : dict, optional
+        non-spatial coordinate to use for visualization (e.g. {'c': 'EGFP', 't': 0}),
+        by default {}
 
     Returns
     -------
     fig, ax : matplotlib figure and axis
     """
 
+    if nscoord is None:
+        nscoord = {}
+
     ndim = msi_utils.get_ndim(msims[0])
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-    if "t" in sims[0].dims and len(sims[0].coords["t"]) > 1:
-        if t is None:
-            t = sims[0].coords["t"][0]
-        sims = [
-            spatial_image_utils.sim_sel_coords(sim, {"t": t}) for sim in sims
-        ]
+    # select a single position for non-spatial dimensions
+    for isim, sim in enumerate(sims):
+        sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+        nsdims = [dim for dim in sim.dims if dim not in sdims]
+        for nsdim in nsdims:
+            if nsdim in sim.dims and len(sim.coords[nsdim]) > 1:
+                if nsdim not in nscoord:
+                    nscoord[nsdim] = sim.coords[nsdim][0]
+                sims[isim] = spatial_image_utils.sim_sel_coords(sim, nscoord)
 
     if use_positional_colors:
         pos_colors = ["red", "green", "blue", "yellow"]
@@ -117,7 +125,6 @@ def plot_positions(
 
             edge_colors = [edge_cmap(norm(val)) for val in edge_color_vals]
         else:
-            # edge_cmap = 'k'
             edge_colors = ["k" for _ in edges]
 
         # Plot the edges
@@ -132,7 +139,6 @@ def plot_positions(
             sm = plt.cm.ScalarMappable(cmap=edge_cmap)
             sm.set_array(edge_color_vals)
             plt.colorbar(sm, label=edge_label, ax=ax)
-            # plt.colorbar
 
     ax.set_xlabel("z [μm]")
     ax.set_ylabel("x [μm]")

@@ -570,7 +570,8 @@ def calc_fusion_stack_properties(
     dict
         Stack properties (shape, spacing, origin).
     """
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
     views_props = [
         spatial_image_utils.get_stack_properties_from_sim(sim, asarray=False)
@@ -578,23 +579,33 @@ def calc_fusion_stack_properties(
     ]
 
     params_ds = xr.Dataset(dict(enumerate(params)))
+    param_nsdims = param_utils.get_non_spatial_dims_from_params(params_ds)
 
-    if "t" in params_ds.dims:
+    # if present, combine stack properties from multiple non-spatial coordinates
+    if len(param_nsdims):
         stack_properties = combine_stack_props(
             [
                 calc_stack_properties_from_view_properties_and_params(
                     views_props,
                     [
-                        params_ds.sel(t=t).data_vars[ip].data
+                        params_ds.sel(
+                            {
+                                ndsim: ns_coords[i]
+                                for i, ndsim in enumerate(param_nsdims)
+                            }
+                        )
+                        .data_vars[ip]
+                        .data
                         for ip in range(len(params))
                     ],
                     spacing=spacing,
                     mode=mode,
                 )
-                for t in params_ds.coords["t"]
+                for ns_coords in product(
+                    *tuple([params_ds.coords[nsdim] for nsdim in param_nsdims])
+                )
             ]
         )
-
     else:
         stack_properties = (
             calc_stack_properties_from_view_properties_and_params(
@@ -607,7 +618,7 @@ def calc_fusion_stack_properties(
 
     # return properties in dict form
     stack_properties = {
-        k: {dim: v[idim] for idim, dim in enumerate(spatial_dims)}
+        k: {dim: v[idim] for idim, dim in enumerate(sdims)}
         for k, v in stack_properties.items()
     }
 
