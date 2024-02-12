@@ -292,12 +292,15 @@ def phase_correlation_registration(
 
         disambiguate_metric_vals = []
         quality_metric_vals = []
-        # corrs, corrs2 = [], []
-        t_candidates = []
 
         ndim = im0.ndim
+        t_candidates = []
         for shift_candidate in shift_candidates:
-            for s in np.ndindex(tuple([4] * ndim)):
+            for s in np.ndindex(
+                tuple(
+                    [1 if shift_candidate[d] == 0 else 4 for d in range(ndim)]
+                )
+            ):
                 t_candidate = []
                 for d in range(ndim):
                     if s[d] == 0:
@@ -325,22 +328,38 @@ def phase_correlation_registration(
                 cval=0,
             )
             mask = im1t > 0
+
             if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
                 disambiguate_metric_val = -1
+                quality_metric_val = -1
             else:
+                mask_slices = tuple(
+                    [
+                        slice(0, im0.shape[idim] - int(np.ceil(t_[idim])))
+                        if t_[idim] >= 0
+                        else slice(-int(np.ceil(t_[idim])), im0.shape[idim])
+                        for idim in range(ndim)
+                    ]
+                )
                 # structural_similarity requires at least 7 pixels
-                if np.sum(mask) >= 7:
-                    disambiguate_metric_val = structural_similarity(
-                        im0[mask], im1t[mask], data_range=data_range
-                    )
-                else:
+                if (
+                    np.sum(mask) < 7
+                    or np.min([s.stop - s.start for s in mask_slices]) < 7
+                ):
                     disambiguate_metric_val = -1
+                else:
+                    disambiguate_metric_val = structural_similarity(
+                        im0[mask_slices],
+                        im1t[mask_slices] - 1,
+                        data_range=data_range,
+                    )
 
                 # spearman seems to be better than structural_similarity
                 # for filtering out bad links between views
                 quality_metric_val = stats.spearmanr(
-                    im0[mask], im1t[mask]
+                    im0[mask], im1t[mask] - 1
                 ).correlation
+
             disambiguate_metric_vals.append(disambiguate_metric_val)
             quality_metric_vals.append(quality_metric_val)
 
@@ -932,7 +951,7 @@ def compute_pairwise_registrations(
             pairwise_reg_func=pairwise_reg_func,
             reg_func_kwargs=reg_func_kwargs,
         )
-        for pair in tqdm(edges)
+        for pair in edges
     ]
 
     params = compute(params_xds)[0]
