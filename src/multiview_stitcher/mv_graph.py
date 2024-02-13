@@ -3,7 +3,7 @@ import warnings
 import networkx as nx
 import numpy as np
 import xarray as xr
-from dask import compute, delayed
+from dask import compute
 from Geometry3D import (
     ConvexPolygon,
     ConvexPolyhedron,
@@ -61,7 +61,8 @@ def build_view_adjacency_graph_from_msims(
             if imsim1 >= imsim2:
                 continue
 
-            overlap_result = delayed(get_overlap_between_pair_of_sims)(
+            # overlap_result = delayed(get_overlap_between_pair_of_sims)(
+            overlap_result = get_overlap_between_pair_of_sims(
                 msi_utils.get_sim_from_msim(msim1),
                 msi_utils.get_sim_from_msim(msim2),
                 expand=expand,
@@ -75,7 +76,7 @@ def build_view_adjacency_graph_from_msims(
     # but actually slows it down, probably because the GIL is not released
     # by pure python Geometry3D code.
     # Multiprocessing should help, but tests don't suggest so.
-    # Maybe because in current implementation, the full arrays are passed
+    # Maybe because in current implementation, probably the full arrays are passed
     # which might get computed. We should consider passing
     # stack properties / boundaries only.
     overlap_results = compute(overlap_results, scheduler="single-threaded")[0]
