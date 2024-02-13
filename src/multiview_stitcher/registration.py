@@ -341,17 +341,19 @@ def phase_correlation_registration(
                         for idim in range(ndim)
                     ]
                 )
-                # structural_similarity requires at least 7 pixels
-                if (
-                    np.sum(mask) < 7
-                    or np.min([s.stop - s.start for s in mask_slices]) < 7
-                ):
+
+                # structural similarity seems to be better than
+                # correlation for disambiguation (need to solidify this)
+                min_shape = np.min(im0[mask_slices].shape)
+                ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
+                if ssim_win_size < 3:
                     disambiguate_metric_val = -1
                 else:
                     disambiguate_metric_val = structural_similarity(
                         im0[mask_slices],
                         im1t[mask_slices] - 1,
                         data_range=data_range,
+                        win_size=ssim_win_size,
                     )
 
                 # spearman seems to be better than structural_similarity

@@ -3,7 +3,7 @@ import warnings
 import networkx as nx
 import numpy as np
 import xarray as xr
-from dask import compute
+from dask import compute, delayed
 from Geometry3D import (
     ConvexPolygon,
     ConvexPolyhedron,
@@ -55,21 +55,36 @@ def build_view_adjacency_graph_from_msims(
     for iview in range(len(msims)):
         g.add_node(iview)
 
+    pairs, overlap_results = [], []
     for imsim1, msim1 in enumerate(msims):
         for imsim2, msim2 in enumerate(msims):
             if imsim1 >= imsim2:
                 continue
 
-            overlap_area, _ = get_overlap_between_pair_of_sims(
+            overlap_result = delayed(get_overlap_between_pair_of_sims)(
                 msi_utils.get_sim_from_msim(msim1),
                 msi_utils.get_sim_from_msim(msim2),
                 expand=expand,
                 transform_key=transform_key,
             )
 
-            # overlap 0 means one pixel overlap
-            if overlap_area > 0:
-                g.add_edge(imsim1, imsim2, overlap=overlap_area)
+            pairs.append((imsim1, imsim2))
+            overlap_results.append(overlap_result)
+
+    # Threading doesn't improve performance here
+    # but actually slows it down, probably because the GIL is not released
+    # by pure python Geometry3D code.
+    # Multiprocessing should help, but tests don't suggest so.
+    # Maybe because in current implementation, the full arrays are passed
+    # which might get computed. We should consider passing
+    # stack properties / boundaries only.
+    overlap_results = compute(overlap_results, scheduler="single-threaded")[0]
+
+    for pair, overlap_result in zip(pairs, overlap_results):
+        overlap_area = overlap_result[0]
+        # overlap 0 means one pixel overlap
+        if overlap_area > 0:
+            g.add_edge(pair[0], pair[1], overlap=overlap_area)
 
     return g
 
