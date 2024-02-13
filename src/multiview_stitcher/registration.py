@@ -586,7 +586,7 @@ def register_pair_of_msims(
 
     if (
         registration_binning is not None
-        and min(registration_binning.values()) > 1
+        and max(registration_binning.values()) > 1
     ):
         reg_sims_b = [
             sim.coarsen(registration_binning, boundary="trim")
@@ -784,7 +784,7 @@ def get_node_params_from_reg_graph(g_reg):
 
 
 def register(
-    msims: [MultiscaleSpatialImage],
+    msims: list[MultiscaleSpatialImage],
     transform_key,
     reg_channel_index=None,
     new_transform_key=None,
