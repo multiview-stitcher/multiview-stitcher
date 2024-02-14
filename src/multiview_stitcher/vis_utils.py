@@ -79,8 +79,10 @@ def plot_positions(
     v = Visualizer(backend="matplotlib")
 
     for iview, sim in enumerate(sims):
-        view_domain = mv_graph.get_poly_from_sim(
-            sim, transform_key=transform_key
+        view_domain = mv_graph.get_poly_from_stack_props(
+            spatial_image_utils.get_stack_properties_from_sim(
+                sim, transform_key=transform_key
+            )
         )
 
         v.add((view_domain, pos_colors[iview], 1))

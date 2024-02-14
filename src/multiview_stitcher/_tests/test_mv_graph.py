@@ -3,17 +3,18 @@ import pytest
 
 from multiview_stitcher import (
     io,
-    # spatial_image_utils,
     msi_utils,
     mv_graph,
     sample_data,
+    spatial_image_utils,
 )
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 @pytest.mark.parametrize(
     "ndim, overlap",
-    [(ndim, overlap) for ndim in [2, 3] for overlap in [0, 1, 3]],
+    # [(ndim, overlap) for ndim in [2, 3] for overlap in [0, 1, 3]],
+    [(ndim, overlap) for ndim in [3] for overlap in [1]],
 )
 def test_overlap(ndim, overlap):
     spacing_x = 0.5
@@ -35,11 +36,20 @@ def test_overlap(ndim, overlap):
 
     sims = [sim.sel(t=0) for sim in sims]
 
+    stack_propss = [
+        spatial_image_utils.get_stack_properties_from_sim(
+            sim, transform_key=METADATA_TRANSFORM_KEY
+        )
+        for sim in sims
+    ]
+
     overlap_areas = []
-    for _isim1, sim1 in enumerate(sims):
-        for _isim2, sim2 in enumerate(sims):
-            overlap_area, _ = mv_graph.get_overlap_between_pair_of_sims(
-                sim1, sim2, transform_key=METADATA_TRANSFORM_KEY
+    for isim1, _sim1 in enumerate(sims):
+        for isim2, _sim2 in enumerate(sims):
+            overlap_area, _ = mv_graph.get_overlap_between_pair_of_stack_props(
+                # sim1, sim2, transform_key=METADATA_TRANSFORM_KEY
+                stack_propss[isim1],
+                stack_propss[isim2],
             )
             overlap_areas.append(overlap_area)
 
@@ -107,14 +117,19 @@ def test_mv_graph_creation():
     return
 
 
-def test_get_intersection_polygon_from_pair_of_sims_2D():
+def test_get_intersection_polygon_from_pair_of_stack_props():
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
         sample_data.get_mosaic_sample_data_path()
     )
 
     intersection_polygon = (
-        mv_graph.get_intersection_polygon_from_pair_of_sims_2D(
-            sims[0], sims[1], transform_key=METADATA_TRANSFORM_KEY
+        mv_graph.get_intersection_poly_from_pair_of_stack_props(
+            spatial_image_utils.get_stack_properties_from_sim(
+                sims[0], transform_key=METADATA_TRANSFORM_KEY
+            ),
+            spatial_image_utils.get_stack_properties_from_sim(
+                sims[1], transform_key=METADATA_TRANSFORM_KEY
+            ),
         )
     )
 

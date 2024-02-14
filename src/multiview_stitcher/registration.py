@@ -127,8 +127,10 @@ def get_overlap_bboxes(
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
 
     corners = [
-        mv_graph.get_faces_from_sim(
-            sim, transform_key=input_transform_key
+        mv_graph.get_vertices_from_stack_props(
+            spatial_image_utils.get_stack_properties_from_sim(
+                sim, transform_key=input_transform_key
+            )
         ).reshape(-1, ndim)
         for sim in [sim1, sim2]
     ]
@@ -1236,9 +1238,11 @@ def crop_sim_to_references(
     for irefsim, reference_sim in enumerate(reference_sims):
         ref_corners_world += list(
             np.unique(
-                mv_graph.get_faces_from_sim(
-                    reference_sim,
-                    transform_key=transform_keys_reference[irefsim],
+                mv_graph.get_vertices_from_stack_props(
+                    spatial_image_utils.get_stack_properties_from_sim(
+                        reference_sim,
+                        transform_key=transform_keys_reference[irefsim],
+                    )
                 ).reshape((-1, 2)),
                 axis=0,
             )

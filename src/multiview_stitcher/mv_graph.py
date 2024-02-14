@@ -55,18 +55,24 @@ def build_view_adjacency_graph_from_msims(
     for iview in range(len(msims)):
         g.add_node(iview)
 
+    stack_propss = [
+        spatial_image_utils.get_stack_properties_from_sim(
+            msi_utils.get_sim_from_msim(msim), transform_key=transform_key
+        )
+        for msim in msims
+    ]
+
     pairs, overlap_results = [], []
-    for imsim1, msim1 in enumerate(msims):
-        for imsim2, msim2 in enumerate(msims):
+    for imsim1, _msim1 in enumerate(msims):
+        for imsim2, _msim2 in enumerate(msims):
             if imsim1 >= imsim2:
                 continue
 
             # overlap_result = delayed(get_overlap_between_pair_of_sims)(
-            overlap_result = get_overlap_between_pair_of_sims(
-                msi_utils.get_sim_from_msim(msim1),
-                msi_utils.get_sim_from_msim(msim2),
+            overlap_result = get_overlap_between_pair_of_stack_props(
+                stack_propss[imsim1],
+                stack_propss[imsim2],
                 expand=expand,
-                transform_key=transform_key,
             )
 
             pairs.append((imsim1, imsim2))
@@ -90,11 +96,10 @@ def build_view_adjacency_graph_from_msims(
     return g
 
 
-def get_overlap_between_pair_of_sims(
-    sim1,
-    sim2,
+def get_overlap_between_pair_of_stack_props(
+    stack_props_1,
+    stack_props_2,
     expand=False,
-    transform_key=None,
 ):
     """
     - if there is no overlap, return overlap area of -1
@@ -102,39 +107,17 @@ def get_overlap_between_pair_of_sims(
     - assumes spacing is the same for sim1 and sim2
     """
 
-    if "t" in sim1.dims:
-        sim1 = spatial_image_utils.sim_sel_coords(
-            sim1, {"t": sim1.coords["t"][0]}
+    ndim = len(stack_props_1["origin"])
+
+    intersection_poly_structure = (
+        get_intersection_poly_from_pair_of_stack_props(
+            stack_props_1, stack_props_2
         )
+    )
 
-    if "t" in sim2.dims:
-        sim2 = spatial_image_utils.sim_sel_coords(
-            sim2, {"t": sim2.coords["t"][0]}
-        )
-
-    assert spatial_image_utils.get_ndim_from_sim(
-        sim1
-    ) == spatial_image_utils.get_ndim_from_sim(sim2)
-
-    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
-
-    if ndim == 2:
-        intersection_poly_structure = (
-            get_intersection_polygon_from_pair_of_sims_2D(
-                sim1,
-                sim2,
-                transform_key=transform_key,
-            )
-        )
-
-    elif ndim == 3:
-        intersection_poly_structure = (
-            get_intersection_polyhedron_from_pair_of_sims_3D(
-                sim1, sim2, transform_key=transform_key
-            )
-        )
-
-    spacing = spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+    spacing = np.array(
+        [stack_props_1["spacing"][dim] for dim in ["z", "y", "x"][-ndim:]]
+    )
     small_length = np.min(spacing) / 10.0
 
     if intersection_poly_structure is None:
@@ -229,8 +212,13 @@ def get_nodes_dataset_from_graph(g, node_attribute):
     )
 
 
-def get_faces_from_sim(sim, transform_key):
-    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+def get_vertices_from_stack_props(stack_props):
+    """
+    Get sim stack corners in world coordinates.
+    """
+    ndim = len(stack_props["origin"])
+    sdims = ["z", "y", "x"][-ndim:]
+
     gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
     faces = []
@@ -241,20 +229,17 @@ def get_faces_from_sim(sim, transform_key):
 
     faces = np.array(faces)
 
-    origin = spatial_image_utils.get_origin_from_sim(sim, asarray=True)
-    spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
-    shape = spatial_image_utils.get_shape_from_sim(sim, asarray=True)
-    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+    faces = faces * (
+        np.array([stack_props["shape"][dim] for dim in sdims]) - 1
+    ) * np.array([stack_props["spacing"][dim] for dim in sdims]) + np.array(
+        [stack_props["origin"][dim] for dim in sdims]
+    )
 
-    faces = faces * (shape - 1) * spacing + origin
-
-    if transform_key is not None:
+    if "transform" in stack_props:
         orig_shape = faces.shape
         faces = faces.reshape(-1, ndim)
 
-        affine = spatial_image_utils.get_affine_from_sim(
-            sim, transform_key=transform_key
-        )
+        affine = stack_props["transform"]
         faces = np.dot(
             affine, np.hstack([faces, np.ones((faces.shape[0], 1))]).T
         ).T[:, :-1]
@@ -288,8 +273,33 @@ def sims_are_far_apart(sim1, sim2, transform_key):
     ]
 
 
-def get_intersection_polyhedron_from_pair_of_sims_3D(
-    sim1, sim2, transform_key
+def strack_props_are_far_apart(stack_props_1, stack_props_2):
+    """ """
+
+    centers = [
+        np.mean(get_vertices_from_stack_props(stack_props), axis=0)
+        for stack_props in [stack_props_1, stack_props_2]
+    ]
+    np.linalg.norm(centers[1] - centers[0], axis=0)
+
+    [
+        np.linalg.norm(
+            np.array(
+                [
+                    stack_props["origin"][dim]
+                    + stack_props["shape"][dim] * stack_props["spacing"][dim]
+                    - stack_props["origin"][dim]
+                    for dim in stack_props["origin"]
+                ]
+            )
+        )
+        for stack_props in [stack_props_1, stack_props_2]
+    ]
+
+
+def get_intersection_poly_from_pair_of_stack_props(
+    stack_props_1,
+    stack_props_2,
 ):
     """
     3D intersection is a polyhedron.
@@ -297,41 +307,28 @@ def get_intersection_polyhedron_from_pair_of_sims_3D(
 
     # perform basic check to see if there can be overlap
 
-    if sims_are_far_apart(sim1, sim2, transform_key):
+    if strack_props_are_far_apart(stack_props_1, stack_props_2):
         return None
+
+    ndim = len(stack_props_1["origin"])
 
     cphs = []
     facess = []
-    for sim in [sim1, sim2]:
-        faces = get_faces_from_sim(sim, transform_key=transform_key)
-        cps = ConvexPolyhedron(
-            [ConvexPolygon([Point(c) for c in face]) for face in faces]
-        )
-        facess.append(faces.reshape((-1, 3)))
+    for stack_props in [stack_props_1, stack_props_2]:
+        faces = get_vertices_from_stack_props(stack_props)
+        cps = get_poly_from_stack_props(stack_props)
+
+        facess.append(faces.reshape((-1, ndim)))
         cphs.append(cps)
 
-    if min([any((f == facess[0]).all(1)) for f in facess[1]]) and min(
-        [any((f == facess[1]).all(1)) for f in facess[0]]
-    ):
-        return cphs[0]
+    if ndim == 3:
+        # TODO: check if line below is really needed
+        if min([any((f == facess[0]).all(1)) for f in facess[1]]) and min(
+            [any((f == facess[1]).all(1)) for f in facess[0]]
+        ):
+            return cphs[0]
     else:
         return cphs[0].intersection(cphs[1])
-
-
-def get_intersection_polygon_from_pair_of_sims_2D(sim1, sim2, transform_key):
-    """
-    For 2D, the intersection is a polygon. Still three-dimensional, but with z=0.
-    """
-
-    if sims_are_far_apart(sim1, sim2, transform_key):
-        return None
-
-    cps = [
-        get_poly_from_sim(sim, transform_key=transform_key)
-        for sim in [sim1, sim2]
-    ]
-
-    return cps[0].intersection(cps[1])
 
 
 def points_inside_sim(pts, sim, transform_key):
@@ -344,32 +341,34 @@ def points_inside_sim(pts, sim, transform_key):
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     assert len(pts[0]) == ndim
 
-    sim_domain = get_poly_from_sim(sim, transform_key=transform_key)
+    sim_domain = get_poly_from_stack_props(
+        spatial_image_utils.get_stack_properties_from_sim(
+            sim, transform_key=transform_key
+        )
+    )
 
     return np.array(
         [sim_domain.intersection(Point(pt)) is not None for pt in pts]
     )
 
 
-def get_poly_from_sim(sim, transform_key):
+def get_poly_from_stack_props(stack_props):
     """
     Get Geometry3D.ConvexPolygon or Geometry3D.ConvexPolyhedron
     representing the image domain of sim.
     """
 
-    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+    ndim = len(stack_props["origin"])
 
     if ndim == 2:
         corners = np.unique(
-            get_faces_from_sim(sim, transform_key=transform_key).reshape(
-                (-1, 2)
-            ),
+            get_vertices_from_stack_props(stack_props).reshape((-1, 2)),
             axis=0,
         )
         sim_domain = ConvexPolygon([Point([0] + list(c)) for c in corners])
 
     elif ndim == 3:
-        faces = get_faces_from_sim(sim, transform_key=transform_key)
+        faces = get_vertices_from_stack_props(stack_props)
         sim_domain = ConvexPolyhedron(
             [ConvexPolygon([Point(c) for c in face]) for face in faces]
         )

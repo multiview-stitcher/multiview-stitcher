@@ -75,12 +75,17 @@ def get_spacing_from_sim(sim, asarray=False):
     return spacing
 
 
-def get_stack_properties_from_sim(sim, asarray=False):
-    return {
+def get_stack_properties_from_sim(sim, transform_key=None, asarray=False):
+    stack_properties = {
         "shape": get_shape_from_sim(sim, asarray=asarray),
         "spacing": get_spacing_from_sim(sim, asarray=asarray),
         "origin": get_origin_from_sim(sim, asarray=asarray),
     }
+
+    if transform_key is not None:
+        stack_properties["transform"] = get_affine_from_sim(sim, transform_key)
+
+    return stack_properties
 
 
 def ensure_time_dim(sim):
