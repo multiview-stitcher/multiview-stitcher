@@ -40,6 +40,11 @@ def get_spatial_dims_from_sim(sim):
     return [dim for dim in ["z", "y", "x"] if dim in sim.dims]
 
 
+def get_nonspatial_dims_from_sim(sim):
+    sdims = get_spatial_dims_from_sim(sim)
+    return [dim for dim in sim.dims if dim not in sdims]
+
+
 def get_origin_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
     origin = {dim: float(sim.coords[dim][0]) for dim in spatial_dims}

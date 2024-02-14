@@ -3,13 +3,14 @@ import warnings
 import networkx as nx
 import numpy as np
 import xarray as xr
-from dask import compute
+from dask import compute, delayed
 from Geometry3D import (
     ConvexPolygon,
     ConvexPolyhedron,
     Point,
     Segment,
 )
+from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
 # set_eps(get_eps() * 100000) # https://github.com/GouMinghao/Geometry3D/issues/8
@@ -55,37 +56,80 @@ def build_view_adjacency_graph_from_msims(
     for iview in range(len(msims)):
         g.add_node(iview)
 
+    sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    nsdims = spatial_image_utils.get_nonspatial_dims_from_sim(sims[0])
+
+    if len(nsdims):
+        sims = [
+            spatial_image_utils.sim_sel_coords(
+                sim, {nsdim: sim.coords[nsdim][0] for nsdim in nsdims}
+            )
+            for sim in sims
+        ]
+
     stack_propss = [
         spatial_image_utils.get_stack_properties_from_sim(
-            msi_utils.get_sim_from_msim(msim), transform_key=transform_key
+            sim, transform_key=transform_key
         )
-        for msim in msims
+        for sim in sims
     ]
 
+    # calculate overlap between pairs of views that are close to each other
+    # (closer than the maximum diameter of the views)
+    # use scipy cKDTree for performance
+
+    sim_centers = np.array(
+        [
+            spatial_image_utils.get_center_of_sim(
+                sim, transform_key=transform_key
+            )
+            for sim in sims
+        ]
+    )
+
+    sim_diameters = np.array(
+        [
+            np.linalg.norm(
+                np.array(
+                    [
+                        stack_props["shape"][dim] * stack_props["spacing"][dim]
+                        for dim in sdims
+                    ]
+                )
+            )
+            for stack_props in stack_propss
+        ]
+    )
+    max_diameter = np.max(sim_diameters)
+
+    tree = cKDTree(sim_centers)
+
+    # get all pairs of views that are close to each other
     pairs, overlap_results = [], []
-    for imsim1, _msim1 in enumerate(msims):
-        for imsim2, _msim2 in enumerate(msims):
-            if imsim1 >= imsim2:
+    for iview in range(len(msims)):
+        close_views = tree.query_ball_point(
+            sim_centers[iview], max_diameter + 1
+        )
+        for close_view in close_views:
+            if iview == close_view:
                 continue
 
-            # overlap_result = delayed(get_overlap_between_pair_of_sims)(
-            overlap_result = get_overlap_between_pair_of_stack_props(
-                stack_propss[imsim1],
-                stack_propss[imsim2],
+            overlap_result = delayed(get_overlap_between_pair_of_stack_props)(
+                stack_propss[iview],
+                stack_propss[close_view],
                 expand=expand,
             )
 
-            pairs.append((imsim1, imsim2))
+            pairs.append((iview, close_view))
             overlap_results.append(overlap_result)
 
-    # Threading doesn't improve performance here
-    # but actually slows it down, probably because the GIL is not released
-    # by pure python Geometry3D code.
-    # Multiprocessing should help, but tests don't suggest so.
-    # Maybe because in current implementation, probably the full arrays are passed
-    # which might get computed. We should consider passing
-    # stack properties / boundaries only.
-    overlap_results = compute(overlap_results, scheduler="single-threaded")[0]
+    # multithreading doesn't improve performance here, probably because the GIL is
+    # not released by pure python Geometry3D code. Using multiprocessing instead.
+    # Probably need to confirm here that local dask scheduler doesn't conflict
+    # with dask distributed scheduler
+    overlap_results = compute(overlap_results, scheduler="processes")[0]
 
     for pair, overlap_result in zip(pairs, overlap_results):
         overlap_area = overlap_result[0]
@@ -321,12 +365,11 @@ def get_intersection_poly_from_pair_of_stack_props(
         facess.append(faces.reshape((-1, ndim)))
         cphs.append(cps)
 
-    if ndim == 3:
-        # TODO: check if line below is really needed
-        if min([any((f == facess[0]).all(1)) for f in facess[1]]) and min(
-            [any((f == facess[1]).all(1)) for f in facess[0]]
-        ):
-            return cphs[0]
+    if ndim == 3 and (
+        min([any((f == facess[0]).all(1)) for f in facess[1]])
+        and min([any((f == facess[1]).all(1)) for f in facess[0]])
+    ):
+        return cphs[0]
     else:
         return cphs[0].intersection(cphs[1])
 

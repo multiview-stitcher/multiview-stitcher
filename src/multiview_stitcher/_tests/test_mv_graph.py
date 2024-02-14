@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from dask import compute, delayed
 
 from multiview_stitcher import (
     io,
@@ -13,8 +14,7 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 @pytest.mark.parametrize(
     "ndim, overlap",
-    # [(ndim, overlap) for ndim in [2, 3] for overlap in [0, 1, 3]],
-    [(ndim, overlap) for ndim in [3] for overlap in [1]],
+    [(ndim, overlap) for ndim in [2, 3] for overlap in [0, 1, 3]],
 )
 def test_overlap(ndim, overlap):
     spacing_x = 0.5
@@ -27,8 +27,8 @@ def test_overlap(ndim, overlap):
         N_t=1,
         tile_size=15,
         tiles_x=3,
-        tiles_y=3,
-        tiles_z=3,
+        tiles_y=2,
+        tiles_z=2,
         spacing_x=spacing_x,
         spacing_y=spacing_y,
         spacing_z=spacing_z,
@@ -43,15 +43,22 @@ def test_overlap(ndim, overlap):
         for sim in sims
     ]
 
-    overlap_areas = []
+    overlap_results = []
     for isim1, _sim1 in enumerate(sims):
         for isim2, _sim2 in enumerate(sims):
-            overlap_area, _ = mv_graph.get_overlap_between_pair_of_stack_props(
-                # sim1, sim2, transform_key=METADATA_TRANSFORM_KEY
-                stack_propss[isim1],
-                stack_propss[isim2],
+            overlap_results.append(
+                delayed(mv_graph.get_overlap_between_pair_of_stack_props)(
+                    stack_propss[isim1],
+                    stack_propss[isim2],
+                )
             )
-            overlap_areas.append(overlap_area)
+
+    overlap_areas = [
+        overlap_result[0]
+        for overlap_result in compute(overlap_results, scheduler="processes")[
+            0
+        ]
+    ]
 
     overlap_areas = np.array(overlap_areas).reshape((len(sims), len(sims)))
 
