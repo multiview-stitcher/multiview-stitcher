@@ -72,7 +72,7 @@ def get_optimal_registration_binning(
     while (
         max(
             [
-                np.product(
+                np.prod(
                     [
                         overlap[dim]
                         / spacings[isim][dim]
@@ -331,7 +331,7 @@ def phase_correlation_registration(
             )
             mask = im1t > 0
 
-            if float(np.sum(mask)) / np.product(im1.shape) < 0.1:
+            if float(np.sum(mask)) / np.prod(im1.shape) < 0.1:
                 disambiguate_metric_val = -1
                 quality_metric_val = -1
             else:
@@ -780,7 +780,7 @@ def get_node_params_from_reg_graph(g_reg):
     # e.g. if some node's params are missing 't' dimension, add it
     node_transforms = xr.Dataset(data_vars=node_transforms).to_array("node")
     node_transforms = {
-        node: node_transforms.sel({"node": node}).drop("node")
+        node: node_transforms.sel({"node": node}).drop_vars("node")
         for node in node_transforms.coords["node"].values
     }
 

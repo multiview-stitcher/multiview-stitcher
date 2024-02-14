@@ -471,10 +471,6 @@ def fuse_field(
         field_ims_t = da.stack(field_ims_t)
         field_ws_t = da.stack(field_ws_t)
 
-        wsum = da.nansum(field_ws_t, axis=0)
-        wsum[wsum == 0] = 1
-
-        field_ws_t = field_ws_t / wsum
         field_ws_t = weights.normalize_weights(field_ws_t)
 
         # calculate fusion weights
