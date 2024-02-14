@@ -4,20 +4,19 @@ import networkx as nx
 import numpy as np
 import xarray as xr
 from dask import compute, delayed
-from Geometry3D import (
-    ConvexPolygon,
-    ConvexPolyhedron,
-    Point,
-    Segment,
-)
 from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
-# set_eps(get_eps() * 100000) # https://github.com/GouMinghao/Geometry3D/issues/8
-# 20230924: set_eps line above created problems
-# potentially because it had been called multiple times
-# commenting out for now
 from multiview_stitcher import msi_utils, spatial_image_utils
+from multiview_stitcher.misc_utils import DisableLogger
+
+with DisableLogger():
+    from Geometry3D import (
+        ConvexPolygon,
+        ConvexPolyhedron,
+        Point,
+        Segment,
+    )
 
 
 class NotEnoughOverlapError(Exception):

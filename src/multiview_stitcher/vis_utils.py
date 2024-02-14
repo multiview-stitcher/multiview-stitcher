@@ -1,9 +1,12 @@
 import numpy as np
-from Geometry3D import Visualizer
 from matplotlib import cm, colors
 from matplotlib import pyplot as plt
 
 from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
+from multiview_stitcher.misc_utils import DisableLogger
+
+with DisableLogger():
+    from Geometry3D import Visualizer
 
 
 def plot_positions(
