@@ -20,6 +20,10 @@ def transform_sim(
 ):
     """
     (Lazily) transform a spatial image
+
+    TODO: Need to have option to low pass filter
+    before significantly reducing spacing, see
+    https://computergraphics.stackexchange.com/questions/103/do-you-need-to-use-a-lowpass-filter-before-downsizing-an-image
     """
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim)

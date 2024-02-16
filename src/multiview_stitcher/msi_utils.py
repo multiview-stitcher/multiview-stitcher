@@ -43,26 +43,6 @@ def get_transform_from_msim(msim, transform_key):
     return msim["scale0"][transform_key]
 
 
-# def multiscale_sel_coords(msim, sel_dict):
-
-#     out_msim = msim.copy(deep=True)
-#     for child in msim.children.keys():
-#         for data_var in msim[child].data_vars:
-#             tmpsel = {dim: sel_vals for dim, sel_vals in sel_dict.items()
-#                      if dim in out_msim[child][data_var].dims}
-#             import pdb; pdb.set_trace()
-#             out_msim[child][data_var] = \
-#                 out_msim[child][data_var].sel(tmpsel, drop=False)
-#             out_msim[child][data_var] = \
-#                 out_msim[child][data_var].assign_coords(tmpsel)
-#             # print(tmpsel)
-
-#             # for dim, sel_vals in tmpsel.items():
-#             #     out_msim[child][data_var].coords[dim] = sel_vals
-
-#     return out_msim
-
-
 def multiscale_sel_coords(msim, sel_dict):
     """ """
 

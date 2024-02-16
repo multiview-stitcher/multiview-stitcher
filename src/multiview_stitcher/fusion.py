@@ -156,7 +156,7 @@ def fuse(
         )
 
         if output_origin is not None:
-            output_stack_properties = output_origin
+            output_stack_properties["origin"] = output_origin
 
         if output_shape is not None:
             output_stack_properties["shape"] = output_shape
@@ -321,7 +321,6 @@ def fuse_field(
 
     # reassemble sims from data and metadata
     # this way we can pass them to fuse_field without triggering compute
-
     sims = [
         si.to_spatial_image(
             sim_data,
@@ -351,6 +350,16 @@ def fuse_field(
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
+    # # downsample input views to just below output spacing
+    # if coarsen_before_transform:
+    #     for isim, sim in enumerate(sims):
+    #         spacing = spatial_image_utils.get_spacing_from_sim(sim)
+    #         shape = spatial_image_utils.get_shape_from_sim(sim)
+    #         bin_factors = {dim: np.max(
+    #             [1, np.min([shape[dim], int(np.floor(output_stack_properties["spacing"][dim] / spacing[dim]))])])
+    #             for dim in spatial_dims}
+    #         sims[isim] = sims[isim].coarsen(bin_factors, boundary="trim").mean()
 
     if fusion_requires_blending_weights:
         # get blending weights
