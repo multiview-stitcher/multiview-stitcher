@@ -547,9 +547,9 @@ def filter_edges(g, weight_key="overlap", threshold=None):
     edges_df = nx.to_pandas_edgelist(g)
 
     if threshold is None:
-        threshold = threshold_otsu(np.array(edges_df["overlap"]))
+        threshold = threshold_otsu(np.array(edges_df[weight_key]))
 
-    edges_to_delete_df = edges_df[edges_df.overlap < threshold]
+    edges_to_delete_df = edges_df[edges_df[weight_key] < threshold]
 
     g_filtered = g.copy()
     g_filtered.remove_edges_from(
