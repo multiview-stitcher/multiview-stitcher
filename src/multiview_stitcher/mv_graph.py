@@ -1,4 +1,5 @@
 import warnings
+from collections.abc import Iterable
 
 import networkx as nx
 import numpy as np
@@ -546,10 +547,20 @@ are %s connected components composed of the following tile indices:\n"""
 def filter_edges(g, weight_key="overlap", threshold=None):
     edges_df = nx.to_pandas_edgelist(g)
 
+    if not len(edges_df):
+        return g
+
     if threshold is None:
         threshold = threshold_otsu(np.array(edges_df[weight_key]))
 
-    edges_to_delete_df = edges_df[edges_df[weight_key] < threshold]
+    edges_to_delete_df = edges_df[
+        (
+            np.array([w.min() for w in edges_df[weight_key]])
+            if isinstance(edges_df[weight_key].iloc[0], Iterable)
+            else edges_df[weight_key]
+        )
+        < threshold
+    ]
 
     g_filtered = g.copy()
     g_filtered.remove_edges_from(
