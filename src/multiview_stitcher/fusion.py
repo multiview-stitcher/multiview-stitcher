@@ -7,6 +7,7 @@ import numpy as np
 import spatial_image as si
 import xarray as xr
 from dask import delayed
+from dask.utils import has_keyword
 
 from multiview_stitcher import (
     param_utils,
@@ -16,11 +17,29 @@ from multiview_stitcher import (
 )
 
 
-def fusion_method_weighted_average(
+def max_fusion(
+    transformed_views,
+):
+    """
+    Simple pixel-wise maximum fusion.
+
+    Parameters
+    ----------
+    transformed_views : list of ndarrays
+        transformed input views
+
+    Returns
+    -------
+    ndarray
+        Maximum of input views at each pixel
+    """
+    return np.nanmax(transformed_views, axis=0)
+
+
+def weighted_average_fusion(
     transformed_views,
     blending_weights,
     fusion_weights=None,
-    params=None,
 ):
     """
     Simple weighted average fusion.
@@ -34,7 +53,6 @@ def fusion_method_weighted_average(
     fusion_weights : list of ndarrays, optional
         additional view weights for fusion, e.g. contrast weighted scores.
         By default None.
-    params : _type_, optional
 
     Returns
     -------
@@ -57,9 +75,9 @@ def fusion_method_weighted_average(
 def fuse(
     sims: list,
     transform_key: str = None,
-    fusion_method=fusion_method_weighted_average,
-    weights_method=None,
-    weights_method_kwargs=None,
+    fusion_func=weighted_average_fusion,
+    weights_func=None,
+    weights_func_kwargs=None,
     output_spacing=None,
     output_stack_mode="union",
     output_origin=None,
@@ -67,6 +85,7 @@ def fuse(
     output_stack_properties=None,
     output_chunksize=512,
     overlap_in_pixels=None,
+    interpolation_order=1,
 ):
     """
 
@@ -82,11 +101,11 @@ def fuse(
     transform_key : str, optional
         Which (extrinsic coordinate system) to use as transformation parameters.
         By default None (intrinsic coordinate system).
-    fusion_method : func, optional
+    fusion_func : func, optional
         Fusion function to be applied. This function receives the following
         inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
-        By default fusion_method_weighted_average
-    weights_method : func, optional
+        By default weighted_average_fusion
+    weights_func : func, optional
         Function to calculate fusion weights. This function receives the
         following inputs: transformed_views (as spatial images), params.
         It returns (non-normalized) fusion weights for each view.
@@ -176,6 +195,8 @@ def fuse(
                 ssim.data.chunks,
                 ssim.data.dtype,
             )
+            if isinstance(ssim.data, da.Array)
+            else ssim.data
             for ssim in ssims
         ]
 
@@ -192,12 +213,13 @@ def fuse(
             sims_datas,
             sims_metas,
             sparams,
-            fusion_method=fusion_method,
-            weights_method=weights_method,
-            weights_method_kwargs=weights_method_kwargs,
+            fusion_func=fusion_func,
+            weights_func=weights_func,
+            weights_func_kwargs=weights_func_kwargs,
             output_stack_properties=output_stack_properties,
             output_chunksize=output_chunksize,
             overlap_in_pixels=overlap_in_pixels,
+            interpolation_order=interpolation_order,
         )
 
         # continue working with dask array
@@ -243,23 +265,34 @@ def fuse(
     res = spatial_image_utils.get_sim_from_xim(res)
     spatial_image_utils.set_sim_affine(
         res,
-        param_utils.identity_transform(len(sdims), res.coords["t"]),
+        # param_utils.identity_transform(len(sdims), res.coords["t"]),
+        param_utils.identity_transform(len(sdims)),
         transform_key,
     )
 
     return res
 
 
+def func_ignore_nan_warning(func, *args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            action="ignore", message="All-NaN slice encountered"
+        )
+        warnings.filterwarnings(action="ignore", message="Mean of empty slice")
+        return func(*args, **kwargs)
+
+
 def fuse_field(
     sims_datas,
     sims_metas,
     params,
-    fusion_method=fusion_method_weighted_average,
-    weights_method=None,
-    weights_method_kwargs=None,
+    fusion_func=weighted_average_fusion,
+    weights_func=None,
+    weights_func_kwargs=None,
     output_stack_properties=None,
     output_chunksize=512,
     overlap_in_pixels=None,
+    interpolation_order=1,
 ):
     """
     Fuse tiles from a single timepoint and channel (a (Z)YX "field").
@@ -270,9 +303,9 @@ def fuse_field(
         Input images containing only spatial dimensions.
     params : list of xarray.DataArray
         Transformation parameters for each view.
-    fusion_method : func, optional
+    fusion_func : func, optional
         See docstring of `fuse`.
-    weights_method : func, optional
+    weights_func : func, optional
         See docstring of `fuse`.
     output_stack_properties : dict, optional
         Dictionary describing the output stack with keys
@@ -288,6 +321,7 @@ def fuse_field(
 
     # reassemble sims from data and metadata
     # this way we can pass them to fuse_field without triggering compute
+
     sims = [
         si.to_spatial_image(
             sim_data,
@@ -298,42 +332,38 @@ def fuse_field(
         for sim_meta, sim_data in zip(sims_metas, sims_datas)
     ]
 
-    # reassemble sims from data and metadata
-    # this way we can pass them to fuse_field without triggering compute
-    sims = [
-        si.to_spatial_image(
-            sim_data,
-            dims=sim_meta["dims"],
-            scale=sim_meta["scale"],
-            translation=sim_meta["translation"],
-        )
-        for sim_meta, sim_data in zip(sims_metas, sims_datas)
-    ]
+    if has_keyword(fusion_func, "blending_weights") or has_keyword(
+        weights_func, "blending_weights"
+    ):
+        fusion_requires_blending_weights = True
+    else:
+        fusion_requires_blending_weights = False
 
-    if weights_method_kwargs is None:
-        weights_method_kwargs = {}
+    if weights_func_kwargs is None:
+        weights_func_kwargs = {}
 
     # calculate required overlap from chosen weights method
     if overlap_in_pixels is None:
         overlap_in_pixels = weights.calculate_required_overlap(
-            weights_method, weights_method_kwargs
+            weights_func, weights_func_kwargs
         )
 
     input_dtype = sims[0].dtype
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
-    # get blending weights
-    blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
-    field_ws = []
-    for sim in sims:
-        field_w = xr.zeros_like(sim)
-        field_w.data = weights.get_smooth_border_weight_from_shape(
-            sim.shape[-ndim:],
-            chunks=sim.chunks,
-            widths=blending_widths,
-        )
-        field_ws.append(field_w)
+    if fusion_requires_blending_weights:
+        # get blending weights
+        blending_widths = [10] * 2 if ndim == 2 else [3] + [10] * 2
+        field_ws = []
+        for sim in sims:
+            field_w = xr.zeros_like(sim)
+            field_w.data = weights.get_smooth_border_weight_from_shape(
+                sim.shape[-ndim:],
+                chunks=sim.chunks,
+                widths=blending_widths,
+            )
+            field_ws.append(field_w)
 
     ###
     # Build output array
@@ -441,60 +471,73 @@ def fuse_field(
 
             field_ims_t.append(
                 transformation.transform_sim(
-                    sim_reduced,
+                    sim_reduced.astype(float),
                     param,
                     output_chunksize=[
                         chunk_output_stack_properties["shape"][dim]
                         for _, dim in enumerate(spatial_dims)
                     ],
                     output_stack_properties=chunk_output_stack_properties,
-                    order=1,
+                    order=interpolation_order,
+                    cval=np.nan,
                 ).data
             )
 
-            field_ws_t.append(
-                transformation.transform_sim(
-                    field_ws[iview],
-                    param,
-                    output_chunksize=[
-                        chunk_output_stack_properties["shape"][dim]
-                        for _, dim in enumerate(spatial_dims)
-                    ],
-                    output_stack_properties=chunk_output_stack_properties,
-                    order=1,
-                ).data
-            )
+            if fusion_requires_blending_weights:
+                field_ws_t.append(
+                    transformation.transform_sim(
+                        field_ws[iview],
+                        param,
+                        output_chunksize=[
+                            chunk_output_stack_properties["shape"][dim]
+                            for _, dim in enumerate(spatial_dims)
+                        ],
+                        output_stack_properties=chunk_output_stack_properties,
+                        order=1,
+                    ).data
+                )
 
         if empty_chunk:
             continue
 
         field_ims_t = da.stack(field_ims_t)
-        field_ws_t = da.stack(field_ws_t)
 
-        field_ws_t = weights.normalize_weights(field_ws_t)
+        if fusion_requires_blending_weights:
+            field_ws_t = da.stack(field_ws_t)
+            field_ws_t = weights.normalize_weights(field_ws_t)
 
-        # calculate fusion weights
-        if weights_method is not None:
+        fusion_method_kwargs = {}
+        fusion_method_kwargs["transformed_views"] = field_ims_t
+        if has_keyword(fusion_func, "params"):
+            fusion_method_kwargs["params"] = params
+        if fusion_requires_blending_weights:
+            fusion_method_kwargs["blending_weights"] = field_ws_t
+
+        # calculate fusion weights if required
+        if weights_func is not None and has_keyword(
+            fusion_func, "fusion_weights"
+        ):
+            weights_func_kwargs["transformed_sims"] = field_ims_t
+            if has_keyword(weights_func, "params"):
+                weights_func_kwargs["params"] = params
+            if fusion_requires_blending_weights:
+                weights_func_kwargs["blending_weights"] = field_ws_t
+
             fusion_weights = da.from_delayed(
-                delayed(weights_method)(
-                    field_ims_t, field_ws_t, **weights_method_kwargs
-                ),
+                delayed(weights_func)(**weights_func_kwargs),
                 shape=field_ims_t.shape,
                 dtype=float,
             )
-        else:
-            fusion_weights = None
+            fusion_method_kwargs["fusion_weights"] = fusion_weights
 
-        fused_field_chunk = delayed(fusion_method)(
-            field_ims_t,
-            field_ws_t,
-            fusion_weights,
-            params,
+        fused_field_chunk = delayed(func_ignore_nan_warning)(
+            fusion_func,
+            **fusion_method_kwargs,
         )
 
-        fused_field_chunk = delayed(lambda x: np.array(x).astype(input_dtype))(
-            fused_field_chunk
-        )
+        fused_field_chunk = delayed(
+            lambda x: np.array(np.nan_to_num(x)).astype(input_dtype)
+        )(fused_field_chunk)
 
         fused_field_chunk = da.from_delayed(
             fused_field_chunk,

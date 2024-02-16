@@ -16,6 +16,7 @@ def transform_sim(
     output_stack_properties=None,
     output_chunksize=256,
     order=1,
+    cval=0.0,
 ):
     """
     (Lazily) transform a spatial image
@@ -49,6 +50,7 @@ def transform_sim(
                 output_stack_properties=output_stack_properties,
                 output_chunksize=output_chunksize,
                 order=order,
+                cval=cval,
             )
 
             sim_field_t = sim_field_t.expand_dims(nsdims)
@@ -114,7 +116,7 @@ def transform_sim(
         ),
         output_chunks=output_chunks,
         mode="constant",
-        cval=0.0,
+        cval=cval,
     )
 
     sim = si.to_spatial_image(

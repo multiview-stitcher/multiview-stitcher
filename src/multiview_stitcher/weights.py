@@ -23,7 +23,6 @@ def calculate_required_overlap(
 def content_based(
     transformed_sims,
     blending_weights,
-    params=None,
     sigma_1=5,
     sigma_2=11,
 ):

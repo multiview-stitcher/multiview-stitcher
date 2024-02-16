@@ -52,7 +52,7 @@ def test_fuse_sims():
 
 
 @pytest.mark.parametrize(
-    "ndim, weights_method",
+    "ndim, weights_func",
     [
         (2, None),
         (2, weights.content_based),
@@ -60,7 +60,7 @@ def test_fuse_sims():
         (3, weights.content_based),
     ],
 )
-def test_multi_view_fusion(ndim, weights_method):
+def test_multi_view_fusion(ndim, weights_func):
     nviews = 3
 
     sims = [
@@ -87,9 +87,9 @@ def test_multi_view_fusion(ndim, weights_method):
     fused = fusion.fuse(
         sims[:],
         transform_key=METADATA_TRANSFORM_KEY,
-        weights_method=weights_method,
-        weights_method_kwargs={"sigma_1": 1, "sigma_2": 2}
-        if weights_method == weights.content_based
+        weights_func=weights_func,
+        weights_func_kwargs={"sigma_1": 1, "sigma_2": 2}
+        if weights_func == weights.content_based
         else None,
     )
 

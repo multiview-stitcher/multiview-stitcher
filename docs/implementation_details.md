@@ -55,10 +55,18 @@ A *registration graph* or list of registration pairs (TODO: clarify whether this
 
 ### Fusion framework
 
-`multiview_stitcher.fusion.fuse` can be used in combination with fusion implementation(s) available in `multiview_stitcher.fusion` or custom functions sharing the interface of `multiview_stitcher.fusion.fusion_method_weighted_average` (default fusion func).
+`multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion)` can be used in combination with fusion functions available in `multiview_stitcher.fusion` or custom functions that accept the following keyword arguments:
 
-Fusion implementations are automatically passed blending weights for the input views and can optionally receive further weights obtained by a weight calculation function passed to `multiview_stitcher.fusion.fuse` (sharing the interface of `multiview_stitcher.weights.content_based`).
+    transformed_views : list of ndarrays
+        transformed input views
+    blending_weights : list of ndarrays, optional
+        blending weights for each view
+    fusion_weights : list of ndarrays, optional
+        additional view weights for fusion, e.g. contrast weighted scores.
+    params : list of xarrays, optional
+
+Further fusion weights can be obtained by the weight calculation function specified in `fuse(..., weights_func=None, weights_func_kwargs=None)`. An example for such a function is `weights.content_based`, but also custom functions can be passed which accept the same (optional) input arguments as the fusion functions.
 
 ### Content based fusion
 
-To improve multi-view fusion in the context of strongly scattering samples, [content-based fusion](https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf) turns out to be helpful. This fusion method is available in `multiview-stitcher` by using `multiview_stitcher.weights.content_based` as an optional fusion weight function (see [above](###Fusion-framework)).
+To improve multi-view fusion in the context of strongly scattering samples, [content-based fusion](https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf) turns out to be helpful. This fusion method is available in `multiview-stitcher` by using `multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion, weights_method=weights.content_based)` (see [above](###Fusion-framework)).
