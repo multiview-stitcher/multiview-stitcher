@@ -28,6 +28,7 @@ def build_view_adjacency_graph_from_msims(
     msims,
     transform_key,
     expand=False,
+    pairs=None,
 ):
     """
     Build graph representing view overlap relationships from list of xarrays.
@@ -40,10 +41,12 @@ def build_view_adjacency_graph_from_msims(
     ----------
     msims : list of MultiscaleSpatialImage
         Input views.
-    expand : bool, optional
-        If True, spatial extents of input images is dilated, by default False
     transform_key : _type_, optional
         Extrinsic coordinate system to consider, by default None
+    expand : bool, optional
+        If True, spatial extents of input images is dilated, by default False
+    pairs : list of tuples, optional
+        List of pairs of view indices to consider, by default None
 
     Returns
     -------
@@ -76,54 +79,58 @@ def build_view_adjacency_graph_from_msims(
         for sim in sims
     ]
 
-    # calculate overlap between pairs of views that are close to each other
-    # (closer than the maximum diameter of the views)
-    # use scipy cKDTree for performance
+    if pairs is None:
+        # calculate overlap between pairs of views that are close to each other
+        # (closer than the maximum diameter of the views)
+        # use scipy cKDTree for performance
 
-    sim_centers = np.array(
-        [
-            spatial_image_utils.get_center_of_sim(
-                sim, transform_key=transform_key
-            )
-            for sim in sims
-        ]
-    )
-
-    sim_diameters = np.array(
-        [
-            np.linalg.norm(
-                np.array(
-                    [
-                        stack_props["shape"][dim] * stack_props["spacing"][dim]
-                        for dim in sdims
-                    ]
+        sim_centers = np.array(
+            [
+                spatial_image_utils.get_center_of_sim(
+                    sim, transform_key=transform_key
                 )
-            )
-            for stack_props in stack_propss
-        ]
-    )
-    max_diameter = np.max(sim_diameters)
-
-    tree = cKDTree(sim_centers)
-
-    # get all pairs of views that are close to each other
-    pairs, overlap_results = [], []
-    for iview in range(len(msims)):
-        close_views = tree.query_ball_point(
-            sim_centers[iview], max_diameter + 1
+                for sim in sims
+            ]
         )
-        for close_view in close_views:
-            if iview == close_view:
-                continue
 
-            overlap_result = delayed(get_overlap_between_pair_of_stack_props)(
-                stack_propss[iview],
-                stack_propss[close_view],
-                expand=expand,
+        sim_diameters = np.array(
+            [
+                np.linalg.norm(
+                    np.array(
+                        [
+                            stack_props["shape"][dim]
+                            * stack_props["spacing"][dim]
+                            for dim in sdims
+                        ]
+                    )
+                )
+                for stack_props in stack_propss
+            ]
+        )
+        max_diameter = np.max(sim_diameters)
+
+        tree = cKDTree(sim_centers)
+
+        # get all pairs of views that are close to each other
+        pairs = []
+        for iview in range(len(msims)):
+            close_views = tree.query_ball_point(
+                sim_centers[iview], max_diameter + 1
             )
+            for close_view in close_views:
+                if iview == close_view:
+                    continue
 
-            pairs.append((iview, close_view))
-            overlap_results.append(overlap_result)
+                pairs.append((iview, close_view))
+
+    overlap_results = []
+    for pair in pairs:
+        overlap_result = delayed(get_overlap_between_pair_of_stack_props)(
+            stack_propss[pair[0]],
+            stack_propss[pair[1]],
+            expand=expand,
+        )
+        overlap_results.append(overlap_result)
 
     # multithreading doesn't improve performance here, probably because the GIL is
     # not released by pure python Geometry3D code. Using multiprocessing instead.
@@ -483,14 +490,15 @@ def prune_to_shortest_weighted_paths(g):
 
     """
 
-    g_reg = nx.Graph(nodes=g.nodes)
+    g_reg = nx.Graph()
+    g_reg.add_nodes_from(g.nodes())
 
     ccs = list(nx.connected_components(g))
 
     if len(ccs) > 1:
         warnings.warn(
             """
-The provided tiles/views do not globally overlap, instead there
+The provided tiles/views are not globally linked, instead there
 are %s connected components composed of the following tile indices:\n"""
             % (len(ccs))
             + "\n".join([str(list(cc)) for cc in ccs])
@@ -499,10 +507,10 @@ are %s connected components composed of the following tile indices:\n"""
             stacklevel=1,
         )
     if np.max([len(cc) for cc in ccs]) < 2:
-        raise (NotEnoughOverlapError("Not enough overlap between views."))
+        raise (NotEnoughOverlapError("No overlap between views."))
     elif np.min([len(cc) for cc in ccs]) < 2:
         warnings.warn(
-            "The following views have no overlap with other views:\n%s"
+            "The following views have no links with other views:\n%s"
             % list(np.where([len(cc) == 1 for cc in ccs])[0]),
             UserWarning,
             stacklevel=1,

@@ -800,6 +800,7 @@ def register(
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
     plot_summary=False,
+    pairs=None,
 ):
     """
 
@@ -844,6 +845,9 @@ def register(
     plot_summary : bool, optional
         If True, plot a graph showing registered stack boundaries and
         performed pairwise registrations including correlations, by default False
+    pairs : list of tuples, optional
+        If set, initialises the view adjacency graph using the indicates
+        pairs of view/tile indices, by default None
 
     Returns
     -------
@@ -873,6 +877,7 @@ def register(
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims_reg,
         transform_key=transform_key,
+        pairs=pairs,
     )
 
     if pre_registration_pruning_method is not None:
@@ -902,7 +907,7 @@ def register(
         )
 
     params = get_node_params_from_reg_graph(g_reg_computed)
-    params = [params[iview] for iview in sorted(params.keys())]
+    params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
 
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
