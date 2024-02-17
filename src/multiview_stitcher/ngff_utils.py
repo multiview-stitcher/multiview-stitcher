@@ -18,12 +18,20 @@ def sim_to_ngff_image(sim, transform_key):
     """
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sim)
 
     origin = si_utils.get_origin_from_sim(sim)
     if transform_key is not None:
-        transform = np.array(
-            si_utils.get_affine_from_sim(sim, transform_key)[0]
-        )
+        transform = si_utils.get_affine_from_sim(sim, transform_key)
+        for nsdim in nsdims:
+            if nsdim in transform.dims:
+                transform = transform.sel(
+                    {
+                        nsdim: transform.coords[nsdim][0]
+                        for nsdim in transform.dims
+                    }
+                )
+        transform = np.array(transform)
         transform_translation = param_utils.translation_from_affine(transform)
         for isdim, sdim in enumerate(sdims):
             origin[sdim] = origin[sdim] + transform_translation[isdim]
