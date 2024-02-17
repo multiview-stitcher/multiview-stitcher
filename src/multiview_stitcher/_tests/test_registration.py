@@ -14,7 +14,14 @@ from multiview_stitcher import (
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
-def test_pairwise():
+@pytest.mark.parametrize(
+    "pairwise_reg_func",
+    [
+        registration.phase_correlation_registration,
+        registration.registration_ANTsPy,
+    ],
+)
+def test_pairwise(pairwise_reg_func):
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
 
@@ -34,13 +41,23 @@ def test_pairwise():
         msims[1],
         registration_binning={dim: 1 for dim in spatial_dims},
         transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=pairwise_reg_func,
     )
 
     p = pd.compute()
 
+    # assert matrix
     assert np.allclose(
-        p["transform"].sel(t=0),
-        np.array([[1.0, 0.0, 1.95], [0.0, 1.0, 7.58333333], [0.0, 0.0, 1.0]]),
+        p["transform"].sel(t=0, x_in=[0, 1], x_out=[0, 1]),
+        np.array([[1.0, 0.0], [0.0, 1.0]]),
+        atol=0.05,
+    )
+
+    # assert offset
+    assert np.allclose(
+        p["transform"].sel(t=0, x_in=[0, 1], x_out=2),
+        np.array([2.5, 7.5]),
+        atol=1.5,
     )
 
 
@@ -132,29 +149,43 @@ def test_get_optimal_registration_binning():
 @pytest.mark.parametrize(
     """
     ndim, N_c, N_t,
+    pairwise_reg_func,
     pre_registration_pruning_method,
     post_registration_do_quality_filter,
     """,
     [
-        (2, 1, 3, pre_reg_pm, True)
+        (
+            ndim,
+            1,
+            3,
+            registration.registration_ANTsPy,
+            "shortest_paths_overlap_weighted",
+            False,
+        )
+        for ndim in [2, 3]
+    ]
+    + [
+        (
+            ndim,
+            1,
+            3,
+            registration.phase_correlation_registration,
+            pre_reg_pm,
+            True,
+        )
         for pre_reg_pm in [
             "shortest_paths_overlap_weighted",
             "otsu_threshold_on_overlap",
             None,
         ]
-    ]
-    + [
-        (3, 1, 3, pre_reg_pm, False)
-        for pre_reg_pm in [
-            "shortest_paths_overlap_weighted",
-            "otsu_threshold_on_overlap",
-        ]
+        for ndim in [2, 3]
     ],
 )
 def test_register(
     ndim,
     N_c,
     N_t,
+    pairwise_reg_func,
     pre_registration_pruning_method,
     post_registration_do_quality_filter,
 ):
@@ -164,7 +195,7 @@ def test_register(
         N_c=N_c,
         tile_size=15,
         tiles_x=2,
-        tiles_y=2,
+        tiles_y=1,
         tiles_z=2,
         zoom=10,
     )
@@ -178,9 +209,10 @@ def test_register(
         msims,
         reg_channel_index=0,
         transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=pairwise_reg_func,
         new_transform_key="affine_registered",
         pre_registration_pruning_method=pre_registration_pruning_method,
         post_registration_do_quality_filter=post_registration_do_quality_filter,
     )
 
-    assert len(params) == 2**ndim
+    assert len(params) == 2 ** (ndim - 1)

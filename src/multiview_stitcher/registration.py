@@ -1,3 +1,5 @@
+import os
+import tempfile
 import warnings
 
 import dask.array as da
@@ -11,6 +13,11 @@ from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.metrics import structural_similarity
 from tqdm import tqdm
+
+try:
+    import ants
+except ImportError:
+    ants = None
 
 from multiview_stitcher import (
     msi_utils,
@@ -30,6 +37,11 @@ def apply_recursive_dict(func, d):
     else:
         return func(d)
     return res
+
+
+def link_quality_metric_func(im0, im1t):
+    quality = stats.spearmanr(im0.flatten(), im1t.flatten() - 1).correlation
+    return quality
 
 
 def get_optimal_registration_binning(
@@ -360,9 +372,9 @@ def phase_correlation_registration(
 
                 # spearman seems to be better than structural_similarity
                 # for filtering out bad links between views
-                quality_metric_val = stats.spearmanr(
+                quality_metric_val = link_quality_metric_func(
                     im0[mask], im1t[mask] - 1
-                ).correlation
+                )
 
             disambiguate_metric_vals.append(disambiguate_metric_val)
             quality_metric_vals.append(quality_metric_val)
@@ -432,7 +444,6 @@ def get_affine_from_intrinsic_affine(
     x_f_D = M_D * x_c_D
     x_f_P = M_P * x_c_P
     x_f_W = M_W * x_c_W
-
 
     D_to_P_f * x_f_D = M_P * D_to_P_c * x_c_D
     x_f_D = inv(D_to_P_f) * M_P * D_to_P_c * x_c_D
@@ -519,7 +530,7 @@ def register_pair_of_msims(
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
+    pairwise_reg_func_kwargs=None,
 ):
     """
     Register the input images containing only spatial dimensions.
@@ -543,7 +554,7 @@ def register_pair_of_msims(
         Function used for registration, which is passed as input two spatial images,
         a transform_key and precomputed bounding boxes. Returns a transform in
         homogeneous coordinates. By default phase_correlation_registration
-    reg_func_kwargs : dict, optional
+    pairwise_reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function
 
     Returns
@@ -553,8 +564,8 @@ def register_pair_of_msims(
         to the moving image.
     """
 
-    if reg_func_kwargs is None:
-        reg_func_kwargs = {}
+    if pairwise_reg_func_kwargs is None:
+        pairwise_reg_func_kwargs = {}
     spatial_dims = msi_utils.get_spatial_dims(msim1)
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
@@ -623,7 +634,7 @@ def register_pair_of_msims(
         reg_sims_b[1],
         transform_key=transform_key,
         overlap_bboxes=(lowers, uppers),
-        **reg_func_kwargs,
+        **pairwise_reg_func_kwargs,
     )
 
 
@@ -634,14 +645,14 @@ def register_pair_of_msims_over_time(
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
+    pairwise_reg_func_kwargs=None,
 ):
     """
     Apply register_pair_of_msims to each time point of the input images.
     """
 
-    if reg_func_kwargs is None:
-        reg_func_kwargs = {}
+    if pairwise_reg_func_kwargs is None:
+        pairwise_reg_func_kwargs = {}
     msim1 = msi_utils.ensure_time_dim(msim1)
     msim2 = msi_utils.ensure_time_dim(msim2)
 
@@ -659,7 +670,7 @@ def register_pair_of_msims_over_time(
                     transform_key=transform_key,
                     registration_binning=registration_binning,
                     pairwise_reg_func=pairwise_reg_func,
-                    reg_func_kwargs=reg_func_kwargs,
+                    pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
                     use_only_overlap_region=use_only_overlap_region,
                 )
                 for t in sim1.coords["t"].values
@@ -795,7 +806,7 @@ def register(
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
+    pairwise_reg_func_kwargs=None,
     pre_registration_pruning_method="shortest_paths_overlap_weighted",
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
@@ -833,7 +844,7 @@ def register(
         Binning applied to each dimensionn during registration, by default None
     pairwise_reg_func : func, optional
         Function used for registration.
-    reg_func_kwargs : dict, optional
+    pairwise_reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function
     pre_registration_pruning_method : str, optional
         Method used to prune the view adjacency graph before registration,
@@ -855,8 +866,9 @@ def register(
         Parameters mapping each view into a new extrinsic coordinate system
     """
 
-    if reg_func_kwargs is None:
-        reg_func_kwargs = {}
+    if pairwise_reg_func_kwargs is None:
+        pairwise_reg_func_kwargs = {}
+
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if reg_channel_index is None:
@@ -895,10 +907,10 @@ def register(
         registration_binning=registration_binning,
         use_only_overlap_region=use_only_overlap_region,
         pairwise_reg_func=pairwise_reg_func,
-        reg_func_kwargs=reg_func_kwargs,
+        pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
     )
 
-    if post_registration_do_quality_filter is not None:
+    if post_registration_do_quality_filter:
         # filter edges by quality
         g_reg_computed = mv_graph.filter_edges(
             g_reg_computed,
@@ -945,7 +957,7 @@ def compute_pairwise_registrations(
     registration_binning=None,
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
-    reg_func_kwargs=None,
+    pairwise_reg_func_kwargs=None,
 ):
     g_reg_computed = g_reg.copy()
     edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
@@ -958,7 +970,7 @@ def compute_pairwise_registrations(
             registration_binning=registration_binning,
             use_only_overlap_region=use_only_overlap_region,
             pairwise_reg_func=pairwise_reg_func,
-            reg_func_kwargs=reg_func_kwargs,
+            pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         )
         for pair in edges
     ]
@@ -1283,3 +1295,156 @@ def crop_sim_to_references(
     )
 
     return sim_cropped
+
+
+def _register_using_ants(
+    fixed_np,
+    moving_np,
+    scale_fixed,
+    scale_moving,
+    origin_fixed,
+    origin_moving,
+    init_affine,
+    transform_types,
+):
+    if ants is None:
+        raise (
+            Exception(
+                """
+Please install the antspyx package to use ANTsPy for registration.
+E.g. using pip:
+- `pip install multiview-stitcher[ants]` or
+- `pip install antspyx`
+"""
+            )
+        )
+
+    ndim = len(scale_fixed)
+
+    # convert input images to ants images
+    fixed_ants = ants.from_numpy(
+        fixed_np.astype(np.float32),
+        origin=list(origin_fixed),
+        spacing=list(scale_fixed),
+    )
+    moving_ants = ants.from_numpy(
+        moving_np.astype(np.float32),
+        origin=list(origin_moving),
+        spacing=list(scale_moving),
+    )
+
+    init_aff = ants.ants_transform_io.create_ants_transform(
+        transform_type="AffineTransform",
+        dimension=ndim,
+        matrix=init_affine[:ndim, :ndim],
+        offset=init_affine[:ndim, ndim],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        init_transform_path = os.path.join(tmpdir, "init_aff.txt")
+        ants.ants_transform_io.write_transform(init_aff, init_transform_path)
+
+        for transform_type in transform_types:
+            aff = ants.registration(
+                fixed=fixed_ants,
+                moving=moving_ants,
+                type_of_transform=transform_type,
+                random_seed=0,
+                initial_transform=[init_transform_path],
+                write_composite_transform=False,
+                aff_metric="meansquares",
+                # aff_metric='mattes',
+                verbose=False,
+                aff_random_sampling_rate=0.2,
+                # aff_iterations=(2000, 2000, 1000, 100),
+                # aff_iterations=(2000, 2000, 1000, 100),
+                # aff_smoothing_sigmas=(4, 2, 1, 0),
+                # aff_shrink_factors=(6, 4, 2, 1),
+            )
+
+            # ants.registration(fixed, moving, type_of_transform='SyN', initial_transform=None, outprefix='', mask=None, moving_mask=None, mask_all_stages=False,
+            # grad_step=0.2, flow_sigma=3, total_sigma=0, aff_metric='mattes', aff_sampling=32, aff_random_sampling_rate=0.2,
+            # syn_metric='mattes', syn_sampling=32, reg_iterations=(40, 20, 0),
+            # aff_iterations=(2100, 1200, 1200, 10), aff_shrink_factors=(6, 4, 2, 1), aff_smoothing_sigmas=(3, 2, 1, 0),
+            # write_composite_transform=False, random_seed=None, verbose=False, multivariate_extras=None, restrict_transformation=None, smoothing_in_mm=False, **kwargs)
+
+            result_transform_path = aff["fwdtransforms"][0]
+            result_transform = ants.ants_transform_io.read_transform(
+                result_transform_path
+            )
+
+            curr_init_transform = result_transform
+            ants.ants_transform_io.write_transform(
+                curr_init_transform, init_transform_path
+            )
+
+    p = param_utils.affine_from_linear_affine(result_transform.parameters)
+
+    quality = link_quality_metric_func(
+        fixed_ants.numpy(), aff["warpedmovout"].numpy()
+    )
+
+    return p, quality
+
+
+def registration_ANTsPy(
+    sim1,
+    sim2,
+    transform_key,
+    overlap_bboxes,
+    # transform_types=("Translation", "Rigid", "Similarity", "Affine"),
+    transform_types=("Translation", "Rigid", "Similarity"),
+):
+    """
+    Use ANTsPy to perform registration between two spatial images.
+    """
+
+    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
+    spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+
+    # obtain initial transform parameters
+    affines = [
+        spatial_image_utils.get_affine_from_sim(
+            sim, transform_key=transform_key
+        )
+        .squeeze()
+        .data
+        for sim in [sim1, sim2]
+    ]
+    init_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+
+    delayed_reg_result = delayed(_register_using_ants)(
+        delayed(lambda x: np.array(x))(sim1.data),
+        delayed(lambda x: np.array(x))(sim2.data),
+        spatial_image_utils.get_spacing_from_sim(sim1, asarray=True),
+        spatial_image_utils.get_spacing_from_sim(sim2, asarray=True),
+        spatial_image_utils.get_origin_from_sim(sim1, asarray=True),
+        spatial_image_utils.get_origin_from_sim(sim2, asarray=True),
+        init_affine,
+        transform_types,
+    )
+
+    out_affine = da.from_delayed(
+        delayed_reg_result[0],
+        shape=(ndim + 1, ndim + 1),
+        dtype=float,
+    )
+
+    out_quality = da.from_delayed(
+        delayed_reg_result[1],
+        shape=(),
+        dtype=float,
+    )
+
+    p_final = np.matmul(
+        affines[1], np.matmul(out_affine, np.linalg.inv(affines[0]))
+    )
+
+    xds = xr.Dataset(
+        data_vars={
+            "transform": param_utils.get_xparam_from_param(p_final),
+            "quality": xr.DataArray(out_quality),
+        }
+    )
+
+    return xds
