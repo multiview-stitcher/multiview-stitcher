@@ -6,6 +6,7 @@ Below is a list of features which are either already implemented or are on the r
 
 ### Pairwise registration
 - [x] phase correlation
+- [x] ANTsPy
 - [ ] elastix (`itk-elastix`) will be used for up to affine transformations
 - [ ] bead alignment
 - [ ] phase correlation for rotation + translation
