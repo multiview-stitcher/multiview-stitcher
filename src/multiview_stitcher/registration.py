@@ -1306,6 +1306,7 @@ def _register_using_ants(
     origin_moving,
     init_affine,
     transform_types,
+    **ants_registration_kwargs,
 ):
     if ants is None:
         raise (
@@ -1340,6 +1341,23 @@ E.g. using pip:
         offset=init_affine[:ndim, ndim],
     )
 
+    default_ants_registration_kwargs = {
+        "random_seed": 0,
+        "write_composite_transform": False,
+        "aff_metric": "mattes",
+        # aff_metric="meansquares",
+        "verbose": False,
+        "aff_random_sampling_rate": 0.2,
+        # aff_iterations=(2000, 2000, 1000, 100),
+        # aff_smoothing_sigmas=(4, 2, 1, 0),
+        # aff_shrink_factors=(6, 4, 2, 1),
+    }
+
+    ants_registration_kwargs = {
+        **default_ants_registration_kwargs,
+        **ants_registration_kwargs,
+    }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         init_transform_path = os.path.join(tmpdir, "init_aff.txt")
         ants.ants_transform_io.write_transform(init_aff, init_transform_path)
@@ -1349,17 +1367,8 @@ E.g. using pip:
                 fixed=fixed_ants,
                 moving=moving_ants,
                 type_of_transform=transform_type,
-                random_seed=0,
                 initial_transform=[init_transform_path],
-                write_composite_transform=False,
-                # aff_metric="meansquares",
-                aff_metric="mattes",
-                verbose=False,
-                aff_random_sampling_rate=0.2,
-                # aff_iterations=(2000, 2000, 1000, 100),
-                # aff_iterations=(2000, 2000, 1000, 100),
-                # aff_smoothing_sigmas=(4, 2, 1, 0),
-                # aff_shrink_factors=(6, 4, 2, 1),
+                **ants_registration_kwargs,
             )
 
             # ants.registration(fixed, moving, type_of_transform='SyN', initial_transform=None, outprefix='', mask=None, moving_mask=None, mask_all_stages=False,
@@ -1394,6 +1403,7 @@ def registration_ANTsPy(
     overlap_bboxes,
     # transform_types=("Translation", "Rigid", "Similarity", "Affine"),
     transform_types=("Translation", "Rigid", "Similarity"),
+    **ants_registration_kwargs,
 ):
     """
     Use ANTsPy to perform registration between two spatial images.
@@ -1422,6 +1432,7 @@ def registration_ANTsPy(
         spatial_image_utils.get_origin_from_sim(sim2, asarray=True),
         init_affine,
         transform_types,
+        **ants_registration_kwargs,
     )
 
     out_affine = da.from_delayed(
