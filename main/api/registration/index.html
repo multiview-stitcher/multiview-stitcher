@@ -792,7 +792,7 @@
 
 
 <h2 id="multiview_stitcher.registration.register" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;shortest_paths_overlap_weighted&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;shortest_paths_overlap_weighted&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -835,7 +835,10 @@ post_registration_quality_threshold : float, optional
     by default None (no filtering)
 plot_summary : bool, optional
     If True, plot a graph showing registered stack boundaries and
-    performed pairwise registrations including correlations, by default False</p>
+    performed pairwise registrations including correlations, by default False
+pairs : list of tuples, optional
+    If set, initialises the view adjacency graph using the indicates
+    pairs of view/tile indices, by default None</p>
 <h4 id="multiview_stitcher.registration.register--returns">Returns</h4>
 <p>list of xr.DataArray
     Parameters mapping each view into a new extrinsic coordinate system</p>
@@ -985,7 +988,12 @@ plot_summary : bool, optional
 <span class="normal">930</span>
 <span class="normal">931</span>
 <span class="normal">932</span>
-<span class="normal">933</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">933</span>
+<span class="normal">934</span>
+<span class="normal">935</span>
+<span class="normal">936</span>
+<span class="normal">937</span>
+<span class="normal">938</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">transform_key</span><span class="p">,</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -998,6 +1006,7 @@ plot_summary : bool, optional
     <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
     <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
     <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 
@@ -1042,6 +1051,9 @@ plot_summary : bool, optional
 <span class="sd">    plot_summary : bool, optional</span>
 <span class="sd">        If True, plot a graph showing registered stack boundaries and</span>
 <span class="sd">        performed pairwise registrations including correlations, by default False</span>
+<span class="sd">    pairs : list of tuples, optional</span>
+<span class="sd">        If set, initialises the view adjacency graph using the indicates</span>
+<span class="sd">        pairs of view/tile indices, by default None</span>
 
 <span class="sd">    Returns</span>
 <span class="sd">    -------</span>
@@ -1071,6 +1083,7 @@ plot_summary : bool, optional
     <span class="n">g</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">build_view_adjacency_graph_from_msims</span><span class="p">(</span>
         <span class="n">msims_reg</span><span class="p">,</span>
         <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
+        <span class="n">pairs</span><span class="o">=</span><span class="n">pairs</span><span class="p">,</span>
     <span class="p">)</span>
 
     <span class="k">if</span> <span class="n">pre_registration_pruning_method</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -1100,7 +1113,7 @@ plot_summary : bool, optional
         <span class="p">)</span>
 
     <span class="n">params</span> <span class="o">=</span> <span class="n">get_node_params_from_reg_graph</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="p">)</span>
-    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">params</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">params</span><span class="o">.</span><span class="n">keys</span><span class="p">())]</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">params</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="o">.</span><span class="n">nodes</span><span class="p">())]</span>
 
     <span class="k">if</span> <span class="n">new_transform_key</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">):</span>
