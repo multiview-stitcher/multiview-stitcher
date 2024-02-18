@@ -792,7 +792,7 @@
 
 
 <h2 id="multiview_stitcher.registration.register" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;shortest_paths_overlap_weighted&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;shortest_paths_overlap_weighted&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -824,7 +824,7 @@ registration_binning : dict, optional
     Binning applied to each dimensionn during registration, by default None
 pairwise_reg_func : func, optional
     Function used for registration.
-reg_func_kwargs : dict, optional
+pairwise_reg_func_kwargs : dict, optional
     Additional keyword arguments passed to the registration function
 pre_registration_pruning_method : str, optional
     Method used to prune the view adjacency graph before registration,
@@ -845,18 +845,7 @@ pairs : list of tuples, optional
 
           <details class="quote">
             <summary>Source code in <code>src/multiview_stitcher/registration.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">790</span>
-<span class="normal">791</span>
-<span class="normal">792</span>
-<span class="normal">793</span>
-<span class="normal">794</span>
-<span class="normal">795</span>
-<span class="normal">796</span>
-<span class="normal">797</span>
-<span class="normal">798</span>
-<span class="normal">799</span>
-<span class="normal">800</span>
-<span class="normal">801</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">801</span>
 <span class="normal">802</span>
 <span class="normal">803</span>
 <span class="normal">804</span>
@@ -993,7 +982,19 @@ pairs : list of tuples, optional
 <span class="normal">935</span>
 <span class="normal">936</span>
 <span class="normal">937</span>
-<span class="normal">938</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">938</span>
+<span class="normal">939</span>
+<span class="normal">940</span>
+<span class="normal">941</span>
+<span class="normal">942</span>
+<span class="normal">943</span>
+<span class="normal">944</span>
+<span class="normal">945</span>
+<span class="normal">946</span>
+<span class="normal">947</span>
+<span class="normal">948</span>
+<span class="normal">949</span>
+<span class="normal">950</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">transform_key</span><span class="p">,</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -1001,7 +1002,7 @@ pairs : list of tuples, optional
     <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
     <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span>
-    <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s2">&quot;shortest_paths_overlap_weighted&quot;</span><span class="p">,</span>
     <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
     <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
@@ -1039,7 +1040,7 @@ pairs : list of tuples, optional
 <span class="sd">        Binning applied to each dimensionn during registration, by default None</span>
 <span class="sd">    pairwise_reg_func : func, optional</span>
 <span class="sd">        Function used for registration.</span>
-<span class="sd">    reg_func_kwargs : dict, optional</span>
+<span class="sd">    pairwise_reg_func_kwargs : dict, optional</span>
 <span class="sd">        Additional keyword arguments passed to the registration function</span>
 <span class="sd">    pre_registration_pruning_method : str, optional</span>
 <span class="sd">        Method used to prune the view adjacency graph before registration,</span>
@@ -1061,8 +1062,9 @@ pairs : list of tuples, optional
 <span class="sd">        Parameters mapping each view into a new extrinsic coordinate system</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
-    <span class="k">if</span> <span class="n">reg_func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">reg_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">pairwise_reg_func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">pairwise_reg_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+
     <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
 
     <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
@@ -1101,10 +1103,10 @@ pairs : list of tuples, optional
         <span class="n">registration_binning</span><span class="o">=</span><span class="n">registration_binning</span><span class="p">,</span>
         <span class="n">use_only_overlap_region</span><span class="o">=</span><span class="n">use_only_overlap_region</span><span class="p">,</span>
         <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">pairwise_reg_func</span><span class="p">,</span>
-        <span class="n">reg_func_kwargs</span><span class="o">=</span><span class="n">reg_func_kwargs</span><span class="p">,</span>
+        <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="n">pairwise_reg_func_kwargs</span><span class="p">,</span>
     <span class="p">)</span>
 
-    <span class="k">if</span> <span class="n">post_registration_do_quality_filter</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">post_registration_do_quality_filter</span><span class="p">:</span>
         <span class="c1"># filter edges by quality</span>
         <span class="n">g_reg_computed</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">filter_edges</span><span class="p">(</span>
             <span class="n">g_reg_computed</span><span class="p">,</span>
