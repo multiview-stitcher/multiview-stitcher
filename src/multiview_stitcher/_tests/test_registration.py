@@ -213,6 +213,7 @@ def test_register(
         new_transform_key="affine_registered",
         pre_registration_pruning_method=pre_registration_pruning_method,
         post_registration_do_quality_filter=post_registration_do_quality_filter,
+        post_registration_quality_threshold=-1,
     )
 
     assert len(params) == 2 ** (ndim - 1)
