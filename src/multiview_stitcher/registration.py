@@ -876,15 +876,14 @@ def register(
             if "c" in msi_utils.get_dims(msim):
                 raise (Exception("Please choose a registration channel."))
 
-    msims_reg = []
-    for imsim, msim in enumerate(msims):
-        if "c" in msi_utils.get_dims(msim):
-            msim_reg = msi_utils.multiscale_sel_coords(
-                msim, {"c": sims[imsim].coords["c"][reg_channel_index]}
-            )
-        else:
-            msim_reg = msim
-        msims_reg.append(msim_reg)
+    msims_reg = [
+        msi_utils.multiscale_sel_coords(
+            msim, {"c": sims[imsim].coords["c"][reg_channel_index]}
+        )
+        if "c" in msi_utils.get_dims(msim)
+        else msim
+        for imsim, msim in enumerate(msims)
+    ]
 
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims_reg,

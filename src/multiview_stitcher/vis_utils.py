@@ -142,7 +142,9 @@ def plot_positions(
 
         if edge_color_vals is not None:
             sm = plt.cm.ScalarMappable(cmap=edge_cmap)
-            sm.set_array(edge_color_vals)
+            sm.set_array(
+                list(edge_color_vals) + [edge_clims[0], edge_clims[1]]
+            )
             plt.colorbar(sm, label=edge_label, ax=ax)
 
     ax.set_xlabel("z [μm]")
