@@ -1,14 +1,17 @@
 import warnings
 from collections.abc import Iterable
+from itertools import chain
 
 import networkx as nx
 import numpy as np
 import xarray as xr
 from dask import compute, delayed
+from scipy.ndimage import binary_dilation
 from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
 from multiview_stitcher import msi_utils, spatial_image_utils
+from multiview_stitcher.fusion import fuse
 from multiview_stitcher.misc_utils import DisableLogger
 
 with DisableLogger():
@@ -495,23 +498,25 @@ def prune_to_shortest_weighted_paths(g):
 
     ccs = list(nx.connected_components(g))
 
-    if len(ccs) > 1:
-        warnings.warn(
-            """
-The provided tiles/views are not globally linked, instead there
-are %s connected components composed of the following tile indices:\n"""
-            % (len(ccs))
-            + "\n".join([str(list(cc)) for cc in ccs])
-            + "\nProceeding without registering between the disconnected components.",
-            UserWarning,
-            stacklevel=1,
-        )
+    #     if len(ccs) > 1:
+    #         warnings.warn(
+    #             """
+    # The provided tiles/views are not globally linked, instead there
+    # are %s connected components composed of the following tile indices:\n"""
+    #             % (len(ccs))
+    #             + "\n".join([str(list(cc)) for cc in ccs])
+    #             + "\nProceeding without registering between the disconnected components.",
+    #             UserWarning,
+    #             stacklevel=1,
+    #         )
+
     if np.max([len(cc) for cc in ccs]) < 2:
-        raise (NotEnoughOverlapError("No overlap between views."))
+        raise (NotEnoughOverlapError("No overlap between views/tiles."))
     elif np.min([len(cc) for cc in ccs]) < 2:
         warnings.warn(
-            "The following views have no links with other views:\n%s"
-            % list(np.where([len(cc) == 1 for cc in ccs])[0]),
+            "The following views/tiles have no links with other views:\n%s"
+            % list(chain(*[cc for cc in ccs if len(cc) == 1])),
+            # % list(np.where([len(cc) == 1 for cc in ccs])[0]),
             UserWarning,
             stacklevel=1,
         )
@@ -576,3 +581,94 @@ def filter_edges(g, weight_key="overlap", threshold=None):
     )
 
     return g_filtered
+
+
+def get_pairs_from_sample_masks(
+    mask_sims,
+    transform_key="affine_manual",
+    fused_mask_spacing=None,
+):
+    """
+    Find pairs of tiles that have overlapping/touching masks.
+    Masks are assumed to be binary and can e.g. represent a sample segmentation.
+    """
+
+    with xr.set_options(keep_attrs=True):
+        label_sims = [
+            spatial_image_utils.process_fields(
+                mask_sim, binary_dilation, iterations=1
+            )
+            * (i + 1)
+            for i, mask_sim in enumerate(mask_sims)
+        ]
+
+    if fused_mask_spacing is None:
+        fused_mask_spacing = spatial_image_utils.get_spacing_from_sim(
+            label_sims[0]
+        )
+
+    fused_labels = fuse(
+        label_sims,
+        transform_key=transform_key,
+        fusion_func=lambda transformed_views: np.nanmin(
+            transformed_views, axis=0
+        ),
+        interpolation_order=0,
+        output_spacing=fused_mask_spacing,
+    ).compute()
+
+    pairs = get_connected_labels(
+        fused_labels.data, structure=np.ones((3, 3, 3))
+    )
+
+    return pairs
+
+
+def unique_along_axis(a, axis=0):
+    """
+    Find unique subarrays in axis in N-D array.
+    """
+    at = np.ascontiguousarray(a.swapaxes(0, axis))
+    dt = np.dtype([("values", at.dtype, at.shape[1:])])
+    atv = at.view(dt)
+    r = np.unique(atv)["values"].swapaxes(0, axis)
+    return r
+
+
+def get_connected_labels(labels, structure):
+    """
+    Get pairs of connected labels in an n-dimensional input array.
+    """
+    ndim = labels.ndim
+    structure = np.ones((3,) * ndim)
+
+    pairs = np.concatenate(
+        [
+            (lambda x: x[:, x.all(axis=0) * np.diff(x, axis=0)[0] != 0])(
+                np.array(
+                    [
+                        labels[
+                            tuple(
+                                slice([0, 1][int(pos > 1)], None)
+                                for pos in pos_structure_coord
+                            )
+                        ],
+                        labels[
+                            tuple(
+                                slice(0, [None, -1][int(pos > 1)])
+                                for pos in pos_structure_coord
+                            )
+                        ],
+                    ]
+                ).reshape((2, -1))
+            )
+            for pos_structure_coord in np.array(np.where(structure)).T
+            if (min(pos_structure_coord) < 1 or max(pos_structure_coord) < 2)
+        ],
+        axis=1,
+    )
+
+    pairs = unique_along_axis(pairs, axis=1).T
+    pairs -= 1
+
+    return pairs

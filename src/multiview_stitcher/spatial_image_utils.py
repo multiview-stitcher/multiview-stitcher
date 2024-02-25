@@ -2,6 +2,7 @@ import copy
 
 import numpy as np
 import spatial_image as si
+import xarray as xr
 
 from multiview_stitcher import param_utils
 
@@ -220,3 +221,18 @@ def get_sim_field(sim, ns_coords=None):
     sim_field = sim_sel_coords(sim, ns_coords)
 
     return sim_field
+
+
+def process_fields(sim, func, **func_kwargs):
+    sdims = get_spatial_dims_from_sim(sim)
+
+    return xr.apply_ufunc(
+        func,
+        sim,
+        input_core_dims=[sdims],
+        output_core_dims=[sdims],
+        vectorize=True,
+        dask="allowed",
+        keep_attrs=True,
+        kwargs=func_kwargs,
+    )
