@@ -1,5 +1,6 @@
 import itertools
 import warnings
+from collections.abc import Iterable
 from itertools import product
 
 import dask.array as da
@@ -123,7 +124,7 @@ def fuse(
         Dictionary describing the output stack with keys
         'spacing', 'origin', 'shape'. Other output_* are ignored
         if this argument is present.
-    output_chunksize : int, optional
+    output_chunksize : int or tuple of ints, optional
         Chunksize of the dask data array of the fused image, by default 512
 
     Returns
@@ -143,6 +144,11 @@ def fuse(
     ]
 
     params = [param_utils.invert_xparams(param) for param in params]
+
+    if isinstance(output_chunksize, Iterable):
+        output_chunksize = tuple(output_chunksize)
+    else:
+        output_chunksize = (output_chunksize,) * len(sdims)
 
     if output_stack_properties is None:
         if output_spacing is None:
@@ -231,7 +237,7 @@ def fuse(
 
         # rechunk to get a chunked dask array from the delayed object
         # (hacky, is there a better way to do this?)
-        merge_data = merge_data.rechunk([output_chunksize] * len(sdims))
+        merge_data = merge_data.rechunk(output_chunksize)
 
         # trigger compute here
         merge_data = merge_data.map_blocks(
@@ -310,7 +316,7 @@ def fuse_field(
     output_stack_properties : dict, optional
         Dictionary describing the output stack with keys
         'spacing', 'origin', 'shape'.
-    output_chunksize : int, optional
+    output_chunksize : int or tuple of ints, optional
        See docstring of `fuse`.
 
     Returns
@@ -351,6 +357,11 @@ def fuse_field(
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
+    if isinstance(output_chunksize, Iterable):
+        output_chunksize = tuple(output_chunksize)
+    else:
+        output_chunksize = (output_chunksize,) * len(ndim)
+
     # # downsample input views to just below output spacing
     # if coarsen_before_transform:
     #     for isim, sim in enumerate(sims):
@@ -380,7 +391,7 @@ def fuse_field(
 
     # calculate output array properties
     normalized_chunks = da.core.normalize_chunks(
-        [output_chunksize] * ndim,
+        output_chunksize,
         tuple([output_stack_properties["shape"][dim] for dim in spatial_dims]),
     )
 
