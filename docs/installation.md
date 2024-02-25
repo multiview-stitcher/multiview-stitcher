@@ -4,7 +4,7 @@
 
 [TODO] You can install `napari-stitcher` via pip:
 
-    `pip install https://github.com/multiview-stitcher/multiview-stitcher`
+    `pip install multiview-stitcher`
 
 To install latest development version :
 
