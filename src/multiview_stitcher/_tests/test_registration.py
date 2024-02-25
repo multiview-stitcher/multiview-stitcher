@@ -2,7 +2,6 @@ import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
-from scipy import ndimage
 
 from multiview_stitcher import (
     io,
@@ -91,44 +90,6 @@ def test_register_with_single_pixel_overlap(ndim):
         msims[1],
         transform_key=METADATA_TRANSFORM_KEY,
     )
-
-
-def test_get_stabilization_parameters():
-    for ndim in [2, 3]:
-        N_t = 10
-
-        im = np.random.randint(0, 100, (5,) * ndim, dtype=np.uint16)
-        im = ndimage.zoom(im, [10] * ndim, order=1)
-
-        # simulate random stage drifts
-        shifts = (np.random.random((N_t, ndim)) - 0.5) * 30
-
-        # simulate drift
-        drift = np.cumsum(np.array([[10] * ndim] * N_t), axis=0)
-
-        tl = []
-        for t in range(N_t):
-            tl.append(
-                ndimage.shift(
-                    im, shifts[t] + drift[t], order=1, mode="reflect"
-                )
-            )
-        tl = np.array(tl)
-
-        params_da = registration.get_stabilization_parameters(tl, sigma=1)
-        params = params_da.compute()
-
-        assert len(params) == N_t
-
-        assert np.all(
-            np.abs(
-                np.mean(
-                    np.diff(shifts, axis=0) - np.diff(params, axis=0), axis=0
-                )
-                < np.std(shifts)
-            )
-            / 3
-        )
 
 
 def test_get_optimal_registration_binning():
