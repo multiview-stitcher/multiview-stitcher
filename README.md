@@ -42,7 +42,11 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 ----------------------------------
 ## Installation
 
-You can install `multiview-stitcher` via pip:
+You can install `multiview-stitcher` via `pip` from PyPI:
+
+    pip install multiview-stitcher
+
+or from the source code in this github repository:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
