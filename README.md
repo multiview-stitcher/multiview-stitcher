@@ -14,7 +14,7 @@ For visualization, the associated [`napari-stitcher`](https://github.com/multivi
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 
-It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) classes for image metadata handling and [`dask`](https://github.com/dask) and [`dask-image`](https://github.com/dask-image) for chunked and distributed image processing.
+It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) and [`multiscale-spatial-image`](https://github.com/spatial-image/multiscale-spatial-image) for image handling and [`dask`](https://github.com/dask) and [`dask-image`](https://github.com/dask-image) for chunked and distributed image processing.
 
 ## Quickstart
 
@@ -42,7 +42,7 @@ WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in th
 ----------------------------------
 ## Installation
 
-You can install `napari-stitcher` via pip:
+You can install `multiview-stitcher` via pip:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
@@ -53,7 +53,7 @@ If you encounter any problems, please [file an issue](https://github.com/multivi
 
 ## Contributing
 
-Contributions are welcome! At the same time, we're still improving.
+Contributions are welcome.
 
 ## License
 
