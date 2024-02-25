@@ -102,7 +102,7 @@ def ngff_image_to_sim(ngff_im, transform_key):
         translation=ngff_im.translation,
     )
 
-    sim = si_utils.ensure_time_dim(sim)
+    sim = si_utils.ensure_dim(sim, "t")
 
     if "c" not in sim.dims:
         sim = sim.expand_dims(["c"])

@@ -93,11 +93,11 @@ def get_stack_properties_from_sim(sim, transform_key=None, asarray=False):
     return stack_properties
 
 
-def ensure_time_dim(sim):
-    if "t" in sim.dims:
+def ensure_dim(sim, dim):
+    if dim in sim.dims:
         return sim
     else:
-        sim = sim.expand_dims(["t"], axis=0)
+        sim = sim.expand_dims([dim], axis=0)
 
     sim = get_sim_from_xim(sim)
 

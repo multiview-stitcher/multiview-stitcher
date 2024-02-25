@@ -653,8 +653,9 @@ def register_pair_of_msims_over_time(
 
     if pairwise_reg_func_kwargs is None:
         pairwise_reg_func_kwargs = {}
-    msim1 = msi_utils.ensure_time_dim(msim1)
-    msim2 = msi_utils.ensure_time_dim(msim2)
+
+    msim1 = msi_utils.ensure_dim(msim1, "t")
+    msim2 = msi_utils.ensure_dim(msim2, "t")
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
 

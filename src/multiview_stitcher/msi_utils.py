@@ -223,23 +223,23 @@ def set_affine_transform(
         msim[sk][transform_key] = xaffine
 
 
-def ensure_time_dim(msim):
-    if "t" in msim["scale0/image"].dims:
+def ensure_dim(msim, dim):
+    if dim in msim["scale0/image"].dims:
         return msim
 
     scale_keys = get_sorted_scale_keys(msim)
     for sk in scale_keys:
         for data_var in msim[sk].data_vars:
             if data_var == "image":
-                msim[sk][data_var] = spatial_image_utils.ensure_time_dim(
-                    msim[sk][data_var]
+                msim[sk][data_var] = spatial_image_utils.ensure_dim(
+                    msim[sk][data_var], dim
                 )
             else:
-                if "t" in msim[sk][data_var].dims:
+                if dim in msim[sk][data_var].dims:
                     continue
                 else:
                     msim[sk][data_var] = msim[sk][data_var].expand_dims(
-                        ["t"], axis=0
+                        [dim], axis=0
                     )
 
     return msim
