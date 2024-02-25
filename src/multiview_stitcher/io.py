@@ -6,9 +6,14 @@ import numpy as np
 import spatial_image as si
 import xarray as xr
 import zarr
-from aicsimageio import AICSImage
 from tifffile import TiffFile, imread, imwrite
 from tqdm import tqdm
+
+# aicsimageio is an optional dependency
+try:
+    from aicsimageio import AICSImage
+except ImportError:
+    AICSImage = None
 
 from multiview_stitcher import param_utils, spatial_image_utils
 
@@ -122,6 +127,10 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     # for multiscale always require zarr format
 
     """
+    if AICSImage is None:
+        raise ImportError(
+            "aicsimageio is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+        )
 
     aicsim = AICSImage(path, reconstruct_mosaic=False)
 
