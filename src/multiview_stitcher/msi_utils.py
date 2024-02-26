@@ -73,16 +73,17 @@ def get_sorted_scale_keys(msim):
     return sorted_scale_keys
 
 
-def multiscale_spatial_image_from_zarr(path):
+def multiscale_spatial_image_from_zarr(path, chunks=None):
     ndim = spatial_image_utils.get_ndim_from_sim(
         datatree.open_datatree(path, engine="zarr")["scale0/image"]
     )
 
-    if ndim == 2:
-        chunks = {"y": 256, "x": 256}
-    elif ndim == 3:
-        # chunks = {'z': 64, 'y': 64, 'x': 64}
-        chunks = {"z": 256, "y": 256, "x": 256}
+    if chunks is None:
+        if ndim == 2:
+            chunks = {"y": 256, "x": 256}
+        elif ndim == 3:
+            # chunks = {'z': 64, 'y': 64, 'x': 64}
+            chunks = {"z": 256, "y": 256, "x": 256}
 
     multiscale = datatree.open_datatree(path, engine="zarr", chunks=chunks)
 
@@ -188,7 +189,7 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     if scale_factors is None:
         scale_factors = get_optimal_multi_scale_factors_from_sim(sim)
 
-    if chunks is not None:
+    if chunks is None:
         chunks = {dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims}
 
     msim = msi.to_multiscale(

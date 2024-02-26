@@ -6,7 +6,6 @@ import networkx as nx
 import numpy as np
 import xarray as xr
 from dask import compute, delayed
-from scipy.ndimage import binary_dilation
 from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
@@ -595,11 +594,7 @@ def get_pairs_from_sample_masks(
 
     with xr.set_options(keep_attrs=True):
         label_sims = [
-            spatial_image_utils.process_fields(
-                mask_sim, binary_dilation, iterations=1
-            )
-            * (i + 1)
-            for i, mask_sim in enumerate(mask_sims)
+            mask_sim * (i + 1) for i, mask_sim in enumerate(mask_sims)
         ]
 
     if fused_mask_spacing is None:
@@ -617,11 +612,13 @@ def get_pairs_from_sample_masks(
         output_spacing=fused_mask_spacing,
     ).compute()
 
+    fused_labels = fused_labels.compute()
+
     pairs = get_connected_labels(
         fused_labels.data, structure=np.ones((3, 3, 3))
     )
 
-    return pairs
+    return pairs, fused_labels
 
 
 def unique_along_axis(a, axis=0):
