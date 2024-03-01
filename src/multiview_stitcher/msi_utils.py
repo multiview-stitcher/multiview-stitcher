@@ -1,12 +1,16 @@
 from functools import wraps
 from pathlib import Path
 
+import dask.array as da
 import datatree
 import multiscale_spatial_image as msi
 import spatial_image as si
 import xarray as xr
 
 from multiview_stitcher import param_utils, spatial_image_utils
+
+DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
+DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 1024, "x": 1024}
 
 
 def get_store_decorator(store_path, store_overwrite=False):
@@ -74,16 +78,19 @@ def get_sorted_scale_keys(msim):
 
 
 def multiscale_spatial_image_from_zarr(path, chunks=None):
-    ndim = spatial_image_utils.get_ndim_from_sim(
-        datatree.open_datatree(path, engine="zarr")["scale0/image"]
-    )
+    dims = datatree.open_datatree(path, engine="zarr")["scale0/image"].dims
+    sdims = [dim for dim in dims if dim in spatial_image_utils.SPATIAL_DIMS]
+    ndim = len(sdims)
+    nsdims = [dim for dim in dims if dim not in sdims]
 
     if chunks is None:
         if ndim == 2:
-            chunks = {"y": 256, "x": 256}
+            chunks = DEFAULT_SPATIAL_CHUNKSIZES_2D
         elif ndim == 3:
-            # chunks = {'z': 64, 'y': 64, 'x': 64}
-            chunks = {"z": 256, "y": 256, "x": 256}
+            chunks = DEFAULT_SPATIAL_CHUNKSIZES_3D
+
+        for nsdim in nsdims:
+            chunks[nsdim] = 1
 
     multiscale = datatree.open_datatree(path, engine="zarr", chunks=chunks)
 
@@ -190,7 +197,12 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
         scale_factors = get_optimal_multi_scale_factors_from_sim(sim)
 
     if chunks is None:
-        chunks = {dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims}
+        if isinstance(sim.data, da.Array):
+            chunks = sim.data.chunksize
+        else:
+            chunks = {
+                dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims
+            }
 
     msim = msi.to_multiscale(
         sim,

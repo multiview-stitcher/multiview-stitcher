@@ -9,32 +9,36 @@ from multiview_stitcher import param_utils
 SPATIAL_DIMS = ["z", "y", "x"]
 
 
-def get_data_to_world_matrix_from_spatial_image(sim):
-    spatial_dims = [dim for dim in ["z", "y", "x"] if dim in sim.dims]
+def get_sim_from_array(
+    array,
+    dims=None,
+    scale=None,
+    translation=None,
+    affine=True,
+    transform_key=None,
+):
+    """
+    highest scale sim from msim with affine transforms
+    """
 
-    ndim = len(spatial_dims)
-    p = np.eye(ndim + 1)
+    sim = si.to_spatial_image(
+        array,
+        dims=dims,
+        scale=scale,
+        translation=translation,
+    )
 
-    scale, offset = {}, {}
-    for _, dim in enumerate(spatial_dims):
-        coords = sim.coords[dim]
+    ndim = get_ndim_from_sim(sim)
 
-        if len(coords) > 1:
-            scale[dim] = coords[1] - coords[0]
-        else:
-            scale[dim] = 1
+    if affine is None:
+        affine = np.eye(ndim + 1)
 
-        offset[dim] = coords[0]
+    if transform_key is None:
+        transform_key = "affine_manual"
 
-    S = np.diag([scale[dim] for dim in spatial_dims] + [1])
-    T = np.eye(ndim + 1)
-    T[:ndim, ndim] = [offset[dim] for dim in spatial_dims]
+    set_sim_affine(sim, affine, transform_key)
 
-    # direction not implemented (yet?)
-    # p = np.matmul(T, np.matmul(S, sim.attrs['direction']))
-    p = np.matmul(T, S)
-
-    return p
+    return sim
 
 
 def get_spatial_dims_from_sim(sim):
