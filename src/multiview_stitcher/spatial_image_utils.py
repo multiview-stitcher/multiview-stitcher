@@ -28,7 +28,7 @@ def get_sim_from_array(
     dims: Optional[Union[list, tuple]] = None,
     scale: Optional[dict] = None,
     translation: Optional[dict] = None,
-    affine: Optional[Union[np.ndarray, list]] = None,
+    affine: Optional[xr.DataArray] = None,
     transform_key: str = "affine_manual",
     c_coords: Optional[Union[list, tuple, ArrayLike]] = None,
     t_coords: Optional[Union[list, tuple, ArrayLike]] = None,
@@ -36,6 +36,31 @@ def get_sim_from_array(
     """
     Get a spatial-image (multiview-stitcher flavor)
     from an array-like object.
+
+    Parameters
+    ----------
+    array : ArrayLike
+        Image data
+    dims : Optional[Union[list, tuple]], optional
+        Image dimension. Subset of ('t', 'c', 'z', 'y', 'x')
+    scale : Optional[dict], optional
+        Pixel spacing, e.g. {'z': 1.0, 'y': 0.3, 'x': 0.3}
+    translation : Optional[dict], optional
+        Image offset {'z': 50.0, 'y': 50. 'x': 50.}
+    affine : Optional[xr.DataArray], optional
+        Affine transform, e.g. xr.DataArray(np.eye(4), dims=["x_in", "x_out"])
+    transform_key : str, optional
+        By default "affine_manual"
+    c_coords : Optional[Union[list, tuple, ArrayLike]], optional
+        Channel coordinates, e.g. ['DAPI', 'GFP', 'RFP']
+    t_coords : Optional[Union[list, tuple, ArrayLike]], optional
+        Time coordinates, e.g. [0.0, 0.2, 0.4, 0.6, 0.8]
+
+    Returns
+    -------
+    spatial_image.SpatialImage
+        spatial-image with multiview-stitcher flavor
+        (SpatialImage + affine transform attributes)
     """
 
     assert len(dims) == array.ndim
@@ -72,13 +97,7 @@ def get_sim_from_array(
     )
 
     if affine is None:
-        affine = np.eye(ndim + 1)
-
-    affine_xr = xr.DataArray(
-        np.stack([affine] * len(sim.coords["t"])),
-        dims=["t", "x_in", "x_out"],
-        coords={"t": sim.coords["t"]},
-    )
+        affine_xr = param_utils.identity_transform(ndim, t_coords=t_coords)
 
     set_sim_affine(
         sim,

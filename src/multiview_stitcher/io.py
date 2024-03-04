@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import xarray as xr
 import zarr
 from tifffile import TiffFile, imread, imwrite
 from tqdm import tqdm
@@ -14,7 +13,6 @@ try:
 except ImportError:
     AICSImage = None
 
-from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = "affine_metadata"
@@ -67,7 +65,7 @@ def read_tiff_into_spatial_xarray(
         translation=translation,
         affine=affine_transform,
         transform_key=METADATA_TRANSFORM_KEY,
-        channel_names=channel_names,
+        c_coords=channel_names,
     )
 
     return sim
@@ -107,24 +105,21 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     else:
         scene_index = 0
 
-    sim = aicsim.get_xarray_dask_stack()
+    xim = aicsim.get_xarray_dask_stack()
 
-    sim = sim.sel(I=scene_index)
+    xim = xim.sel(I=scene_index)
 
     # sim coords to lower case
-    sim = sim.rename({dim: dim.lower() for dim in sim.dims})
+    xim = xim.rename({dim: dim.lower() for dim in xim.dims})
 
     # remove singleton Z
     for axis in ["z"]:
-        if axis in sim.dims and len(sim.coords[axis]) < 2:
-            sim = sim.sel({axis: 0}, drop=True)
+        if axis in xim.dims and len(xim.coords[axis]) < 2:
+            xim = xim.sel({axis: 0}, drop=True)
 
-    # ensure time dimension is present
-    sim = si_utils.ensure_dim(sim, "t")
+    spatial_dims = [dim for dim in xim.dims if dim in si_utils.SPATIAL_DIMS]
 
-    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
-
-    views = range(len(sim.coords["m"]))
+    views = range(len(xim.coords["m"]))
 
     pixel_sizes = {}
     pixel_sizes["x"] = aicsim.physical_pixel_sizes.X
@@ -135,12 +130,10 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     tile_mosaic_positions = aicsim.get_mosaic_tile_positions()
 
     view_sims = []
-    for iview, (view, tile_mosaic_position) in enumerate(
+    for _iview, (view, tile_mosaic_position) in enumerate(
         zip(views, tile_mosaic_positions)
     ):
-        view_sim = sim.sel(m=view)
-
-        view_sim = si_utils.get_sim_from_xim(view_sim)
+        view_xim = xim.sel(m=view)
 
         origin_values = {
             mosaic_axis: tile_mosaic_position[ima] * pixel_sizes[mosaic_axis]
@@ -150,18 +143,16 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
         if "z" in spatial_dims:
             origin_values["z"] = 0
 
-        affine = param_utils.affine_from_translation(
-            np.array([origin_values[dim] for dim in spatial_dims])
+        view_sim = si_utils.get_sim_from_array(
+            view_xim.data,
+            dims=view_xim.dims,
+            scale=pixel_sizes,
+            translation=origin_values,
+            affine=None,
+            transform_key=METADATA_TRANSFORM_KEY,
+            c_coords=view_xim.coords["c"].values,
+            t_coords=view_xim.coords["t"].values,
         )
-
-        affine_xr = xr.DataArray(
-            np.stack([affine] * len(view_sim.coords["t"])),
-            dims=["t", "x_in", "x_out"],
-        )
-
-        si_utils.set_sim_affine(view_sim, affine_xr, METADATA_TRANSFORM_KEY)
-
-        view_sim.name = str(iview)
 
         view_sims.append(view_sim)
 
