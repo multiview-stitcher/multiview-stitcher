@@ -1,18 +1,21 @@
 import copy
+from typing import Optional, Union
 
 import numpy as np
 import spatial_image as si
 import xarray as xr
+from numpy._typing import ArrayLike
 
 from multiview_stitcher import param_utils
 
 SPATIAL_DIMS = ["z", "y", "x"]
+SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
 DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
 DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 1024, "x": 1024}
 
 
-def get_default_spatial_chunksizes(ndim):
+def get_default_spatial_chunksizes(ndim: int):
     assert ndim in [2, 3]
     if ndim == 2:
         return DEFAULT_SPATIAL_CHUNKSIZES_2D
@@ -21,33 +24,67 @@ def get_default_spatial_chunksizes(ndim):
 
 
 def get_sim_from_array(
-    array,
-    dims=None,
-    scale=None,
-    translation=None,
-    affine=True,
-    transform_key=None,
+    array: ArrayLike,
+    dims: Optional[Union[list, tuple]] = None,
+    scale: Optional[dict] = None,
+    translation: Optional[dict] = None,
+    affine: Optional[Union[np.ndarray, list]] = None,
+    transform_key: str = "affine_manual",
+    c_coords: Optional[Union[list, tuple, ArrayLike]] = None,
+    t_coords: Optional[Union[list, tuple, ArrayLike]] = None,
 ):
     """
-    highest scale sim from msim with affine transforms
+    Get a spatial-image (multiview-stitcher flavor)
+    from an array-like object.
     """
 
-    sim = si.to_spatial_image(
+    assert len(dims) == array.ndim
+
+    xim = xr.DataArray(
         array,
         dims=dims,
-        scale=scale,
-        translation=translation,
     )
 
-    ndim = get_ndim_from_sim(sim)
+    for nsdim in ["c", "t"]:
+        if nsdim not in xim.dims:
+            xim = xim.expand_dims([nsdim])
+
+    # transpose to dim order supported by spatial-image
+    new_dims = [dim for dim in SPATIAL_IMAGE_DIMS if dim in xim.dims]
+    xim = xim.transpose(*new_dims)
+
+    spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
+    ndim = len(spatial_dims)
+
+    if scale is None:
+        scale = {dim: 1 for dim in spatial_dims}
+
+    if translation is None:
+        translation = {dim: 0 for dim in spatial_dims}
+
+    sim = si.to_spatial_image(
+        xim.data,
+        dims=xim.dims,
+        scale=scale,
+        translation=translation,
+        c_coords=c_coords,
+        t_coords=t_coords,
+    )
 
     if affine is None:
         affine = np.eye(ndim + 1)
 
-    if transform_key is None:
-        transform_key = "affine_manual"
+    affine_xr = xr.DataArray(
+        np.stack([affine] * len(sim.coords["t"])),
+        dims=["t", "x_in", "x_out"],
+        coords={"t": sim.coords["t"]},
+    )
 
-    set_sim_affine(sim, affine, transform_key)
+    set_sim_affine(
+        sim,
+        affine_xr,
+        transform_key=transform_key,
+    )
 
     return sim
 

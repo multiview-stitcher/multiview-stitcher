@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import spatial_image as si
 import xarray as xr
 import zarr
 from tifffile import TiffFile, imread, imwrite
@@ -15,7 +14,8 @@ try:
 except ImportError:
     AICSImage = None
 
-from multiview_stitcher import param_utils, spatial_image_utils
+from multiview_stitcher import param_utils
+from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = "affine_metadata"
 
@@ -60,55 +60,14 @@ def read_tiff_into_spatial_xarray(
         # infer from metadata
         dims = [dim.lower() for dim in axes]
 
-    sim = xr.DataArray(
+    sim = si_utils.get_sim_from_array(
         data,
         dims=dims,
-    )
-
-    # transpose to dim order supported by spatial-image
-    si_dims = ["t", "c", "z", "y", "x"]
-    new_dims = [dim for dim in si_dims if dim in dims]
-    sim = sim.transpose(*new_dims)
-
-    sim = spatial_image_utils.ensure_dim(sim, "t")
-
-    if "c" not in sim.dims:
-        sim = sim.expand_dims(["c"])
-
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
-    sim = sim.transpose(*(("t", "c") + tuple(spatial_dims)))
-
-    if scale is None:
-        scale = {ax: 1 for ax in spatial_dims}
-
-    if translation is None:
-        translation = {ax: 0 for ax in spatial_dims}
-
-    sim = si.to_spatial_image(
-        sim.data,
-        dims=sim.dims,
         scale=scale,
         translation=translation,
-        c_coords=tuple(channel_names)
-        if channel_names is not None
-        else list(range(len(sim.coords["c"]))),
-    )
-
-    ndim = spatial_image_utils.get_ndim_from_sim(sim)
-
-    if affine_transform is None:
-        affine_transform = np.eye(ndim + 1)
-
-    affine_xr = xr.DataArray(
-        np.stack([affine_transform] * len(sim.coords["t"])),
-        dims=["t", "x_in", "x_out"],
-        coords={"t": sim.coords["t"]},
-    )
-
-    spatial_image_utils.set_sim_affine(
-        sim,
-        affine_xr,
-        METADATA_TRANSFORM_KEY,
+        affine=affine_transform,
+        transform_key=METADATA_TRANSFORM_KEY,
+        channel_names=channel_names,
     )
 
     return sim
@@ -161,9 +120,9 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
             sim = sim.sel({axis: 0}, drop=True)
 
     # ensure time dimension is present
-    sim = spatial_image_utils.ensure_dim(sim, "t")
+    sim = si_utils.ensure_dim(sim, "t")
 
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
 
     views = range(len(sim.coords["m"]))
 
@@ -181,7 +140,7 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     ):
         view_sim = sim.sel(m=view)
 
-        view_sim = spatial_image_utils.get_sim_from_xim(view_sim)
+        view_sim = si_utils.get_sim_from_xim(view_sim)
 
         origin_values = {
             mosaic_axis: tile_mosaic_position[ima] * pixel_sizes[mosaic_axis]
@@ -200,9 +159,7 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
             dims=["t", "x_in", "x_out"],
         )
 
-        spatial_image_utils.set_sim_affine(
-            view_sim, affine_xr, METADATA_TRANSFORM_KEY
-        )
+        si_utils.set_sim_affine(view_sim, affine_xr, METADATA_TRANSFORM_KEY)
 
         view_sim.name = str(iview)
 
@@ -225,8 +182,8 @@ def save_sim_as_tif(path, sim):
     sim : spatial image
     """
 
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
-    spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
+    spacing = si_utils.get_spacing_from_sim(sim, asarray=True)
 
     sim = sim.transpose(*tuple(["t", "c"] + spatial_dims))
 
