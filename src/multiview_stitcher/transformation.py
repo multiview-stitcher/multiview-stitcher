@@ -1,3 +1,4 @@
+import copy
 import warnings
 from collections.abc import Iterable
 from itertools import product
@@ -7,7 +8,7 @@ import spatial_image as si
 import xarray as xr
 from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 
-from multiview_stitcher import spatial_image_utils
+from multiview_stitcher import param_utils, spatial_image_utils
 
 
 def transform_sim(
@@ -17,6 +18,7 @@ def transform_sim(
     output_chunksize=None,
     order=1,
     cval=0.0,
+    keep_transform_keys=False,
 ):
     """
     (Lazily) transform a spatial image
@@ -35,6 +37,12 @@ def transform_sim(
             ndim
         )
         output_chunksize = tuple([default_chunksize[dim] for dim in sdims])
+    
+    if p is None:
+        p = param_utils.identity_transform(ndim)
+
+    if keep_transform_keys:
+        transform_attrs = copy.deepcopy(sim.attrs)
 
     if len(nsdims) > 0:
         merges = []
@@ -61,6 +69,7 @@ def transform_sim(
                 output_chunksize=output_chunksize,
                 order=order,
                 cval=cval,
+                keep_transform_keys=keep_transform_keys,
             )
 
             sim_field_t = sim_field_t.expand_dims(nsdims)
@@ -75,14 +84,16 @@ def transform_sim(
                 warnings.simplefilter(action="ignore", category=FutureWarning)
 
                 # if sims are named, combine_by_coord returns a dataset
-                sim_t = xr.combine_by_coords([m.rename(None) for m in merges])
+                sim_t = xr.combine_by_coords(
+                    [m.rename(None) for m in merges], combine_attrs="drop"
+                )
         else:
             sim_t = sim_field_t
 
-        return sim_t
+        if keep_transform_keys:
+            sim_t.attrs.update(transform_attrs)
 
-    if p is None:
-        p = np.eye(ndim + 1)
+        return sim_t
 
     if output_stack_properties is None:
         output_stack_properties = (
@@ -135,6 +146,9 @@ def transform_sim(
         scale=output_stack_properties["spacing"],
         translation=output_stack_properties["origin"],
     )
+
+    if keep_transform_keys:
+        sim.attrs.update(transform_attrs)
 
     return sim
 
