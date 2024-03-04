@@ -7,10 +7,8 @@ import multiscale_spatial_image as msi
 import spatial_image as si
 import xarray as xr
 
-from multiview_stitcher import param_utils, spatial_image_utils
-
-DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
-DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 1024, "x": 1024}
+from multiview_stitcher import param_utils
+from multiview_stitcher import spatial_image_utils as si_utils
 
 
 def get_store_decorator(store_path, store_overwrite=False):
@@ -79,15 +77,12 @@ def get_sorted_scale_keys(msim):
 
 def multiscale_spatial_image_from_zarr(path, chunks=None):
     dims = datatree.open_datatree(path, engine="zarr")["scale0/image"].dims
-    sdims = [dim for dim in dims if dim in spatial_image_utils.SPATIAL_DIMS]
+    sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
     ndim = len(sdims)
     nsdims = [dim for dim in dims if dim not in sdims]
 
     if chunks is None:
-        if ndim == 2:
-            chunks = DEFAULT_SPATIAL_CHUNKSIZES_2D
-        elif ndim == 3:
-            chunks = DEFAULT_SPATIAL_CHUNKSIZES_3D
+        chunks = si_utils.get_default_spatial_chunksizes(ndim)
 
         for nsdim in nsdims:
             chunks[nsdim] = 1
@@ -122,7 +117,7 @@ def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
     Probably it'd make more sense to downscale considering the dims spacing.
     """
 
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
     current_shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
     factors = []
     while 1:
@@ -168,8 +163,9 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     highest scale sim from msim with affine transforms
     """
 
-    spacing = spatial_image_utils.get_spacing_from_sim(sim)
-    origin = spatial_image_utils.get_origin_from_sim(sim)
+    ndim = si_utils.get_ndim_from_sim(sim)
+    spacing = si_utils.get_spacing_from_sim(sim)
+    origin = si_utils.get_origin_from_sim(sim)
 
     if "c" in sim.dims and "t" in sim.dims:
         sim = sim.transpose(
@@ -200,8 +196,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
         if isinstance(sim.data, da.Array):
             chunks = sim.data.chunksize
         else:
+            spatial_chunksizes = si_utils.get_default_spatial_chunksizes(ndim)
             chunks = {
-                dim: 256 if dim not in ["c", "t"] else 1 for dim in sim.dims
+                dim: spatial_chunksizes[dim] if dim not in ["c", "t"] else 1
+                for dim in sim.dims
             }
 
     msim = msi.to_multiscale(
@@ -244,7 +242,7 @@ def ensure_dim(msim, dim):
     for sk in scale_keys:
         for data_var in msim[sk].data_vars:
             if data_var == "image":
-                msim[sk][data_var] = spatial_image_utils.ensure_dim(
+                msim[sk][data_var] = si_utils.ensure_dim(
                     msim[sk][data_var], dim
                 )
             else:
@@ -262,9 +260,9 @@ def get_first_scale_above_target_spacing(msim, target_spacing, dim="y"):
     sorted_scale_keys = get_sorted_scale_keys(msim)
 
     for scale in sorted_scale_keys:
-        scale_spacing = spatial_image_utils.get_spacing_from_sim(
-            msim[scale]["image"]
-        )[dim]
+        scale_spacing = si_utils.get_spacing_from_sim(msim[scale]["image"])[
+            dim
+        ]
         if scale_spacing > target_spacing:
             break
 
@@ -272,13 +270,11 @@ def get_first_scale_above_target_spacing(msim, target_spacing, dim="y"):
 
 
 def get_ndim(msim):
-    return spatial_image_utils.get_ndim_from_sim(get_sim_from_msim(msim))
+    return si_utils.get_ndim_from_sim(get_sim_from_msim(msim))
 
 
 def get_spatial_dims(msim):
-    return spatial_image_utils.get_spatial_dims_from_sim(
-        get_sim_from_msim(msim)
-    )
+    return si_utils.get_spatial_dims_from_sim(get_sim_from_msim(msim))
 
 
 def get_dims(msim):

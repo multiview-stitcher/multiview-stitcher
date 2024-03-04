@@ -8,6 +8,17 @@ from multiview_stitcher import param_utils
 
 SPATIAL_DIMS = ["z", "y", "x"]
 
+DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
+DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 1024, "x": 1024}
+
+
+def get_default_spatial_chunksizes(ndim):
+    assert ndim in [2, 3]
+    if ndim == 2:
+        return DEFAULT_SPATIAL_CHUNKSIZES_2D
+    elif ndim == 3:
+        return DEFAULT_SPATIAL_CHUNKSIZES_3D
+
 
 def get_sim_from_array(
     array,

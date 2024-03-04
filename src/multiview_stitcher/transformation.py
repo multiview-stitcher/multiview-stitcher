@@ -14,7 +14,7 @@ def transform_sim(
     sim,
     p=None,
     output_stack_properties=None,
-    output_chunksize=256,
+    output_chunksize=None,
     order=1,
     cval=0.0,
 ):
@@ -29,6 +29,12 @@ def transform_sim(
     ndim = spatial_image_utils.get_ndim_from_sim(sim)
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     nsdims = [dim for dim in sim.dims if dim not in sdims]
+
+    if output_chunksize is None:
+        default_chunksize = spatial_image_utils.get_default_spatial_chunksizes(
+            ndim
+        )
+        output_chunksize = tuple([default_chunksize[dim] for dim in sdims])
 
     if len(nsdims) > 0:
         merges = []

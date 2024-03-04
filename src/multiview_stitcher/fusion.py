@@ -12,10 +12,10 @@ from dask.utils import has_keyword
 
 from multiview_stitcher import (
     param_utils,
-    spatial_image_utils,
     transformation,
     weights,
 )
+from multiview_stitcher import spatial_image_utils as si_utils
 
 
 def max_fusion(
@@ -84,7 +84,7 @@ def fuse(
     output_origin=None,
     output_shape=None,
     output_stack_properties=None,
-    output_chunksize=512,
+    output_chunksize=None,
     overlap_in_pixels=None,
     interpolation_order=1,
 ):
@@ -133,26 +133,28 @@ def fuse(
         Fused image.
     """
 
-    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    ndim = si_utils.get_ndim_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     nsdims = [dim for dim in sims[0].dims if dim not in sdims]
 
     params = [
-        spatial_image_utils.get_affine_from_sim(
-            sim, transform_key=transform_key
-        )
+        si_utils.get_affine_from_sim(sim, transform_key=transform_key)
         for sim in sims
     ]
 
     params = [param_utils.invert_xparams(param) for param in params]
 
-    if isinstance(output_chunksize, Iterable):
+    if output_chunksize is None:
+        default_chunksizes = si_utils.get_default_spatial_chunksizes(ndim)
+        output_chunksize = tuple([default_chunksizes[dim] for dim in sdims])
+    elif isinstance(output_chunksize, Iterable):
         output_chunksize = tuple(output_chunksize)
     else:
         output_chunksize = (output_chunksize,) * len(sdims)
 
     if output_stack_properties is None:
         if output_spacing is None:
-            output_spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
+            output_spacing = si_utils.get_spacing_from_sim(sims[0])
 
         output_stack_properties = calc_fusion_stack_properties(
             sims,
@@ -209,8 +211,8 @@ def fuse(
         sims_metas = [
             {
                 "dims": ssim.dims,
-                "scale": spatial_image_utils.get_spacing_from_sim(ssim),
-                "translation": spatial_image_utils.get_origin_from_sim(ssim),
+                "scale": si_utils.get_spacing_from_sim(ssim),
+                "translation": si_utils.get_origin_from_sim(ssim),
             }
             for ssim in ssims
         ]
@@ -268,8 +270,8 @@ def fuse(
     else:
         res = merge
 
-    res = spatial_image_utils.get_sim_from_xim(res)
-    spatial_image_utils.set_sim_affine(
+    res = si_utils.get_sim_from_xim(res)
+    si_utils.set_sim_affine(
         res,
         # param_utils.identity_transform(len(sdims), res.coords["t"]),
         param_utils.identity_transform(len(sdims)),
@@ -354,8 +356,8 @@ def fuse_field(
         )
 
     input_dtype = sims[0].dtype
-    ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    ndim = si_utils.get_ndim_from_sim(sims[0])
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sims[0])
 
     if isinstance(output_chunksize, Iterable):
         output_chunksize = tuple(output_chunksize)
@@ -365,8 +367,8 @@ def fuse_field(
     # # downsample input views to just below output spacing
     # if coarsen_before_transform:
     #     for isim, sim in enumerate(sims):
-    #         spacing = spatial_image_utils.get_spacing_from_sim(sim)
-    #         shape = spatial_image_utils.get_shape_from_sim(sim)
+    #         spacing = si_utils.get_spacing_from_sim(sim)
+    #         shape = si_utils.get_shape_from_sim(sim)
     #         bin_factors = {dim: np.max(
     #             [1, np.min([shape[dim], int(np.floor(output_stack_properties["spacing"][dim] / spacing[dim]))])])
     #             for dim in spatial_dims}
@@ -630,10 +632,10 @@ def calc_fusion_stack_properties(
         Stack properties (shape, spacing, origin).
     """
 
-    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
 
     views_props = [
-        spatial_image_utils.get_stack_properties_from_sim(sim, asarray=False)
+        si_utils.get_stack_properties_from_sim(sim, asarray=False)
         for sim in sims
     ]
 
