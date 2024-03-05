@@ -62,6 +62,29 @@ def test_pairwise(pairwise_reg_func):
         )
 
 
+def test_iterative_registration_and_transform_key_setting():
+    example_data_path = sample_data.get_mosaic_sample_data_path()
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    registration.register(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="affine_registered",
+        reg_channel_index=0,
+    )
+
+    registration.register(
+        msims,
+        transform_key="affine_registered",
+        new_transform_key="affine_registered_2",
+        reg_channel_index=0,
+    )
+
+
 @pytest.mark.parametrize("ndim", [2, 3])
 def test_register_with_single_pixel_overlap(ndim):
     sims = sample_data.generate_tiled_dataset(

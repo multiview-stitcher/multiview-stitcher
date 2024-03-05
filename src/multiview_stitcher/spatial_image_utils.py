@@ -242,8 +242,6 @@ def get_center_of_sim(sim, transform_key=None):
         ]
     )
 
-    # center = center * spacing + origin
-
     if transform_key is not None:
         affine = get_affine_from_sim(sim, transform_key=transform_key)
         # select params of first time point if applicable
