@@ -9,6 +9,7 @@ import spatial_image as si
 import xarray as xr
 from dask import delayed
 from dask.utils import has_keyword
+from scipy.spatial import cKDTree
 
 from multiview_stitcher import (
     param_utils,
@@ -364,15 +365,35 @@ def fuse_field(
     else:
         output_chunksize = (output_chunksize,) * len(ndim)
 
-    # # downsample input views to just below output spacing
-    # if coarsen_before_transform:
-    #     for isim, sim in enumerate(sims):
-    #         spacing = si_utils.get_spacing_from_sim(sim)
-    #         shape = si_utils.get_shape_from_sim(sim)
-    #         bin_factors = {dim: np.max(
-    #             [1, np.min([shape[dim], int(np.floor(output_stack_properties["spacing"][dim] / spacing[dim]))])])
-    #             for dim in spatial_dims}
-    #         sims[isim] = sims[isim].coarsen(bin_factors, boundary="trim").mean()
+    sims_spacing_array = np.array(
+        [[meta["scale"][dim] for dim in spatial_dims] for meta in sims_metas]
+    )
+    sims_origin_array = np.array(
+        [
+            [meta["translation"][dim] for dim in spatial_dims]
+            for meta in sims_metas
+        ]
+    )
+    sims_shape_array = np.array(
+        [
+            [sim.shape[idim] for idim, dim in enumerate(spatial_dims)]
+            for sim in sims
+        ]
+    )
+
+    output_shape_array = np.array(
+        [output_stack_properties["shape"][dim] for dim in spatial_dims]
+    )
+    output_spacing_array = np.array(
+        [output_stack_properties["spacing"][dim] for dim in spatial_dims]
+    )
+    output_origin_array = np.array(
+        [output_stack_properties["origin"][dim] for dim in spatial_dims]
+    )
+
+    output_chunksize_array = np.min(
+        [output_chunksize, output_shape_array], axis=0
+    )
 
     if fusion_requires_blending_weights:
         # get blending weights
@@ -397,12 +418,58 @@ def fuse_field(
         tuple([output_stack_properties["shape"][dim] for dim in spatial_dims]),
     )
 
-    block_indices = product(*(range(len(bds)) for bds in normalized_chunks))
+    block_indices = list(
+        product(*(range(len(bds)) for bds in normalized_chunks))
+    )
     block_offsets = [np.cumsum((0,) + bds[:-1]) for bds in normalized_chunks]
     numblocks = [len(bds) for bds in normalized_chunks]
 
+    # perform pre-selection of relevant views for each chunk
+    view_matrices = [np.array(param[:ndim, :ndim]) for param in params]
+    view_offsets = [np.array(param[:ndim, ndim]) for param in params]
+    view_centers_intrinsic = (
+        sims_origin_array + sims_shape_array * sims_spacing_array / 2.0
+    )
+    view_centers = np.array(
+        [
+            np.dot(matrix, center.T).T + offset
+            for matrix, offset, center in zip(
+                view_matrices, view_offsets, view_centers_intrinsic
+            )
+        ]
+    )
+    view_diameters = np.linalg.norm(
+        np.array(
+            [
+                sims_shape_array[isim] * sims_spacing_array[isim] / 2.0
+                for isim, sim in enumerate(sims)
+            ]
+        ),
+        axis=1,
+    )
+
+    chunk_centers = np.array(
+        [
+            output_origin_array
+            + (np.array(block_ind) + 1)
+            * output_spacing_array
+            * output_chunksize_array
+            / 2.0
+            for block_ind in block_indices
+        ]
+    )
+    chunk_diameter = np.linalg.norm(
+        output_spacing_array * output_chunksize_array / 2.0
+    )
+
+    # query relevant views for each chunk
+    tree = cKDTree(view_centers)
+    close_views = tree.query_ball_point(
+        chunk_centers, 1.01 * (np.max(view_diameters) + chunk_diameter)
+    )
+
     fused_blocks = np.empty(numblocks, dtype=object)
-    for _, block_ind in enumerate(block_indices):
+    for ib, block_ind in enumerate(block_indices):
         out_chunk_shape = [
             normalized_chunks[dim][block_ind[dim]] for dim in range(ndim)
         ]
@@ -414,10 +481,9 @@ def fuse_field(
             list(np.ndindex(tuple([2] * ndim)))
         ) * np.array(out_chunk_shape) + np.array(out_chunk_offset)
 
-        out_chunk_edges_phys = np.array(
-            [output_stack_properties["origin"][dim] for dim in spatial_dims]
-        ) + np.array(out_chunk_edges) * np.array(
-            [output_stack_properties["spacing"][dim] for dim in spatial_dims]
+        out_chunk_edges_phys = (
+            np.array(output_spacing_array)
+            + np.array(out_chunk_edges) * output_spacing_array
         )
 
         empty_chunk = True
@@ -447,26 +513,18 @@ def fuse_field(
         field_ims_t, field_ws_t = [], []
 
         # for each block, add contributing chunks from each input view
-        for iview, (param, sim) in enumerate(zip(params, sims)):
-            matrix = np.array(param[:ndim, :ndim])
-            offset = np.array(param[:ndim, ndim])
+        for iview in close_views[ib]:
+            sim = sims[iview]
+            param = params[iview]
+            matrix = view_matrices[iview]
+            offset = view_offsets[iview]
 
             # map output chunk edges onto input image coordinates
             # to define the input region relevant for the current chunk
             rel_image_edges = np.dot(matrix, out_chunk_edges_phys.T).T + offset
 
-            rel_image_i = np.min(rel_image_edges, 0) - np.array(
-                [
-                    output_stack_properties["spacing"][dim]
-                    for dim in spatial_dims
-                ]
-            )
-            rel_image_f = np.max(rel_image_edges, 0) + np.array(
-                [
-                    output_stack_properties["spacing"][dim]
-                    for dim in spatial_dims
-                ]
-            )
+            rel_image_i = np.min(rel_image_edges, 0) - output_spacing_array
+            rel_image_f = np.max(rel_image_edges, 0) + output_spacing_array
 
             maps_outside = np.max(
                 [
@@ -477,9 +535,6 @@ def fuse_field(
             )
 
             if maps_outside:
-                fused_blocks[block_ind] = da.zeros(
-                    out_chunk_shape, dtype=input_dtype
-                )
                 continue
 
             sim_reduced = sim.sel(
@@ -520,6 +575,9 @@ def fuse_field(
                 )
 
         if empty_chunk:
+            fused_blocks[block_ind] = da.zeros(
+                out_chunk_shape, dtype=input_dtype
+            )
             continue
 
         field_ims_t = da.stack(field_ims_t)

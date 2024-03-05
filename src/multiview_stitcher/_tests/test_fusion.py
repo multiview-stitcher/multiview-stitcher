@@ -42,7 +42,7 @@ def test_fuse_sims():
     assert xfused.dtype == sims[0].dtype
 
     # xfused.compute()
-    xfused = xfused.compute(scheduled="single-threaded")
+    xfused = xfused.compute(scheduler="single-threaded")
 
     assert xfused.dtype == sims[0].dtype
     assert (

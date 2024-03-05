@@ -76,7 +76,8 @@ def get_sim_from_array(
 
     # transpose to dim order supported by spatial-image
     new_dims = [dim for dim in SPATIAL_IMAGE_DIMS if dim in xim.dims]
-    xim = xim.transpose(*new_dims)
+    if new_dims != xim.dims:
+        xim = xim.transpose(*new_dims)
 
     spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
     ndim = len(spatial_dims)
