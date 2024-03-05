@@ -97,7 +97,7 @@ def get_sim_from_array(
     )
 
     if affine is None:
-        affine_xr = param_utils.identity_transform(ndim, t_coords=t_coords)
+        affine_xr = param_utils.identity_transform(ndim, t_coords=None)
 
     set_sim_affine(
         sim,
@@ -306,4 +306,64 @@ def process_fields(sim, func, **func_kwargs):
         dask="allowed",
         keep_attrs=True,
         kwargs=func_kwargs,
+    )
+
+
+def combine_attrs_func(x, context=None):
+    """
+    Function to be passed to xarray methods
+    to manage combining multiview-stitcher flavoured
+    SpatialImage attrributes.
+
+    Example:
+    ```
+    xr.concat(..., combine_attrs=combine_attrs_func))
+    ```
+    """
+    return {
+        k: {
+            transform_key: xr.concat(
+                [v["transforms"][transform_key] for v in x], dim="t"
+            )
+            for transform_key in x[0]["transforms"]
+        }
+        for k, _ in x[0].items()
+        if k == "transforms"
+    }
+
+
+def concat(sims, dim, **kwargs):
+    """
+    Concatenate multiview-stitcher flavoured SpatialImages.
+
+    Same as xr.concat but with handling of
+    transform_keys in attributes.
+
+    Parameters
+    ----------
+    sims : spatial_image.SpatialImage
+        multiview-stitcher flavor spatial images
+    dim : str
+        dim to concatenate over
+    """
+
+    return xr.concat(sims, dim=dim, combine_attrs=combine_attrs_func, **kwargs)
+
+
+def combine_by_coords(sims, **kwargs):
+    """
+    Combine multiview-stitcher flavoured SpatialImages
+    by coordinates.
+
+    Same as xr.combine_by_coords but with handling of
+    transform_keys in attributes.
+
+    Parameters
+    ----------
+    sims : spatial_image.SpatialImage
+        multiview-stitcher flavor spatial images
+    """
+
+    return xr.combine_by_coords(
+        sims, combine_attrs=combine_attrs_func, **kwargs
     )
