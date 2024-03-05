@@ -2,10 +2,9 @@ from pathlib import Path
 
 import dask.array as da
 import numpy as np
-import xarray as xr
 from scipy import ndimage
 
-from multiview_stitcher import param_utils
+from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
@@ -118,33 +117,21 @@ def generate_tiled_dataset(
         origin = (
             tile_index * tile_size * spacing - overlap * (tile_index) * spacing
         )
-        sim = xr.DataArray(
+
+        sim = si_utils.get_sim_from_array(
             tile,
             dims=["c", "t"] + spatial_dims,
-            # For python >= 3.9 we can use the union '|' operator to merge to dict
-            coords={
-                **{
-                    spatial_dims[dim]:
-                    # origin[dim] +\
-                    np.arange(tile.shape[2 + dim]) * spacing[dim]
-                    for dim in range(ndim)
-                },
-                "c": ["channel " + str(c) for c in range(N_c)],
+            scale={
+                dim: spacing[idim] for idim, dim in enumerate(spatial_dims)
             },
-        )
-        # spatial-image expects t to be the first dimension
-        sim = sim.transpose(*(("t", "c") + tuple(spatial_dims)))
-
-        affine = param_utils.affine_from_translation(origin)
-
-        affine_xr = xr.DataArray(
-            np.stack([affine] * len(sim.coords["t"])),
-            dims=["t", "x_in", "x_out"],
+            translation={
+                dim: origin[idim] for idim, dim in enumerate(spatial_dims)
+            },
+            c_coords=["channel " + str(c) for c in range(N_c)],
+            t_coords=np.arange(N_t),
+            transform_key=transform_key,
         )
 
-        sim.attrs["transforms"] = xr.Dataset({transform_key: affine_xr})
-
-        # sim.name = 'tile_' + '_'.join([str(ti) for ti in tile_index])
         sim.data = sim.data.rechunk((1, 1) + (chunksize,) * ndim)
 
         sims.append(sim)

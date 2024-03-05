@@ -4,7 +4,6 @@ from pathlib import Path
 import dask.array as da
 import datatree
 import multiscale_spatial_image as msi
-import spatial_image as si
 import xarray as xr
 
 from multiview_stitcher import param_utils
@@ -164,30 +163,8 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     """
 
     ndim = si_utils.get_ndim_from_sim(sim)
-    spacing = si_utils.get_spacing_from_sim(sim)
-    origin = si_utils.get_origin_from_sim(sim)
-
-    if "c" in sim.dims and "t" in sim.dims:
-        sim = sim.transpose(
-            *tuple(
-                ["t", "c"] + [dim for dim in sim.dims if dim not in ["c", "t"]]
-            )
-        )
-        c_coords = sim.coords["c"].values
-    else:
-        c_coords = None
 
     sim_attrs = sim.attrs.copy()
-
-    # view_sim.name = str(view)
-    sim = si.to_spatial_image(
-        sim.data,
-        dims=sim.dims,
-        c_coords=c_coords,
-        scale=spacing,
-        translation=origin,
-        t_coords=sim.coords["t"].values,
-    )
 
     if scale_factors is None:
         scale_factors = get_optimal_multi_scale_factors_from_sim(sim)
@@ -211,6 +188,8 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     if "transforms" in sim_attrs:
         scale_keys = get_sorted_scale_keys(msim)
         for sk in scale_keys:
+            msim[sk].attrs = {}
+            msim[sk]["image"].attrs = {}
             for transform_key, transform in sim_attrs["transforms"].items():
                 msim[sk][transform_key] = transform
 
