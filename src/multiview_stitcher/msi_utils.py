@@ -171,7 +171,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
     if chunks is None:
         if isinstance(sim.data, da.Array):
-            chunks = sim.data.chunksize
+            chunks = {
+                dim: sim.data.chunksize[idim]
+                for idim, dim in enumerate(sim.dims)
+            }
         else:
             spatial_chunksizes = si_utils.get_default_spatial_chunksizes(ndim)
             chunks = {
