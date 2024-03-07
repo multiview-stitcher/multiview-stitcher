@@ -115,7 +115,7 @@ def test_multi_view_fusion(ndim, weights_func):
 
 def test_fusion_stack_properties():
     sim = spatial_image_utils.get_sim_from_array(
-        da.random.randint(1, 100, (100, 100)),
+        da.random.randint(1, 100, (100, 100), chunks=(10, 10)),
         dims=["y", "x"],
         scale={"y": 0.5, "x": 0.5},
         translation={"y": -10, "x": -10},
@@ -123,5 +123,38 @@ def test_fusion_stack_properties():
     )
 
     fused = fusion.fuse(sim, transform_key=METADATA_TRANSFORM_KEY)
+
+    assert np.min(fused.data.compute()) > 0
+
+
+def test_fused_field_coverage():
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=20,
+        tiles_x=3,
+        tiles_y=3,
+        # spacing_x=5.,
+        # spacing_y=0.2,
+        spacing_x=2.0,
+        spacing_y=0.5,
+    )
+
+    # # shift the sims
+    # for isim, sim in enumerate(sims):
+    #     sims[isim] = sim.assign_coords({
+    #         'y': sim.coords['y'] - 100,
+    #         'x': sim.coords['x'] + 100})
+
+    with xr.set_options(keep_attrs=True):
+        sims = [sim + 1 for sim in sims]
+
+    fused = fusion.fuse(
+        sims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        output_chunksize=10,
+    )
 
     assert np.min(fused.data.compute()) > 0

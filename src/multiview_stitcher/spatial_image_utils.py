@@ -240,12 +240,13 @@ def set_sim_affine(sim, xaffine, transform_key, base_transform_key=None):
 def get_center_of_sim(sim, transform_key=None):
     ndim = get_ndim_from_sim(sim)
 
-    get_spacing_from_sim(sim, asarray=True)
-    get_origin_from_sim(sim, asarray=True)
+    spacing = get_spacing_from_sim(sim, asarray=False)
+    origin = get_origin_from_sim(sim, asarray=False)
+    shape = get_shape_from_sim(sim, asarray=False)
 
     center = np.array(
         [
-            sim.coords[dim][len(sim.coords[dim]) // 2]
+            origin[dim] + spacing[dim] * (shape[dim] - 1) / 2
             for dim in get_spatial_dims_from_sim(sim)
         ]
     )

@@ -428,7 +428,7 @@ def fuse_field(
     view_matrices = [np.array(param[:ndim, :ndim]) for param in params]
     view_offsets = [np.array(param[:ndim, ndim]) for param in params]
     view_centers_intrinsic = (
-        sims_origin_array + sims_shape_array * sims_spacing_array / 2.0
+        sims_origin_array + (sims_shape_array - 1) * sims_spacing_array / 2.0
     )
     view_centers = np.array(
         [
@@ -438,6 +438,7 @@ def fuse_field(
             )
         ]
     )
+
     view_diameters = np.linalg.norm(
         np.array(
             [
@@ -451,10 +452,11 @@ def fuse_field(
     chunk_centers = np.array(
         [
             output_origin_array
-            + (np.array(block_ind) + 1)
-            * output_spacing_array
-            * output_chunksize_array
-            / 2.0
+            + output_spacing_array
+            * np.array(
+                block_ind * output_chunksize_array
+                + (output_chunksize_array - 1) / 2.0
+            )
             for block_ind in block_indices
         ]
     )
@@ -464,9 +466,13 @@ def fuse_field(
 
     # query relevant views for each chunk
     tree = cKDTree(view_centers)
+    max_dist = (ndim * (np.max(view_diameters) + chunk_diameter) ** 2) ** 0.5
     close_views = tree.query_ball_point(
-        chunk_centers, 1.01 * (np.max(view_diameters) + chunk_diameter)
+        # chunk_centers, 1.01 * (np.max(view_diameters) + chunk_diameter)
+        chunk_centers,
+        1.01 * max_dist,
     )
+    print(close_views)
 
     fused_blocks = np.empty(numblocks, dtype=object)
     for ib, block_ind in enumerate(block_indices):
@@ -543,6 +549,8 @@ def fuse_field(
                     for idim, dim in enumerate(spatial_dims)
                 }
             )
+
+            # import pdb; pdb.set_trace()
 
             empty_chunk = False
 
