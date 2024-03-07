@@ -470,7 +470,6 @@ def fuse_field(
         chunk_centers,
         1.01 * max_dist,
     )
-    print(close_views)
 
     fused_blocks = np.empty(numblocks, dtype=object)
     for ib, block_ind in enumerate(block_indices):
