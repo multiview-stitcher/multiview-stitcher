@@ -3,6 +3,7 @@ import tempfile
 import warnings
 
 import dask.array as da
+import numpy as np
 import pytest
 import xarray as xr
 
@@ -110,3 +111,17 @@ def test_multi_view_fusion(ndim, weights_func):
         mfused = msi_utils.multiscale_spatial_image_from_zarr(fused_path)
 
         assert fused.data.min() > 0
+
+
+def test_fusion_stack_properties():
+    sim = spatial_image_utils.get_sim_from_array(
+        da.random.randint(1, 100, (100, 100)),
+        dims=["y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+        translation={"y": -10, "x": -10},
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    fused = fusion.fuse(sim, transform_key=METADATA_TRANSFORM_KEY)
+
+    assert np.min(fused.data.compute()) > 0

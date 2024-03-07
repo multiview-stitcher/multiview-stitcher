@@ -482,7 +482,7 @@ def fuse_field(
         ) * np.array(out_chunk_shape) + np.array(out_chunk_offset)
 
         out_chunk_edges_phys = (
-            np.array(output_spacing_array)
+            np.array(output_origin_array)
             + np.array(out_chunk_edges) * output_spacing_array
         )
 
