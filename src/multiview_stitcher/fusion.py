@@ -274,7 +274,6 @@ def fuse(
     res = si_utils.get_sim_from_xim(res)
     si_utils.set_sim_affine(
         res,
-        # param_utils.identity_transform(len(sdims), res.coords["t"]),
         param_utils.identity_transform(len(sdims)),
         transform_key,
     )
@@ -468,7 +467,6 @@ def fuse_field(
     tree = cKDTree(view_centers)
     max_dist = (ndim * (np.max(view_diameters) + chunk_diameter) ** 2) ** 0.5
     close_views = tree.query_ball_point(
-        # chunk_centers, 1.01 * (np.max(view_diameters) + chunk_diameter)
         chunk_centers,
         1.01 * max_dist,
     )
@@ -549,8 +547,6 @@ def fuse_field(
                     for idim, dim in enumerate(spatial_dims)
                 }
             )
-
-            # import pdb; pdb.set_trace()
 
             empty_chunk = False
 
