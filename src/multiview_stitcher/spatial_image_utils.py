@@ -1,6 +1,7 @@
 import copy
 from typing import Optional, Union
 
+import dask.array as da
 import numpy as np
 import spatial_image as si
 import xarray as xr
@@ -70,7 +71,8 @@ def get_sim_from_array(
         dims=dims,
     )
 
-    for nsdim in ["c", "t"]:
+    nsdims = ["c", "t"]
+    for nsdim in nsdims:
         if nsdim not in xim.dims:
             xim = xim.expand_dims([nsdim])
 
@@ -81,6 +83,11 @@ def get_sim_from_array(
 
     spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
     ndim = len(spatial_dims)
+
+    if not isinstance(array, da.Array):
+        xim = xim.chunk(
+            {dim: 1 for dim in nsdims} | get_default_spatial_chunksizes(ndim)
+        )
 
     if scale is None:
         scale = {dim: 1 for dim in spatial_dims}
