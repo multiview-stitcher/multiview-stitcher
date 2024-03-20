@@ -9,7 +9,7 @@ from dask import compute, delayed
 from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
-from multiview_stitcher import msi_utils, spatial_image_utils
+from multiview_stitcher import msi_utils, spatial_image_utils, transformation
 from multiview_stitcher.fusion import fuse
 from multiview_stitcher.misc_utils import DisableLogger
 
@@ -274,32 +274,18 @@ def get_vertices_from_stack_props(stack_props):
 
     gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
-    faces = []
-    for iax in range(len(gv[0])):
-        for lface in [0, 1]:
-            face = gv[np.where(gv[:, iax] == lface)[0]]
-            faces.append(face)
-
-    faces = np.array(faces)
-
-    faces = faces * (
+    vertices = gv * (
         np.array([stack_props["shape"][dim] for dim in sdims]) - 1
     ) * np.array([stack_props["spacing"][dim] for dim in sdims]) + np.array(
         [stack_props["origin"][dim] for dim in sdims]
     )
 
     if "transform" in stack_props:
-        orig_shape = faces.shape
-        faces = faces.reshape(-1, ndim)
+        vertices = transformation.transform_pts(
+            vertices, stack_props["transform"]
+        )
 
-        affine = stack_props["transform"]
-        faces = np.dot(
-            affine, np.hstack([faces, np.ones((faces.shape[0], 1))]).T
-        ).T[:, :-1]
-
-        faces = faces.reshape(orig_shape)
-
-    return faces
+    return vertices
 
 
 def sims_are_far_apart(sim1, sim2, transform_key):

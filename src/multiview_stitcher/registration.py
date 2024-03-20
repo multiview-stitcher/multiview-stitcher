@@ -145,29 +145,29 @@ def get_overlap_bboxes(
         for sim in [sim1, sim2]
     ]
 
-    # project corners into intrinsic coordinate system
-    corners_intrinsic = np.array(
-        [
+    if output_transform_key is None:
+        # project corners into intrinsic coordinate system
+        corners_intrinsic = np.array(
             [
-                transformation.transform_pts(
-                    corners[isim],
-                    np.linalg.inv(
-                        spatial_image_utils.get_affine_from_sim(
-                            sim, transform_key=input_transform_key
-                        ).data
-                    ),
-                )
-                for isim in range(2)
+                [
+                    transformation.transform_pts(
+                        corners[isim],
+                        np.linalg.inv(
+                            spatial_image_utils.get_affine_from_sim(
+                                sim, transform_key=input_transform_key
+                            ).data
+                        ),
+                    )
+                    for isim in range(2)
+                ]
+                for sim in [sim1, sim2]
             ]
-            for sim in [sim1, sim2]
-        ]
-    )
-
-    # project points into output_transform_key coordinate system if required
-    if output_transform_key is not None:
-        raise (NotImplementedError)
-    else:
+        )
         corners_target_space = corners_intrinsic
+    elif output_transform_key == input_transform_key:
+        corners_target_space = [corners, corners]
+    else:
+        raise (NotImplementedError)
 
     lowers = [
         np.max(np.min(corners_target_space[isim], axis=1), axis=0)
@@ -414,8 +414,6 @@ def phase_correlation_registration(
         transform_key_moving=transform_key,
     )
 
-    # ext_param = param_utils.get_xparam_from_param(ext_param)
-
     xds = xr.Dataset(
         data_vars={
             "transform": param_utils.get_xparam_from_param(ext_param),
@@ -627,13 +625,31 @@ def register_pair_of_msims(
     #         dtype=float
     #         )
 
-    return pairwise_reg_func(
+    param_ds = pairwise_reg_func(
         reg_sims_b[0],
         reg_sims_b[1],
         transform_key=transform_key,
         overlap_bboxes=(lowers, uppers),
         **pairwise_reg_func_kwargs,
     )
+
+    # attach bbox in physical coordinates
+    lowers_phys, uppers_phys = get_overlap_bboxes(
+        sim1,
+        sim2,
+        input_transform_key=transform_key,
+        output_transform_key=transform_key,
+    )
+
+    param_ds = param_ds.assign(
+        {
+            "bbox": xr.DataArray(
+                [lowers_phys[0], uppers_phys[0]], dims=["point_index", "dim"]
+            )
+        }
+    )
+
+    return param_ds
 
 
 def register_pair_of_msims_over_time(
@@ -797,6 +813,133 @@ def get_node_params_from_reg_graph(g_reg):
     return node_transforms
 
 
+# def get_node_params_from_reg_graph_global_opt(g_reg, stack_propss):
+#     """
+#     Get final transform parameters by global optimization.
+
+#     Output parameters P for each view map coordinates in the view
+#     into the coordinates of a new coordinate system.
+
+#     Strategy:
+#     - for each pairwise registration, compute virtual pairs of beads
+#         - fixed view: take bounding box corners
+#         - moving view: transform fixed view corners using inverse of pairwise transform
+#     - for each view, compute the transform that minimizes the distance between
+#         its virtual beads and associated virtual beads in overlapping views
+#     - assign the computed transform to the view
+#     - perform this process iteratively until convergence
+#         (transforming each view's beads by the view's current transformation)
+#     - potentially: filter out bad links looking at residual distances
+
+#     Data structure:
+#     - graph or table?
+#     - start with graph
+
+#     Algorithm:
+#     - initialise view transforms with identity transforms
+#     - build graph with pairwise transforms as edges
+#         - this is an undirected graph
+#     - calculate an order of views by descending connectivity / number of links
+#     - for each view, compute the transform that minimizes the distance between
+#         its virtual beads and associated virtual beads in overlapping views
+#     - assign the computed transform to the view
+
+#     References:
+#     - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
+#     - BigStitcher publication: https://www.nature.com/articles/s41592-019-0501-0#Sec2
+#       - Supplementary Note 2
+#     """
+
+#     # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+#     ndim = (
+#         g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
+#     )
+
+#     # initialise view transforms with identity transforms
+#     {node: param_utils.identity_transform(ndim) for node in g_reg.nodes}
+
+#     # undirected graph containing virtual bead pairs as edges
+#     g_beads = nx.Graph()
+#     for e in g_reg.edges:
+#         sorted_e = tuple(sorted(e))
+#         g_beads.add_edge(
+#             sorted_e[0],
+#             sorted_e[1],
+#             beads={
+#                 sorted_e[0]: {
+#                     "corners": mv_graph.get_vertices_from_stack_props(
+#                         stack_propss[sorted_e[0]]
+#                     )
+#                 },
+#             },
+#         )
+
+#     # # use quality as weight in shortest path (mean over tp currently)
+#     # for e in g_reg.edges:
+#     #     g_reg.edges[e]["quality_mean"] = np.mean(g_reg.edges[e]["quality"])
+#     #     g_reg.edges[e]["quality_mean_inv"] = 1 / (
+#     #         g_reg.edges[e]["quality_mean"] + 0.5
+#     #     )
+
+#     # get directed graph and invert transforms along edges
+
+#     # g_reg_di = g_reg.to_directed()
+#     for e in g_reg.edges:
+#         sorted_e = tuple(sorted(e))
+#         g_reg_di.edges[(sorted_e[1], sorted_e[0])][
+#             "transform"
+#         ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
+
+#     ccs = list(nx.connected_components(g_reg))
+
+#     node_transforms = {}
+
+#     for cc in ccs:
+#         subgraph = g_reg_di.subgraph(list(cc))
+
+#         ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+#             subgraph, weight_key="quality"
+#         )
+
+#         # get shortest paths to ref_node
+#         # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
+#         paths = {
+#             n: nx.shortest_path(
+#                 subgraph, target=n, source=ref_node, weight="quality_mean_inv"
+#             )
+#             for n in cc
+#         }
+
+#         for n in subgraph.nodes:
+#             # reg_path = g_reg.nodes[n]["reg_path"]
+#             reg_path = paths[n]
+
+#             path_pairs = [
+#                 [reg_path[i], reg_path[i + 1]]
+#                 for i in range(len(reg_path) - 1)
+#             ]
+
+#             path_params = param_utils.identity_transform(ndim)
+
+#             for pair in path_pairs:
+#                 path_params = param_utils.rebase_affine(
+#                     g_reg_di.edges[(pair[0], pair[1])]["transform"],
+#                     path_params,
+#                 )
+
+#             node_transforms[n] = param_utils.invert_xparams(path_params)
+
+#     # homogenize dims and coords in node_transforms
+#     # e.g. if some node's params are missing 't' dimension, add it
+#     node_transforms = xr.Dataset(data_vars=node_transforms).to_array("node")
+#     node_transforms = {
+#         node: node_transforms.sel({"node": node}).drop_vars("node")
+#         for node in node_transforms.coords["node"].values
+#     }
+
+#     return node_transforms
+
+
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key,
@@ -916,6 +1059,13 @@ def register(
             weight_key="quality",
         )
 
+    # stack_propss = [
+    #     spatial_image_utils.get_stack_properties_from_sim(sim) for sim in sims
+    # ]
+    # params = get_node_params_from_reg_graph_global_opt(
+    #     g_reg_computed, stack_propss
+    # )
+
     params = get_node_params_from_reg_graph(g_reg_computed)
     params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
 
@@ -978,6 +1128,7 @@ def compute_pairwise_registrations(
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
         g_reg_computed.edges[pair]["quality"] = params[i]["quality"]
+        g_reg_computed.edges[pair]["bbox"] = params[i]["bbox"]
 
     return g_reg_computed
 
