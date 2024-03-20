@@ -813,131 +813,163 @@ def get_node_params_from_reg_graph(g_reg):
     return node_transforms
 
 
-# def get_node_params_from_reg_graph_global_opt(g_reg, stack_propss):
-#     """
-#     Get final transform parameters by global optimization.
+def get_node_params_from_reg_graph_global_opt(g_reg):
+    """
+    Get final transform parameters by global optimization.
 
-#     Output parameters P for each view map coordinates in the view
-#     into the coordinates of a new coordinate system.
+    Output parameters P for each view map coordinates in the view
+    into the coordinates of a new coordinate system.
 
-#     Strategy:
-#     - for each pairwise registration, compute virtual pairs of beads
-#         - fixed view: take bounding box corners
-#         - moving view: transform fixed view corners using inverse of pairwise transform
-#     - for each view, compute the transform that minimizes the distance between
-#         its virtual beads and associated virtual beads in overlapping views
-#     - assign the computed transform to the view
-#     - perform this process iteratively until convergence
-#         (transforming each view's beads by the view's current transformation)
-#     - potentially: filter out bad links looking at residual distances
+    Strategy:
+    - iterate over timepoints
+    - for each pairwise registration, compute virtual pairs of beads
+        - fixed view: take bounding box corners
+        - moving view: transform fixed view corners using inverse of pairwise transform
+    - for each view, compute the transform that minimizes the distance between
+        its virtual beads and associated virtual beads in overlapping views
+    - assign the computed transform to the view
+    - perform this process iteratively until convergence
+        (transforming each view's beads by the view's current transformation)
+    - potentially: filter out bad links looking at residual distances
 
-#     Data structure:
-#     - graph or table?
-#     - start with graph
+    Data structure:
+    - graph or table?
+    - start with graph
 
-#     Algorithm:
-#     - initialise view transforms with identity transforms
-#     - build graph with pairwise transforms as edges
-#         - this is an undirected graph
-#     - calculate an order of views by descending connectivity / number of links
-#     - for each view, compute the transform that minimizes the distance between
-#         its virtual beads and associated virtual beads in overlapping views
-#     - assign the computed transform to the view
+    Algorithm:
+    - initialise view transforms with identity transforms
+    - build graph with pairwise transforms as edges
+        - this is an undirected graph
+    - calculate an order of views by descending connectivity / number of links
+    - for each view, compute the transform that minimizes the distance between
+        its virtual beads and associated virtual beads in overlapping views
+    - assign the computed transform to the view
 
-#     References:
-#     - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
-#     - BigStitcher publication: https://www.nature.com/articles/s41592-019-0501-0#Sec2
-#       - Supplementary Note 2
-#     """
+    References:
+    - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
+    - BigStitcher publication: https://www.nature.com/articles/s41592-019-0501-0#Sec2
+      - Supplementary Note 2
+    """
 
-#     # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
-#     ndim = (
-#         g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
-#     )
+    # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
+    ndim = (
+        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
+    )
+    gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
-#     # initialise view transforms with identity transforms
-#     {node: param_utils.identity_transform(ndim) for node in g_reg.nodes}
+    from skimage.transform import EuclideanTransform
 
-#     # undirected graph containing virtual bead pairs as edges
-#     g_beads = nx.Graph()
-#     for e in g_reg.edges:
-#         sorted_e = tuple(sorted(e))
-#         g_beads.add_edge(
-#             sorted_e[0],
-#             sorted_e[1],
-#             beads={
-#                 sorted_e[0]: {
-#                     "corners": mv_graph.get_vertices_from_stack_props(
-#                         stack_propss[sorted_e[0]]
-#                     )
-#                 },
-#             },
-#         )
+    transform_generator = EuclideanTransform(dimensionality=ndim)
 
-#     # # use quality as weight in shortest path (mean over tp currently)
-#     # for e in g_reg.edges:
-#     #     g_reg.edges[e]["quality_mean"] = np.mean(g_reg.edges[e]["quality"])
-#     #     g_reg.edges[e]["quality_mean_inv"] = 1 / (
-#     #         g_reg.edges[e]["quality_mean"] + 0.5
-#     #     )
+    # find timepoints
+    all_transforms = [g_reg.edges[(0, 1)]["transform"] for e in g_reg.edges]
+    t_coords = np.unique(
+        [
+            transform.coords["t"].data
+            for transform in all_transforms
+            if "t" in transform.coords
+        ]
+    )
 
-#     # get directed graph and invert transforms along edges
+    params = {nodes: [] for nodes in g_reg.nodes}
+    for t in t_coords:
+        ccs = list(nx.connected_components(g_reg))
 
-#     # g_reg_di = g_reg.to_directed()
-#     for e in g_reg.edges:
-#         sorted_e = tuple(sorted(e))
-#         g_reg_di.edges[(sorted_e[1], sorted_e[0])][
-#             "transform"
-#         ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
+        for cc in ccs:
+            g_reg_subgraph = g_reg.subgraph(list(cc))
 
-#     ccs = list(nx.connected_components(g_reg))
+            ref_node = (
+                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+                    g_reg_subgraph, weight_key="quality"
+                )
+            )
 
-#     node_transforms = {}
+            # undirected graph containing virtual bead pairs as edges
+            g_beads_subgraph = nx.Graph()
+            for e in g_reg_subgraph.edges:
+                sorted_e = tuple(sorted(e))
+                bbox_lower, bbox_upper = (
+                    g_reg_subgraph.edges[e]["bbox"].sel({"t": t}).data
+                )
+                bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
+                affine = (
+                    g_reg_subgraph.edges[e]["transform"].sel({"t": t})
+                    if "t" in g_reg_subgraph.edges[e]["transform"].coords
+                    else g_reg_subgraph.edges[e]["transform"]
+                )
+                g_beads_subgraph.add_edge(
+                    sorted_e[0],
+                    sorted_e[1],
+                    beads={
+                        sorted_e[0]: bbox_vertices,
+                        sorted_e[1]: transformation.transform_pts(
+                            bbox_vertices, param_utils.invert_xparams(affine)
+                        ),
+                    },
+                )
 
-#     for cc in ccs:
-#         subgraph = g_reg_di.subgraph(list(cc))
+            # initialise view transforms with identity transforms
+            for node in g_reg.nodes:
+                g_beads_subgraph.nodes[node][
+                    "affine"
+                ] = param_utils.identity_transform(ndim)
 
-#         ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-#             subgraph, weight_key="quality"
-#         )
+            # calculate an order of views by descending connectivity / number of links
+            centralities = nx.degree_centrality(
+                g_beads_subgraph
+            )  # this is a dict
+            sorted_nodes = sorted(
+                centralities, key=centralities.get, reverse=True
+            )
 
-#         # get shortest paths to ref_node
-#         # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
-#         paths = {
-#             n: nx.shortest_path(
-#                 subgraph, target=n, source=ref_node, weight="quality_mean_inv"
-#             )
-#             for n in cc
-#         }
+            for iteration in range(10):
+                print(iteration)
+                for node in sorted_nodes:
+                    if node == ref_node:
+                        continue
+                    node_edges = list(g_beads_subgraph.edges(0))
+                    node_pts = transformation.transform_pts(
+                        np.concatenate(
+                            [
+                                g_beads_subgraph.edges[e]["beads"][node]
+                                for e in node_edges
+                            ],
+                            axis=0,
+                        ),
+                        g_beads_subgraph.nodes[node]["affine"],
+                    )
+                    adjecent_pts = np.concatenate(
+                        [
+                            transformation.transform_pts(
+                                g_beads_subgraph.edges[e]["beads"][n],
+                                g_beads_subgraph.nodes[n]["affine"],
+                            )
+                            for e in node_edges
+                            for n in e
+                            if n != node
+                        ],
+                        axis=0,
+                    )
 
-#         for n in subgraph.nodes:
-#             # reg_path = g_reg.nodes[n]["reg_path"]
-#             reg_path = paths[n]
+                    transform_generator.estimate(node_pts, adjecent_pts)
+                    g_beads_subgraph.nodes[node][
+                        "affine"
+                    ] = param_utils.matmul_xparams(
+                        param_utils.affine_to_xaffine(
+                            transform_generator.params
+                        ),
+                        g_beads_subgraph.nodes[node]["affine"],
+                    )
 
-#             path_pairs = [
-#                 [reg_path[i], reg_path[i + 1]]
-#                 for i in range(len(reg_path) - 1)
-#             ]
+            for node in g_beads_subgraph.nodes:
+                params[node].append(g_beads_subgraph.nodes[node]["affine"])
 
-#             path_params = param_utils.identity_transform(ndim)
+    for node in g_reg.nodes:
+        params[node] = xr.concat(params[node], dim="t").assign_coords(
+            {"t": t_coords}
+        )
 
-#             for pair in path_pairs:
-#                 path_params = param_utils.rebase_affine(
-#                     g_reg_di.edges[(pair[0], pair[1])]["transform"],
-#                     path_params,
-#                 )
-
-#             node_transforms[n] = param_utils.invert_xparams(path_params)
-
-#     # homogenize dims and coords in node_transforms
-#     # e.g. if some node's params are missing 't' dimension, add it
-#     node_transforms = xr.Dataset(data_vars=node_transforms).to_array("node")
-#     node_transforms = {
-#         node: node_transforms.sel({"node": node}).drop_vars("node")
-#         for node in node_transforms.coords["node"].values
-#     }
-
-#     return node_transforms
+    return params
 
 
 def register(
@@ -1062,11 +1094,9 @@ def register(
     # stack_propss = [
     #     spatial_image_utils.get_stack_properties_from_sim(sim) for sim in sims
     # ]
-    # params = get_node_params_from_reg_graph_global_opt(
-    #     g_reg_computed, stack_propss
-    # )
+    params = get_node_params_from_reg_graph_global_opt(g_reg_computed)
 
-    params = get_node_params_from_reg_graph(g_reg_computed)
+    # params = get_node_params_from_reg_graph(g_reg_computed)
     params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
 
     if new_transform_key is not None:
