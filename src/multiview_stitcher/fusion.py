@@ -424,17 +424,16 @@ def fuse_field(
     numblocks = [len(bds) for bds in normalized_chunks]
 
     # perform pre-selection of relevant views for each chunk
-    view_matrices = [np.array(param[:ndim, :ndim]) for param in params]
-    view_offsets = [np.array(param[:ndim, ndim]) for param in params]
+
     view_centers_intrinsic = (
         sims_origin_array + (sims_shape_array - 1) * sims_spacing_array / 2.0
     )
     view_centers = np.array(
         [
-            np.dot(matrix, center.T).T + offset
-            for matrix, offset, center in zip(
-                view_matrices, view_offsets, view_centers_intrinsic
-            )
+            transformation.transform_pts(
+                [center], param_utils.invert_xparams(param)
+            )[0]
+            for param, center in zip(params, view_centers_intrinsic)
         ]
     )
 
@@ -519,12 +518,14 @@ def fuse_field(
         for iview in close_views[ib]:
             sim = sims[iview]
             param = params[iview]
-            matrix = view_matrices[iview]
-            offset = view_offsets[iview]
 
             # map output chunk edges onto input image coordinates
             # to define the input region relevant for the current chunk
-            rel_image_edges = np.dot(matrix, out_chunk_edges_phys.T).T + offset
+            # rel_image_edges = np.dot(matrix, out_chunk_edges_phys.T).T + offset
+
+            rel_image_edges = transformation.transform_pts(
+                out_chunk_edges_phys, param
+            )
 
             rel_image_i = np.min(rel_image_edges, 0) - output_spacing_array
             rel_image_f = np.max(rel_image_edges, 0) + output_spacing_array

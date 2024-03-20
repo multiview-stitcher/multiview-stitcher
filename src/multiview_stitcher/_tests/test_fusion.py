@@ -12,6 +12,7 @@ from multiview_stitcher import (
     fusion,
     io,
     msi_utils,
+    param_utils,
     sample_data,
     weights,
 )
@@ -114,6 +115,7 @@ def test_multi_view_fusion(ndim, weights_func):
 
 def test_fused_field_coverage():
     scale = {"y": 2, "x": 0.5}
+    affine = param_utils.affine_from_translation([1000, -1000])
 
     sims = []
     N_x, N_y = 3, 3
@@ -128,6 +130,7 @@ def test_fused_field_coverage():
                         "y": iy * 20 * scale["y"] - 100,
                         "x": ix * 20 * scale["x"] + 100,
                     },
+                    affine=affine,
                     transform_key=METADATA_TRANSFORM_KEY,
                 )
             )

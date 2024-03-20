@@ -106,6 +106,8 @@ def get_sim_from_array(
 
     if affine is None:
         affine_xr = param_utils.identity_transform(ndim, t_coords=None)
+    else:
+        affine_xr = param_utils.affine_to_xaffine(affine)
 
     set_sim_affine(
         sim,
