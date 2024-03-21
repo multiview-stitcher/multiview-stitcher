@@ -733,7 +733,16 @@ def prune_view_adjacency_graph(
         raise ValueError(f"Unknown graph pruning method: {method}")
 
 
-def get_node_params_from_reg_graph(g_reg):
+def groupwise_optimization(g_reg, method="iterative", **kwargs):
+    if method == "iterative":
+        return groupwise_optimization_iterative(g_reg, **kwargs)
+    elif method == "shortest_paths":
+        return groupwise_optimization_shortest_paths(g_reg, **kwargs)
+    else:
+        raise ValueError(f"Unknown groupwise optimization method: {method}")
+
+
+def groupwise_optimization_shortest_paths(g_reg):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
@@ -813,7 +822,7 @@ def get_node_params_from_reg_graph(g_reg):
     return node_transforms
 
 
-def get_node_params_from_reg_graph_global_opt(g_reg):
+def groupwise_optimization_iterative(g_reg):
     """
     Get final transform parameters by global optimization.
 
@@ -855,7 +864,6 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
     ndim = (
         g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
     )
-    gv = np.array(list(np.ndindex(tuple([2] * ndim))))
 
     from skimage.transform import EuclideanTransform
 
@@ -880,83 +888,25 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
             g_reg_subgraph, weight_key="quality"
         )
 
-        for t in t_coords:
-            # undirected graph containing virtual bead pairs as edges
-            g_beads_subgraph = nx.Graph()
-            for e in g_reg_subgraph.edges:
-                sorted_e = tuple(sorted(e))
-                bbox_lower, bbox_upper = (
-                    g_reg_subgraph.edges[e]["bbox"].sel({"t": t}).data
+        if len(t_coords):
+            for t in t_coords:
+                g_reg_subgraph_t = get_reg_graph_with_single_tp_transforms(
+                    g_reg_subgraph, t
                 )
-                bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
-                affine = (
-                    g_reg_subgraph.edges[e]["transform"].sel({"t": t})
-                    if "t" in g_reg_subgraph.edges[e]["transform"].coords
-                    else g_reg_subgraph.edges[e]["transform"]
+                g_beads_subgraph = get_beads_graph_from_reg_graph(
+                    g_reg_subgraph_t
                 )
-                g_beads_subgraph.add_edge(
-                    sorted_e[0],
-                    sorted_e[1],
-                    beads={
-                        sorted_e[0]: bbox_vertices,
-                        sorted_e[1]: transformation.transform_pts(
-                            bbox_vertices, param_utils.invert_xparams(affine)
-                        ),
-                    },
+                g_beads_subgraph = optimize_bead_subgraph(
+                    g_beads_subgraph, ref_node, transform_generator
                 )
 
-            # initialise view transforms with identity transforms
-            for node in g_reg.nodes:
-                g_beads_subgraph.nodes[node][
-                    "affine"
-                ] = param_utils.identity_transform(ndim)
-
-            # calculate an order of views by descending connectivity / number of links
-            centralities = nx.degree_centrality(
-                g_beads_subgraph
-            )  # this is a dict
-            sorted_nodes = sorted(
-                centralities, key=centralities.get, reverse=True
+                for node in g_beads_subgraph.nodes:
+                    params[node].append(g_beads_subgraph.nodes[node]["affine"])
+        else:
+            g_beads_subgraph = get_beads_graph_from_reg_graph(g_reg_subgraph)
+            g_beads_subgraph = optimize_bead_subgraph(
+                g_beads_subgraph, ref_node, transform_generator
             )
-
-            for iteration in range(10):
-                print(iteration)
-                for curr_node in sorted_nodes:
-                    if curr_node == ref_node:
-                        continue
-                    node_edges = list(g_beads_subgraph.edges(curr_node))
-                    node_pts = transformation.transform_pts(
-                        np.concatenate(
-                            [
-                                g_beads_subgraph.edges[e]["beads"][curr_node]
-                                for e in node_edges
-                            ],
-                            axis=0,
-                        ),
-                        g_beads_subgraph.nodes[curr_node]["affine"],
-                    )
-                    adjecent_pts = np.concatenate(
-                        [
-                            transformation.transform_pts(
-                                g_beads_subgraph.edges[e]["beads"][n],
-                                g_beads_subgraph.nodes[n]["affine"],
-                            )
-                            for e in node_edges
-                            for n in e
-                            if n != curr_node
-                        ],
-                        axis=0,
-                    )
-
-                    transform_generator.estimate(node_pts, adjecent_pts)
-                    g_beads_subgraph.nodes[curr_node][
-                        "affine"
-                    ] = param_utils.matmul_xparams(
-                        param_utils.affine_to_xaffine(
-                            transform_generator.params
-                        ),
-                        g_beads_subgraph.nodes[curr_node]["affine"],
-                    )
 
             for node in g_beads_subgraph.nodes:
                 params[node].append(g_beads_subgraph.nodes[node]["affine"])
@@ -969,6 +919,120 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
     return params
 
 
+def get_reg_graph_with_single_tp_transforms(g_reg, t):
+    g_reg_t = g_reg.copy()
+    for e in g_reg_t.edges:
+        for k, v in g_reg_t.edges[e].items():
+            if isinstance(v, xr.DataArray) and "t" in v.coords:
+                g_reg_t.edges[e][k] = g_reg_t.edges[e][k].sel({"t": t})
+    return g_reg_t
+
+
+def get_beads_graph_from_reg_graph(g_reg_subgraph):
+    """
+    Get a graph with virtual bead pairs as edges and view transforms as node attributes.
+
+    Parameters
+    ----------
+    g_reg_subgraph : nx.Graph
+        Registration graph with single tp transforms
+
+    Returns
+    -------
+    nx.Graph
+    """
+    ndim = g_reg_subgraph.edges[list(g_reg_subgraph.edges)[0]]["bbox"].shape[
+        -1
+    ]
+
+    # undirected graph containing virtual bead pairs as edges
+    g_beads_subgraph = nx.Graph()
+    for e in g_reg_subgraph.edges:
+        sorted_e = tuple(sorted(e))
+        bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data
+        gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
+        bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
+        affine = g_reg_subgraph.edges[e]["transform"]
+        g_beads_subgraph.add_edge(
+            sorted_e[0],
+            sorted_e[1],
+            beads={
+                sorted_e[0]: bbox_vertices,
+                sorted_e[1]: transformation.transform_pts(
+                    bbox_vertices,
+                    affine,
+                ),
+            },
+        )
+
+    # initialise view transforms with identity transforms
+    for node in g_reg_subgraph.nodes:
+        g_beads_subgraph.nodes[node][
+            "affine"
+        ] = param_utils.identity_transform(ndim)
+
+    return g_beads_subgraph
+
+
+def optimize_bead_subgraph(g_beads_subgraph, ref_node, transform_generator):
+    """
+    Optimize the virtual bead graph.
+
+    Parameters
+    ----------
+    g_beads_subgraph : nx.Graph
+    ref_node : int
+    transform_generator : skimage.transform.BaseTransform
+
+    Returns
+    -------
+    nx.Graph
+        _description_
+    """
+
+    # calculate an order of views by descending connectivity / number of links
+    centralities = nx.degree_centrality(g_beads_subgraph)
+    sorted_nodes = sorted(centralities, key=centralities.get, reverse=True)
+
+    for iteration in range(10):
+        print(iteration)
+        for curr_node in sorted_nodes:
+            if curr_node == ref_node:
+                continue
+            node_edges = list(g_beads_subgraph.edges(curr_node))
+            node_pts = transformation.transform_pts(
+                np.concatenate(
+                    [
+                        g_beads_subgraph.edges[e]["beads"][curr_node]
+                        for e in node_edges
+                    ],
+                    axis=0,
+                ),
+                g_beads_subgraph.nodes[curr_node]["affine"],
+            )
+            adjecent_pts = np.concatenate(
+                [
+                    transformation.transform_pts(
+                        g_beads_subgraph.edges[e]["beads"][n],
+                        g_beads_subgraph.nodes[n]["affine"],
+                    )
+                    for e in node_edges
+                    for n in e
+                    if n != curr_node
+                ],
+                axis=0,
+            )
+
+            transform_generator.estimate(node_pts, adjecent_pts)
+            g_beads_subgraph.nodes[curr_node][
+                "affine"
+            ] = param_utils.matmul_xparams(
+                param_utils.affine_to_xaffine(transform_generator.params),
+                g_beads_subgraph.nodes[curr_node]["affine"],
+            )
+    return g_beads_subgraph
+
+
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key,
@@ -978,6 +1042,8 @@ def register(
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
+    groupwise_optimization_method="iterative",
+    groupwise_optimization_kwargs=None,
     pre_registration_pruning_method="shortest_paths_overlap_weighted",
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
@@ -1017,6 +1083,13 @@ def register(
         Function used for registration.
     pairwise_reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function
+    groupwise_optimization_method : str, optional
+        Method used to determine the final transform parameters
+        from pairwise registrations:
+        - 'iterative': iterative optimization
+        - 'shortest_paths': concatenation of pairwise transforms along shortest paths
+    groupwise_optimization_kwargs : dict, optional
+        Additional keyword arguments passed to the groupwise optimization function
     pre_registration_pruning_method : str, optional
         Method used to prune the view adjacency graph before registration,
         by default 'shortest_paths_overlap_weighted'.
@@ -1039,6 +1112,9 @@ def register(
 
     if pairwise_reg_func_kwargs is None:
         pairwise_reg_func_kwargs = {}
+
+    if groupwise_optimization_kwargs is None:
+        groupwise_optimization_kwargs = {}
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
@@ -1088,12 +1164,12 @@ def register(
             weight_key="quality",
         )
 
-    # stack_propss = [
-    #     spatial_image_utils.get_stack_properties_from_sim(sim) for sim in sims
-    # ]
-    params = get_node_params_from_reg_graph_global_opt(g_reg_computed)
+    params = groupwise_optimization(
+        g_reg_computed,
+        method=groupwise_optimization_method,
+        **groupwise_optimization_kwargs,
+    )
 
-    # params = get_node_params_from_reg_graph(g_reg_computed)
     params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
 
     if new_transform_key is not None:
