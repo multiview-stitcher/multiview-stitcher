@@ -26,6 +26,20 @@ def affine_from_linear_affine(linear_affine):
     return M
 
 
+def linear_affine_from_affine(affine):
+    """
+    Return linear representation of affine matrix from affine matrix.
+    """
+    ndim = affine.shape[-1] - 1
+
+    linear_affine = np.zeros(ndim**2 + ndim, dtype=float)
+
+    linear_affine[: ndim**2] = affine[:ndim, :ndim].flatten()
+    linear_affine[-ndim:] = affine[:ndim, ndim]
+
+    return linear_affine
+
+
 def translation_from_affine(affine):
     """
     Return matrix in homogeneous coords representing a translation.

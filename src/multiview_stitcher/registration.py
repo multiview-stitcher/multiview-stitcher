@@ -5,6 +5,7 @@ import warnings
 import dask.array as da
 import networkx as nx
 import numpy as np
+import pandas as pd
 import skimage.registration
 import xarray as xr
 from dask import compute, delayed
@@ -819,10 +820,12 @@ def groupwise_optimization_shortest_paths(g_reg):
         for node in node_transforms.coords["node"].values
     }
 
-    return node_transforms
+    return node_transforms, None
 
 
-def groupwise_optimization_iterative(g_reg):
+def groupwise_optimization_iterative(
+    g_reg, max_iter=100, rel_tol=1e-5, abs_tol=1e-7
+):
     """
     Get final transform parameters by global optimization.
 
@@ -880,6 +883,7 @@ def groupwise_optimization_iterative(g_reg):
     )
 
     params = {nodes: [] for nodes in g_reg.nodes}
+    all_dfs = []
     ccs = list(nx.connected_components(g_reg))
     for cc in ccs:
         g_reg_subgraph = g_reg.subgraph(list(cc))
@@ -889,34 +893,56 @@ def groupwise_optimization_iterative(g_reg):
         )
 
         if len(t_coords):
-            for t in t_coords:
-                g_reg_subgraph_t = get_reg_graph_with_single_tp_transforms(
-                    g_reg_subgraph, t
-                )
-                g_beads_subgraph = get_beads_graph_from_reg_graph(
-                    g_reg_subgraph_t
-                )
-                g_beads_subgraph = optimize_bead_subgraph(
-                    g_beads_subgraph, ref_node, transform_generator
-                )
-
-                for node in g_beads_subgraph.nodes:
-                    params[node].append(g_beads_subgraph.nodes[node]["affine"])
+            g_reg_subgraph_ts = [
+                get_reg_graph_with_single_tp_transforms(g_reg_subgraph, t)
+                for t in t_coords
+            ]
         else:
-            g_beads_subgraph = get_beads_graph_from_reg_graph(g_reg_subgraph)
-            g_beads_subgraph = optimize_bead_subgraph(
-                g_beads_subgraph, ref_node, transform_generator
-            )
+            g_reg_subgraph_ts = [g_reg_subgraph]
 
-            for node in g_beads_subgraph.nodes:
-                params[node].append(g_beads_subgraph.nodes[node]["affine"])
+        g_beads_subgraph_ts = [
+            get_beads_graph_from_reg_graph(g_reg_subgraph_t)
+            for g_reg_subgraph_t in g_reg_subgraph_ts
+        ]
+
+        cc_params, cc_dfs = list(
+            zip(
+                *tuple(
+                    [
+                        optimize_bead_subgraph(
+                            g_beads_subgraph,
+                            ref_node,
+                            transform_generator,
+                            max_iter,
+                            rel_tol,
+                            abs_tol,
+                        )
+                        for g_beads_subgraph in g_beads_subgraph_ts
+                    ]
+                )
+            )
+        )
+
+        for node in cc:
+            for cc_param in cc_params:
+                params[node].append(cc_param[node])
+
+        if len(t_coords):
+            for it, t in enumerate(t_coords):
+                cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
+
+        cc_df = pd.concat(cc_dfs)
+
+        all_dfs.append(cc_df)
+
+    df = pd.concat(all_dfs)
 
     for node in g_reg.nodes:
         params[node] = xr.concat(params[node], dim="t").assign_coords(
             {"t": t_coords}
         )
 
-    return params
+    return params, df
 
 
 def get_reg_graph_with_single_tp_transforms(g_reg, t):
@@ -974,7 +1000,14 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph):
     return g_beads_subgraph
 
 
-def optimize_bead_subgraph(g_beads_subgraph, ref_node, transform_generator):
+def optimize_bead_subgraph(
+    g_beads_subgraph,
+    ref_node,
+    transform_generator,
+    max_iter=100,
+    rel_tol=1e-5,
+    abs_tol=1e-7,
+):
     """
     Optimize the virtual bead graph.
 
@@ -994,11 +1027,18 @@ def optimize_bead_subgraph(g_beads_subgraph, ref_node, transform_generator):
     centralities = nx.degree_centrality(g_beads_subgraph)
     sorted_nodes = sorted(centralities, key=centralities.get, reverse=True)
 
-    for iteration in range(10):
-        print(iteration)
+    (
+        g_beads_subgraph.nodes[list(g_beads_subgraph.nodes)[0]][
+            "affine"
+        ].shape[-1]
+        - 1
+    )
+
+    mean_residuals = []
+    dfs = []
+    for iteration in range(max_iter):
+        iter_residuals = []
         for curr_node in sorted_nodes:
-            if curr_node == ref_node:
-                continue
             node_edges = list(g_beads_subgraph.edges(curr_node))
             node_pts = transformation.transform_pts(
                 np.concatenate(
@@ -1024,13 +1064,70 @@ def optimize_bead_subgraph(g_beads_subgraph, ref_node, transform_generator):
             )
 
             transform_generator.estimate(node_pts, adjecent_pts)
-            g_beads_subgraph.nodes[curr_node][
-                "affine"
-            ] = param_utils.matmul_xparams(
-                param_utils.affine_to_xaffine(transform_generator.params),
-                g_beads_subgraph.nodes[curr_node]["affine"],
+
+            curr_residuals = transform_generator.residuals(
+                node_pts, adjecent_pts
             )
-    return g_beads_subgraph
+            iter_residuals.append(np.mean(curr_residuals))
+
+            if curr_node != ref_node:
+                g_beads_subgraph.nodes[curr_node][
+                    "affine"
+                ] = param_utils.matmul_xparams(
+                    param_utils.affine_to_xaffine(transform_generator.params),
+                    g_beads_subgraph.nodes[curr_node]["affine"],
+                )
+
+            # node_iter_info = {
+            #     "transform": g_beads_subgraph.nodes[curr_node]["affine"].data,
+            #     "node_pts": node_pts.flatten(),
+            #     "adjecent_pts": adjecent_pts.flatten(),
+            #     "residuals": curr_residuals,
+            # }
+
+            df_iter_node = pd.concat(
+                [
+                    xr.DataArray(
+                        g_beads_subgraph.nodes[curr_node]["affine"],
+                        name=str(curr_node),
+                    )
+                    .to_dataframe()
+                    .reset_index()
+                    .pivot_table(str(curr_node), [], ["x_in", "x_out"]),
+                    pd.DataFrame(
+                        {
+                            "residual": np.mean(curr_residuals),
+                            "iteration": iteration,
+                        },
+                        index=[str(curr_node)],
+                    ),
+                ],
+                axis=1,
+            ).reset_index(names=["node"])
+
+            dfs.append(df_iter_node)
+
+        mean_residuals.append(np.mean(iter_residuals))
+
+        # check for convergence
+        if iteration > 5:
+            rel_change = (
+                np.abs(mean_residuals[-1] - mean_residuals[-2])
+                / mean_residuals[-1]
+            )
+            abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
+            if rel_change < rel_tol or abs_change < abs_tol:
+                break
+
+        print(iteration, mean_residuals[-1], iter_residuals)
+
+    df = pd.concat(dfs, axis=0)
+
+    params = {
+        node: g_beads_subgraph.nodes[node]["affine"]
+        for node in g_beads_subgraph.nodes
+    }
+    return params, df
 
 
 def register(
@@ -1044,7 +1141,7 @@ def register(
     pairwise_reg_func_kwargs=None,
     groupwise_optimization_method="iterative",
     groupwise_optimization_kwargs=None,
-    pre_registration_pruning_method="shortest_paths_overlap_weighted",
+    pre_registration_pruning_method=None,
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
     plot_summary=False,
@@ -1164,7 +1261,7 @@ def register(
             weight_key="quality",
         )
 
-    params = groupwise_optimization(
+    params, groupwise_opt_info = groupwise_optimization(
         g_reg_computed,
         method=groupwise_optimization_method,
         **groupwise_optimization_kwargs,
