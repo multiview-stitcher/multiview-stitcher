@@ -265,6 +265,43 @@ def get_nodes_dataset_from_graph(g, node_attribute):
     )
 
 
+def get_faces_from_stack_props(stack_props):
+    """
+    Get sim stack corners in world coordinates.
+    """
+    ndim = len(stack_props["origin"])
+    sdims = ["z", "y", "x"][-ndim:]
+
+    gv = np.array(list(np.ndindex(tuple([2] * ndim))))
+
+    faces = []
+    for iax in range(len(gv[0])):
+        for lface in [0, 1]:
+            face = gv[np.where(gv[:, iax] == lface)[0]]
+            faces.append(face)
+
+    faces = np.array(faces)
+
+    faces = faces * (
+        np.array([stack_props["shape"][dim] for dim in sdims]) - 1
+    ) * np.array([stack_props["spacing"][dim] for dim in sdims]) + np.array(
+        [stack_props["origin"][dim] for dim in sdims]
+    )
+
+    if "transform" in stack_props:
+        orig_shape = faces.shape
+        faces = faces.reshape(-1, ndim)
+
+        affine = stack_props["transform"]
+        faces = np.dot(
+            affine, np.hstack([faces, np.ones((faces.shape[0], 1))]).T
+        ).T[:, :-1]
+
+        faces = faces.reshape(orig_shape)
+
+    return faces
+
+
 def get_vertices_from_stack_props(stack_props):
     """
     Get sim stack corners in world coordinates.
@@ -354,7 +391,8 @@ def get_intersection_poly_from_pair_of_stack_props(
     cphs = []
     facess = []
     for stack_props in [stack_props_1, stack_props_2]:
-        faces = get_vertices_from_stack_props(stack_props)
+        # faces = get_vertices_from_stack_props(stack_props)
+        faces = get_faces_from_stack_props(stack_props)
         cps = get_poly_from_stack_props(stack_props)
 
         facess.append(faces.reshape((-1, ndim)))
@@ -406,7 +444,8 @@ def get_poly_from_stack_props(stack_props):
         sim_domain = ConvexPolygon([Point([0] + list(c)) for c in corners])
 
     elif ndim == 3:
-        faces = get_vertices_from_stack_props(stack_props)
+        # faces = get_vertices_from_stack_props(stack_props)
+        faces = get_faces_from_stack_props(stack_props)
         sim_domain = ConvexPolyhedron(
             [ConvexPolygon([Point(c) for c in face]) for face in faces]
         )

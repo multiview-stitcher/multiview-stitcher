@@ -862,7 +862,7 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
     transform_generator = EuclideanTransform(dimensionality=ndim)
 
     # find timepoints
-    all_transforms = [g_reg.edges[(0, 1)]["transform"] for e in g_reg.edges]
+    all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
     t_coords = np.unique(
         [
             transform.coords["t"].data
@@ -872,18 +872,15 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
     )
 
     params = {nodes: [] for nodes in g_reg.nodes}
-    for t in t_coords:
-        ccs = list(nx.connected_components(g_reg))
+    ccs = list(nx.connected_components(g_reg))
+    for cc in ccs:
+        g_reg_subgraph = g_reg.subgraph(list(cc))
 
-        for cc in ccs:
-            g_reg_subgraph = g_reg.subgraph(list(cc))
+        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+            g_reg_subgraph, weight_key="quality"
+        )
 
-            ref_node = (
-                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-                    g_reg_subgraph, weight_key="quality"
-                )
-            )
-
+        for t in t_coords:
             # undirected graph containing virtual bead pairs as edges
             g_beads_subgraph = nx.Graph()
             for e in g_reg_subgraph.edges:
@@ -924,19 +921,19 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
 
             for iteration in range(10):
                 print(iteration)
-                for node in sorted_nodes:
-                    if node == ref_node:
+                for curr_node in sorted_nodes:
+                    if curr_node == ref_node:
                         continue
-                    node_edges = list(g_beads_subgraph.edges(0))
+                    node_edges = list(g_beads_subgraph.edges(curr_node))
                     node_pts = transformation.transform_pts(
                         np.concatenate(
                             [
-                                g_beads_subgraph.edges[e]["beads"][node]
+                                g_beads_subgraph.edges[e]["beads"][curr_node]
                                 for e in node_edges
                             ],
                             axis=0,
                         ),
-                        g_beads_subgraph.nodes[node]["affine"],
+                        g_beads_subgraph.nodes[curr_node]["affine"],
                     )
                     adjecent_pts = np.concatenate(
                         [
@@ -946,19 +943,19 @@ def get_node_params_from_reg_graph_global_opt(g_reg):
                             )
                             for e in node_edges
                             for n in e
-                            if n != node
+                            if n != curr_node
                         ],
                         axis=0,
                     )
 
                     transform_generator.estimate(node_pts, adjecent_pts)
-                    g_beads_subgraph.nodes[node][
+                    g_beads_subgraph.nodes[curr_node][
                         "affine"
                     ] = param_utils.matmul_xparams(
                         param_utils.affine_to_xaffine(
                             transform_generator.params
                         ),
-                        g_beads_subgraph.nodes[node]["affine"],
+                        g_beads_subgraph.nodes[curr_node]["affine"],
                     )
 
             for node in g_beads_subgraph.nodes:
