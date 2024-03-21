@@ -1295,7 +1295,7 @@ def register(
                 use_positional_colors=False,
             )
 
-    return params
+    return params, groupwise_opt_info
 
 
 def compute_pairwise_registrations(
