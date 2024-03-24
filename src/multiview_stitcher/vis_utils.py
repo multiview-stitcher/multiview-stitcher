@@ -59,7 +59,8 @@ def plot_positions(
         sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
         nsdims = [dim for dim in sim.dims if dim not in sdims]
         for nsdim in nsdims:
-            if nsdim in sim.dims and len(sim.coords[nsdim]) > 1:
+            # if nsdim in sim.dims and len(sim.coords[nsdim]) > 1:
+            if nsdim in sim.dims:
                 if nsdim not in nscoord:
                     nscoord[nsdim] = sim.coords[nsdim][0]
                 sims[isim] = spatial_image_utils.sim_sel_coords(sim, nscoord)

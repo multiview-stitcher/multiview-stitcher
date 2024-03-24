@@ -12,6 +12,10 @@ from dask import compute, delayed
 from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.metrics import structural_similarity
+from skimage.transform import (
+    AffineTransform,
+    EuclideanTransform,
+)
 
 try:
     import ants
@@ -824,7 +828,12 @@ def groupwise_optimization_shortest_paths(g_reg):
 
 
 def groupwise_optimization_iterative(
-    g_reg, max_iter=100, rel_tol=1e-5, abs_tol=1e-7
+    g_reg,
+    transform="rigid",
+    max_iter=100,
+    rel_tol=1e-5,
+    abs_tol=1e-7,
+    max_residual_max_mean_ratio=2.0,
 ):
     """
     Get final transform parameters by global optimization.
@@ -861,16 +870,29 @@ def groupwise_optimization_iterative(
     - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
     - BigStitcher publication: https://www.nature.com/articles/s41592-019-0501-0#Sec2
       - Supplementary Note 2
+
+    Parameters
+    ----------
+    g_reg : nx.Graph
+        Registration graph with pairwise transforms as edges
+    transform : str, optional
+        Transformation type ('rigid' or 'affine')
+    max_iter : int, optional
+        Maximum number of iterations
+    rel_tol : float, optional
+        Relative tolerance for convergence
+    abs_tol : float, optional
+        Absolute tolerance for convergence
+    max_residual_max_mean_ratio : float, optional
+        Maximum ratio of the maximum residual to the mean residual
+
+    Returns
+    -------
+    dict
+        Dictionary containing the final transform parameters for each view
     """
 
-    # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
-    ndim = (
-        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
-    )
-
-    from skimage.transform import EuclideanTransform
-
-    transform_generator = EuclideanTransform(dimensionality=ndim)
+    (g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1)
 
     # find timepoints
     all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
@@ -911,11 +933,12 @@ def groupwise_optimization_iterative(
                     [
                         optimize_bead_subgraph(
                             g_beads_subgraph,
+                            transform,
                             ref_node,
-                            transform_generator,
                             max_iter,
                             rel_tol,
                             abs_tol,
+                            max_residual_max_mean_ratio,
                         )
                         for g_beads_subgraph in g_beads_subgraph_ts
                     ]
@@ -989,6 +1012,8 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph):
                     affine,
                 ),
             },
+            quality=g_reg_subgraph.edges[e]["quality"].data,
+            overlap=g_reg_subgraph.edges[e]["overlap"],
         )
 
     # initialise view transforms with identity transforms
@@ -1002,11 +1027,12 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph):
 
 def optimize_bead_subgraph(
     g_beads_subgraph,
+    transform,
     ref_node,
-    transform_generator,
     max_iter=100,
     rel_tol=1e-5,
     abs_tol=1e-7,
+    max_residual_max_mean_ratio=2.0,
 ):
     """
     Optimize the virtual bead graph.
@@ -1014,114 +1040,237 @@ def optimize_bead_subgraph(
     Parameters
     ----------
     g_beads_subgraph : nx.Graph
+        Virtual bead graph
+    transform : str
+        Transformation type ('rigid' or 'affine')
     ref_node : int
-    transform_generator : skimage.transform.BaseTransform
+    max_iter : int, optional
+    rel_tol : float, optional
+    abs_tol : float, optional
+    max_residual_max_mean_ratio : float, optional
 
     Returns
     -------
     nx.Graph
-        _description_
+        Optimized virtual bead graph
     """
 
     # calculate an order of views by descending connectivity / number of links
     centralities = nx.degree_centrality(g_beads_subgraph)
     sorted_nodes = sorted(centralities, key=centralities.get, reverse=True)
 
-    (
+    ndim = (
         g_beads_subgraph.nodes[list(g_beads_subgraph.nodes)[0]][
             "affine"
         ].shape[-1]
         - 1
     )
 
+    if transform == "rigid":
+        transform_generator = EuclideanTransform(dimensionality=ndim)
+    elif transform == "affine":
+        transform_generator = AffineTransform(dimensionality=ndim)
+
     mean_residuals = []
     dfs = []
-    for iteration in range(max_iter):
-        iter_residuals = []
-        for curr_node in sorted_nodes:
-            node_edges = list(g_beads_subgraph.edges(curr_node))
-            node_pts = transformation.transform_pts(
-                np.concatenate(
-                    [
-                        g_beads_subgraph.edges[e]["beads"][curr_node]
-                        for e in node_edges
-                    ],
-                    axis=0,
-                ),
-                g_beads_subgraph.nodes[curr_node]["affine"],
-            )
-            adjecent_pts = np.concatenate(
-                [
-                    transformation.transform_pts(
-                        g_beads_subgraph.edges[e]["beads"][n],
-                        g_beads_subgraph.nodes[n]["affine"],
-                    )
-                    for e in node_edges
-                    for n in e
-                    if n != curr_node
-                ],
-                axis=0,
-            )
 
-            transform_generator.estimate(node_pts, adjecent_pts)
+    edge_residuals = {}
+    pts_per_edge = ndim**2
 
-            curr_residuals = transform_generator.residuals(
-                node_pts, adjecent_pts
-            )
-            iter_residuals.append(np.mean(curr_residuals))
-
-            if curr_node != ref_node:
-                g_beads_subgraph.nodes[curr_node][
-                    "affine"
-                ] = param_utils.matmul_xparams(
-                    param_utils.affine_to_xaffine(transform_generator.params),
+    total_iterations = 0
+    # first loop: iterate until max / mean residual ratio is below threshold
+    while True:
+        # second loop: optimise transformations of each node
+        for iteration in range(max_iter):
+            iter_residuals = []
+            if not len(list(g_beads_subgraph.edges)):
+                break
+            for curr_node in sorted_nodes:
+                node_edges = list(g_beads_subgraph.edges(curr_node))
+                if len(node_edges) == 0:
+                    continue
+                node_pts = transformation.transform_pts(
+                    np.concatenate(
+                        [
+                            g_beads_subgraph.edges[e]["beads"][curr_node]
+                            for ie, e in enumerate(node_edges)
+                        ],
+                        axis=0,
+                    ),
                     g_beads_subgraph.nodes[curr_node]["affine"],
                 )
+                adjecent_pts = np.concatenate(
+                    [
+                        transformation.transform_pts(
+                            g_beads_subgraph.edges[e]["beads"][n],
+                            g_beads_subgraph.nodes[n]["affine"],
+                        )
+                        for ie, e in enumerate(node_edges)
+                        for n in e
+                        if n != curr_node
+                    ],
+                    axis=0,
+                )
 
-            # node_iter_info = {
-            #     "transform": g_beads_subgraph.nodes[curr_node]["affine"].data,
-            #     "node_pts": node_pts.flatten(),
-            #     "adjecent_pts": adjecent_pts.flatten(),
-            #     "residuals": curr_residuals,
-            # }
+                ### repeat points based on edge quality
 
-            df_iter_node = pd.concat(
-                [
-                    xr.DataArray(
+                # edge_qualities = np.array([g_beads_subgraph.edges[e]['quality'] for e in node_edges])
+                # edge_qualities_norm = edge_qualities / np.sum(edge_qualities)
+                # edge_repeats = [np.max([1, int(edge_qualities_norm[ie] * ndim ** 2 * 4)])
+                #     for ie in range(len(edge_qualities))]
+
+                # pts_per_edge = ndim ** 2
+                # node_pts_reg = np.concatenate(
+                #     [
+                #         np.repeat(
+                #             node_pts[ie * pts_per_edge : (ie + 1) * pts_per_edge],
+                #             edge_repeats[ie],
+                #             axis=0,
+                #         )
+                #         for ie in range(len(node_edges))
+                #     ], axis=0
+                # )
+
+                # adjecent_pts_reg = np.concatenate(
+                #     [
+                #         np.repeat(
+                #             adjecent_pts[ie * pts_per_edge : (ie + 1) * pts_per_edge],
+                #             edge_repeats[ie],
+                #             axis=0,
+                #         )
+                #         for ie in range(len(node_edges))
+                #     ], axis=0
+                # )
+
+                # transform_generator.estimate(node_pts_reg, adjecent_pts_reg)
+
+                transform_generator.estimate(node_pts, adjecent_pts)
+
+                curr_residuals = transform_generator.residuals(
+                    node_pts, adjecent_pts
+                )
+
+                curr_edge_residuals = np.array(
+                    [
+                        np.mean(
+                            curr_residuals[
+                                ie * pts_per_edge : (ie + 1) * pts_per_edge
+                            ]
+                        )
+                        for ie, e in enumerate(node_edges)
+                    ]
+                )
+
+                for ie, e in enumerate(node_edges):
+                    edge_residuals[e] = curr_edge_residuals[ie]
+
+                iter_residuals.append(np.mean(curr_residuals))
+
+                if curr_node != ref_node:
+                    g_beads_subgraph.nodes[curr_node][
+                        "affine"
+                    ] = param_utils.matmul_xparams(
+                        param_utils.affine_to_xaffine(
+                            transform_generator.params
+                        ),
                         g_beads_subgraph.nodes[curr_node]["affine"],
-                        name=str(curr_node),
                     )
-                    .to_dataframe()
-                    .reset_index()
-                    .pivot_table(str(curr_node), [], ["x_in", "x_out"]),
-                    pd.DataFrame(
-                        {
-                            "residual": np.mean(curr_residuals),
-                            "iteration": iteration,
-                        },
-                        index=[str(curr_node)],
-                    ),
-                ],
-                axis=1,
-            ).reset_index(names=["node"])
 
-            dfs.append(df_iter_node)
+                # node_iter_info = {
+                #     "transform": g_beads_subgraph.nodes[curr_node]["affine"].data,
+                #     "node_pts": node_pts.flatten(),
+                #     "adjecent_pts": adjecent_pts.flatten(),
+                #     "residuals": curr_residuals,
+                # }
 
-        mean_residuals.append(np.mean(iter_residuals))
+                total_iterations += 1
 
-        # check for convergence
-        if iteration > 5:
-            rel_change = (
-                np.abs(mean_residuals[-1] - mean_residuals[-2])
-                / mean_residuals[-1]
+                df_iter_node = pd.concat(
+                    [
+                        # xr.DataArray(
+                        #     g_beads_subgraph.nodes[curr_node]["affine"],
+                        #     name=str(curr_node),
+                        # )
+                        # .to_dataframe()
+                        # .reset_index()
+                        # .pivot_table(str(curr_node), [], ["x_in", "x_out"]),
+                        pd.DataFrame(
+                            {
+                                "residual": np.mean(curr_residuals),
+                                "iteration": iteration,
+                                "total_iteration": total_iterations,
+                            },
+                            index=[str(curr_node)],
+                        ),
+                    ],
+                    axis=1,
+                ).reset_index(names=["node"])
+
+                dfs.append(df_iter_node)
+
+            mean_residuals.append(np.mean(iter_residuals))
+
+            # check for convergence
+            if iteration > 5:
+                rel_change = (
+                    np.abs(mean_residuals[-1] - mean_residuals[-2])
+                    / mean_residuals[-1]
+                )
+                abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
+                if rel_change < rel_tol or abs_change < abs_tol:
+                    break
+
+            print(iteration, mean_residuals[-1], iter_residuals)
+
+        residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
+            iter_residuals
+        )
+
+        # import pdb; pdb.set_trace()
+        if residual_max_mean_ratio > max_residual_max_mean_ratio:
+            # determine which edge to remove (formula from bigstitcher)
+            # c_value = (1-qij)**2 * sqrt(dijk) * log10(max(degi, degj))
+            c_value_dict = {
+                e: (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
+                * (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
+                * np.sqrt(np.max(edge_residuals[e]))
+                * np.log10(
+                    np.max(
+                        [len(list(g_beads_subgraph.neighbors(n))) for n in e]
+                    )
+                )
+                for e in g_beads_subgraph.edges
+            }
+
+            edges, c_values = zip(*c_value_dict.items())
+
+            max_c_value_key = edges[np.argmax(c_values)]
+            g_beads_subgraph.remove_edge(*max_c_value_key)
+
+            # reset view transforms with identity transforms
+            for node in g_beads_subgraph.nodes:
+                g_beads_subgraph.nodes[node][
+                    "affine"
+                ] = param_utils.identity_transform(ndim)
+
+            print(
+                "restart",
+                max_c_value_key,
+                residual_max_mean_ratio,
+                np.max(iter_residuals),
+                np.mean(iter_residuals),
             )
-            abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
-            if rel_change < rel_tol or abs_change < abs_tol:
-                break
 
-        print(iteration, mean_residuals[-1], iter_residuals)
+        else:
+            print(
+                "finished",
+                residual_max_mean_ratio,
+                np.max(iter_residuals),
+                np.mean(iter_residuals),
+            )
+            break
 
-    df = pd.concat(dfs, axis=0)
+    df = pd.concat(dfs, axis=0) if len(dfs) else None
 
     params = {
         node: g_beads_subgraph.nodes[node]["affine"]
