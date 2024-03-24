@@ -1085,9 +1085,11 @@ def optimize_bead_subgraph(
             iter_residuals = []
             if not len(list(g_beads_subgraph.edges)):
                 break
+            new_affines = []
             for curr_node in sorted_nodes:
                 node_edges = list(g_beads_subgraph.edges(curr_node))
                 if len(node_edges) == 0:
+                    new_affines.append(param_utils.identity_transform(ndim))
                     continue
                 node_pts = transformation.transform_pts(
                     np.concatenate(
@@ -1167,14 +1169,24 @@ def optimize_bead_subgraph(
                 iter_residuals.append(np.mean(curr_residuals))
 
                 if curr_node != ref_node:
-                    g_beads_subgraph.nodes[curr_node][
-                        "affine"
-                    ] = param_utils.matmul_xparams(
-                        param_utils.affine_to_xaffine(
-                            transform_generator.params
-                        ),
-                        g_beads_subgraph.nodes[curr_node]["affine"],
+                    # g_beads_subgraph.nodes[curr_node][
+                    #     "affine"
+                    # ] = param_utils.matmul_xparams(
+                    #     param_utils.affine_to_xaffine(
+                    #         transform_generator.params
+                    #     ),
+                    #     g_beads_subgraph.nodes[curr_node]["affine"],
+                    # )
+                    new_affines.append(
+                        param_utils.matmul_xparams(
+                            param_utils.affine_to_xaffine(
+                                transform_generator.params
+                            ),
+                            g_beads_subgraph.nodes[curr_node]["affine"],
+                        )
                     )
+                else:
+                    new_affines.append(param_utils.identity_transform(ndim))
 
                 # node_iter_info = {
                 #     "transform": g_beads_subgraph.nodes[curr_node]["affine"].data,
@@ -1210,6 +1222,9 @@ def optimize_bead_subgraph(
 
             mean_residuals.append(np.mean(iter_residuals))
 
+            for i, curr_node in enumerate(sorted_nodes):
+                g_beads_subgraph.nodes[curr_node]["affine"] = new_affines[i]
+
             # check for convergence
             if iteration > 5:
                 rel_change = (
@@ -1226,7 +1241,6 @@ def optimize_bead_subgraph(
             iter_residuals
         )
 
-        # import pdb; pdb.set_trace()
         if residual_max_mean_ratio > max_residual_max_mean_ratio:
             # determine which edge to remove (formula from bigstitcher)
             # c_value = (1-qij)**2 * sqrt(dijk) * log10(max(degi, degj))
@@ -1599,6 +1613,8 @@ E.g. using pip:
         **default_ants_registration_kwargs,
         **ants_registration_kwargs,
     }
+
+    # import pdb; pdb.set_trace()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         init_transform_path = os.path.join(tmpdir, "init_aff.txt")
