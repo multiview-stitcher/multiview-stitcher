@@ -1264,7 +1264,7 @@ def optimize_bead_subgraph(
                 if rel_change < rel_tol or abs_change < abs_tol:
                     break
 
-            print(iteration, mean_residuals[-1], iter_residuals)
+            # print(iteration, mean_residuals[-1], iter_residuals)
 
         if not len(list(g_beads_subgraph.edges)):
             break
@@ -1277,7 +1277,7 @@ def optimize_bead_subgraph(
             residual_max_mean_ratio = np.max(edge_residual_values) / np.mean(
                 edge_residual_values
             )
-            print("edge_residuals_max_mean_ratio", residual_max_mean_ratio)
+            # print("edge_residuals_max_mean_ratio", residual_max_mean_ratio)
 
             if residual_max_mean_ratio < max_residual_max_mean_ratio:
                 print("finished", residual_max_mean_ratio)
@@ -1285,9 +1285,9 @@ def optimize_bead_subgraph(
             else:
                 max_residual_value_key = edges[np.argmax(edge_residual_values)]
                 g_beads_subgraph.remove_edge(*max_residual_value_key)
-                print(
-                    "restart", max_residual_value_key, residual_max_mean_ratio
-                )
+                # print(
+                #     "restart", max_residual_value_key, residual_max_mean_ratio
+                # )
 
         elif type_of_residual == "node":
             residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
@@ -1323,21 +1323,21 @@ def optimize_bead_subgraph(
                         "affine"
                     ] = param_utils.identity_transform(ndim)
 
-                print(
-                    "restart",
-                    max_c_value_key,
-                    residual_max_mean_ratio,
-                    np.max(iter_residuals),
-                    np.mean(iter_residuals),
-                )
+                # print(
+                #     "restart",
+                #     max_c_value_key,
+                #     residual_max_mean_ratio,
+                #     np.max(iter_residuals),
+                #     np.mean(iter_residuals),
+                # )
 
             else:
-                print(
-                    "finished",
-                    residual_max_mean_ratio,
-                    np.max(iter_residuals),
-                    np.mean(iter_residuals),
-                )
+                # print(
+                #     "finished",
+                #     residual_max_mean_ratio,
+                #     np.max(iter_residuals),
+                #     np.mean(iter_residuals),
+                # )
                 break
         else:
             raise ValueError(f"Unknown type of residual: {type_of_residual}")
