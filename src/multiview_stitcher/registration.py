@@ -739,7 +739,7 @@ def prune_view_adjacency_graph(
         raise ValueError(f"Unknown graph pruning method: {method}")
 
 
-def groupwise_resolution(g_reg, method="global-optimization", **kwargs):
+def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     if not len(g_reg.edges):
         raise (
             mv_graph.NotEnoughOverlapError(
@@ -748,7 +748,7 @@ def groupwise_resolution(g_reg, method="global-optimization", **kwargs):
             )
         )
 
-    if method == "global-optimization":
+    if method == "global_optimization":
         return groupwise_resolution_global_optimization(g_reg, **kwargs)
     elif method == "shortest_paths":
         return groupwise_resolution_shortest_paths(g_reg, **kwargs)
@@ -859,7 +859,7 @@ def groupwise_resolution_global_optimization(
     - for each view, compute the transform that minimizes the distance between
         its virtual beads and associated virtual beads in overlapping views
     - assign the computed transform to the view
-    - perform this process global-optimizationly until convergence
+    - perform this process global_optimizationly until convergence
         (transforming each view's beads by the view's current transformation)
     - potentially: filter out bad links looking at residual distances
 
@@ -1404,7 +1404,7 @@ def register(
     groupwise_resolution_method : str, optional
         Method used to determine the final transform parameters
         from pairwise registrations:
-        - 'global-optimization': global optimization considering all pairwise transforms
+        - 'global_optimization': global optimization considering all pairwise transforms
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
     groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function

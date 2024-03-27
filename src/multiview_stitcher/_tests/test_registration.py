@@ -197,7 +197,7 @@ def test_get_optimal_registration_binning():
         for ndim in [2, 3]
         for groupwise_resolution_method in [
             "shortest_paths",
-            "global-optimization",
+            "global_optimization",
         ]
     ],
 )
