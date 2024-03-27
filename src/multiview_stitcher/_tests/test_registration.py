@@ -165,7 +165,7 @@ def test_get_optimal_registration_binning():
     pairwise_reg_func,
     pre_registration_pruning_method,
     post_registration_do_quality_filter,
-    groupwise_optimization_method,
+    groupwise_resolution_method,
     """,
     [
         (
@@ -187,7 +187,7 @@ def test_get_optimal_registration_binning():
             registration.phase_correlation_registration,
             pre_reg_pm,
             True,
-            groupwise_optimization_method,
+            groupwise_resolution_method,
         )
         for pre_reg_pm in [
             "shortest_paths_overlap_weighted",
@@ -195,9 +195,9 @@ def test_get_optimal_registration_binning():
             None,
         ]
         for ndim in [2, 3]
-        for groupwise_optimization_method in [
+        for groupwise_resolution_method in [
             "shortest_paths",
-            "iterative",
+            "global-optimization",
         ]
     ],
 )
@@ -208,7 +208,7 @@ def test_register(
     pairwise_reg_func,
     pre_registration_pruning_method,
     post_registration_do_quality_filter,
-    groupwise_optimization_method,
+    groupwise_resolution_method,
 ):
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,

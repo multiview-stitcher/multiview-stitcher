@@ -1,3 +1,4 @@
+import copy
 import os
 import tempfile
 import warnings
@@ -738,16 +739,24 @@ def prune_view_adjacency_graph(
         raise ValueError(f"Unknown graph pruning method: {method}")
 
 
-def groupwise_optimization(g_reg, method="iterative", **kwargs):
-    if method == "iterative":
-        return groupwise_optimization_iterative(g_reg, **kwargs)
+def groupwise_resolution(g_reg, method="global-optimization", **kwargs):
+    if not len(g_reg.edges):
+        raise (
+            mv_graph.NotEnoughOverlapError(
+                "Not enough overlap between views\
+        for stitching."
+            )
+        )
+
+    if method == "global-optimization":
+        return groupwise_resolution_global_optimization(g_reg, **kwargs)
     elif method == "shortest_paths":
-        return groupwise_optimization_shortest_paths(g_reg, **kwargs)
+        return groupwise_resolution_shortest_paths(g_reg, **kwargs)
     else:
         raise ValueError(f"Unknown groupwise optimization method: {method}")
 
 
-def groupwise_optimization_shortest_paths(g_reg):
+def groupwise_resolution_shortest_paths(g_reg):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
@@ -827,13 +836,14 @@ def groupwise_optimization_shortest_paths(g_reg):
     return node_transforms, None
 
 
-def groupwise_optimization_iterative(
+def groupwise_resolution_global_optimization(
     g_reg,
     transform="rigid",
-    max_iter=100,
-    rel_tol=1e-5,
-    abs_tol=1e-7,
-    max_residual_max_mean_ratio=2.0,
+    max_iter=None,
+    rel_tol=None,
+    abs_tol=None,
+    max_residual_max_mean_ratio=None,
+    type_of_residual=None,
 ):
     """
     Get final transform parameters by global optimization.
@@ -849,7 +859,7 @@ def groupwise_optimization_iterative(
     - for each view, compute the transform that minimizes the distance between
         its virtual beads and associated virtual beads in overlapping views
     - assign the computed transform to the view
-    - perform this process iteratively until convergence
+    - perform this process global-optimizationly until convergence
         (transforming each view's beads by the view's current transformation)
     - potentially: filter out bad links looking at residual distances
 
@@ -891,8 +901,6 @@ def groupwise_optimization_iterative(
     dict
         Dictionary containing the final transform parameters for each view
     """
-
-    (g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1)
 
     # find timepoints
     all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
@@ -939,6 +947,7 @@ def groupwise_optimization_iterative(
                             rel_tol,
                             abs_tol,
                             max_residual_max_mean_ratio,
+                            type_of_residual,
                         )
                         for g_beads_subgraph in g_beads_subgraph_ts
                     ]
@@ -1029,13 +1038,20 @@ def optimize_bead_subgraph(
     g_beads_subgraph,
     transform,
     ref_node,
-    max_iter=100,
-    rel_tol=1e-5,
-    abs_tol=1e-7,
-    max_residual_max_mean_ratio=2.0,
+    max_iter,
+    rel_tol,
+    abs_tol,
+    max_residual_max_mean_ratio,
+    type_of_residual,
 ):
     """
     Optimize the virtual bead graph.
+
+    Two loops:
+    - first loop: iterate until max / mean residual ratio is below threshold
+    - second loop: optimise transformations of each node
+
+    TODO: improve efficiency
 
     Parameters
     ----------
@@ -1048,12 +1064,27 @@ def optimize_bead_subgraph(
     rel_tol : float, optional
     abs_tol : float, optional
     max_residual_max_mean_ratio : float, optional
+    type_of_residual : str, optional
+        Whether to calculate residuals on 'edge' or 'node' level
 
     Returns
     -------
     nx.Graph
         Optimized virtual bead graph
     """
+
+    g_beads_subgraph = copy.deepcopy(g_beads_subgraph)
+
+    if max_iter is None:
+        max_iter = 100
+    if rel_tol is None:
+        rel_tol = 1e-5
+    if abs_tol is None:
+        abs_tol = 1e-7
+    if max_residual_max_mean_ratio is None:
+        max_residual_max_mean_ratio = 3.0
+    if type_of_residual is None:
+        type_of_residual = "edge"
 
     # calculate an order of views by descending connectivity / number of links
     centralities = nx.degree_centrality(g_beads_subgraph)
@@ -1074,13 +1105,13 @@ def optimize_bead_subgraph(
     mean_residuals = []
     dfs = []
 
-    edge_residuals = {}
     pts_per_edge = ndim**2
 
     total_iterations = 0
     # first loop: iterate until max / mean residual ratio is below threshold
     while True:
         # second loop: optimise transformations of each node
+        edge_residuals = {tuple(sorted(e)): [] for e in g_beads_subgraph.edges}
         for iteration in range(max_iter):
             iter_residuals = []
             if not len(list(g_beads_subgraph.edges)):
@@ -1088,9 +1119,11 @@ def optimize_bead_subgraph(
             new_affines = []
             for curr_node in sorted_nodes:
                 node_edges = list(g_beads_subgraph.edges(curr_node))
+
                 if len(node_edges) == 0:
                     new_affines.append(param_utils.identity_transform(ndim))
                     continue
+
                 node_pts = transformation.transform_pts(
                     np.concatenate(
                         [
@@ -1115,6 +1148,7 @@ def optimize_bead_subgraph(
                 )
 
                 ### repeat points based on edge quality
+                ### (not used currently, as although it seems to improve convergence, it slows down performance)
 
                 # edge_qualities = np.array([g_beads_subgraph.edges[e]['quality'] for e in node_edges])
                 # edge_qualities_norm = edge_qualities / np.sum(edge_qualities)
@@ -1164,19 +1198,14 @@ def optimize_bead_subgraph(
                 )
 
                 for ie, e in enumerate(node_edges):
-                    edge_residuals[e] = curr_edge_residuals[ie]
+                    # edge_residuals[e] = curr_edge_residuals[ie]
+                    edge_residuals[tuple(sorted(e))].append(
+                        curr_edge_residuals[ie]
+                    )
 
                 iter_residuals.append(np.mean(curr_residuals))
 
                 if curr_node != ref_node:
-                    # g_beads_subgraph.nodes[curr_node][
-                    #     "affine"
-                    # ] = param_utils.matmul_xparams(
-                    #     param_utils.affine_to_xaffine(
-                    #         transform_generator.params
-                    #     ),
-                    #     g_beads_subgraph.nodes[curr_node]["affine"],
-                    # )
                     new_affines.append(
                         param_utils.matmul_xparams(
                             param_utils.affine_to_xaffine(
@@ -1237,52 +1266,81 @@ def optimize_bead_subgraph(
 
             print(iteration, mean_residuals[-1], iter_residuals)
 
-        residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
-            iter_residuals
-        )
-
-        if residual_max_mean_ratio > max_residual_max_mean_ratio:
-            # determine which edge to remove (formula from bigstitcher)
-            # c_value = (1-qij)**2 * sqrt(dijk) * log10(max(degi, degj))
-            c_value_dict = {
-                e: (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
-                * (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
-                * np.sqrt(np.max(edge_residuals[e]))
-                * np.log10(
-                    np.max(
-                        [len(list(g_beads_subgraph.neighbors(n))) for n in e]
-                    )
-                )
-                for e in g_beads_subgraph.edges
-            }
-
-            edges, c_values = zip(*c_value_dict.items())
-
-            max_c_value_key = edges[np.argmax(c_values)]
-            g_beads_subgraph.remove_edge(*max_c_value_key)
-
-            # reset view transforms with identity transforms
-            for node in g_beads_subgraph.nodes:
-                g_beads_subgraph.nodes[node][
-                    "affine"
-                ] = param_utils.identity_transform(ndim)
-
-            print(
-                "restart",
-                max_c_value_key,
-                residual_max_mean_ratio,
-                np.max(iter_residuals),
-                np.mean(iter_residuals),
-            )
-
-        else:
-            print(
-                "finished",
-                residual_max_mean_ratio,
-                np.max(iter_residuals),
-                np.mean(iter_residuals),
-            )
+        if not len(list(g_beads_subgraph.edges)):
             break
+
+        if type_of_residual == "edge":
+            edge_residuals = {k: np.mean(v) for k, v in edge_residuals.items()}
+
+            edges, edge_residual_values = zip(*edge_residuals.items())
+
+            residual_max_mean_ratio = np.max(edge_residual_values) / np.mean(
+                edge_residual_values
+            )
+            print("edge_residuals_max_mean_ratio", residual_max_mean_ratio)
+
+            if residual_max_mean_ratio < max_residual_max_mean_ratio:
+                print("finished", residual_max_mean_ratio)
+                break
+            else:
+                max_residual_value_key = edges[np.argmax(edge_residual_values)]
+                g_beads_subgraph.remove_edge(*max_residual_value_key)
+                print(
+                    "restart", max_residual_value_key, residual_max_mean_ratio
+                )
+
+        elif type_of_residual == "node":
+            residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
+                iter_residuals
+            )
+
+            if residual_max_mean_ratio > max_residual_max_mean_ratio:
+                # determine which edge to remove (formula from bigstitcher)
+                # c_value = (1-qij)**2 * sqrt(dijk) * log10(max(degi, degj))
+                c_value_dict = {
+                    e: (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
+                    * (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
+                    * np.sqrt(np.max(edge_residuals[e]))
+                    * np.log10(
+                        np.max(
+                            [
+                                len(list(g_beads_subgraph.neighbors(n)))
+                                for n in e
+                            ]
+                        )
+                    )
+                    for e in g_beads_subgraph.edges
+                }
+
+                edges, c_values = zip(*c_value_dict.items())
+
+                max_c_value_key = edges[np.argmax(c_values)]
+                g_beads_subgraph.remove_edge(*max_c_value_key)
+
+                # reset view transforms with identity transforms
+                for node in g_beads_subgraph.nodes:
+                    g_beads_subgraph.nodes[node][
+                        "affine"
+                    ] = param_utils.identity_transform(ndim)
+
+                print(
+                    "restart",
+                    max_c_value_key,
+                    residual_max_mean_ratio,
+                    np.max(iter_residuals),
+                    np.mean(iter_residuals),
+                )
+
+            else:
+                print(
+                    "finished",
+                    residual_max_mean_ratio,
+                    np.max(iter_residuals),
+                    np.mean(iter_residuals),
+                )
+                break
+        else:
+            raise ValueError(f"Unknown type of residual: {type_of_residual}")
 
     df = pd.concat(dfs, axis=0) if len(dfs) else None
 
@@ -1302,8 +1360,8 @@ def register(
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
-    groupwise_optimization_method="iterative",
-    groupwise_optimization_kwargs=None,
+    groupwise_resolution_method="shortest_paths",
+    groupwise_resolution_kwargs=None,
     pre_registration_pruning_method=None,
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
@@ -1343,12 +1401,12 @@ def register(
         Function used for registration.
     pairwise_reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function
-    groupwise_optimization_method : str, optional
+    groupwise_resolution_method : str, optional
         Method used to determine the final transform parameters
         from pairwise registrations:
-        - 'iterative': iterative optimization
+        - 'global-optimization': global optimization considering all pairwise transforms
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
-    groupwise_optimization_kwargs : dict, optional
+    groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function
     pre_registration_pruning_method : str, optional
         Method used to prune the view adjacency graph before registration,
@@ -1373,8 +1431,8 @@ def register(
     if pairwise_reg_func_kwargs is None:
         pairwise_reg_func_kwargs = {}
 
-    if groupwise_optimization_kwargs is None:
-        groupwise_optimization_kwargs = {}
+    if groupwise_resolution_kwargs is None:
+        groupwise_resolution_kwargs = {}
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
@@ -1424,10 +1482,10 @@ def register(
             weight_key="quality",
         )
 
-    params, groupwise_opt_info = groupwise_optimization(
+    params, groupwise_opt_info = groupwise_resolution(
         g_reg_computed,
-        method=groupwise_optimization_method,
-        **groupwise_optimization_kwargs,
+        method=groupwise_resolution_method,
+        **groupwise_resolution_kwargs,
     )
 
     params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
@@ -1458,7 +1516,7 @@ def register(
                 use_positional_colors=False,
             )
 
-    return params, groupwise_opt_info
+    return params  # , groupwise_opt_info
 
 
 def compute_pairwise_registrations(
