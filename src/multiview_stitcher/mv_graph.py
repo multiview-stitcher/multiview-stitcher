@@ -1,3 +1,4 @@
+import copy
 import warnings
 from collections.abc import Iterable
 from itertools import chain
@@ -453,11 +454,61 @@ def get_poly_from_stack_props(stack_props):
     return sim_domain
 
 
+# def get_greedy_colors(sims, n_colors=2, transform_key=None):
+#     """
+#     Get colors (indices) from view adjacency graph analysis
+
+#     Idea: use the same logic to determine relevant registration edges
+#     """
+
+#     view_adj_graph = build_view_adjacency_graph_from_msims(
+#         [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims],
+#         expand=True,
+#         transform_key=transform_key,
+#     )
+
+#     # thresholds = threshold_multiotsu(overlaps)
+
+#     # strategy: remove edges with overlap values of increasing thresholds until
+#     # the graph division into n_colors is successful
+
+#     # modify overlap values
+#     # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
+
+#     edge_vals = nx.edge_betweenness_centrality(view_adj_graph)
+
+#     edges = list(view_adj_graph.edges(data=True))
+#     for e in edges:
+#         edge_vals[tuple(e[:2])] = edge_vals[tuple(e[:2])] + e[2]["overlap"]
+
+#     sorted_unique_vals = sorted(np.unique(list(edge_vals.values())))
+
+#     nx.set_edge_attributes(view_adj_graph, edge_vals, name="edge_val")
+
+#     thresh_ind = 0
+#     while 1:
+#         colors = nx.coloring.greedy_color(view_adj_graph)
+#         if (
+#             len(set(colors.values())) <= n_colors
+#         ):  # and nx.coloring.equitable_coloring.is_equitable(view_adj_graph, colors):
+#             break
+#         view_adj_graph.remove_edges_from(
+#             [
+#                 (a, b)
+#                 for a, b, attrs in view_adj_graph.edges(data=True)
+#                 if attrs["edge_val"] <= sorted_unique_vals[thresh_ind]
+#             ]
+#         )
+#         thresh_ind += 1
+
+#     greedy_colors = dict(colors.items())
+
+#     return greedy_colors
+
+
 def get_greedy_colors(sims, n_colors=2, transform_key=None):
     """
     Get colors (indices) from view adjacency graph analysis
-
-    Idea: use the same logic to determine relevant registration edges
     """
 
     view_adj_graph = build_view_adjacency_graph_from_msims(
@@ -474,35 +525,68 @@ def get_greedy_colors(sims, n_colors=2, transform_key=None):
     # modify overlap values
     # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
 
-    edge_vals = nx.edge_betweenness_centrality(view_adj_graph)
+    view_adj_graph_pruned, greedy_colors = prune_graph_to_alternating_colors(
+        view_adj_graph, n_colors=n_colors
+    )
 
-    edges = list(view_adj_graph.edges(data=True))
+    return greedy_colors
+
+
+def prune_graph_to_alternating_colors(g, n_colors=2, return_colors=True):
+    """
+    Prune a graph
+
+    Parameters
+    ----------
+    g : nx.Graph
+        Graph containing edges with overlap values
+    n_colors : int, optional
+    return_colors : bool, optional
+
+    Returns
+    -------
+    nx.Graph
+        Pruned graph
+    """
+
+    # strategy: remove edges with overlap values of increasing thresholds until
+    # the graph division into n_colors is successful
+
+    # modify overlap values
+    # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
+
+    g_pruned = copy.deepcopy(g)
+
+    edge_vals = nx.edge_betweenness_centrality(g)
+
+    edges = list(g_pruned.edges(data=True))
     for e in edges:
         edge_vals[tuple(e[:2])] = edge_vals[tuple(e[:2])] + e[2]["overlap"]
 
     sorted_unique_vals = sorted(np.unique(list(edge_vals.values())))
 
-    nx.set_edge_attributes(view_adj_graph, edge_vals, name="edge_val")
+    # nx.set_edge_attributes(g, edge_vals, name="edge_val")
 
     thresh_ind = 0
     while 1:
-        colors = nx.coloring.greedy_color(view_adj_graph)
+        colors = nx.coloring.greedy_color(g_pruned)
         if (
             len(set(colors.values())) <= n_colors
-        ):  # and nx.coloring.equitable_coloring.is_equitable(view_adj_graph, colors):
+        ):  # and nx.coloring.equitable_coloring.is_equitable(g_pruned, colors):
             break
-        view_adj_graph.remove_edges_from(
+        g_pruned.remove_edges_from(
             [
                 (a, b)
-                for a, b, attrs in view_adj_graph.edges(data=True)
-                if attrs["edge_val"] <= sorted_unique_vals[thresh_ind]
+                for a, b, attrs in g_pruned.edges(data=True)
+                if edge_vals[(a, b)] <= sorted_unique_vals[thresh_ind]
             ]
         )
         thresh_ind += 1
 
-    greedy_colors = dict(colors.items())
-
-    return greedy_colors
+    if return_colors:
+        return g_pruned, colors
+    else:
+        return g_pruned
 
 
 def prune_to_shortest_weighted_paths(g):

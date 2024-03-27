@@ -709,7 +709,7 @@ def register_pair_of_msims_over_time(
 
 def prune_view_adjacency_graph(
     g,
-    method="shortest_paths_overlap_weighted",
+    method=None,
 ):
     """
     Prune the view adjacency graph
@@ -730,6 +730,14 @@ def prune_view_adjacency_graph(
                 "Not enough overlap between views\
         for stitching."
             )
+        )
+
+    if method is None:
+        return g
+
+    if method == "alternating_pattern":
+        return mv_graph.prune_graph_to_alternating_colors(
+            g, return_colors=False
         )
 
     if method == "shortest_paths_overlap_weighted":
@@ -1371,7 +1379,7 @@ def register(
     pairwise_reg_func_kwargs=None,
     groupwise_resolution_method="global_optimization",
     groupwise_resolution_kwargs=None,
-    pre_registration_pruning_method=None,
+    pre_registration_pruning_method="alternating_pattern",
     post_registration_do_quality_filter=False,
     post_registration_quality_threshold=0.2,
     plot_summary=False,
@@ -1418,8 +1426,15 @@ def register(
     groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function
     pre_registration_pruning_method : str, optional
-        Method used to prune the view adjacency graph before registration,
-        by default 'shortest_paths_overlap_weighted'.
+        Method used to eliminate registration edges (e.g. diagonals) from the view adjacency
+        graph before registration. Available methods:
+        - None: No pruning, useful when no regular arrangement is present.
+        - 'alternating_pattern': Prune to edges between squares of differering
+            colors in checkerboard pattern. Useful for regular 2D tile arrangements (of both 2D or 3D data).
+        - 'shortest_paths_overlap_weighted': Prune to shortest paths in overlap graph
+            (weighted by overlap). Useful to minimize the number of pairwise registrations.
+        - 'otsu_threshold_on_overlap': Prune to edges with overlap above Otsu threshold.
+            This is useful for regular 2D or 3D grid arrangements, as diagonal edges will be pruned.
     post_registration_do_quality_filter : bool, optional
     post_registration_quality_threshold : float, optional
         Threshold used to filter edges by quality after registration,
