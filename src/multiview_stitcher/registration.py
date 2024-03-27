@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import tempfile
 import warnings
@@ -31,6 +32,8 @@ from multiview_stitcher import (
     transformation,
     vis_utils,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def apply_recursive_dict(func, d):
@@ -1256,12 +1259,15 @@ def optimize_bead_subgraph(
 
             # check for convergence
             if iteration > 5:
+                abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
+                if abs_change < abs_tol:
+                    break
+
                 rel_change = (
                     np.abs(mean_residuals[-1] - mean_residuals[-2])
                     / mean_residuals[-1]
                 )
-                abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
-                if rel_change < rel_tol or abs_change < abs_tol:
+                if rel_change < rel_tol:
                     break
 
             # print(iteration, mean_residuals[-1], iter_residuals)
@@ -1278,16 +1284,14 @@ def optimize_bead_subgraph(
                 edge_residual_values
             )
             # print("edge_residuals_max_mean_ratio", residual_max_mean_ratio)
+            logger.debug(
+                "edge_residuals_max_mean_ratio %s", residual_max_mean_ratio
+            )
 
             if residual_max_mean_ratio < max_residual_max_mean_ratio:
-                print("finished", residual_max_mean_ratio)
-                break
+                edge_to_remove = None
             else:
-                max_residual_value_key = edges[np.argmax(edge_residual_values)]
-                g_beads_subgraph.remove_edge(*max_residual_value_key)
-                # print(
-                #     "restart", max_residual_value_key, residual_max_mean_ratio
-                # )
+                edge_to_remove = edges[np.argmax(edge_residual_values)]
 
         elif type_of_residual == "node":
             residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
@@ -1313,34 +1317,39 @@ def optimize_bead_subgraph(
                 }
 
                 edges, c_values = zip(*c_value_dict.items())
-
-                max_c_value_key = edges[np.argmax(c_values)]
-                g_beads_subgraph.remove_edge(*max_c_value_key)
-
-                # reset view transforms with identity transforms
-                for node in g_beads_subgraph.nodes:
-                    g_beads_subgraph.nodes[node][
-                        "affine"
-                    ] = param_utils.identity_transform(ndim)
-
-                # print(
-                #     "restart",
-                #     max_c_value_key,
-                #     residual_max_mean_ratio,
-                #     np.max(iter_residuals),
-                #     np.mean(iter_residuals),
-                # )
+                edge_to_remove = edges[np.argmax(c_values)]
 
             else:
-                # print(
-                #     "finished",
-                #     residual_max_mean_ratio,
-                #     np.max(iter_residuals),
-                #     np.mean(iter_residuals),
-                # )
-                break
+                edge_to_remove = None
         else:
             raise ValueError(f"Unknown type of residual: {type_of_residual}")
+
+        logger.debug("Glob opt iter %s", iteration)
+        logger.debug(
+            "Max and mean residuals: %s \t %s",
+            {np.max(iter_residuals)},
+            np.mean(iter_residuals),
+        )
+
+        if edge_to_remove is not None:
+            g_beads_subgraph.remove_edge(*edge_to_remove)
+
+            # reset view transforms with identity transforms
+            for node in g_beads_subgraph.nodes:
+                g_beads_subgraph.nodes[node][
+                    "affine"
+                ] = param_utils.identity_transform(ndim)
+
+            logger.debug(
+                "Removing edge %s and restarting glob opt.", edge_to_remove
+            )
+        else:
+            logger.debug(
+                "Finished glob opt. Max and mean residuals: %s \t %s",
+                np.max(iter_residuals),
+                np.mean(iter_residuals),
+            )
+            break
 
     df = pd.concat(dfs, axis=0) if len(dfs) else None
 
@@ -1360,7 +1369,7 @@ def register(
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
-    groupwise_resolution_method="shortest_paths",
+    groupwise_resolution_method="global_optimization",
     groupwise_resolution_kwargs=None,
     pre_registration_pruning_method=None,
     post_registration_do_quality_filter=False,
