@@ -11,6 +11,7 @@ import pandas as pd
 import skimage.registration
 import xarray as xr
 from dask import compute, delayed
+from dask.utils import has_keyword
 from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.metrics import structural_similarity
@@ -261,180 +262,142 @@ def sims_to_intrinsic_coord_system(
     return reg_sims_b_t[0], reg_sims_b_t[1]
 
 
-def phase_correlation_registration(
-    sim1,
-    sim2,
-    transform_key,
-    overlap_bboxes,
-):
+def phase_correlation_registration(fixed_data, moving_data, **kwargs):
     """
-    Perform phase correlation registration between two spatial images.
+    Phase correlation registration using a modified version of skimage's
+    phase_cross_correlation function.
+
+    Parameters
+    ----------
+    fixed_data : array-like
+    moving_data : array-like
+
+    Returns
+    -------
+    dict
+        'affine_matrix' : array-like
+            Homogeneous transformation matrix.
+        'quality' : float
+            Quality metric.
     """
 
-    sims_intrinsic_cs = sims_to_intrinsic_coord_system(
-        sim1,
-        sim2,
-        transform_key,
-        overlap_bboxes,
-    )
+    im0 = fixed_data.data
+    im1 = moving_data.data
+    ndim = im0.ndim
 
-    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
-    spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
+    if "upsample_factor" not in kwargs:
+        kwargs["upsample_factor"] = 10 if ndim == 2 else 2
 
-    def skimage_modified_phase_corr(*args, **kwargs):
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-            # strategy: compute phase correlation with and without
-            # normalization and keep the one with the highest
-            # structural similarity score during manual "disambiguation"
-            # (which should be a metric orthogonal to the corr coef)
-            shift_candidates = []
-            for normalization in ["phase", None]:
-                shift_candidates.append(
-                    skimage.registration.phase_cross_correlation(
-                        *args,
-                        disambiguate=False,
-                        normalization=normalization,
-                        **kwargs,
-                    )[0]
-                )
-
-        # disambiguate shift manually
-        # there seems to be a problem with the scikit-image implementation
-        # of disambiguate_shift, but this needs to be checked
-
-        im0 = args[0]
-        im1 = args[1]
-
-        # assume that the shift along any dimension isn't larger than the overlap
-        # in the dimension with smallest overlap
-        # e.g. if overlap is 50 pixels in x and 200 pixels in y, assume that
-        # the shift along x and y is smaller than 50 pixels
-        max_shift_per_dim = np.max([im.shape for im in [im0, im1]])
-
-        data_range = np.max([im0, im1]) - np.min([im0, im1])
-
-        disambiguate_metric_vals = []
-        quality_metric_vals = []
-
-        ndim = im0.ndim
-        t_candidates = []
-        for shift_candidate in shift_candidates:
-            for s in np.ndindex(
-                tuple(
-                    [1 if shift_candidate[d] == 0 else 4 for d in range(ndim)]
-                )
-            ):
-                t_candidate = []
-                for d in range(ndim):
-                    if s[d] == 0:
-                        t_candidate.append(shift_candidate[d])
-                    elif s[d] == 1:
-                        t_candidate.append(-shift_candidate[d])
-                    elif s[d] == 2:
-                        t_candidate.append(
-                            -(shift_candidate[d] - im1.shape[d])
-                        )
-                    elif s[d] == 3:
-                        t_candidate.append(-shift_candidate[d] - im1.shape[d])
-                if np.max(np.abs(t_candidate)) < max_shift_per_dim:
-                    t_candidates.append(t_candidate)
-
-        if not len(t_candidates):
-            return [np.zeros(ndim)]
-
-        for t_ in t_candidates:
-            im1t = ndimage.affine_transform(
-                im1 + 1,
-                param_utils.affine_from_translation(list(t_)),
-                order=1,
-                mode="constant",
-                cval=0,
+        # strategy: compute phase correlation with and without
+        # normalization and keep the one with the highest
+        # structural similarity score during manual "disambiguation"
+        # (which should be a metric orthogonal to the corr coef)
+        shift_candidates = []
+        for normalization in ["phase", None]:
+            shift_candidates.append(
+                skimage.registration.phase_cross_correlation(
+                    im0,
+                    im1,
+                    disambiguate=False,
+                    normalization=normalization,
+                    **kwargs,
+                )[0]
             )
-            mask = im1t > 0
 
-            if float(np.sum(mask)) / np.prod(im1.shape) < 0.1:
+    # disambiguate shift manually
+    # there seems to be a problem with the scikit-image implementation
+    # of disambiguate_shift, but this needs to be checked
+
+    # assume that the shift along any dimension isn't larger than the overlap
+    # in the dimension with smallest overlap
+    # e.g. if overlap is 50 pixels in x and 200 pixels in y, assume that
+    # the shift along x and y is smaller than 50 pixels
+    max_shift_per_dim = np.max([im.shape for im in [im0, im1]])
+
+    data_range = np.max([im0, im1]) - np.min([im0, im1])
+
+    disambiguate_metric_vals = []
+    quality_metric_vals = []
+
+    t_candidates = []
+    for shift_candidate in shift_candidates:
+        for s in np.ndindex(
+            tuple([1 if shift_candidate[d] == 0 else 4 for d in range(ndim)])
+        ):
+            t_candidate = []
+            for d in range(ndim):
+                if s[d] == 0:
+                    t_candidate.append(shift_candidate[d])
+                elif s[d] == 1:
+                    t_candidate.append(-shift_candidate[d])
+                elif s[d] == 2:
+                    t_candidate.append(-(shift_candidate[d] - im1.shape[d]))
+                elif s[d] == 3:
+                    t_candidate.append(-shift_candidate[d] - im1.shape[d])
+            if np.max(np.abs(t_candidate)) < max_shift_per_dim:
+                t_candidates.append(t_candidate)
+
+    if not len(t_candidates):
+        return [np.zeros(ndim)]
+
+    for t_ in t_candidates:
+        im1t = ndimage.affine_transform(
+            im1 + 1,
+            param_utils.affine_from_translation(list(t_)),
+            order=1,
+            mode="constant",
+            cval=0,
+        )
+        mask = im1t > 0
+
+        if float(np.sum(mask)) / np.prod(im1.shape) < 0.1:
+            disambiguate_metric_val = -1
+            quality_metric_val = -1
+        else:
+            mask_slices = tuple(
+                [
+                    slice(0, im0.shape[idim] - int(np.ceil(t_[idim])))
+                    if t_[idim] >= 0
+                    else slice(-int(np.ceil(t_[idim])), im0.shape[idim])
+                    for idim in range(ndim)
+                ]
+            )
+
+            # structural similarity seems to be better than
+            # correlation for disambiguation (need to solidify this)
+            min_shape = np.min(im0[mask_slices].shape)
+            ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
+            if ssim_win_size < 3:
                 disambiguate_metric_val = -1
-                quality_metric_val = -1
             else:
-                mask_slices = tuple(
-                    [
-                        slice(0, im0.shape[idim] - int(np.ceil(t_[idim])))
-                        if t_[idim] >= 0
-                        else slice(-int(np.ceil(t_[idim])), im0.shape[idim])
-                        for idim in range(ndim)
-                    ]
+                disambiguate_metric_val = structural_similarity(
+                    im0[mask_slices],
+                    im1t[mask_slices] - 1,
+                    data_range=data_range,
+                    win_size=ssim_win_size,
                 )
 
-                # structural similarity seems to be better than
-                # correlation for disambiguation (need to solidify this)
-                min_shape = np.min(im0[mask_slices].shape)
-                ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
-                if ssim_win_size < 3:
-                    disambiguate_metric_val = -1
-                else:
-                    disambiguate_metric_val = structural_similarity(
-                        im0[mask_slices],
-                        im1t[mask_slices] - 1,
-                        data_range=data_range,
-                        win_size=ssim_win_size,
-                    )
+            # spearman seems to be better than structural_similarity
+            # for filtering out bad links between views
+            quality_metric_val = link_quality_metric_func(
+                im0[mask], im1t[mask] - 1
+            )
 
-                # spearman seems to be better than structural_similarity
-                # for filtering out bad links between views
-                quality_metric_val = link_quality_metric_func(
-                    im0[mask], im1t[mask] - 1
-                )
+        disambiguate_metric_vals.append(disambiguate_metric_val)
+        quality_metric_vals.append(quality_metric_val)
 
-            disambiguate_metric_vals.append(disambiguate_metric_val)
-            quality_metric_vals.append(quality_metric_val)
+    argmax_index = np.nanargmax(disambiguate_metric_vals)
+    t = t_candidates[argmax_index]
 
-        argmax_index = np.nanargmax(disambiguate_metric_vals)
-        t = t_candidates[argmax_index]
+    reg_result = {}
+    reg_result["affine_matrix"] = param_utils.affine_from_translation(t)
+    reg_result["quality"] = quality_metric_vals[argmax_index]
 
-        return [t, quality_metric_vals[argmax_index]]
-
-    shift_d, quality_d = delayed(skimage_modified_phase_corr, nout=2)(
-        delayed(lambda x: np.array(x))(sims_intrinsic_cs[0].data),
-        delayed(lambda x: np.array(x))(sims_intrinsic_cs[1].data),
-        upsample_factor=(10 if ndim == 2 else 2),
-    )
-
-    shift = da.from_delayed(
-        delayed(np.array)(shift_d),
-        shape=(ndim,),
-        dtype=float,
-    )
-
-    quality = da.from_delayed(
-        delayed(np.array)(quality_d),
-        shape=(),
-        dtype=float,
-    )
-
-    shift_matrix = param_utils.affine_from_translation(shift)
-
-    # transform shift obtained in intrinsic coordinate system
-    # into transformation between input images placed in
-    # extrinsic coordinate system
-
-    ext_param = get_affine_from_intrinsic_affine(
-        data_affine=shift_matrix,
-        sim_fixed=sims_intrinsic_cs[0],
-        sim_moving=sims_intrinsic_cs[1],
-        transform_key_fixed=transform_key,
-        transform_key_moving=transform_key,
-    )
-
-    xds = xr.Dataset(
-        data_vars={
-            "transform": param_utils.get_xparam_from_param(ext_param),
-            "quality": xr.DataArray(quality),
-        }
-    )
-
-    return xds
+    # return [t, quality_metric_vals[argmax_index]]
+    return reg_result
 
 
 def get_affine_from_intrinsic_affine(
@@ -575,7 +538,9 @@ def register_pair_of_msims(
 
     if pairwise_reg_func_kwargs is None:
         pairwise_reg_func_kwargs = {}
+
     spatial_dims = msi_utils.get_spatial_dims(msim1)
+    ndim = len(spatial_dims)
 
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
@@ -638,12 +603,106 @@ def register_pair_of_msims(
     #         dtype=float
     #         )
 
-    param_ds = pairwise_reg_func(
-        reg_sims_b[0],
-        reg_sims_b[1],
-        transform_key=transform_key,
-        overlap_bboxes=(lowers, uppers),
+    pairwise_reg_func_has_keywords = {
+        keyword: has_keyword(pairwise_reg_func, keyword)
+        for keyword in [
+            "fixed_origin",
+            "moving_origin",
+            "fixed_spacing",
+            "moving_spacing",
+            "initial_affine",
+        ]
+    }
+
+    if not np.any(list(pairwise_reg_func_has_keywords.values())):
+        registration_func_space = "pixel_space"
+
+        sims_pixel_space = sims_to_intrinsic_coord_system(
+            reg_sims_b[0],
+            reg_sims_b[1],
+            transform_key=transform_key,
+            overlap_bboxes=(lowers, uppers),
+        )
+
+        fixed_data = sims_pixel_space[0].data
+        moving_data = sims_pixel_space[1].data
+
+    elif np.all(list(pairwise_reg_func_has_keywords.values())):
+        registration_func_space = "physical_space"
+
+        fixed_data = reg_sims_b[0].data
+        moving_data = reg_sims_b[1].data
+
+        for isim, sim in enumerate(reg_sims_b):
+            prefix = ["fixed", "moving"][isim]
+            pairwise_reg_func_kwargs[
+                "%s_origin" % prefix
+            ] = spatial_image_utils.get_origin_from_sim(sim)
+            pairwise_reg_func_kwargs[
+                "%s_spacing" % prefix
+            ] = spatial_image_utils.get_spacing_from_sim(sim)
+
+        # obtain initial transform parameters
+        affines = [
+            spatial_image_utils.get_affine_from_sim(
+                sim, transform_key=transform_key
+            )
+            .squeeze()
+            .data
+            for sim in reg_sims_b
+        ]
+        initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+        pairwise_reg_func_kwargs[
+            "initial_affine"
+        ] = param_utils.get_xparam_from_param(initial_affine)
+
+    else:
+        raise ValueError("Unknown registration function signature")
+
+    # param_ds = pairwise_reg_func(
+    #     # reg_sims_b[0],
+    #     # reg_sims_b[1],
+    #     # transform_key=transform_key,
+    #     # overlap_bboxes=(lowers, uppers),
+    #     **pairwise_reg_func_kwargs,
+    # )
+
+    param_dict_d = delayed(pairwise_reg_func, nout=1)(
+        # delayed(lambda x: np.array(x))(pairwise_reg_im1[0].data),
+        # delayed(lambda x: np.array(x))(pairwise_reg_im1[1].data),
+        fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
+        moving_data=xr.DataArray(moving_data, dims=spatial_dims),
         **pairwise_reg_func_kwargs,
+    )
+
+    affine = da.from_delayed(
+        delayed(lambda x: np.array(x["affine_matrix"]))(param_dict_d),
+        shape=(ndim + 1, ndim + 1),
+        dtype=float,
+    )
+
+    quality = da.from_delayed(
+        delayed(lambda x: x["quality"])(param_dict_d),
+        shape=(),
+        dtype=float,
+    )
+
+    if registration_func_space == "pixel_space":
+        get_affine_from_intrinsic_affine(
+            data_affine=affine,
+            sim_fixed=reg_sims_b[0],
+            sim_moving=reg_sims_b[1],
+            transform_key_fixed=transform_key,
+            transform_key_moving=transform_key,
+        )
+    elif registration_func_space == "physical_space":
+        np.matmul(affines[1], np.matmul(affine, np.linalg.inv(affines[0])))
+
+    param_ds = xr.Dataset(
+        data_vars={
+            "transform": param_utils.get_xparam_from_param(affine),
+            "quality": xr.DataArray(quality),
+        }
     )
 
     # attach bbox in physical coordinates
@@ -1658,17 +1717,22 @@ def crop_sim_to_references(
     return sim_cropped
 
 
-def _register_using_ants(
-    fixed_np,
-    moving_np,
-    scale_fixed,
-    scale_moving,
-    origin_fixed,
-    origin_moving,
-    init_affine,
-    transform_types,
+def registration_ANTsPy(
+    fixed_data,
+    moving_data,
+    *,
+    fixed_origin,
+    moving_origin,
+    fixed_spacing,
+    moving_spacing,
+    initial_affine,
+    transform_types=None,
     **ants_registration_kwargs,
 ):
+    """
+    Use ANTsPy to perform registration between two spatial images.
+    """
+
     if ants is None:
         raise (
             Exception(
@@ -1681,25 +1745,29 @@ E.g. using pip:
             )
         )
 
-    ndim = len(scale_fixed)
+    if transform_types is None:
+        transform_types = ["Translation", "Rigid", "Similarity"]
+
+    spatial_dims = fixed_data.dims
+    ndim = len(fixed_spacing)
 
     # convert input images to ants images
     fixed_ants = ants.from_numpy(
-        fixed_np.astype(np.float32),
-        origin=list(origin_fixed),
-        spacing=list(scale_fixed),
+        fixed_data.astype(np.float32),
+        origin=[fixed_origin[dim] for dim in spatial_dims],
+        spacing=[fixed_spacing[dim] for dim in spatial_dims],
     )
     moving_ants = ants.from_numpy(
-        moving_np.astype(np.float32),
-        origin=list(origin_moving),
-        spacing=list(scale_moving),
+        moving_data.astype(np.float32),
+        origin=[moving_origin[dim] for dim in spatial_dims],
+        spacing=[moving_spacing[dim] for dim in spatial_dims],
     )
 
     init_aff = ants.ants_transform_io.create_ants_transform(
         transform_type="AffineTransform",
         dimension=ndim,
-        matrix=init_affine[:ndim, :ndim],
-        offset=init_affine[:ndim, ndim],
+        matrix=np.array(initial_affine)[:ndim, :ndim],
+        offset=np.array(initial_affine)[:ndim, ndim],
     )
 
     default_ants_registration_kwargs = {
@@ -1751,74 +1819,15 @@ E.g. using pip:
             )
 
     p = param_utils.affine_from_linear_affine(result_transform.parameters)
+    p = param_utils.get_xparam_from_param(p)
 
     quality = link_quality_metric_func(
         fixed_ants.numpy(), aff["warpedmovout"].numpy()
     )
 
-    return p, quality
+    reg_result = {}
 
+    reg_result["affine_matrix"] = p
+    reg_result["quality"] = quality
 
-def registration_ANTsPy(
-    sim1,
-    sim2,
-    transform_key,
-    overlap_bboxes,
-    # transform_types=("Translation", "Rigid", "Similarity", "Affine"),
-    transform_types=("Translation", "Rigid", "Similarity"),
-    **ants_registration_kwargs,
-):
-    """
-    Use ANTsPy to perform registration between two spatial images.
-    """
-
-    ndim = spatial_image_utils.get_ndim_from_sim(sim1)
-    spatial_image_utils.get_spacing_from_sim(sim1, asarray=True)
-
-    # obtain initial transform parameters
-    affines = [
-        spatial_image_utils.get_affine_from_sim(
-            sim, transform_key=transform_key
-        )
-        .squeeze()
-        .data
-        for sim in [sim1, sim2]
-    ]
-    init_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
-
-    delayed_reg_result = delayed(_register_using_ants)(
-        delayed(lambda x: np.array(x))(sim1.data),
-        delayed(lambda x: np.array(x))(sim2.data),
-        spatial_image_utils.get_spacing_from_sim(sim1, asarray=True),
-        spatial_image_utils.get_spacing_from_sim(sim2, asarray=True),
-        spatial_image_utils.get_origin_from_sim(sim1, asarray=True),
-        spatial_image_utils.get_origin_from_sim(sim2, asarray=True),
-        init_affine,
-        transform_types,
-        **ants_registration_kwargs,
-    )
-
-    out_affine = da.from_delayed(
-        delayed_reg_result[0],
-        shape=(ndim + 1, ndim + 1),
-        dtype=float,
-    )
-
-    out_quality = da.from_delayed(
-        delayed_reg_result[1],
-        shape=(),
-        dtype=float,
-    )
-
-    p_final = np.matmul(
-        affines[1], np.matmul(out_affine, np.linalg.inv(affines[0]))
-    )
-
-    xds = xr.Dataset(
-        data_vars={
-            "transform": param_utils.get_xparam_from_param(p_final),
-            "quality": xr.DataArray(out_quality),
-        }
-    )
-
-    return xds
+    return reg_result

@@ -49,18 +49,26 @@ def test_reg_against_gt(pairwise_reg_func):
 
     # assert matrix
     assert np.allclose(
-        p["transform"].sel(t=0, x_in=[0, 1], x_out=[0, 1]),
+        # p["transform"].sel(t=0, x_in=[0, 1], x_out=[0, 1]),
+        p["transform"].sel(t=0, x_in=["x", "y"], x_out=["x", "y"]),
         np.array([[1.0, 0.0], [0.0, 1.0]]),
         atol=0.05,
     )
+
+    gt_shift = xr.DataArray(
+        [2.5, 7.5],
+        dims=["x_in"],
+        coords={"x_in": ["y", "x"]},
+    )
+    tolerance = 1.5
 
     # somehow antspy sporadically yields different results in ~1/10 times
     if pairwise_reg_func != registration.registration_ANTsPy:
         # assert offset
         assert np.allclose(
-            p["transform"].sel(t=0, x_in=[0, 1], x_out=2),
-            np.array([2.5, 7.5]),
-            atol=1.5,
+            p["transform"].sel(t=0, x_in=["y", "x"], x_out="1") - gt_shift,
+            np.zeros((2,)),
+            atol=tolerance,
         )
 
     ##### test groupwise registration
@@ -84,7 +92,8 @@ def test_reg_against_gt(pairwise_reg_func):
         # assert offset
         assert np.allclose(
             rel_pos,
-            np.array([2.5, 7.5]),
+            # np.array([2.5, 7.5]),
+            gt_shift,
             atol=1.5,
         )
 

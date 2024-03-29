@@ -123,7 +123,16 @@ def get_xparam_from_param(params):
     Homogeneous matrix to xparams
     """
 
-    xparam = xr.DataArray(params, dims=["x_in", "x_out"])
+    ndim = params.shape[-1] - 1
+
+    xparam = xr.DataArray(
+        params,
+        dims=["x_in", "x_out"],
+        coords={
+            "x_in": ["z", "y", "x"][-ndim:] + ["1"],
+            "x_out": ["z", "y", "x"][-ndim:] + ["1"],
+        },
+    )
 
     return xparam
 
