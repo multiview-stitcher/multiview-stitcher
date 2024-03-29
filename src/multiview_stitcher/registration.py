@@ -1783,12 +1783,12 @@ E.g. using pip:
         "random_seed": 0,
         "write_composite_transform": False,
         "aff_metric": "mattes",
-        # aff_metric="meansquares",
+        # "aff_metric": "meansquares",
         "verbose": False,
         "aff_random_sampling_rate": 0.2,
-        # aff_iterations=(2000, 2000, 1000, 100),
-        # aff_smoothing_sigmas=(4, 2, 1, 0),
-        # aff_shrink_factors=(6, 4, 2, 1),
+        # "aff_iterations": (2000, 2000, 1000, 100),
+        # "aff_smoothing_sigmas": (4, 2, 1, 0),
+        # "aff_shrink_factors": (6, 4, 2, 1),
     }
 
     ants_registration_kwargs = {
