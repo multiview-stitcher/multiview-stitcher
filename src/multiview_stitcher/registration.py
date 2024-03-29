@@ -56,7 +56,7 @@ def get_optimal_registration_binning(
     sim1,
     sim2,
     max_total_pixels_per_stack=(400) ** 3,
-    use_only_overlap_region=False,
+    overlap_tolerance=None,
 ):
     """
     Heuristic to find good registration binning.
@@ -81,8 +81,8 @@ def get_optimal_registration_binning(
 
     registration_binning = {dim: 1 for dim in spatial_dims}
 
-    if use_only_overlap_region:
-        raise (NotImplementedError("use_only_overlap_region"))
+    if overlap_tolerance is not None:
+        raise (NotImplementedError("overlap_tolerance"))
 
     overlap = {
         dim: max(sim1.shape[idim], sim2.shape[idim])
@@ -134,6 +134,7 @@ def get_overlap_bboxes(
     sim2,
     input_transform_key=None,
     output_transform_key=None,
+    extension_in_physical_units=0.0,
 ):
     """
     Get bounding box(es) of overlap between two spatial images
@@ -181,10 +182,12 @@ def get_overlap_bboxes(
 
     lowers = [
         np.max(np.min(corners_target_space[isim], axis=1), axis=0)
+        - extension_in_physical_units
         for isim in range(2)
     ]
     uppers = [
         np.min(np.max(corners_target_space[isim], axis=1), axis=0)
+        + extension_in_physical_units
         for isim in range(2)
     ]
 
@@ -500,7 +503,7 @@ def register_pair_of_msims(
     msim2,
     transform_key,
     registration_binning=None,
-    use_only_overlap_region=True,
+    overlap_tolerance=0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
 ):
@@ -520,8 +523,12 @@ def register_pair_of_msims(
         This affects the calculation of the overlap region and is passed on to the
         registration func, by default None
     registration_binning : dict, optional
-    use_only_overlap_region : bool, optional
-        If True, only the precomputed overlap between images , by default True
+    overlap_tolerance : float, optional
+        Extend overlap regions considered for pairwise registration.
+        - if 0, the overlap region is the intersection of the bounding boxes.
+        - if > 0, the overlap region is the intersection of the bounding boxes
+            extended by this value in all spatial dimensions.
+        - if None, the full images are used for registration
     pairwise_reg_func : func, optional
         Function used for registration, which is passed as input two spatial images,
         a transform_key and precomputed bounding boxes. Returns a transform in
@@ -550,14 +557,18 @@ def register_pair_of_msims(
         sim2,
         input_transform_key=transform_key,
         output_transform_key=None,
+        extension_in_physical_units=overlap_tolerance
+        if overlap_tolerance is not None
+        else 0.0,
     )
 
-    if use_only_overlap_region:
+    if overlap_tolerance is not None:
         reg_sims = [
             sim.sel(
                 {
                     dim: slice(
-                        lowers[isim][idim] - 0.001, uppers[isim][idim] + 0.001
+                        lowers[isim][idim] - 0.001 - overlap_tolerance,
+                        uppers[isim][idim] + 0.001 + overlap_tolerance,
                     )
                     for idim, dim in enumerate(spatial_dims)
                 }
@@ -659,17 +670,7 @@ def register_pair_of_msims(
     else:
         raise ValueError("Unknown registration function signature")
 
-    # param_ds = pairwise_reg_func(
-    #     # reg_sims_b[0],
-    #     # reg_sims_b[1],
-    #     # transform_key=transform_key,
-    #     # overlap_bboxes=(lowers, uppers),
-    #     **pairwise_reg_func_kwargs,
-    # )
-
     param_dict_d = delayed(pairwise_reg_func, nout=1)(
-        # delayed(lambda x: np.array(x))(pairwise_reg_im1[0].data),
-        # delayed(lambda x: np.array(x))(pairwise_reg_im1[1].data),
         fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
         moving_data=xr.DataArray(moving_data, dims=spatial_dims),
         **pairwise_reg_func_kwargs,
@@ -688,19 +689,21 @@ def register_pair_of_msims(
     )
 
     if registration_func_space == "pixel_space":
-        get_affine_from_intrinsic_affine(
+        affine_phys = get_affine_from_intrinsic_affine(
             data_affine=affine,
-            sim_fixed=reg_sims_b[0],
-            sim_moving=reg_sims_b[1],
+            sim_fixed=sims_pixel_space[0],
+            sim_moving=sims_pixel_space[1],
             transform_key_fixed=transform_key,
             transform_key_moving=transform_key,
         )
     elif registration_func_space == "physical_space":
-        np.matmul(affines[1], np.matmul(affine, np.linalg.inv(affines[0])))
+        affine_phys = np.matmul(
+            affines[1], np.matmul(affine, np.linalg.inv(affines[0]))
+        )
 
     param_ds = xr.Dataset(
         data_vars={
-            "transform": param_utils.get_xparam_from_param(affine),
+            "transform": param_utils.get_xparam_from_param(affine_phys),
             "quality": xr.DataArray(quality),
         }
     )
@@ -729,7 +732,7 @@ def register_pair_of_msims_over_time(
     msim2,
     transform_key,
     registration_binning=None,
-    use_only_overlap_region=True,
+    overlap_tolerance=0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
 ):
@@ -758,7 +761,7 @@ def register_pair_of_msims_over_time(
                     registration_binning=registration_binning,
                     pairwise_reg_func=pairwise_reg_func,
                     pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
-                    use_only_overlap_region=use_only_overlap_region,
+                    overlap_tolerance=overlap_tolerance,
                 )
                 for t in sim1.coords["t"].values
             ],
@@ -1453,7 +1456,7 @@ def register(
     reg_channel_index=None,
     new_transform_key=None,
     registration_binning=None,
-    use_only_overlap_region=True,
+    overlap_tolerance=0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
     groupwise_resolution_method="global_optimization",
@@ -1494,6 +1497,12 @@ def register(
         coordinate system in the input views (with the given name), by default None
     registration_binning : dict, optional
         Binning applied to each dimensionn during registration, by default None
+    overlap_tolerance : float, optional
+        Extend overlap regions considered for pairwise registration.
+        - if 0, the overlap region is the intersection of the bounding boxes.
+        - if > 0, the overlap region is the intersection of the bounding boxes
+            extended by this value in all spatial dimensions.
+        - if None, the full images are used for registration
     pairwise_reg_func : func, optional
         Function used for registration.
     pairwise_reg_func_kwargs : dict, optional
@@ -1573,7 +1582,7 @@ def register(
         g_reg,
         transform_key=transform_key,
         registration_binning=registration_binning,
-        use_only_overlap_region=use_only_overlap_region,
+        overlap_tolerance=overlap_tolerance,
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         scheduler=scheduler,
@@ -1629,7 +1638,7 @@ def compute_pairwise_registrations(
     g_reg,
     transform_key=None,
     registration_binning=None,
-    use_only_overlap_region=True,
+    overlap_tolerance=0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
     scheduler=None,
@@ -1643,7 +1652,7 @@ def compute_pairwise_registrations(
             msims[pair[1]],
             transform_key=transform_key,
             registration_binning=registration_binning,
-            use_only_overlap_region=use_only_overlap_region,
+            overlap_tolerance=overlap_tolerance,
             pairwise_reg_func=pairwise_reg_func,
             pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         )
