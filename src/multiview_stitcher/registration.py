@@ -209,8 +209,12 @@ def sims_to_intrinsic_coord_system(
 
     # get images into the same physical space (that of sim1)
     spatial_image_utils.get_ndim_from_sim(reg_sims_b[0])
-    spacing = spatial_image_utils.get_spacing_from_sim(
-        reg_sims_b[0], asarray=True
+    spacing = np.max(
+        [
+            spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
+            for sim in reg_sims_b
+        ],
+        axis=0,
     )
 
     # transform images into intrinsic coordinate system of fixed image
@@ -759,6 +763,11 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
             )
         )
 
+    # if only two views, set reference view to the first view
+    # this is compatible with a [fixed, moving] convention
+    if "reference_view" not in kwargs and len(g_reg.nodes) == 2:
+        kwargs["reference_view"] = min(list(g_reg.nodes))
+
     if method == "global_optimization":
         return groupwise_resolution_global_optimization(g_reg, **kwargs)
     elif method == "shortest_paths":
@@ -767,7 +776,7 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
         raise ValueError(f"Unknown groupwise optimization method: {method}")
 
 
-def groupwise_resolution_shortest_paths(g_reg):
+def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
@@ -804,9 +813,14 @@ def groupwise_resolution_shortest_paths(g_reg):
     for cc in ccs:
         subgraph = g_reg_di.subgraph(list(cc))
 
-        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-            subgraph, weight_key="quality"
-        )
+        if reference_view is not None and reference_view in cc:
+            ref_node = reference_view
+        else:
+            ref_node = (
+                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+                    subgraph, weight_key="quality"
+                )
+            )
 
         # get shortest paths to ref_node
         # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
@@ -849,6 +863,7 @@ def groupwise_resolution_shortest_paths(g_reg):
 
 def groupwise_resolution_global_optimization(
     g_reg,
+    reference_view=None,
     transform="rigid",
     max_iter=None,
     rel_tol=None,
@@ -929,9 +944,14 @@ def groupwise_resolution_global_optimization(
     for cc in ccs:
         g_reg_subgraph = g_reg.subgraph(list(cc))
 
-        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-            g_reg_subgraph, weight_key="quality"
-        )
+        if reference_view is not None and reference_view in cc:
+            ref_node = reference_view
+        else:
+            ref_node = (
+                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+                    g_reg_subgraph, weight_key="quality"
+                )
+            )
 
         if len(t_coords):
             g_reg_subgraph_ts = [
@@ -1384,6 +1404,7 @@ def register(
     post_registration_quality_threshold=0.2,
     plot_summary=False,
     pairs=None,
+    scheduler=None,
 ):
     """
 
@@ -1496,6 +1517,7 @@ def register(
         use_only_overlap_region=use_only_overlap_region,
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
+        scheduler=scheduler,
     )
 
     if post_registration_do_quality_filter:
@@ -1551,6 +1573,7 @@ def compute_pairwise_registrations(
     use_only_overlap_region=True,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
+    scheduler=None,
 ):
     g_reg_computed = g_reg.copy()
     edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
@@ -1568,7 +1591,7 @@ def compute_pairwise_registrations(
         for pair in edges
     ]
 
-    params = compute(params_xds)[0]
+    params = compute(params_xds, scheduler=scheduler)[0]
 
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
