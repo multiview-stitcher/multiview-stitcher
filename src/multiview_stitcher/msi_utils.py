@@ -110,6 +110,33 @@ def multiscale_spatial_image_to_zarr(msim, path):
     msim.to_zarr(path)
 
 
+def complete_msim_zarr(msim, path):
+    """
+    Complete zarr store with data from msim that doesn't exist in store.
+    """
+
+    path = Path(path)
+
+    if not path.exists():
+        raise ValueError("Path does not exist")
+        # multiscale_spatial_image_to_zarr(msim, path)
+        # return
+
+    msim_disk = multiscale_spatial_image_from_zarr(path)
+
+    for scale_key in get_sorted_scale_keys(msim):
+        if scale_key in msim_disk:
+            ds = xr.open_zarr(path, group=scale_key)
+            ds_diff = xr.Dataset(msim[scale_key].drop_vars(ds.data_vars))
+            ds_diff.to_zarr(path, group=scale_key, mode="a")
+
+        else:
+            ds.to_zarr(
+                path,
+                group=scale_key,
+            )
+
+
 def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
     """
     This is currently simply downscaling z and xy until a minimum size is reached.

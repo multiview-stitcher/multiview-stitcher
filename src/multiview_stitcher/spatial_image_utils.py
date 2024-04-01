@@ -64,7 +64,10 @@ def get_sim_from_array(
         (SpatialImage + affine transform attributes)
     """
 
-    assert len(dims) == array.ndim
+    if dims is None:
+        dims = ["t", "c", "z", "y", "x"][-array.ndim :]
+    else:
+        assert len(dims) == array.ndim
 
     xim = xr.DataArray(
         array,
