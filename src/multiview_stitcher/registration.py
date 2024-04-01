@@ -990,6 +990,8 @@ def groupwise_resolution_global_optimization(
         Dictionary containing the final transform parameters for each view
     """
 
+    ndim = g_reg.edges[list(g_reg.edges)[0]]["transform"].shape[-1] - 1
+
     # find timepoints
     all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
     t_coords = np.unique(
@@ -1003,7 +1005,7 @@ def groupwise_resolution_global_optimization(
     params = {nodes: [] for nodes in g_reg.nodes}
     all_dfs = []
     ccs = list(nx.connected_components(g_reg))
-    for cc in ccs:
+    for icc, cc in enumerate(ccs):
         g_reg_subgraph = g_reg.subgraph(list(cc))
 
         if reference_view is not None and reference_view in cc:
@@ -1024,7 +1026,7 @@ def groupwise_resolution_global_optimization(
             g_reg_subgraph_ts = [g_reg_subgraph]
 
         g_beads_subgraph_ts = [
-            get_beads_graph_from_reg_graph(g_reg_subgraph_t)
+            get_beads_graph_from_reg_graph(g_reg_subgraph_t, ndim=ndim)
             for g_reg_subgraph_t in g_reg_subgraph_ts
         ]
 
@@ -1054,13 +1056,13 @@ def groupwise_resolution_global_optimization(
 
         if len(t_coords):
             for it, t in enumerate(t_coords):
-                cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
+                if cc_dfs[it] is not None:
+                    cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
+                    cc_dfs[it]["icc"] = [icc] * len(cc_dfs[it])
+                    all_dfs.append(cc_dfs[it])
 
-        cc_df = pd.concat(cc_dfs)
-
-        all_dfs.append(cc_df)
-
-    df = pd.concat(all_dfs)
+    all_dfs = [df for df in all_dfs if df is not None]
+    df = pd.concat(all_dfs) if len(all_dfs) else None
 
     for node in g_reg.nodes:
         params[node] = xr.concat(params[node], dim="t").assign_coords(
@@ -1079,7 +1081,7 @@ def get_reg_graph_with_single_tp_transforms(g_reg, t):
     return g_reg_t
 
 
-def get_beads_graph_from_reg_graph(g_reg_subgraph):
+def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
     """
     Get a graph with virtual bead pairs as edges and view transforms as node attributes.
 
@@ -1092,12 +1094,10 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph):
     -------
     nx.Graph
     """
-    ndim = g_reg_subgraph.edges[list(g_reg_subgraph.edges)[0]]["bbox"].shape[
-        -1
-    ]
 
     # undirected graph containing virtual bead pairs as edges
     g_beads_subgraph = nx.Graph()
+    g_beads_subgraph.add_nodes_from(g_reg_subgraph.nodes)
     for e in g_reg_subgraph.edges:
         sorted_e = tuple(sorted(e))
         bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data

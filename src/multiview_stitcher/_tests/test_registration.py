@@ -247,3 +247,49 @@ def test_register(
     )
 
     assert len(params) == 2 ** (ndim - 1)
+
+
+@pytest.mark.parametrize(
+    """
+    groupwise_resolution_method,
+    """,
+    [
+        "shortest_paths",
+        "global_optimization",
+    ],
+)
+def test_cc_registration(
+    groupwise_resolution_method,
+):
+    # Generate a cc
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_t=2,
+        N_c=2,
+        tile_size=15,
+        tiles_x=3,
+        tiles_y=1,
+        tiles_z=1,
+        overlap=5,
+    )
+
+    # remove last tile from cc
+    sims[2] = sims[2].assign_coords(
+        {"y": sims[2].coords["y"] + max(sims[2].coords["y"]) + 1}
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # Run registration
+    params = registration.register(
+        msims,
+        reg_channel_index=0,
+        transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=registration.phase_correlation_registration,
+        new_transform_key="affine_registered",
+        groupwise_resolution_method=groupwise_resolution_method,
+    )
+
+    assert len(params) == 3
