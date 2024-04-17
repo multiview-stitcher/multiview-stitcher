@@ -13,10 +13,18 @@ class DisableLogger:
 @contextmanager
 def temporary_log_level(logger, level):
     """
-    Use this in notebooks:
+    Use in notebooks:
 
-    import logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout, force=True)
+    import logging, sys
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout,
+        force=True)
+
+    with temporary_log_level(logging.getLogger('multiview_stitcher'), logging.DEBUG):
+        ...
+
     """
     old_level = logger.level
     logger.setLevel(level)

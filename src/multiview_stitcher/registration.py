@@ -1291,7 +1291,6 @@ def optimize_bead_subgraph(
                 )
 
                 for ie, e in enumerate(node_edges):
-                    # edge_residuals[e] = curr_edge_residuals[ie]
                     edge_residuals[tuple(sorted(e))].append(
                         curr_edge_residuals[ie]
                     )
@@ -1310,24 +1309,10 @@ def optimize_bead_subgraph(
                 else:
                     new_affines.append(param_utils.identity_transform(ndim))
 
-                # node_iter_info = {
-                #     "transform": g_beads_subgraph.nodes[curr_node]["affine"].data,
-                #     "node_pts": node_pts.flatten(),
-                #     "adjecent_pts": adjecent_pts.flatten(),
-                #     "residuals": curr_residuals,
-                # }
-
                 total_iterations += 1
 
                 df_iter_node = pd.concat(
                     [
-                        # xr.DataArray(
-                        #     g_beads_subgraph.nodes[curr_node]["affine"],
-                        #     name=str(curr_node),
-                        # )
-                        # .to_dataframe()
-                        # .reset_index()
-                        # .pivot_table(str(curr_node), [], ["x_in", "x_out"]),
                         pd.DataFrame(
                             {
                                 "residual": np.mean(curr_residuals),
@@ -1362,7 +1347,9 @@ def optimize_bead_subgraph(
 
             # print(iteration, mean_residuals[-1], iter_residuals)
 
-        if not len(list(g_beads_subgraph.edges)):
+        # keep parameters after one iteration if there are
+        # less than two edges
+        if len(list(g_beads_subgraph.edges)) < 2:
             break
 
         if type_of_residual == "edge":
@@ -1370,25 +1357,25 @@ def optimize_bead_subgraph(
 
             edges, edge_residual_values = zip(*edge_residuals.items())
 
-            residual_max_mean_ratio = np.max(edge_residual_values) / np.mean(
-                edge_residual_values
-            )
-            # print("edge_residuals_max_mean_ratio", residual_max_mean_ratio)
-            logger.debug(
-                "edge_residuals_max_mean_ratio %s", residual_max_mean_ratio
-            )
+            mean_edge_residual_value = np.mean(edge_residual_values)
 
-            if residual_max_mean_ratio < max_residual_max_mean_ratio:
+            if (
+                mean_edge_residual_value < abs_tol
+                or np.max(edge_residual_values) / mean_edge_residual_value
+                < max_residual_max_mean_ratio
+            ):
                 edge_to_remove = None
             else:
                 edge_to_remove = edges[np.argmax(edge_residual_values)]
 
         elif type_of_residual == "node":
-            residual_max_mean_ratio = np.max(iter_residuals) / np.mean(
-                iter_residuals
-            )
+            mean_iter_residual = np.mean(iter_residuals)
 
-            if residual_max_mean_ratio > max_residual_max_mean_ratio:
+            if (
+                mean_iter_residual > abs_tol
+                and np.max(iter_residuals) / mean_iter_residual
+                > max_residual_max_mean_ratio
+            ):
                 # determine which edge to remove (formula from bigstitcher)
                 # c_value = (1-qij)**2 * sqrt(dijk) * log10(max(degi, degj))
                 c_value_dict = {
