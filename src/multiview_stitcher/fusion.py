@@ -170,17 +170,9 @@ def fuse(
         if output_shape is not None:
             output_stack_properties["shape"] = output_shape
 
-    xds = xr.Dataset(
-        # For python >= 3.9 we can use the union '|' operator to merge to dict
-        {
-            **{(view, "sim"): sims[view] for view in range(len(sims))},
-            **{(view, "param"): params[view] for view in range(len(sims))},
-        },
-    )
-
     merges = []
     for ns_coords in itertools.product(
-        *tuple([xds.coords[nsdim] for nsdim in nsdims])
+        *tuple([sims[0].coords[nsdim] for nsdim in nsdims])
     ):
         sim_coord_dict = {
             ndsim: ns_coords[i] for i, ndsim in enumerate(nsdims)
