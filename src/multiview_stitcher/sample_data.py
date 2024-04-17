@@ -51,6 +51,7 @@ def generate_tiled_dataset(
             offset=offset,
             output_shape=output_shape,
             mode="reflect",
+            order=1,
         )[None]
 
         return x
