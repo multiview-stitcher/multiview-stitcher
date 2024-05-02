@@ -1750,20 +1750,20 @@ E.g. using pip:
     # convert input images to ants images
     fixed_ants = ants.from_numpy(
         fixed_data.astype(np.float32),
-        origin=[fixed_origin[dim] for dim in spatial_dims],
-        spacing=[fixed_spacing[dim] for dim in spatial_dims],
+        origin=[fixed_origin[dim] for dim in spatial_dims][::-1],
+        spacing=[fixed_spacing[dim] for dim in spatial_dims][::-1],
     )
     moving_ants = ants.from_numpy(
         moving_data.astype(np.float32),
-        origin=[moving_origin[dim] for dim in spatial_dims],
-        spacing=[moving_spacing[dim] for dim in spatial_dims],
+        origin=[moving_origin[dim] for dim in spatial_dims][::-1],
+        spacing=[moving_spacing[dim] for dim in spatial_dims][::-1],
     )
 
     init_aff = ants.ants_transform_io.create_ants_transform(
         transform_type="AffineTransform",
         dimension=ndim,
-        matrix=np.array(initial_affine)[:ndim, :ndim],
-        offset=np.array(initial_affine)[:ndim, ndim],
+        matrix=np.array(initial_affine)[:ndim, :ndim][::-1, ::-1],
+        offset=np.array(initial_affine)[:ndim, ndim][::-1],
     )
 
     default_ants_registration_kwargs = {
@@ -1782,8 +1782,6 @@ E.g. using pip:
         **default_ants_registration_kwargs,
         **ants_registration_kwargs,
     }
-
-    # import pdb; pdb.set_trace()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         init_transform_path = os.path.join(tmpdir, "init_aff.txt")
@@ -1814,7 +1812,17 @@ E.g. using pip:
                 curr_init_transform, init_transform_path
             )
 
-    p = param_utils.affine_from_linear_affine(result_transform.parameters)
+    # reverse engineer the affine matrix from ants output parameters
+    # linearising is not enough as there seems to be a centering convention affecting the translation part
+    gv = np.array(list(np.ndindex(tuple([2] * ndim))))
+    gv_t = np.array([result_transform.apply_to_point(pt) for pt in gv])
+    simage_affine = AffineTransform()
+    simage_affine.estimate(gv, gv_t)
+    p = simage_affine.params
+
+    # ants coordinates are in xyz order
+    p = param_utils.invert_coordinate_order(p)
+
     p = param_utils.get_xparam_from_param(p)
 
     quality = link_quality_metric_func(

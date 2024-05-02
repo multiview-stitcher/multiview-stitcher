@@ -2,10 +2,12 @@ import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
+from scipy import ndimage
 
 from multiview_stitcher import (
     io,
     msi_utils,
+    param_utils,
     registration,
     sample_data,
     spatial_image_utils,
@@ -21,7 +23,7 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
         registration.registration_ANTsPy,
     ],
 )
-def test_reg_against_gt(pairwise_reg_func):
+def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
 
@@ -95,6 +97,93 @@ def test_reg_against_gt(pairwise_reg_func):
             # np.array([2.5, 7.5]),
             gt_shift,
             atol=1.5,
+        )
+
+
+@pytest.mark.parametrize(
+    "pairwise_reg_func, translation_scale, rotation_scale, scale_scale, reg_func_kwars",
+    [
+        (registration.phase_correlation_registration, 10, 0, 0, {}),
+        (
+            registration.registration_ANTsPy,
+            10,
+            0.1,
+            0.1,
+            {"transform_types": ["Affine"]},
+        ),
+    ],
+)
+def test_pairwise_reg_against_artificial_gt(
+    pairwise_reg_func,
+    translation_scale,
+    rotation_scale,
+    scale_scale,
+    reg_func_kwars,
+):
+    ## create artificial data
+    # (better use sample_data.generate... here?)
+
+    im = np.zeros((100, 100), dtype=float)
+
+    im[10:40, 20:40] = 1
+    im[70:80, 60:90] = 1
+    im[20:40, 60:70] = 1
+    im[60:80, 20:40] = 1
+
+    im = ndimage.gaussian_filter(im, 3)
+
+    np.random.seed(0)
+    affine = param_utils.random_affine(
+        ndim=2,
+        translation_scale=translation_scale,
+        rotation_scale=rotation_scale,
+        scale_scale=scale_scale,
+    )
+
+    imt = ndimage.affine_transform(im, np.linalg.inv(affine))
+
+    spatial_dims = ["y", "x"]
+
+    transform_key = "metadata"
+    msims = [
+        msi_utils.get_msim_from_sim(
+            spatial_image_utils.get_sim_from_array(
+                im,
+                dims=["y", "x"],
+                # scale={dim: s for dim, s
+                #     in zip(spatial_dims, param_utils.random_scale(ndim=2, scale=0.2))},
+                # translation={dim: s for dim, s
+                #     in zip(spatial_dims, param_utils.random_translation(ndim=2, scale=2))},
+                transform_key=transform_key,
+            ),
+            scale_factors=[],
+        )
+        for im in [im, imt]
+    ]
+
+    msims = [
+        msi_utils.multiscale_sel_coords(msim, {"c": 0, "t": 0})
+        for msim in msims
+    ]
+
+    ##### test pairwise registration
+    pd = registration.register_pair_of_msims_over_time(
+        msims[0],
+        msims[1],
+        registration_binning={dim: 1 for dim in spatial_dims},
+        transform_key=transform_key,
+        pairwise_reg_func=pairwise_reg_func,
+        pairwise_reg_func_kwargs=reg_func_kwars,
+    )
+
+    p = pd.compute()
+
+    ## compare reg result with ground truth
+    if pairwise_reg_func != registration.registration_ANTsPy:
+        assert np.allclose(
+            p["transform"].sel(t=0),
+            affine,
+            atol=0.1,
         )
 
 

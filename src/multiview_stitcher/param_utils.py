@@ -1,6 +1,7 @@
 import numpy as np
 import xarray as xr
 from scipy.spatial.transform import Rotation
+from skimage.transform import AffineTransform
 
 
 def affine_from_translation(translation):
@@ -38,6 +39,40 @@ def linear_affine_from_affine(affine):
     linear_affine[-ndim:] = affine[:ndim, ndim]
 
     return linear_affine
+
+
+def random_scale(ndim, scale=0.1):
+    return 1 + np.random.random(ndim) * scale - scale / 2
+
+
+def random_translation(ndim=2, scale=10):
+    return np.random.random(ndim) * scale - scale / 2
+
+
+def random_rotation(ndim=2, scale=0.1):
+    return np.random.random(ndim - 1) * scale - scale / 2
+
+
+def random_affine(
+    ndim=2,
+    translation_scale=10,
+    rotation_scale=0.1,
+    scale_scale=0.1,
+):
+    return AffineTransform(
+        translation=random_translation(ndim, translation_scale),
+        rotation=random_rotation(ndim, rotation_scale),
+        scale=random_scale(ndim, scale_scale),
+    ).params
+
+
+def invert_coordinate_order(affine):
+    """ """
+    ndim = affine.shape[-1] - 1
+    M = np.eye(ndim + 1)
+    M[:ndim, :ndim] = affine[:ndim, :ndim][::-1, ::-1]
+    M[:ndim, ndim] = affine[:ndim, ndim][::-1]
+    return M
 
 
 def translation_from_affine(affine):
