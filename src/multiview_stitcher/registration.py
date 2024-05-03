@@ -373,7 +373,7 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
             # correlation for disambiguation (need to solidify this)
             min_shape = np.min(im0[mask_slices].shape)
             ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
-            if ssim_win_size < 3:
+            if ssim_win_size < 3 or np.max(im1t[mask_slices]) <= 1:
                 disambiguate_metric_val = -1
             else:
                 disambiguate_metric_val = structural_similarity(
@@ -567,15 +567,14 @@ def register_pair_of_msims(
             sim.sel(
                 {
                     dim: slice(
-                        lowers[isim][idim] - 0.001 - overlap_tolerance,
-                        uppers[isim][idim] + 0.001 + overlap_tolerance,
+                        lowers[isim][idim] - 0.001,
+                        uppers[isim][idim] + 0.001,
                     )
                     for idim, dim in enumerate(spatial_dims)
                 }
             )
             for isim, sim in enumerate([sim1, sim2])
         ]
-
     else:
         reg_sims = [sim1, sim2]
 
