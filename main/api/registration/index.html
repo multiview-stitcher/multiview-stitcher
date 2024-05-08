@@ -865,21 +865,7 @@ pairs : list of tuples, optional
 
           <details class="quote">
             <summary>Source code in <code>src/multiview_stitcher/registration.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1439</span>
-<span class="normal">1440</span>
-<span class="normal">1441</span>
-<span class="normal">1442</span>
-<span class="normal">1443</span>
-<span class="normal">1444</span>
-<span class="normal">1445</span>
-<span class="normal">1446</span>
-<span class="normal">1447</span>
-<span class="normal">1448</span>
-<span class="normal">1449</span>
-<span class="normal">1450</span>
-<span class="normal">1451</span>
-<span class="normal">1452</span>
-<span class="normal">1453</span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1453</span>
 <span class="normal">1454</span>
 <span class="normal">1455</span>
 <span class="normal">1456</span>
@@ -1045,7 +1031,21 @@ pairs : list of tuples, optional
 <span class="normal">1616</span>
 <span class="normal">1617</span>
 <span class="normal">1618</span>
-<span class="normal">1619</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">1619</span>
+<span class="normal">1620</span>
+<span class="normal">1621</span>
+<span class="normal">1622</span>
+<span class="normal">1623</span>
+<span class="normal">1624</span>
+<span class="normal">1625</span>
+<span class="normal">1626</span>
+<span class="normal">1627</span>
+<span class="normal">1628</span>
+<span class="normal">1629</span>
+<span class="normal">1630</span>
+<span class="normal">1631</span>
+<span class="normal">1632</span>
+<span class="normal">1633</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">transform_key</span><span class="p">,</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
