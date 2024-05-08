@@ -432,4 +432,4 @@ def test_global_optimization(transform):
 
     if transform == "translation":
         for p in params:
-            assert np.allclose(p.data[:3, :3], np.eye(3))
+            assert np.allclose(p.data.squeeze()[:3, :3], np.eye(3))
