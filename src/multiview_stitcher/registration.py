@@ -18,6 +18,7 @@ from skimage.metrics import structural_similarity
 from skimage.transform import (
     AffineTransform,
     EuclideanTransform,
+    ProjectiveTransform,
 )
 
 try:
@@ -925,7 +926,7 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
 def groupwise_resolution_global_optimization(
     g_reg,
     reference_view=None,
-    transform="rigid",
+    transform="translation",
     max_iter=None,
     rel_tol=None,
     abs_tol=None,
@@ -973,7 +974,7 @@ def groupwise_resolution_global_optimization(
     g_reg : nx.Graph
         Registration graph with pairwise transforms as edges
     transform : str, optional
-        Transformation type ('rigid' or 'affine')
+        Transformation type ('translation', 'rigid' or 'affine')
     max_iter : int, optional
         Maximum number of iterations
     rel_tol : float, optional
@@ -1078,6 +1079,17 @@ def get_reg_graph_with_single_tp_transforms(g_reg, t):
             if isinstance(v, xr.DataArray) and "t" in v.coords:
                 g_reg_t.edges[e][k] = g_reg_t.edges[e][k].sel({"t": t})
     return g_reg_t
+
+
+class TranslationTransform(ProjectiveTransform):
+    """
+    Add a translation transform to skimage.transform
+    """
+
+    def estimate(self, src, dst):
+        translation = np.mean(dst - src, 0)
+        self.params[: self.dimensionality, self.dimensionality] = translation
+        return True
 
 
 def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
@@ -1189,7 +1201,9 @@ def optimize_bead_subgraph(
         - 1
     )
 
-    if transform == "rigid":
+    if transform == "translation":
+        transform_generator = TranslationTransform(dimensionality=ndim)
+    elif transform == "rigid":
         transform_generator = EuclideanTransform(dimensionality=ndim)
     elif transform == "affine":
         transform_generator = AffineTransform(dimensionality=ndim)
