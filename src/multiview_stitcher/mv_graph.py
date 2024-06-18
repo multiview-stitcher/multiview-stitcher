@@ -139,7 +139,12 @@ def build_view_adjacency_graph_from_msims(
     # not released by pure python Geometry3D code. Using multiprocessing instead.
     # Probably need to confirm here that local dask scheduler doesn't conflict
     # with dask distributed scheduler
-    overlap_results = compute(overlap_results, scheduler="processes")[0]
+    try:
+        overlap_results = compute(overlap_results, scheduler="processes")[0]
+    except ValueError:
+        # if multiprocessing fails, try default scheduler
+        # (e.g. when running in JupyterLite)
+        overlap_results = compute(overlap_results)[0]
 
     for pair, overlap_result in zip(pairs, overlap_results):
         overlap_area = overlap_result[0]
