@@ -396,6 +396,7 @@ def fuse_field(
                 sim.shape[-ndim:],
                 chunks=sim.chunks,
                 widths=blending_widths,
+                like=sims_datas[0],
             )
             field_ws.append(field_w)
 
