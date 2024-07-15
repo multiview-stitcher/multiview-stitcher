@@ -16,10 +16,10 @@ from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.metrics import structural_similarity
 from skimage.transform import (
-    AffineTransform,
     EuclideanTransform,
-    ProjectiveTransform,
 )
+
+from multiview_stitcher.transforms import AffineTransform, TranslationTransform
 
 try:
     import ants
@@ -1081,17 +1081,6 @@ def get_reg_graph_with_single_tp_transforms(g_reg, t):
     return g_reg_t
 
 
-class TranslationTransform(ProjectiveTransform):
-    """
-    Add a translation transform to skimage.transform
-    """
-
-    def estimate(self, src, dst):
-        translation = np.mean(dst - src, 0)
-        self.params[: self.dimensionality, self.dimensionality] = translation
-        return True
-
-
 def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
     """
     Get a graph with virtual bead pairs as edges and view transforms as node attributes.
@@ -1789,6 +1778,9 @@ E.g. using pip:
         # "aff_iterations": (2000, 2000, 1000, 100),
         # "aff_smoothing_sigmas": (4, 2, 1, 0),
         # "aff_shrink_factors": (6, 4, 2, 1),
+        "aff_iterations": (2000, 2000),
+        "aff_smoothing_sigmas": (1, 0),
+        "aff_shrink_factors": (2, 1),
     }
 
     ants_registration_kwargs = {
