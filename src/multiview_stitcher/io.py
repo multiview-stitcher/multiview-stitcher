@@ -7,11 +7,11 @@ import zarr
 from tifffile import TiffFile, imread, imwrite
 from tqdm import tqdm
 
-# aicsimageio is an optional dependency
+# bioio is an optional dependency
 try:
-    from aicsimageio import AICSImage
+    from bioio import BioImage
 except ImportError:
-    AICSImage = None
+    BioImage = None
 
 from multiview_stitcher import spatial_image_utils as si_utils
 
@@ -79,17 +79,17 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     are self explanatory for downstream code (and don't depend e.g. on view/tile numbering).
 
     Comment 202304
-    # acisimageio can have problems, namely shape of sim is different from shape of computed sim.data
+    # bioio can have problems, namely shape of sim is different from shape of computed sim.data
     # therefore first load sim, then get sim.data, then create spatial image from sim.data and back on disk
     # for multiscale always require zarr format
 
     """
-    if AICSImage is None:
+    if BioImage is None:
         raise ImportError(
-            "aicsimageio is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+            "bioio is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[bioio]` or `pip install bioio`."
         )
 
-    aicsim = AICSImage(path, reconstruct_mosaic=False)
+    aicsim = BioImage(path, reconstruct_mosaic=False)
 
     if len(aicsim.scenes) > 1 and scene_index is None:
         from magicgui.widgets import request_values

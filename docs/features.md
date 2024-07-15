@@ -43,6 +43,8 @@ Below is a list of features which are either already implemented or are on the r
 - [-] czi input
   - [x] multi-positioning
   - [ ] light-sheet
+- [x] lif input
+- [x] nd2 input
 - [x] tif input
 - [x] tif writing
 
