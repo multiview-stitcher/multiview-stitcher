@@ -103,27 +103,30 @@ def affine_from_rotation(angle, direction, point=None):
 
 
 def identity_transform(ndim, t_coords=None):
-    if t_coords is None:
-        params = xr.DataArray(np.eye(ndim + 1), dims=["x_in", "x_out"])
-    else:
-        params = xr.DataArray(
-            len(t_coords) * [np.eye(ndim + 1)],
-            dims=["t", "x_in", "x_out"],
-            coords={"t": t_coords},
-        )
-
-    return params
+    return affine_to_xaffine(np.eye(ndim + 1), t_coords=t_coords)
 
 
 def affine_to_xaffine(affine, t_coords=None):
+    ndim = affine.shape[-1] - 1
+
+    coords = {
+        "x_in": ["z", "y", "x"][-ndim:] + ["1"],
+        "x_out": ["z", "y", "x"][-ndim:] + ["1"],
+    }
+
     if t_coords is None:
-        params = xr.DataArray(affine, dims=["x_in", "x_out"])
+        data = affine
+        dims = ["x_in", "x_out"]
     else:
-        params = xr.DataArray(
-            len(t_coords) * [affine],
-            dims=["t", "x_in", "x_out"],
-            coords={"t": t_coords},
-        )
+        coords = coords | {"t": t_coords}
+        data = len(t_coords) * [affine]
+        dims = ["t", "x_in", "x_out"]
+
+    params = xr.DataArray(
+        data,
+        dims=dims,
+        coords=coords,
+    )
 
     return params
 
@@ -151,25 +154,6 @@ def invert_xparams(xparams):
         # dask='allowed',
         dask="parallelized",
     )
-
-
-def get_xparam_from_param(params):
-    """
-    Homogeneous matrix to xparams
-    """
-
-    ndim = params.shape[-1] - 1
-
-    xparam = xr.DataArray(
-        params,
-        dims=["x_in", "x_out"],
-        coords={
-            "x_in": ["z", "y", "x"][-ndim:] + ["1"],
-            "x_out": ["z", "y", "x"][-ndim:] + ["1"],
-        },
-    )
-
-    return xparam
 
 
 def rebase_affine(xaffine, base_affine):

@@ -19,3 +19,29 @@ def test_sim_array_input_backends(xp, ndim):
     )
 
     assert isinstance(sim.data, da.Array)
+
+
+def test_max_project():
+    ndim = 3
+    dim = "z"
+    transform_key = "test"
+
+    sim = si_utils.get_sim_from_array(
+        np.ones((5,) * ndim),
+        dims=si_utils.SPATIAL_DIMS[-ndim:],
+        scale={dim: 1.0 for dim in si_utils.SPATIAL_DIMS[-ndim:]},
+        translation={dim: -1.0 for dim in si_utils.SPATIAL_DIMS[-ndim:]},
+        affine=param_utils.identity_transform(ndim),
+        transform_key=transform_key,
+    )
+
+    sim_proj = si_utils.max_project_sim(sim, dim)
+
+    assert dim not in sim_proj.dims
+
+    affine = si_utils.get_affine_from_sim(sim, transform_key)
+
+    for pdim in ["x_in", "x_out"]:
+        assert dim not in affine.coords[pdim].values
+        assert "x" in affine.coords[pdim].values
+        assert "1" in affine.coords[pdim].values

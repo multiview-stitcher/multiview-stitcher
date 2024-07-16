@@ -665,7 +665,7 @@ def register_pair_of_msims(
         initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
         pairwise_reg_func_kwargs[
             "initial_affine"
-        ] = param_utils.get_xparam_from_param(initial_affine)
+        ] = param_utils.affine_to_xaffine(initial_affine)
 
     else:
         raise ValueError("Unknown registration function signature")
@@ -703,7 +703,7 @@ def register_pair_of_msims(
 
     param_ds = xr.Dataset(
         data_vars={
-            "transform": param_utils.get_xparam_from_param(affine_phys),
+            "transform": param_utils.affine_to_xaffine(affine_phys),
             "quality": xr.DataArray(quality),
         }
     )
@@ -1828,7 +1828,7 @@ E.g. using pip:
     # ants coordinates are in xyz order
     p = param_utils.invert_coordinate_order(p)
 
-    p = param_utils.get_xparam_from_param(p)
+    p = param_utils.affine_to_xaffine(p)
 
     quality = link_quality_metric_func(
         fixed_ants.numpy(), aff["warpedmovout"].numpy()

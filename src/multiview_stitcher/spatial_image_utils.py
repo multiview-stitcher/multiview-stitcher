@@ -379,3 +379,38 @@ def combine_by_coords(sims, **kwargs):
     return xr.combine_by_coords(
         sims, combine_attrs=combine_attrs_func, **kwargs
     )
+
+
+def max_project_sim(sim, dim="z"):
+    """
+    Max project a multiview-stitcher flavoured SpatialImage.
+
+    Parameters
+    ----------
+    sim : spatial_image.SpatialImage
+        multiview-stitcher flavor spatial image
+    dim : str, optional
+        dimension to project over, by default "z"
+
+    Returns
+    -------
+    spatial_image.SpatialImage
+        maximum projected spatial image
+    """
+
+    sim = sim.max(dim=dim, keep_attrs=True)
+
+    # project transforms
+    for transform_key in sim.attrs["transforms"]:
+        affine = get_affine_from_sim(sim, transform_key)
+        affine = affine.sel(
+            {
+                pdim: [
+                    sdim for sdim in affine.coords[pdim].values if sdim != dim
+                ]
+                for pdim in ["x_in", "x_out"]
+            }
+        )
+        set_sim_affine(sim, affine, transform_key)
+
+    return sim
