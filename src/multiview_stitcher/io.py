@@ -71,7 +71,7 @@ def read_tiff_into_spatial_xarray(
     return sim
 
 
-def read_bioio_image(path, scene_index=None, flip_x=False, flip_y=False):
+def read_bioio_image(path, scene_index=None):
     """
     Get a list spatial-images (multiview-stitcher flavor)
     from a path to a bioio supported image
@@ -82,10 +82,6 @@ def read_bioio_image(path, scene_index=None, flip_x=False, flip_y=False):
         Path to bioio supported image
     scene_index : int, optional
         Scene index
-    flip_x : bool, optional
-        Flip tile positions left-to-right
-    flip_y : bool, optional
-        Flip tile positions top-to-bottom
 
     Returns
     -------
@@ -152,10 +148,6 @@ def read_bioio_image(path, scene_index=None, flip_x=False, flip_y=False):
 
             if "z" in spatial_dims:
                 origin_values["z"] = 0
-            if flip_x:
-                origin_values["x"] *= -1
-            if flip_y:
-                origin_values["y"] *= -1
 
             view_sim = si_utils.get_sim_from_array(
                 view_xim.data,
@@ -182,10 +174,7 @@ def read_bioio_image(path, scene_index=None, flip_x=False, flip_y=False):
         }
         if "z" in spatial_dims:
             origin_values["z"] = 0
-        if flip_x:
-            origin_values["x"] *= -1
-        if flip_y:
-            origin_values["y"] *= -1
+
         return [
             si_utils.get_sim_from_array(
                 xim.data,
