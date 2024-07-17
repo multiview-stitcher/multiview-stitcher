@@ -25,7 +25,7 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 )
 def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
     example_data_path = sample_data.get_mosaic_sample_data_path()
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+    sims = io.read_bioio_image(example_data_path)
 
     sims = [
         spatial_image_utils.sim_sel_coords(sim, {"c": sim.coords["c"][0]})
@@ -189,7 +189,7 @@ def test_pairwise_reg_against_artificial_gt(
 
 def test_iterative_registration_and_transform_key_setting():
     example_data_path = sample_data.get_mosaic_sample_data_path()
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+    sims = io.read_bioio_image(example_data_path)
 
     msims = [
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
