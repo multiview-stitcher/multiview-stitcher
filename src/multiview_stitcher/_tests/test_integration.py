@@ -72,6 +72,12 @@ def test_diversity_stitching(ndim, overlap, N_c, N_t, dtype):
         transform_key="affine_registered",
     )
 
+    # ensure that channel labels and order remain unchanged
+    assert (
+        fused.coords["c"].values.tolist()
+        == sims[0].coords["c"].values.tolist()
+    )
+
     with tempfile.TemporaryDirectory() as tmpdir:
         filepath_tif = str(Path(tmpdir) / "test.tif")
         filepath_zarr = str(Path(tmpdir) / "test.zarr")

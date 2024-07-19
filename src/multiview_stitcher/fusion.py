@@ -270,6 +270,10 @@ def fuse(
         transform_key,
     )
 
+    # order channels in the same way as first input sim
+    # (combine_by_coords may change coordinate order)
+    res = res.sel({"c": sims[0].coords["c"].values})
+
     return res
 
 
