@@ -106,7 +106,9 @@ def test_overlap(ndim, overlap):
 
 
 def test_mv_graph_creation():
-    sims = io.read_bioio_image(sample_data.get_mosaic_sample_data_path())
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
+        sample_data.get_mosaic_sample_data_path()
+    )
 
     msims = [
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
@@ -123,7 +125,9 @@ def test_mv_graph_creation():
 
 
 def test_get_intersection_polygon_from_pair_of_stack_props():
-    sims = io.read_bioio_image(sample_data.get_mosaic_sample_data_path())
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
+        sample_data.get_mosaic_sample_data_path()
+    )
 
     intersection_polygon = (
         mv_graph.get_intersection_poly_from_pair_of_stack_props(

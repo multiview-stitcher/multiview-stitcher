@@ -20,7 +20,9 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 def test_fuse_sims():
-    sims = io.read_bioio_image(sample_data.get_mosaic_sample_data_path())
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
+        sample_data.get_mosaic_sample_data_path()
+    )
 
     # suppress pandas future warning occuring within xarray.concat
     with warnings.catch_warnings():
