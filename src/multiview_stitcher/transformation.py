@@ -37,7 +37,7 @@ def transform_sim(
             ndim
         )
         output_chunksize = tuple([default_chunksize[dim] for dim in sdims])
-    
+
     if p is None:
         p = param_utils.identity_transform(ndim)
 
