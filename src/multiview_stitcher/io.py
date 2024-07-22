@@ -89,23 +89,23 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
             "bioio is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[bioio]` or `pip install bioio`."
         )
 
-    aicsim = BioImage(path, reconstruct_mosaic=False)
+    bioioim = BioImage(path, reconstruct_mosaic=False)
 
-    if len(aicsim.scenes) > 1 and scene_index is None:
+    if len(bioioim.scenes) > 1 and scene_index is None:
         from magicgui.widgets import request_values
 
         scene_index = request_values(
             scene_index={
                 "annotation": int,
                 "label": "Which scene should be loaded?",
-                "options": {"min": 0, "max": len(aicsim.scenes) - 1},
+                "options": {"min": 0, "max": len(bioioim.scenes) - 1},
             },
         )["scene_index"]
-        aicsim.set_scene(scene_index)
+        bioioim.set_scene(scene_index)
     else:
         scene_index = 0
 
-    xim = aicsim.get_xarray_dask_stack()
+    xim = bioioim.get_xarray_dask_stack()
 
     xim = xim.sel(I=scene_index)
 
@@ -122,12 +122,12 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     views = range(len(xim.coords["m"]))
 
     pixel_sizes = {}
-    pixel_sizes["x"] = aicsim.physical_pixel_sizes.X
-    pixel_sizes["y"] = aicsim.physical_pixel_sizes.Y
+    pixel_sizes["x"] = bioioim.physical_pixel_sizes.X
+    pixel_sizes["y"] = bioioim.physical_pixel_sizes.Y
     if "z" in spatial_dims:
-        pixel_sizes["z"] = aicsim.physical_pixel_sizes.Z
+        pixel_sizes["z"] = bioioim.physical_pixel_sizes.Z
 
-    tile_mosaic_positions = aicsim.get_mosaic_tile_positions()
+    tile_mosaic_positions = bioioim.get_mosaic_tile_positions()
 
     view_sims = []
     for _iview, (view, tile_mosaic_position) in enumerate(
