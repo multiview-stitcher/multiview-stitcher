@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/api/fusion/">
       
       
-        <link rel="prev" href="../transformation/">
+        <link rel="prev" href="../registration/">
       
       
       
@@ -77,6 +77,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#multiview_stitcher.fusion" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -342,11 +347,31 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting_started/" class="md-nav__link">
+      <a href="../../code_example/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Getting started
+    Code example
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
   </span>
   
 
@@ -447,6 +472,26 @@
   
   <span class="md-ellipsis">
     Napari plugin
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../stitching_in_the_browser/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Stitching in the browser
   </span>
   
 
@@ -568,26 +613,6 @@
                 
   
   
-  
-    <li class="md-nav__item">
-      <a href="../transformation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Transformation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -596,6 +621,17 @@
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
       
       
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Fusion
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
       
       <a href="./" class="md-nav__link md-nav__link--active">
         
@@ -606,6 +642,57 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion" class="md-nav__link">
+    fusion
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse" class="md-nav__link">
+    fuse()
+  </a>
+  
+    <nav class="md-nav" aria-label="fuse()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse--parameters" class="md-nav__link">
+    Parameters
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse--returns" class="md-nav__link">
+    Returns
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -637,6 +724,48 @@
   
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion" class="md-nav__link">
+    fusion
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse" class="md-nav__link">
+    fuse()
+  </a>
+  
+    <nav class="md-nav" aria-label="fuse()">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse--parameters" class="md-nav__link">
+    Parameters
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multiview_stitcher.fusion.fuse--returns" class="md-nav__link">
+    Returns
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -655,7 +784,492 @@
 
   <h1>Fusion</h1>
 
+<div class="doc doc-object doc-module">
 
+
+
+<a id="multiview_stitcher.fusion"></a>
+  <div class="doc doc-contents first">
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+
+<h2 id="multiview_stitcher.fusion.fuse" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">fuse</span><span class="p">(</span><span class="n">sims</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fusion_func</span><span class="o">=</span><span class="n">weighted_average_fusion</span><span class="p">,</span> <span class="n">weights_func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_spacing</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_mode</span><span class="o">=</span><span class="s1">&#39;union&#39;</span><span class="p">,</span> <span class="n">output_origin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_properties</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span></code>
+
+</h2>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Fuse input views.</p>
+<p>This function fuses all (Z)YX views ("fields") contained in the
+input list of images, which can additionally contain C and T dimensions.</p>
+<h4 id="multiview_stitcher.fusion.fuse--parameters">Parameters</h4>
+<p>sims : list of SpatialImage
+    Input views.
+transform_key : str, optional
+    Which (extrinsic coordinate system) to use as transformation parameters.
+    By default None (intrinsic coordinate system).
+fusion_func : func, optional
+    Fusion function to be applied. This function receives the following
+    inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
+    By default weighted_average_fusion
+weights_func : func, optional
+    Function to calculate fusion weights. This function receives the
+    following inputs: transformed_views (as spatial images), params.
+    It returns (non-normalized) fusion weights for each view.
+    By default None.
+output_spacing : dict, optional
+    Spacing of the fused image for each spatial dimension, by default None
+output_stack_mode : str, optional
+    Mode to determine output stack properties. Can be one of
+    "union", "intersection", "sample". By default "union"
+output_origin : dict, optional
+    Origin of the fused image for each spatial dimension, by default None
+output_shape : <em>type</em>, optional
+    Shape of the fused image for each spatial dimension, by default None
+output_stack_properties : dict, optional
+    Dictionary describing the output stack with keys
+    'spacing', 'origin', 'shape'. Other output_* are ignored
+    if this argument is present.
+output_chunksize : int or tuple of ints, optional
+    Chunksize of the dask data array of the fused image, by default 512</p>
+<h4 id="multiview_stitcher.fusion.fuse--returns">Returns</h4>
+<p>SpatialImage
+    Fused image.</p>
+
+          <details class="quote">
+            <summary>Source code in <code>src/multiview_stitcher/fusion.py</code></summary>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">fuse</span><span class="p">(</span>
+    <span class="n">sims</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span>
+    <span class="n">transform_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">fusion_func</span><span class="o">=</span><span class="n">weighted_average_fusion</span><span class="p">,</span>
+    <span class="n">weights_func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_spacing</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_stack_mode</span><span class="o">=</span><span class="s2">&quot;union&quot;</span><span class="p">,</span>
+    <span class="n">output_origin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_stack_properties</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">    Fuse input views.</span>
+
+<span class="sd">    This function fuses all (Z)YX views (&quot;fields&quot;) contained in the</span>
+<span class="sd">    input list of images, which can additionally contain C and T dimensions.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    sims : list of SpatialImage</span>
+<span class="sd">        Input views.</span>
+<span class="sd">    transform_key : str, optional</span>
+<span class="sd">        Which (extrinsic coordinate system) to use as transformation parameters.</span>
+<span class="sd">        By default None (intrinsic coordinate system).</span>
+<span class="sd">    fusion_func : func, optional</span>
+<span class="sd">        Fusion function to be applied. This function receives the following</span>
+<span class="sd">        inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.</span>
+<span class="sd">        By default weighted_average_fusion</span>
+<span class="sd">    weights_func : func, optional</span>
+<span class="sd">        Function to calculate fusion weights. This function receives the</span>
+<span class="sd">        following inputs: transformed_views (as spatial images), params.</span>
+<span class="sd">        It returns (non-normalized) fusion weights for each view.</span>
+<span class="sd">        By default None.</span>
+<span class="sd">    output_spacing : dict, optional</span>
+<span class="sd">        Spacing of the fused image for each spatial dimension, by default None</span>
+<span class="sd">    output_stack_mode : str, optional</span>
+<span class="sd">        Mode to determine output stack properties. Can be one of</span>
+<span class="sd">        &quot;union&quot;, &quot;intersection&quot;, &quot;sample&quot;. By default &quot;union&quot;</span>
+<span class="sd">    output_origin : dict, optional</span>
+<span class="sd">        Origin of the fused image for each spatial dimension, by default None</span>
+<span class="sd">    output_shape : _type_, optional</span>
+<span class="sd">        Shape of the fused image for each spatial dimension, by default None</span>
+<span class="sd">    output_stack_properties : dict, optional</span>
+<span class="sd">        Dictionary describing the output stack with keys</span>
+<span class="sd">        &#39;spacing&#39;, &#39;origin&#39;, &#39;shape&#39;. Other output_* are ignored</span>
+<span class="sd">        if this argument is present.</span>
+<span class="sd">    output_chunksize : int or tuple of ints, optional</span>
+<span class="sd">        Chunksize of the dask data array of the fused image, by default 512</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    SpatialImage</span>
+<span class="sd">        Fused image.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">ndim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_ndim_from_sim</span><span class="p">(</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">sdims</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_spatial_dims_from_sim</span><span class="p">(</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">nsdims</span> <span class="o">=</span> <span class="p">[</span><span class="n">dim</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dims</span> <span class="k">if</span> <span class="n">dim</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]</span>
+
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">si_utils</span><span class="o">.</span><span class="n">get_affine_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">sim</span> <span class="ow">in</span> <span class="n">sims</span>
+    <span class="p">]</span>
+
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">param_utils</span><span class="o">.</span><span class="n">invert_xparams</span><span class="p">(</span><span class="n">param</span><span class="p">)</span> <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">params</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">output_chunksize</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">default_chunksizes</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_default_spatial_chunksizes</span><span class="p">(</span><span class="n">ndim</span><span class="p">)</span>
+        <span class="n">output_chunksize</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">([</span><span class="n">default_chunksizes</span><span class="p">[</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output_chunksize</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">):</span>
+        <span class="n">output_chunksize</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">output_chunksize</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">output_chunksize</span> <span class="o">=</span> <span class="p">(</span><span class="n">output_chunksize</span><span class="p">,)</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">sdims</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">output_stack_properties</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">output_spacing</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">output_spacing</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_spacing_from_sim</span><span class="p">(</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="n">output_stack_properties</span> <span class="o">=</span> <span class="n">calc_fusion_stack_properties</span><span class="p">(</span>
+            <span class="n">sims</span><span class="p">,</span>
+            <span class="n">params</span><span class="o">=</span><span class="n">params</span><span class="p">,</span>
+            <span class="n">spacing</span><span class="o">=</span><span class="n">output_spacing</span><span class="p">,</span>
+            <span class="n">mode</span><span class="o">=</span><span class="n">output_stack_mode</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">output_origin</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;origin&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">output_origin</span>
+
+        <span class="k">if</span> <span class="n">output_shape</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">output_shape</span>
+
+    <span class="n">merges</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">ns_coords</span> <span class="ow">in</span> <span class="n">itertools</span><span class="o">.</span><span class="n">product</span><span class="p">(</span>
+        <span class="o">*</span><span class="nb">tuple</span><span class="p">([</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="n">nsdim</span><span class="p">]</span> <span class="k">for</span> <span class="n">nsdim</span> <span class="ow">in</span> <span class="n">nsdims</span><span class="p">])</span>
+    <span class="p">):</span>
+        <span class="n">sim_coord_dict</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ndsim</span><span class="p">:</span> <span class="n">ns_coords</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ndsim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">nsdims</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="n">params_coord_dict</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">ndsim</span><span class="p">:</span> <span class="n">ns_coords</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ndsim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">nsdims</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ndsim</span> <span class="ow">in</span> <span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dims</span>
+        <span class="p">}</span>
+
+        <span class="n">ssims</span> <span class="o">=</span> <span class="p">[</span><span class="n">sim</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span><span class="n">sim_coord_dict</span><span class="p">)</span> <span class="k">for</span> <span class="n">sim</span> <span class="ow">in</span> <span class="n">sims</span><span class="p">]</span>
+        <span class="n">sparams</span> <span class="o">=</span> <span class="p">[</span><span class="n">param</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span><span class="n">params_coord_dict</span><span class="p">)</span> <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">params</span><span class="p">]</span>
+
+        <span class="c1"># convert ssims into dask arrays + metadata to get them</span>
+        <span class="c1"># through fuse_field without triggering compute</span>
+        <span class="c1"># https://dask.discourse.group/t/passing-dask-objects-to-delayed-computations-without-triggering-compute/1441</span>
+        <span class="n">sims_datas</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">delayed</span><span class="p">(</span><span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">)(</span>
+                <span class="n">ssim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">dask</span><span class="p">,</span>
+                <span class="n">ssim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                <span class="n">ssim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">chunks</span><span class="p">,</span>
+                <span class="n">ssim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ssim</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">da</span><span class="o">.</span><span class="n">Array</span><span class="p">)</span>
+            <span class="k">else</span> <span class="n">ssim</span><span class="o">.</span><span class="n">data</span>
+            <span class="k">for</span> <span class="n">ssim</span> <span class="ow">in</span> <span class="n">ssims</span>
+        <span class="p">]</span>
+
+        <span class="n">sims_metas</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;dims&quot;</span><span class="p">:</span> <span class="n">ssim</span><span class="o">.</span><span class="n">dims</span><span class="p">,</span>
+                <span class="s2">&quot;scale&quot;</span><span class="p">:</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_spacing_from_sim</span><span class="p">(</span><span class="n">ssim</span><span class="p">),</span>
+                <span class="s2">&quot;translation&quot;</span><span class="p">:</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_origin_from_sim</span><span class="p">(</span><span class="n">ssim</span><span class="p">),</span>
+            <span class="p">}</span>
+            <span class="k">for</span> <span class="n">ssim</span> <span class="ow">in</span> <span class="n">ssims</span>
+        <span class="p">]</span>
+
+        <span class="n">merge_d</span> <span class="o">=</span> <span class="n">delayed</span><span class="p">(</span><span class="n">fuse_field</span><span class="p">)(</span>
+            <span class="n">sims_datas</span><span class="p">,</span>
+            <span class="n">sims_metas</span><span class="p">,</span>
+            <span class="n">sparams</span><span class="p">,</span>
+            <span class="n">fusion_func</span><span class="o">=</span><span class="n">fusion_func</span><span class="p">,</span>
+            <span class="n">weights_func</span><span class="o">=</span><span class="n">weights_func</span><span class="p">,</span>
+            <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="n">weights_func_kwargs</span><span class="p">,</span>
+            <span class="n">output_stack_properties</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">,</span>
+            <span class="n">output_chunksize</span><span class="o">=</span><span class="n">output_chunksize</span><span class="p">,</span>
+            <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="n">overlap_in_pixels</span><span class="p">,</span>
+            <span class="n">interpolation_order</span><span class="o">=</span><span class="n">interpolation_order</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># continue working with dask array</span>
+        <span class="n">merge_data</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
+            <span class="n">delayed</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">data</span><span class="p">)(</span><span class="n">merge_d</span><span class="p">),</span>
+            <span class="n">shape</span><span class="o">=</span><span class="p">[</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">],</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># rechunk to get a chunked dask array from the delayed object</span>
+        <span class="c1"># (hacky, is there a better way to do this?)</span>
+        <span class="n">merge_data</span> <span class="o">=</span> <span class="n">merge_data</span><span class="o">.</span><span class="n">rechunk</span><span class="p">(</span><span class="n">output_chunksize</span><span class="p">)</span>
+
+        <span class="c1"># trigger compute here</span>
+        <span class="n">merge_data</span> <span class="o">=</span> <span class="n">merge_data</span><span class="o">.</span><span class="n">map_blocks</span><span class="p">(</span>
+            <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">compute</span><span class="p">(),</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">merge</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">to_spatial_image</span><span class="p">(</span>
+            <span class="n">merge_data</span><span class="p">,</span>
+            <span class="n">dims</span><span class="o">=</span><span class="n">sdims</span><span class="p">,</span>
+            <span class="n">scale</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;spacing&quot;</span><span class="p">],</span>
+            <span class="n">translation</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;origin&quot;</span><span class="p">],</span>
+        <span class="p">)</span>
+
+        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">expand_dims</span><span class="p">(</span><span class="n">nsdims</span><span class="p">)</span>
+        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span>
+            <span class="p">{</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="p">[</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">values</span><span class="p">]</span> <span class="k">for</span> <span class="n">ns_coord</span> <span class="ow">in</span> <span class="n">ns_coords</span><span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">merges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">merge</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">merges</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="c1"># suppress pandas future warning occuring within xarray.concat</span>
+        <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">():</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="n">action</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">FutureWarning</span><span class="p">)</span>
+
+            <span class="c1"># if sims are named, combine_by_coord returns a dataset</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">combine_by_coords</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">merges</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">merge</span>
+
+    <span class="n">res</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_xim</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+    <span class="n">si_utils</span><span class="o">.</span><span class="n">set_sim_affine</span><span class="p">(</span>
+        <span class="n">res</span><span class="p">,</span>
+        <span class="n">param_utils</span><span class="o">.</span><span class="n">identity_transform</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sdims</span><span class="p">)),</span>
+        <span class="n">transform_key</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># order channels in the same way as first input sim</span>
+    <span class="c1"># (combine_by_coords may change coordinate order)</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">sel</span><span class="p">({</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">})</span>
+
+    <span class="k">return</span> <span class="n">res</span>
+</code></pre></div></td></tr></table></div>
+          </details>
+  </div>
+
+</div>
+
+
+
+  </div>
+
+  </div>
+
+</div>
 
 
 
@@ -679,7 +1293,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../transformation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Transformation">
+          <a href="../registration/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Registration">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
@@ -689,7 +1303,7 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Transformation
+                Registration
               </div>
             </div>
           </a>

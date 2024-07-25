@@ -410,11 +410,31 @@
   
   
     <li class="md-nav__item">
-      <a href="getting_started/" class="md-nav__link">
+      <a href="code_example/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Getting started
+    Code example
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
   </span>
   
 
@@ -515,6 +535,26 @@
   
   <span class="md-ellipsis">
     Napari plugin
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="stitching_in_the_browser/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Stitching in the browser
   </span>
   
 
@@ -636,26 +676,6 @@
   
   
     <li class="md-nav__item">
-      <a href="api/transformation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Transformation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-    <li class="md-nav__item">
       <a href="api/fusion/" class="md-nav__link">
         
   
@@ -743,7 +763,7 @@
 
 
 <h1 id="overview">Overview</h1>
-<p><a href="https://github.com/multiview-stitcher/multiview-sticher"><code>multiview-stitcher</code></a> is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to <strong>register</strong> and <strong>fuse</strong> small and large datasets from <strong>multi-positioning</strong> and <strong>multi-view</strong> light sheet microscopy, as well as <strong>other modalities</strong> such as correlative cryo-EM datasets.</p>
+<p><a href="https://github.com/multiview-stitcher/multiview-sticher"><code>multiview-stitcher</code></a> is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is an extensible framework including a collection of algorithms to <strong>register</strong> and <strong>fuse</strong> small and large datasets from <strong>multi-positioning</strong> and <strong>multi-view</strong> light sheet microscopy, as well as <strong>other modalities</strong> such as correlative cryo-EM datasets.</p>
 <p>For visualization, the associated <a href="https://github.com/multiview-stitcher/napari-sticher"><code>napari-stitcher</code></a> provides visualization functionality using the Napari viewer, including a standalone widget.</p>
 <p>With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the <a href="https://github.com/ome/ngff">NGFF specification</a>.</p>
 <p>It leverages <a href="https://github.com/xarray"><code>xarray</code></a> in combination with <a href="https://github.com/spatial-data"><code>spatial-image</code></a> classes for image metadata handling and <a href="https://github.com/dask"><code>dask</code></a> (and [<code>dask-image</code>]https://(github.com/dask-image)) for chunked and distributed image processing.</p>

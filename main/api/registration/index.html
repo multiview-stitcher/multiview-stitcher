@@ -16,7 +16,7 @@
         <link rel="prev" href="../../contributing/">
       
       
-        <link rel="next" href="../transformation/">
+        <link rel="next" href="../fusion/">
       
       
       <link rel="icon" href="../../None">
@@ -349,11 +349,31 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting_started/" class="md-nav__link">
+      <a href="../../code_example/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
-    Getting started
+    Code example
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Notebooks
   </span>
   
 
@@ -454,6 +474,26 @@
   
   <span class="md-ellipsis">
     Napari plugin
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../stitching_in_the_browser/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Stitching in the browser
   </span>
   
 
@@ -647,26 +687,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../transformation/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    Transformation
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../fusion/" class="md-nav__link">
         
   
@@ -792,7 +812,7 @@
 
 
 <h2 id="multiview_stitcher.registration.register" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">overlap_tolerance</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">groupwise_resolution_method</span><span class="o">=</span><span class="s1">&#39;global_optimization&#39;</span><span class="p">,</span> <span class="n">groupwise_resolution_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;alternating_pattern&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scheduler</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+          <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="p">,</span> <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reg_channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">overlap_tolerance</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span> <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">groupwise_resolution_method</span><span class="o">=</span><span class="s1">&#39;global_optimization&#39;</span><span class="p">,</span> <span class="n">groupwise_resolution_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s1">&#39;alternating_pattern&#39;</span><span class="p">,</span> <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scheduler</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -814,6 +834,9 @@
     Input views
 reg_channel_index : int, optional
     Index of channel to be used for registration, by default None
+reg_channel : str, optional
+    Name of channel to be used for registration, by default None
+    Overrides reg_channel_index
 transform_key : str, optional
     Extrinsic coordinate system to use as a starting point
     for the registration, by default None
@@ -1045,10 +1068,16 @@ pairs : list of tuples, optional
 <span class="normal">1619</span>
 <span class="normal">1620</span>
 <span class="normal">1621</span>
-<span class="normal">1622</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+<span class="normal">1622</span>
+<span class="normal">1623</span>
+<span class="normal">1624</span>
+<span class="normal">1625</span>
+<span class="normal">1626</span>
+<span class="normal">1627</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
     <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
     <span class="n">transform_key</span><span class="p">,</span>
     <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">reg_channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
     <span class="n">overlap_tolerance</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
@@ -1084,6 +1113,9 @@ pairs : list of tuples, optional
 <span class="sd">        Input views</span>
 <span class="sd">    reg_channel_index : int, optional</span>
 <span class="sd">        Index of channel to be used for registration, by default None</span>
+<span class="sd">    reg_channel : str, optional</span>
+<span class="sd">        Name of channel to be used for registration, by default None</span>
+<span class="sd">        Overrides reg_channel_index</span>
 <span class="sd">    transform_key : str, optional</span>
 <span class="sd">        Extrinsic coordinate system to use as a starting point</span>
 <span class="sd">        for the registration, by default None</span>
@@ -1144,15 +1176,16 @@ pairs : list of tuples, optional
 
     <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
 
-    <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">:</span>
-            <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">):</span>
-                <span class="k">raise</span> <span class="p">(</span><span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Please choose a registration channel.&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">reg_channel</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">:</span>
+                <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="p">(</span><span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Please choose a registration channel.&quot;</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">reg_channel</span> <span class="o">=</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">][</span><span class="n">reg_channel_index</span><span class="p">]</span>
 
     <span class="n">msims_reg</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="n">msi_utils</span><span class="o">.</span><span class="n">multiscale_sel_coords</span><span class="p">(</span>
-            <span class="n">msim</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">sims</span><span class="p">[</span><span class="n">imsim</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">][</span><span class="n">reg_channel_index</span><span class="p">]}</span>
-        <span class="p">)</span>
+        <span class="n">msi_utils</span><span class="o">.</span><span class="n">multiscale_sel_coords</span><span class="p">(</span><span class="n">msim</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">reg_channel</span><span class="p">})</span>
         <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span>
         <span class="k">else</span> <span class="n">msim</span>
         <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">)</span>
@@ -1279,13 +1312,13 @@ pairs : list of tuples, optional
         
         
           
-          <a href="../transformation/" class="md-footer__link md-footer__link--next" aria-label="Next: Transformation">
+          <a href="../fusion/" class="md-footer__link md-footer__link--next" aria-label="Next: Fusion">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Transformation
+                Fusion
               </div>
             </div>
             <div class="md-footer__button md-icon">
