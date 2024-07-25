@@ -39,11 +39,11 @@ Image data by [Arthur Michaut](https://research.pasteur.fr/fr/member/arthur-mich
 ### Code example
 
 These code snippets walk you through a small stitching workflow consisting of
-- preparing the input image data and metadata (tile positions, spacing, channels)
-- registering the tiles
-- stitching / fusing the tiles
+1) Preparing the input image data and metadata (tile positions, spacing, channels)
+2) Registering the tiles
+3) Stitching / fusing the tiles
 
-#### Prepare data for stitching
+#### 1) Prepare data for stitching
 
 
 ```python
@@ -84,7 +84,7 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 
 ![Visualization of input tile configuration](src/multiview_stitcher/_tests/quickstart/tile_configuration.png)
 
-#### Register the tiles
+#### 2) Register the tiles
 
 ```python
 from dask.diagnostics import ProgressBar
@@ -102,7 +102,7 @@ with ProgressBar():
 # vis_utils.plot_positions(msims, transform_key='translation_registered', use_positional_colors=False)
 ```
 
-#### Stitch / fuse the tiles
+#### 3) Stitch / fuse the tiles
 ```python
 from multiview_stitcher import fusion
 

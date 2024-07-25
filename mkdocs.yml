@@ -19,7 +19,8 @@ nav:
   - multiview-stitcher:
     - index.md
     - installation.md
-    - getting_started.md
+    - code_example.md
+    - notebooks.md
     - features.md
     - objects.md
     - data_formats.md

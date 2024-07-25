@@ -24,19 +24,29 @@ def test_quickstart_code():
     assert len(fused_sim.data.shape)  # noqa: F821
 
 
-def test_quickstart_code_is_in_readme():
+def test_quickstart_code_sync():
     """
     Make sure the code in src/multiview_stitcher/_tests/quickstart
-    is in the README and didn't get out of sync.
+    is in
+
+    - the README
+    - docs/code_example.md
+
+    and didn't get out of sync.
     """
 
-    # readme_path = os.path.join(tests_path, '../../..', 'README.md')
-    readme_path = tests_path / "../../.." / "README.md"
-    with open(readme_path) as f:
-        readme = f.read()
+    md_paths = [
+        tests_path / "../../.." / "docs" / "code_example.md",
+        tests_path / "../../.." / "README.md",
+    ]
+    md_strings = []
+    for md_path in md_paths:
+        with open(md_path) as f:
+            md_strings.append(f.read())
 
     for block_filepath in sorted(os.listdir(quickstart_code_dir)):
         if block_filepath.endswith(".py"):
             with open(quickstart_code_dir / block_filepath) as f:
                 block_code = f.read()
-            assert block_code in readme
+            for md_string in md_strings:
+                assert block_code in md_string
