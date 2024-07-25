@@ -147,7 +147,7 @@ or from the source code in this github repository:
 - open [JupyterLite](https://jupyter.org/try-jupyter/lab/) in a private browser window
 - upload this notebook into the jupyter lab window: [notebooks/stitching_in_the_browser.ipynb](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks/stitching_in_the_browser.ipynb)
 - upload files to stitch into a 'data' folder in the jupyter lab window
-- execute the cells in the notebook
+- follow the notebook
 
 #### Limitations
 - stitching will run with a single thread
