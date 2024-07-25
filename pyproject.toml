@@ -52,6 +52,7 @@ exclude = [
     "venv",
     "*vendored*",
     "*_vendor*",
+    "src/multiview_stitcher/_tests/quickstart",
 ]
 
 target-version = "py39"
