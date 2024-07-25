@@ -79,11 +79,10 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 
 # plot the tile configuration
 # from multiview_stitcher import vis_utils
-# vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
+# fig, ax = vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
 ```
 
-![](src/multiview_stitcher/_tests/quickstart/tile_configuration.png)
-
+![Visualization of input tile configuration](src/multiview_stitcher/_tests/quickstart/tile_configuration.png)
 
 #### Register the tiles
 
@@ -121,7 +120,7 @@ fused_sim.data.compute()
 
 ### Work in progress
 
-WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open but has not been released yet.
+WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open and has not reached a stable release yet. The API is subject to change.
 
 ### Previous work
 

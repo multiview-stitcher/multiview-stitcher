@@ -30,4 +30,4 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 
 # plot the tile configuration
 # from multiview_stitcher import vis_utils
-# vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
+# fig, ax = vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
