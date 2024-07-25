@@ -44,7 +44,7 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 # fig, ax = vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
 ```
 
-![Visualization of input tile configuration](../src/multiview_stitcher/_tests/quickstart/tile_configuration.png)
+![Visualization of input tile configuration](images/tile_configuration.png)
 
 ### 2) Register the tiles
 
