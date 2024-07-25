@@ -118,15 +118,6 @@ fused_sim.data
 fused_sim.data.compute()
 ```
 
-### Work in progress
-
-WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open and has not reached a stable release yet. The API is subject to change.
-
-### Previous work
-
-`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
-
-
 ----------------------------------
 ## Installation
 
@@ -152,6 +143,14 @@ or from the source code in this github repository:
 #### Limitations
 - stitching will run with a single thread
 - while the code runs locally, your local file system is not directly accessible from within the browser environment
+
+## Work in progress
+
+WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open and has not reached a stable release yet. The API is subject to change.
+
+## Previous work
+
+`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
 
 ## Issues
 
