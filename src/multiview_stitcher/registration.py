@@ -1443,6 +1443,7 @@ def register(
     msims: list[MultiscaleSpatialImage],
     transform_key,
     reg_channel_index=None,
+    reg_channel=None,
     new_transform_key=None,
     registration_binning=None,
     overlap_tolerance=0.0,
@@ -1478,6 +1479,9 @@ def register(
         Input views
     reg_channel_index : int, optional
         Index of channel to be used for registration, by default None
+    reg_channel : str, optional
+        Name of channel to be used for registration, by default None
+        Overrides reg_channel_index
     transform_key : str, optional
         Extrinsic coordinate system to use as a starting point
         for the registration, by default None
@@ -1538,15 +1542,16 @@ def register(
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-    if reg_channel_index is None:
-        for msim in msims:
-            if "c" in msi_utils.get_dims(msim):
-                raise (Exception("Please choose a registration channel."))
+    if reg_channel is None:
+        if reg_channel_index is None:
+            for msim in msims:
+                if "c" in msi_utils.get_dims(msim):
+                    raise (Exception("Please choose a registration channel."))
+        else:
+            reg_channel = sims[0].coords["c"][reg_channel_index]
 
     msims_reg = [
-        msi_utils.multiscale_sel_coords(
-            msim, {"c": sims[imsim].coords["c"][reg_channel_index]}
-        )
+        msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
         if "c" in msi_utils.get_dims(msim)
         else msim
         for imsim, msim in enumerate(msims)
