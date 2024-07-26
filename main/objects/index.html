@@ -782,51 +782,51 @@
 <p>Modification: Each scale has at least one <em>named</em> <a href="#affine-transformation-parameters">affine transform parameter</a> attached to it as further data variables next to <code>scale&lt;scale&gt;/image</code>.</p>
 <p>While instances of <a href="https://github.com/multiscale-spatial-data"><code>multiscale-spatial-image</code></a> can be serialized to and from NGFF, modified instances of <code>multiscaleimage.MultiscaleImage</code> as used by <code>multiview-stitcher</code> cannot (yet) be serialized to and from NGFF (see <a href="https://github.com/ome/ngff/issues/94">here</a>), as the support for affine transforms is missing.</p>
 <p>Example string representation:</p>
-<p><code>print(msims[0])</code></p>
-<pre><code>DataTree('None', parent=None)
-│   Dimensions:  ()
-│   Data variables:
-│       *empty*
-│   Attributes:
-│       multiscaleSpatialImageVersion:  1
-│       multiscales:                    [{'@type': 'ngff:Image', 'axes': [{'name'...
-├── DataTree('scale0')
-│       Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 1040, x: 1392)
-│       Coordinates:
-│         * c                (c) int64 0
-│         * t                (t) int64 0
-│         * x                (x) float64 0.0 0.645 1.29 1.935 ... 895.9 896.6 897.2
-│         * y                (y) float64 0.0 0.645 1.29 1.935 ... 668.9 669.5 670.2
-│         * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
-│       Dimensions without coordinates: x_in, x_out
-│       Data variables:
-│           affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
-│           image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
-├── DataTree('scale1')
-│       Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 520, x: 696)
-│       Coordinates:
-│         * c                (c) int64 0
-│         * t                (t) int64 0
-│         * x                (x) float64 0.3225 1.613 2.902 4.193 ... 894.3 895.6 896.9
-│         * y                (y) float64 0.3225 1.613 2.902 4.193 ... 667.3 668.5 669.8
-│         * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
-│       Dimensions without coordinates: x_in, x_out
-│       Data variables:
-│           affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
-│           image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
-└── DataTree('scale2')
-        Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 260, x: 348)
-        Coordinates:
-          * c                (c) int64 0
-          * t                (t) int64 0
-          * x                (x) float64 0.9675 3.548 6.128 8.707 ... 891.1 893.6 896.2
-          * y                (y) float64 0.9675 3.548 6.128 8.707 ... 664.0 666.6 669.2
-          * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
-        Dimensions without coordinates: x_in, x_out
-        Data variables:
-            affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
-            image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
-</code></pre>
+<p><code>print(msims[0])</code>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>DataTree(&#39;None&#39;, parent=None)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│   Dimensions:  ()
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   Data variables:
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│       *empty*
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   Attributes:
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│       multiscaleSpatialImageVersion:  1
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│       multiscales:                    [{&#39;@type&#39;: &#39;ngff:Image&#39;, &#39;axes&#39;: [{&#39;name&#39;...
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── DataTree(&#39;scale0&#39;)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│       Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 1040, x: 1392)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│       Coordinates:
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│         * c                (c) int64 0
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│         * t                (t) int64 0
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│         * x                (x) float64 0.0 0.645 1.29 1.935 ... 895.9 896.6 897.2
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│         * y                (y) float64 0.0 0.645 1.29 1.935 ... 668.9 669.5 670.2
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│         * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│       Dimensions without coordinates: x_in, x_out
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│       Data variables:
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│           affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│           image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── DataTree(&#39;scale1&#39;)
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│       Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 520, x: 696)
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│       Coordinates:
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│         * c                (c) int64 0
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│         * t                (t) int64 0
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│         * x                (x) float64 0.3225 1.613 2.902 4.193 ... 894.3 895.6 896.9
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│         * y                (y) float64 0.3225 1.613 2.902 4.193 ... 667.3 668.5 669.8
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│         * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│       Dimensions without coordinates: x_in, x_out
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│       Data variables:
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│           affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│           image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>└── DataTree(&#39;scale2&#39;)
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>        Dimensions:          (t: 1, x_in: 4, x_out: 4, c: 1, z: 179, y: 260, x: 348)
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>        Coordinates:
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>          * c                (c) int64 0
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>          * t                (t) int64 0
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>          * x                (x) float64 0.9675 3.548 6.128 8.707 ... 891.1 893.6 896.2
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>          * y                (y) float64 0.9675 3.548 6.128 8.707 ... 664.0 666.6 669.2
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>          * z                (z) float64 0.0 2.58 5.16 7.74 ... 451.5 454.1 456.7 459.2
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>        Dimensions without coordinates: x_in, x_out
+</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>        Data variables:
+</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>            affine_metadata  (t, x_in, x_out) float64 1.0 0.0 0.0 0.0 ... 0.0 0.0 1.0
+</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>            image            (t, c, z, y, x) uint16 dask.array&lt;chunksize=(1, 1, 179, 256, 256), meta=np.ndarray&gt;
+</span></code></pre></div></p>
 <h2 id="transformation-parameters">Transformation parameters</h2>
 <h3 id="affine-transformation-parameters">Affine transformation parameters</h3>
 <p><code>xarray.DataArray</code> containing parameters in the form of
@@ -838,16 +838,16 @@
 - 'x_in'
 - 'x_out'</p>
 <p>Example string representation:</p>
-<p><code>print(msims[0]['scale0/affine_manual'])</code></p>
-<pre><code>&lt;xarray.DataArray 'affine_manual' (t: 1, x_in: 4, x_out: 4)&gt;
-array([[[1., 0., 0., 0.],
-        [0., 1., 0., 0.],
-        [0., 0., 1., 0.],
-        [0., 0., 0., 1.]]])
-Coordinates:
-  * t        (t) int64 0
-Dimensions without coordinates: x_in, x_out
-</code></pre>
+<p><code>print(msims[0]['scale0/affine_manual'])</code>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;xarray.DataArray &#39;affine_manual&#39; (t: 1, x_in: 4, x_out: 4)&gt;
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>array([[[1., 0., 0., 0.],
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>        [0., 1., 0., 0.],
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        [0., 0., 1., 0.],
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        [0., 0., 0., 1.]]])
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Coordinates:
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  * t        (t) int64 0
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>Dimensions without coordinates: x_in, x_out
+</span></code></pre></div></p>
 
 
 

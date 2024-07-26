@@ -991,14 +991,14 @@
 <h2 id="fusion">Fusion</h2>
 <h3 id="fusion-framework">Fusion framework</h3>
 <p><code>multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion)</code> can be used in combination with fusion functions available in <code>multiview_stitcher.fusion</code> or custom functions that accept the following keyword arguments:</p>
-<pre><code>transformed_views : list of ndarrays
+<div class="language-text highlight"><pre><span></span><code>transformed_views : list of ndarrays
     transformed input views
 blending_weights : list of ndarrays, optional
     blending weights for each view
 fusion_weights : list of ndarrays, optional
     additional view weights for fusion, e.g. contrast weighted scores.
 params : list of xarrays, optional
-</code></pre>
+</code></pre></div>
 <p>Further fusion weights can be obtained by the weight calculation function specified in <code>fuse(..., weights_func=None, weights_func_kwargs=None)</code>. An example for such a function is <code>weights.content_based</code>, but also custom functions can be passed which accept the same (optional) input arguments as the fusion functions.</p>
 <h3 id="content-based-fusion">Content based fusion</h3>
 <p>To improve multi-view fusion in the context of strongly scattering samples, <a href="https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf">content-based fusion</a> turns out to be helpful. This fusion method is available in <code>multiview-stitcher</code> by using <code>multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion, weights_method=weights.content_based)</code> (see <a href="###Fusion-framework">above</a>).</p>
