@@ -272,7 +272,9 @@ def fuse(
 
     # order channels in the same way as first input sim
     # (combine_by_coords may change coordinate order)
-    res = res.sel({"c": sims[0].coords["c"].values})
+
+    if "c" in res.dims:
+        res = res.sel({"c": sims[0].coords["c"].values})
 
     return res
 
