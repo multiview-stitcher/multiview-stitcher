@@ -925,17 +925,13 @@
 <li>[ ] GPU compatibility</li>
 </ul>
 <h2 id="data-formats">Data formats</h2>
-<p>Array-like data formats can be read into <code>multiview-stitcher</code> flavoured <code>spatial_image.SpatialImage</code> objects using <code>multiview_stitcher.spatial_image_utils.get_sim_from_array</code>.</p>
-<p>In addition, <code>multiview-stitcher.io</code> supports reading the following data formats directly from file:</p>
 <ul>
-<li>[ ] multi-positioning file format support (thanks to the awesome <code>bioio</code>):</li>
-<li>[x] czi</li>
-<li>[x] lif</li>
-<li>[x] nd2</li>
-<li>[ ] light-sheet file format support:</li>
-<li>[ ] czi</li>
-<li>output file formats:</li>
-<li>[x] tif (can be streamed into using <code>multiview_stitcher.io.save_sim_as_tif</code>)</li>
+<li>[x] zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: <a href="https://github.com/spatial-image/multiscale-spatial-image">multiscale-spatial-data</a></li>
+<li>[-] czi input</li>
+<li>[x] multi-positioning</li>
+<li>[ ] light-sheet</li>
+<li>[x] tif input</li>
+<li>[x] tif writing</li>
 </ul>
 <h2 id="visualization">Visualization</h2>
 <h3 id="napari">Napari</h3>
