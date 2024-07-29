@@ -138,6 +138,9 @@ def fuse(
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     nsdims = [dim for dim in sims[0].dims if dim not in sdims]
 
+    # extract dask meta from first sim
+    meta = sims[0].data._meta  # assume all sims have the same meta
+
     params = [
         si_utils.get_affine_from_sim(sim, transform_key=transform_key)
         for sim in sims
@@ -195,6 +198,7 @@ def fuse(
                 ssim.data.name,
                 ssim.data.chunks,
                 ssim.data.dtype,
+                meta=meta,
             )
             if isinstance(ssim.data, da.Array)
             else ssim.data
@@ -228,6 +232,7 @@ def fuse(
             delayed(lambda x: x.data)(merge_d),
             shape=[output_stack_properties["shape"][dim] for dim in sdims],
             dtype=sims[0].dtype,
+            meta=meta,
         )
 
         # rechunk to get a chunked dask array from the delayed object
@@ -402,6 +407,7 @@ def fuse_field(
                 sim.shape[-ndim:],
                 chunks=sim.chunks,
                 widths=blending_widths,
+                like=sim.data._meta,
             )
             field_ws.append(field_w)
 
@@ -628,6 +634,7 @@ def fuse_field(
                 for _, dim in enumerate(spatial_dims)
             ],
             dtype=input_dtype,
+            meta=sims_datas[0]._meta,
         )
 
         if overlap_in_pixels > 0:

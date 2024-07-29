@@ -130,7 +130,7 @@ def normalize_weights(weights):
     return weights
 
 
-def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
+def get_smooth_border_weight_from_shape(shape, chunks, widths=None, like=None):
     """
     Get a weight image for blending that is 0 at the border and 1 at the center.
     Transition widths can be specified for each dimension.
@@ -162,7 +162,7 @@ def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
     # get distance to border for each dim
 
     dim_dists = [
-        da.arange(shape[dim], chunks=chunks[dim]).astype(float)
+        da.arange(shape[dim], chunks=chunks[dim], like=like).astype(float)
         for dim in range(ndim)
     ]
 
@@ -179,12 +179,7 @@ def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
     ]
 
     # get product of weights for each dim
-    w = da.ones(shape, chunks=chunks, dtype=float)
-    for dim in range(len(shape)):
-        tmp_dim_w = dim_ws[dim]
-        for _ in range(ndim - dim - 1):
-            tmp_dim_w = tmp_dim_w[:, None]
-        w *= tmp_dim_w
+    w = da.einsum(*tuple([",".join(["i", "j", "k"][: len(dim_ws)])] + dim_ws))
 
     return w
 
