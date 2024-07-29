@@ -162,7 +162,7 @@ def get_smooth_border_weight_from_shape(shape, chunks, widths=None, like=None):
     # get distance to border for each dim
 
     dim_dists = [
-        da.arange(shape[dim], chunks=chunks[dim], like=like).astype(float)
+        da.arange(shape[dim], chunks=chunks[dim], like=like).astype(np.float32)
         for dim in range(ndim)
     ]
 

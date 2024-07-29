@@ -557,7 +557,7 @@ def fuse_field(
 
             field_ims_t.append(
                 transformation.transform_sim(
-                    sim_reduced.astype(float),
+                    sim_reduced.astype(np.float32),
                     param,
                     output_chunksize=[
                         chunk_output_stack_properties["shape"][dim]
@@ -615,7 +615,7 @@ def fuse_field(
             fusion_weights = da.from_delayed(
                 delayed(weights_func)(**weights_func_kwargs),
                 shape=field_ims_t.shape,
-                dtype=float,
+                dtype=np.float32,
             )
             fusion_method_kwargs["fusion_weights"] = fusion_weights
 
