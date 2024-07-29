@@ -197,7 +197,7 @@ def smooth_transition(x, x_offset=0.5, x_stretch=None, k=3):
     xp = xp - x_offset  # w is 0 at offset
     xp = xp / x_stretch / 2.0  # w is +/-0.5 at offset +/- x_stretch
 
-    w = 1 - 1 / (1 + (1 / (xp + 0.5 + 1e-9) - 1) ** (-k))
+    w = 1 - 1 / (1 + (1 / (xp + 0.5 + 1e-5) - 1) ** (-k))
 
     # w[xp <= -0.5] = 0.0
     w[xp <= -0.5] = 1e-7
