@@ -625,7 +625,7 @@ def fuse_field(
         )
 
         fused_field_chunk = delayed(
-            lambda x: np.array(np.nan_to_num(x)).astype(input_dtype)
+            lambda x: np.nan_to_num(x).astype(input_dtype)
         )(fused_field_chunk)
 
         fused_field_chunk = da.from_delayed(
