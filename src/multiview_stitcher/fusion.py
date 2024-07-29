@@ -343,6 +343,8 @@ def fuse_field(
         for sim_meta, sim_data in zip(sims_metas, sims_datas)
     ]
 
+    dask_meta = sims_datas[0]._meta
+
     if has_keyword(fusion_func, "blending_weights") or has_keyword(
         weights_func, "blending_weights"
     ):
@@ -585,7 +587,10 @@ def fuse_field(
 
         if empty_chunk:
             fused_blocks[block_ind] = da.zeros(
-                out_chunk_shape, dtype=input_dtype
+                out_chunk_shape,
+                chunks=out_chunk_shape,
+                dtype=input_dtype,
+                meta=dask_meta,
             )
             continue
 
