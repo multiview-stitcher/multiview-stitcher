@@ -88,6 +88,7 @@ def fuse(
     output_chunksize=None,
     overlap_in_pixels=None,
     interpolation_order=1,
+    scheduler=None,
 ):
     """
 
@@ -127,6 +128,8 @@ def fuse(
         if this argument is present.
     output_chunksize : int or tuple of ints, optional
         Chunksize of the dask data array of the fused image, by default 512
+    scheduler : str, optional
+        Dask scheduler to use for computation, by default None
 
     Returns
     -------
@@ -241,7 +244,7 @@ def fuse(
 
         # trigger compute here
         merge_data = merge_data.map_blocks(
-            lambda x: x.compute(),
+            lambda x: x.compute(scheduler=scheduler),
             dtype=sims[0].dtype,
             meta=meta,
         )
