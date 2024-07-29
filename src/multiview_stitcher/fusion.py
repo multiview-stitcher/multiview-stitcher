@@ -243,6 +243,7 @@ def fuse(
         merge_data = merge_data.map_blocks(
             lambda x: x.compute(),
             dtype=sims[0].dtype,
+            meta=meta,
         )
 
         merge = si.to_spatial_image(
