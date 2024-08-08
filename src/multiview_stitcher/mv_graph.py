@@ -1,8 +1,9 @@
 import copy
 import warnings
 from collections.abc import Iterable
-from itertools import chain
+from itertools import chain, product
 
+import dask.array as da
 import networkx as nx
 import numpy as np
 import xarray as xr
@@ -10,8 +11,8 @@ from dask import compute, delayed
 from scipy.spatial import cKDTree
 from skimage.filters import threshold_otsu
 
-from multiview_stitcher import msi_utils, spatial_image_utils, transformation
-from multiview_stitcher.fusion import fuse
+from multiview_stitcher import msi_utils, transformation
+from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.misc_utils import DisableLogger
 
 with DisableLogger():
@@ -64,19 +65,19 @@ def build_view_adjacency_graph_from_msims(
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
-    nsdims = spatial_image_utils.get_nonspatial_dims_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sims[0])
 
     if len(nsdims):
         sims = [
-            spatial_image_utils.sim_sel_coords(
+            si_utils.sim_sel_coords(
                 sim, {nsdim: sim.coords[nsdim][0] for nsdim in nsdims}
             )
             for sim in sims
         ]
 
     stack_propss = [
-        spatial_image_utils.get_stack_properties_from_sim(
+        si_utils.get_stack_properties_from_sim(
             sim, transform_key=transform_key
         )
         for sim in sims
@@ -89,9 +90,7 @@ def build_view_adjacency_graph_from_msims(
 
         sim_centers = np.array(
             [
-                spatial_image_utils.get_center_of_sim(
-                    sim, transform_key=transform_key
-                )
+                si_utils.get_center_of_sim(sim, transform_key=transform_key)
                 for sim in sims
             ]
         )
@@ -335,7 +334,7 @@ def sims_are_far_apart(sim1, sim2, transform_key):
     """ """
 
     centers = [
-        spatial_image_utils.get_center_of_sim(sim, transform_key=transform_key)
+        si_utils.get_center_of_sim(sim, transform_key=transform_key)
         for sim in [sim1, sim2]
     ]
     np.linalg.norm(centers[1] - centers[0], axis=0)
@@ -345,9 +344,7 @@ def sims_are_far_apart(sim1, sim2, transform_key):
             np.array(
                 [
                     sim.coords[dim][-1] - sim.coords[dim][0]
-                    for dim in spatial_image_utils.get_spatial_dims_from_sim(
-                        sim
-                    )
+                    for dim in si_utils.get_spatial_dims_from_sim(sim)
                 ]
             )
         )
@@ -420,11 +417,11 @@ def points_inside_sim(pts, sim, transform_key):
     Performance could be improved by adding sth similar to `sims_far_apart`.
     """
 
-    ndim = spatial_image_utils.get_ndim_from_sim(sim)
+    ndim = si_utils.get_ndim_from_sim(sim)
     assert len(pts[0]) == ndim
 
     sim_domain = get_poly_from_stack_props(
-        spatial_image_utils.get_stack_properties_from_sim(
+        si_utils.get_stack_properties_from_sim(
             sim, transform_key=transform_key
         )
     )
@@ -696,45 +693,6 @@ def filter_edges(g, weight_key="overlap", threshold=None):
     return g_filtered
 
 
-def get_pairs_from_sample_masks(
-    mask_sims,
-    transform_key="affine_manual",
-    fused_mask_spacing=None,
-):
-    """
-    Find pairs of tiles that have overlapping/touching masks.
-    Masks are assumed to be binary and can e.g. represent a sample segmentation.
-    """
-
-    with xr.set_options(keep_attrs=True):
-        label_sims = [
-            mask_sim * (i + 1) for i, mask_sim in enumerate(mask_sims)
-        ]
-
-    if fused_mask_spacing is None:
-        fused_mask_spacing = spatial_image_utils.get_spacing_from_sim(
-            label_sims[0]
-        )
-
-    fused_labels = fuse(
-        label_sims,
-        transform_key=transform_key,
-        fusion_func=lambda transformed_views: np.nanmin(
-            transformed_views, axis=0
-        ),
-        interpolation_order=0,
-        output_spacing=fused_mask_spacing,
-    ).compute()
-
-    fused_labels = fused_labels.compute()
-
-    pairs = get_connected_labels(
-        fused_labels.data, structure=np.ones((3, 3, 3))
-    )
-
-    return pairs, fused_labels
-
-
 def unique_along_axis(a, axis=0):
     """
     Find unique subarrays in axis in N-D array.
@@ -783,3 +741,181 @@ def get_connected_labels(labels, structure):
     pairs -= 1
 
     return pairs
+
+
+def get_chunk_bbs(
+    array_bb: dict[str, dict[str, int | float]],
+    chunksizes: dict[str, int | list[int]],
+) -> list[dict[str, dict[str, int | float]]]:
+    """
+    Get chunk bounding boxes for all chunks from array bounding box and chunksize.
+
+    Parameters
+    ----------
+    array_bb : dict
+        Array bounding box with keys 'origin' and 'shape', which each are
+        dicts containing values for each dimension.
+    chunksize : dict[str, Union[int, list[int]]]
+        A dict containing for each dimension either a regular chunksize
+        or a list of chunk sizes.
+
+    Returns
+    -------
+    array of dicts
+    block_indices
+    """
+
+    spatial_dims = sorted(array_bb["origin"].keys())[::-1]
+    chunksizes = [chunksizes[dim] for dim in spatial_dims]
+    array_shape = [array_bb["shape"][dim] for dim in spatial_dims]
+    array_origin = [array_bb["origin"][dim] for dim in spatial_dims]
+
+    normalized_chunks = da.core.normalize_chunks(chunksizes, array_shape)
+
+    block_indices = list(
+        product(*(range(len(bds)) for bds in normalized_chunks))
+    )
+    block_offsets = [np.cumsum((0,) + bds[:-1]) for bds in normalized_chunks]
+    block_shapes = list(normalized_chunks)
+
+    chunk_bbs = [
+        {
+            "origin": {
+                dim: array_origin[idim]
+                + array_bb["spacing"][dim]
+                * block_offsets[idim][block_ind[idim]]
+                for idim, dim in enumerate(spatial_dims)
+            },
+            "shape": {
+                dim: block_shapes[idim][block_ind[idim]]
+                for idim, dim in enumerate(spatial_dims)
+            },
+            "spacing": array_bb["spacing"],
+        }
+        for block_ind in block_indices
+    ]
+
+    return chunk_bbs, block_indices
+
+
+def get_overlap_for_bbs(
+    target_bb: dict[str, dict[str, int | float]],
+    query_bbs: dict[str, dict[str, int | float]],
+    param: xr.DataArray,
+    additional_extent_in_pixels: dict[str, int] = None,
+    tol: float = 1e-6,
+):
+    """
+    Get slices of query bounding boxes that overlap with target bounding box.
+
+    Parameters
+    ----------
+    target_bb : dict[str, dict[str, Union[int, float]]]
+        Target bounding box.
+    query_bbs : list[dict[str, dict[str, Union[int, float]]]]
+        Query bounding boxes.
+    param : xr.DataArray
+        Affine transformation parameters mapping query to target.
+    overlap_in_pixels : int
+        Additional overlap in pixels.
+
+    Returns
+    -------
+
+    """
+
+    if additional_extent_in_pixels is None:
+        additional_extent_in_pixels = {"z": 0, "y": 0, "x": 0}
+    ndim = len(target_bb["origin"])
+    spatial_dims = si_utils.SPATIAL_DIMS[-ndim:]
+
+    corners_target = get_vertices_from_stack_props(
+        target_bb,
+    )
+
+    # project corners into intrinsic coordinate system
+    corners_query = transformation.transform_pts(
+        corners_target,
+        np.linalg.inv(param.data),
+    )
+
+    corners_query_min = np.min(corners_query, axis=0)
+    corners_query_max = np.max(corners_query, axis=0)
+
+    overlap_bbs = []
+    for query_bb in query_bbs:
+        backproj_bb_origin = {
+            dim: corners_query_min[idim]
+            - additional_extent_in_pixels[dim] * query_bb["spacing"][dim]
+            for idim, dim in enumerate(spatial_dims)
+        }
+
+        backproj_bb_shape = {
+            dim: np.ceil(
+                (corners_query_max[idim] - corners_query_min[idim])
+                / query_bb["spacing"][dim]
+            ).astype(int)
+            + 1
+            + 2 * additional_extent_in_pixels[dim]
+            for idim, dim in enumerate(spatial_dims)
+        }
+
+        # return None if overlap is outside of query bounding box
+        if any(
+            backproj_bb_origin[dim] - tol
+            > query_bb["origin"][dim]
+            + (query_bb["shape"][dim] - 1) * query_bb["spacing"][dim]
+            for dim in spatial_dims
+        ):
+            overlap_bbs.append(None)
+            continue
+
+        # return None if overlap is outside of query bounding box
+        if any(
+            backproj_bb_origin[dim]
+            + (backproj_bb_shape[dim] - 1) * query_bb["spacing"][dim]
+            < query_bb["origin"][dim] - tol
+            for dim in spatial_dims
+        ):
+            overlap_bbs.append(None)
+            continue
+
+        overlap_bb_origin = {
+            dim: np.max([backproj_bb_origin[dim], query_bb["origin"][dim]])
+            for idim, dim in enumerate(spatial_dims)
+        }
+
+        overlap_bb_shape = {
+            dim: np.ceil(
+                (
+                    np.min(
+                        [
+                            backproj_bb_origin[dim]
+                            + (backproj_bb_shape[dim] - 1)
+                            * query_bb["spacing"][dim],
+                            query_bb["origin"][dim]
+                            + (query_bb["shape"][dim] - 1)
+                            * query_bb["spacing"][dim],
+                        ]
+                    )
+                    - overlap_bb_origin[dim]
+                )
+                / query_bb["spacing"][dim]
+            ).astype(int)
+            + 1
+            for idim, dim in enumerate(spatial_dims)
+        }
+
+        if np.max([overlap_bb_shape[dim] < 1 for dim in spatial_dims]):
+            overlap_bbs.append(None)
+            continue
+
+        overlap_bbs.append(
+            {
+                "origin": overlap_bb_origin,
+                "shape": overlap_bb_shape,
+                "spacing": query_bb["spacing"],
+            }
+        )
+
+    return overlap_bbs

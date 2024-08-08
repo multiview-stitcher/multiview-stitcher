@@ -27,6 +27,7 @@ except ImportError:
     ants = None
 
 from multiview_stitcher import (
+    fusion,
     msi_utils,
     mv_graph,
     param_utils,
@@ -1845,3 +1846,42 @@ E.g. using pip:
     reg_result["quality"] = quality
 
     return reg_result
+
+
+def get_pairs_from_sample_masks(
+    mask_sims,
+    transform_key="affine_manual",
+    fused_mask_spacing=None,
+):
+    """
+    Find pairs of tiles that have overlapping/touching masks.
+    Masks are assumed to be binary and can e.g. represent a sample segmentation.
+    """
+
+    with xr.set_options(keep_attrs=True):
+        label_sims = [
+            mask_sim * (i + 1) for i, mask_sim in enumerate(mask_sims)
+        ]
+
+    if fused_mask_spacing is None:
+        fused_mask_spacing = spatial_image_utils.get_spacing_from_sim(
+            label_sims[0]
+        )
+
+    fused_labels = fusion.fuse(
+        label_sims,
+        transform_key=transform_key,
+        fusion_func=lambda transformed_views: np.nanmin(
+            transformed_views, axis=0
+        ),
+        interpolation_order=0,
+        output_spacing=fused_mask_spacing,
+    ).compute()
+
+    fused_labels = fused_labels.compute()
+
+    pairs = mv_graph.get_connected_labels(
+        fused_labels.data, structure=np.ones((3, 3, 3))
+    )
+
+    return pairs, fused_labels

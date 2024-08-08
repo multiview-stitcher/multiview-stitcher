@@ -141,5 +141,64 @@ def test_fused_field_coverage():
         output_chunksize=13,
         output_spacing=scale,
     )
+    fusedc = fused.data.compute(scheduler="single-threaded")
 
-    assert np.min(fused.data.compute()) > 0
+    assert np.min(fusedc) > 0
+
+
+def test_fused_field_slice():
+    """
+    Make sure that slice in fused output
+      - is properly aligned with the input
+      - only requires input data from the equivalent input slice
+    """
+
+    # construct array that will complain if requested for
+    # chunks that don't have z index 1
+
+    def provide_only_slice(x, imval, block_info=None):
+        block_slices = block_info[None]["array-location"]
+        if block_slices[0][0] != 1:
+            raise ValueError(
+                "This part of the input array shouldn't be required"
+            )
+        else:
+            return np.ones(x.shape) * imval
+
+    imval = 1.0
+    dim = da.map_blocks(
+        provide_only_slice,
+        da.empty((5, 50, 100), chunks=(1, 50, 50)),
+        dtype=np.float32,
+        imval=imval,
+    )
+
+    sdims = ["z", "y", "x"]
+    spacing = {"z": 3.5, "y": 2.5, "x": 4.5}
+    affine_translation = {"z": 1.3, "y": 1, "x": 2}
+    sim = si_utils.get_sim_from_array(
+        dim,
+        dims=sdims,
+        scale=spacing,
+        transform_key=METADATA_TRANSFORM_KEY,
+        affine=param_utils.affine_from_translation(
+            [affine_translation[dim] for dim in sdims]
+        ),
+    )
+
+    output_stack_properties = {
+        "spacing": spacing,
+        "origin": {
+            dim: t + 1 * spacing[dim] for dim, t in affine_translation.items()
+        },
+        "shape": {"z": 1, "y": 40, "x": 70},
+    }
+
+    fused = fusion.fuse(
+        [sim],
+        transform_key=METADATA_TRANSFORM_KEY,
+        interpolation_order=1,
+        output_stack_properties=output_stack_properties,
+    ).compute()
+
+    assert not any(fused.data.flatten() - imval)
