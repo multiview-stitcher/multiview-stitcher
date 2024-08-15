@@ -2,6 +2,7 @@ import copy
 import warnings
 from collections.abc import Iterable
 from itertools import chain, product
+from typing import Union
 
 import dask.array as da
 import networkx as nx
@@ -22,6 +23,8 @@ with DisableLogger():
         Point,
         Segment,
     )
+
+BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
 class NotEnoughOverlapError(Exception):
@@ -744,9 +747,9 @@ def get_connected_labels(labels, structure):
 
 
 def get_chunk_bbs(
-    array_bb: dict[str, dict[str, int | float]],
-    chunksizes: dict[str, int | list[int]],
-) -> list[dict[str, dict[str, int | float]]]:
+    array_bb: BoundingBox,
+    chunksizes: dict[str, Union[int, list[int]]],
+) -> list[BoundingBox]:
     """
     Get chunk bounding boxes for all chunks from array bounding box and chunksize.
 
@@ -799,8 +802,8 @@ def get_chunk_bbs(
 
 
 def get_overlap_for_bbs(
-    target_bb: dict[str, dict[str, int | float]],
-    query_bbs: dict[str, dict[str, int | float]],
+    target_bb: BoundingBox,
+    query_bbs: BoundingBox,
     param: xr.DataArray,
     additional_extent_in_pixels: dict[str, int] = None,
     tol: float = 1e-6,
@@ -921,20 +924,23 @@ def get_overlap_for_bbs(
     return overlap_bbs
 
 
-def project_bb_along_dim(bb, dim):
+def project_bb_along_dim(
+    bb: BoundingBox,
+    dim: str,
+):
     """
     Project bounding box along a dimension.
 
     Parameters
     ----------
-    bb : dict[str, dict[str, float | int]]
+    bb : BoundingBox
         bounding box
     dim : str
         dimension to project along
 
     Returns
     -------
-    dict[str, dict[str, float | int]]
+    BoundingBox
         projected bounding box
     """
 

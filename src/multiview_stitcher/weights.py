@@ -1,9 +1,13 @@
+from typing import Union
+
 import numpy as np
 import xarray as xr
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
+
+BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
 def calculate_required_overlap(
@@ -134,8 +138,8 @@ def normalize_weights(weights):
 
 
 def get_blending_weights(
-    target_bb: dict[str, dict[str, float | int]],
-    source_bb: dict[str, dict[str, float | int]],
+    target_bb: BoundingBox,
+    source_bb: BoundingBox,
     affine: xr.DataArray,
     blending_widths: dict[str, float] = None,
 ):

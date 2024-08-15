@@ -2,6 +2,7 @@ import itertools
 import warnings
 from collections.abc import Sequence
 from itertools import product
+from typing import Union
 
 import dask.array as da
 import numpy as np
@@ -17,6 +18,8 @@ from multiview_stitcher import (
     weights,
 )
 from multiview_stitcher import spatial_image_utils as si_utils
+
+BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
 def max_fusion(
@@ -84,8 +87,8 @@ def fuse(
     output_stack_mode: str = "union",
     output_origin: dict[str, float] = None,
     output_shape: dict[str, int] = None,
-    output_stack_properties: dict[str, dict[str, float | int]] = None,
-    output_chunksize: int | dict[str, int] = None,
+    output_stack_properties: BoundingBox = None,
+    output_chunksize: Union[int, dict[str, int]] = None,
     overlap_in_pixels: int = None,
     interpolation_order: int = 1,
 ):
@@ -429,15 +432,15 @@ def func_ignore_nan_warning(func, *args, **kwargs):
 
 
 def fuse_np(
-    sims: Sequence[xr.DataArray | np.ndarray],
+    sims: Sequence[Union[xr.DataArray, np.ndarray]],
     params: Sequence[xr.DataArray],
-    output_properties: dict[str, dict[str, float | int]],
+    output_properties: BoundingBox,
     fusion_func=weighted_average_fusion,
     weights_func=None,
     weights_func_kwargs=None,
     trim_overlap_in_pixels: int = 0,
     interpolation_order: int = 1,
-    full_view_bbs: Sequence[dict[str, dict[str, float | int]]] = None,
+    full_view_bbs: Sequence[BoundingBox] = None,
     spacings: Sequence[dict[str, float]] = None,
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
