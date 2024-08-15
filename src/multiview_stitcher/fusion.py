@@ -310,18 +310,65 @@ def fuse(
                 for iview in relevant_view_indices
             ]
 
-            fused_output_chunk = delayed(fuse_np)(
+            # determine whether to fuse plany by plane
+            #  to avoid weighting edge artifacts
+            # fuse planewise if:
+            # - z dimension is present
+            # - params don't affect z dimension
+            # - shape in z dimension is 1 (i.e. only one plane)
+            # (the last criterium above could be dropped if we find a way
+            # (to propagate metadata through xr.apply_ufunc)
+
+            if (
+                "z" in fix_dims
+                and output_chunk_bb_with_overlap["shape"]["z"] == 1
+            ):
+                fuse_planewise = True
+
+                sims_slices = [sim.isel(z=0) for sim in sims_slices]
+                tmp_params = [
+                    sparams[iview].sel(
+                        x_in=["y", "x", "1"],
+                        x_out=["y", "x", "1"],
+                    )
+                    for iview in relevant_view_indices
+                ]
+
+                output_chunk_bb_with_overlap = mv_graph.project_bb_along_dim(
+                    output_chunk_bb_with_overlap, dim="z"
+                )
+
+                full_view_bbs = [
+                    mv_graph.project_bb_along_dim(views_bb[iview], dim="z")
+                    for iview in relevant_view_indices
+                ]
+
+            else:
+                fuse_planewise = False
+                tmp_params = [
+                    sparams[iview] for iview in relevant_view_indices
+                ]
+                full_view_bbs = [
+                    views_bb[iview] for iview in relevant_view_indices
+                ]
+
+            fused_output_chunk = delayed(
+                lambda append_leading_axis, **kwargs: fuse_np(**kwargs)[
+                    np.newaxis
+                ]
+                if append_leading_axis
+                else fuse_np(**kwargs),
+            )(
+                append_leading_axis=fuse_planewise,
                 sims=sims_slices,
-                params=[sparams[iview] for iview in relevant_view_indices],
+                params=tmp_params,
                 output_properties=output_chunk_bb_with_overlap,
                 fusion_func=weighted_average_fusion,
                 weights_func=None,
                 weights_func_kwargs=None,
                 trim_overlap_in_pixels=overlap_in_pixels,
                 interpolation_order=1,
-                full_view_bbs=[
-                    views_bb[iview] for iview in relevant_view_indices
-                ],
+                full_view_bbs=full_view_bbs,
             )
 
             fused_output_chunk = da.from_delayed(
@@ -426,17 +473,17 @@ def fuse_np(
     Returns a delayed object.
     """
 
-    # convert to xarray.DataArray
-    # it's useful to be able to pass numpy arrays to this function
-    # e.g. being able to apply xr.apply_ufunc
-    for isim in range(len(sims)):
-        if not isinstance(sims[isim], xr.DataArray):
-            sims[isim] = si.to_spatial_image(
-                sims[isim],
-                dims=si_utils.SPATIAL_DIMS[-sims[isim].ndim :],
-                scale=spacings[isim],
-                translation=origins[isim],
-            )
+    # # convert to xarray.DataArray
+    # # it's useful to be able to pass numpy arrays to this function
+    # # e.g. being able to apply xr.apply_ufunc
+    # for isim in range(len(sims)):
+    #     if not isinstance(sims[isim], xr.DataArray):
+    #         sims[isim] = si.to_spatial_image(
+    #             sims[isim],
+    #             dims=si_utils.SPATIAL_DIMS[-sims[isim].ndim :],
+    #             scale=spacings[isim],
+    #             translation=origins[isim],
+    #         )
 
     if has_keyword(fusion_func, "blending_weights") or has_keyword(
         weights_func, "blending_weights"

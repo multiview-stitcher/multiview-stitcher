@@ -919,3 +919,28 @@ def get_overlap_for_bbs(
         )
 
     return overlap_bbs
+
+
+def project_bb_along_dim(bb, dim):
+    """
+    Project bounding box along a dimension.
+
+    Parameters
+    ----------
+    bb : dict[str, dict[str, float | int]]
+        bounding box
+    dim : str
+        dimension to project along
+
+    Returns
+    -------
+    dict[str, dict[str, float | int]]
+        projected bounding box
+    """
+
+    bb = {
+        key: {dim2: bb[key][dim2] for dim2 in bb[key] if dim2 != dim}
+        for key in bb
+    }
+
+    return bb
