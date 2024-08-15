@@ -164,25 +164,36 @@ def get_blending_weights(
 
     mask = np.zeros([3 + 2 for dim in sdims])
     mask[(slice(1, -1),) * ndim] = 1
-    spacing_support = {
+    support_spacing = {
         dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
         for dim in sdims
     }
+
+    # slightly enlargen the support to avoid edge effects
+    # otherwise there's no smooth transition at shared coordinate boundaries
+    enlargement_fractions = blending_widths
+    support_spacing = {
+        dim: support_spacing[dim]
+        * (source_bb["shape"][dim] - 1 + 2 * enlargement_fractions[dim])
+        / (source_bb["shape"][dim] - 1)
+        for dim in sdims
+    }
+    support_origin = {
+        dim: source_bb["origin"][dim]
+        - enlargement_fractions[dim] * source_bb["spacing"][dim]
+        for dim in sdims
+    }
+
     edt_support = distance_transform_edt(
         mask,
         sampling=[
-            spacing_support[dim] / blending_widths[dim] for dim in sdims
+            support_spacing[dim] / blending_widths[dim] for dim in sdims
         ],
     )
     edt_support = to_spatial_image(
         edt_support,
-        scale={
-            dim: spacing_support[dim]
-            * (target_bb["shape"][dim])
-            / target_bb["shape"][dim]
-            for dim in sdims
-        },
-        translation={dim: source_bb["origin"][dim] for dim in sdims},
+        scale=support_spacing,
+        translation=support_origin,
     )
 
     target_weights = transformation.transform_sim(
