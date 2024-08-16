@@ -100,16 +100,19 @@ def simple_average_fusion(
         Fusion of input views
     """
 
-    # assume views are invalid where weights are zero
-    additive_weights = np.array(
-        [(~np.isnan(tv)).astype(np.float32) for tv in transformed_views]
+    number_of_valid_views = np.zeros(
+        transformed_views[0].shape, dtype=np.float32
     )
+    for tv in transformed_views:
+        number_of_valid_views = np.nansum(
+            [number_of_valid_views, ~np.isnan(tv)], axis=0
+        )
 
-    additive_weights = weights.normalize_weights(additive_weights)
+    number_of_valid_views[number_of_valid_views == 0] = np.nan
 
-    product = transformed_views * additive_weights
-
-    return np.nansum(product, axis=0).astype(transformed_views[0].dtype)
+    return (
+        np.nansum(transformed_views, axis=0) / number_of_valid_views
+    ).astype(transformed_views[0].dtype)
 
 
 def fuse(
@@ -406,7 +409,7 @@ def fuse(
                 sims=sims_slices,
                 params=tmp_params,
                 output_properties=output_chunk_bb_with_overlap,
-                fusion_func=weighted_average_fusion,
+                fusion_func=fusion_func,
                 weights_func=None,
                 weights_func_kwargs=None,
                 trim_overlap_in_pixels=overlap_in_pixels,
