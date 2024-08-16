@@ -10,6 +10,7 @@ import spatial_image as si
 import xarray as xr
 from dask import delayed
 from dask.utils import has_keyword
+from tqdm import tqdm
 
 from multiview_stitcher import (
     mv_graph,
@@ -77,10 +78,45 @@ def weighted_average_fusion(
     return np.nansum(product, axis=0).astype(transformed_views[0].dtype)
 
 
+def simple_average_fusion(
+    transformed_views,
+):
+    """
+    Simple weighted average fusion.
+
+    Parameters
+    ----------
+    transformed_views : list of ndarrays
+        transformed input views
+    blending_weights : list of ndarrays
+        blending weights for each view
+    fusion_weights : list of ndarrays, optional
+        additional view weights for fusion, e.g. contrast weighted scores.
+        By default None.
+
+    Returns
+    -------
+    ndarray
+        Fusion of input views
+    """
+
+    # assume views are invalid where weights are zero
+    additive_weights = np.array(
+        [(~np.isnan(tv)).astype(np.float32) for tv in transformed_views]
+    )
+
+    additive_weights = weights.normalize_weights(additive_weights)
+
+    product = transformed_views * additive_weights
+
+    return np.nansum(product, axis=0).astype(transformed_views[0].dtype)
+
+
 def fuse(
     sims: list,
     transform_key: str = None,
-    fusion_func=weighted_average_fusion,
+    # fusion_func=weighted_average_fusion,
+    fusion_func=simple_average_fusion,
     weights_func=None,
     weights_func_kwargs=None,
     output_spacing: dict[str, float] = None,
@@ -261,8 +297,12 @@ def fuse(
         fused_output_chunks = np.empty(
             np.max(block_indices, 0) + 1, dtype=object
         )
-        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
-            output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
+        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in tqdm(
+            zip(
+                output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
+            ),
+            total=len(output_chunk_bbs),
+            desc="Constructing output dask array graph",
         ):
             # calculate relevant slices for each output chunk
             # this is specific to each non spatial coordinate
