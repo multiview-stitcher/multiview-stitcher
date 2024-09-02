@@ -144,16 +144,14 @@ def get_blending_weights(
     blending_widths: dict[str, float] = None,
 ):
     """
-    _summary_
+    Calculate smooth blending weights for fusion.
 
     Parameters
     ----------
-    target_bb : _type_
-        _description_
-    source_bb : _type_
-        _description_
-    params : _type_
-        _description_
+    target_bb : Target bounding box.
+    source_bb : Source bounding box.
+    params : Parameters for transformation.
+        list of xarray.DataArray
 
     Returns
     -------
@@ -172,32 +170,31 @@ def get_blending_weights(
         dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
         for dim in sdims
     }
+    support_origin = source_bb["origin"]
 
     # slightly enlargen the support to avoid edge effects
     # otherwise there's no smooth transition at shared coordinate boundaries
-    enlargement_fractions = blending_widths
-    support_spacing = {
+    edt_support_spacing = {
         dim: support_spacing[dim]
-        * (source_bb["shape"][dim] - 1 + 2 * enlargement_fractions[dim])
+        * (source_bb["shape"][dim] - 1 + 2 * 1)
         / (source_bb["shape"][dim] - 1)
         for dim in sdims
     }
-    support_origin = {
-        dim: source_bb["origin"][dim]
-        - enlargement_fractions[dim] * source_bb["spacing"][dim]
+    edt_support_origin = {
+        dim: source_bb["origin"][dim] - 1 * source_bb["spacing"][dim]
         for dim in sdims
     }
 
     edt_support = distance_transform_edt(
         mask,
         sampling=[
-            support_spacing[dim] / blending_widths[dim] for dim in sdims
+            edt_support_spacing[dim] / blending_widths[dim] for dim in sdims
         ],
     )
     edt_support = to_spatial_image(
         edt_support,
-        scale=support_spacing,
-        translation=support_origin,
+        scale=edt_support_spacing,
+        translation=edt_support_origin,
     )
 
     target_weights = transformation.transform_sim(
@@ -208,14 +205,29 @@ def get_blending_weights(
         cval=np.nan,
     )
 
-    x_offset = 1
-    x_stretch = 20
+    support = to_spatial_image(
+        mask,
+        scale=support_spacing,
+        translation=support_origin,
+    )
 
-    target_weights = target_weights - x_offset  # w is 0 at offset
-    target_weights = (
-        target_weights * x_stretch / 2.0
-    )  # w is +/-0.5 at offset +/- x_stretch
+    target_support = transformation.transform_sim(
+        support.astype(np.float32),
+        p=np.linalg.inv(affine),
+        output_stack_properties=target_bb,
+        order=0,
+        cval=np.nan,
+    )
 
-    target_weights = 2 / (1 + (1 + np.exp(-target_weights)))
+    target_weights = target_weights * ~np.isnan(target_support)
+
+    def cosine_weights(x):
+        mask = x < 1
+        x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
+        x = np.clip(x, 0, 1)
+        # x[~mask] = 1
+        return x
+
+    target_weights.data = cosine_weights(target_weights.data)
 
     return target_weights

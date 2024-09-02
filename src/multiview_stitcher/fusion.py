@@ -118,8 +118,7 @@ def simple_average_fusion(
 def fuse(
     sims: list,
     transform_key: str = None,
-    # fusion_func=weighted_average_fusion,
-    fusion_func=simple_average_fusion,
+    fusion_func=weighted_average_fusion,
     weights_func=None,
     weights_func_kwargs=None,
     output_spacing: dict[str, float] = None,
