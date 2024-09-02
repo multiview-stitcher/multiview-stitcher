@@ -150,8 +150,10 @@ def get_blending_weights(
     ----------
     target_bb : Target bounding box.
     source_bb : Source bounding box.
-    params : Parameters for transformation.
-        list of xarray.DataArray
+    params : list of xarray.DataArray
+        Transformation parameters for each view.
+    blending_widths : dict
+        Physical blending widths for each dimension.
 
     Returns
     -------
