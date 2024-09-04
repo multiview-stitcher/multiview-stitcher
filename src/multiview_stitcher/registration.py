@@ -1654,7 +1654,20 @@ def compute_pairwise_registrations(
         for pair in edges
     ]
 
-    params = compute(params_xds, scheduler=scheduler)[0]
+    # In case of 3D data, compute pairwise registrations sequentially.
+    # Transformations are still computed in parallel for each pair.
+    # This is to be conservative with memory usage until a more advanced
+    # memory management is implemented. Ideally, registration methods
+    # should report their memory usage and we can use this information
+    # to annotate the dask graph.
+    if scheduler is None:
+        ndim = msi_utils.get_ndim(msims[0])
+        if ndim == 3:
+            logger.info("Computing pairwise registrations sequentially")
+            params = [compute(p, scheduler=scheduler)[0] for p in params_xds]
+        else:
+            logger.info("Computing pairwise registrations in parallel")
+            params = compute(params_xds, scheduler=scheduler)[0]
 
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]

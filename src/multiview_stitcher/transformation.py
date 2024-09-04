@@ -1,5 +1,7 @@
+import dask.array as da
 import numpy as np
 import spatial_image as si
+from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 from scipy.ndimage import affine_transform
 
 from multiview_stitcher import param_utils, spatial_image_utils
@@ -52,17 +54,27 @@ def transform_sim(
         ),
     )
 
-    out_data = affine_transform(
-        sim.data,
-        matrix=matrix_prime,
-        offset=offset_prime,
-        order=order,
-        output_shape=tuple(
+    affine_transform_kwargs = {
+        "matrix": matrix_prime,
+        "offset": offset_prime,
+        "order": order,
+        "output_shape": tuple(
             [output_stack_properties["shape"][dim] for dim in spatial_dims]
         ),
-        mode="constant",
-        cval=cval,
-    )
+        "mode": "constant",
+        "cval": cval,
+    }
+
+    if isinstance(sim.data, da.core.Array):
+        out_data = dask_image_affine_transform(
+            sim.data,
+            **affine_transform_kwargs,
+        )
+    else:
+        out_data = affine_transform(
+            sim.data,
+            **affine_transform_kwargs,
+        )
 
     sim = si.to_spatial_image(
         out_data,
