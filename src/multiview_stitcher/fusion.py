@@ -129,6 +129,7 @@ def fuse(
     output_chunksize: Union[int, dict[str, int]] = None,
     overlap_in_pixels: int = None,
     interpolation_order: int = 1,
+    blending_widths: dict[str, float] = None,
 ):
     """
 
@@ -414,6 +415,7 @@ def fuse(
                 trim_overlap_in_pixels=overlap_in_pixels,
                 interpolation_order=1,
                 full_view_bbs=full_view_bbs,
+                blending_widths=blending_widths,
             )
 
             fused_output_chunk = da.from_delayed(

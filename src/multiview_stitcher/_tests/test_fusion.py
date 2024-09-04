@@ -202,3 +202,35 @@ def test_fused_field_slice():
     ).compute()
 
     assert not any(fused.data.flatten() - imval)
+
+
+def test_blending_widths():
+    """
+    Simple test to check that the blending widths are taken into account
+    """
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
+        sample_data.get_mosaic_sample_data_path()
+    )
+
+    fused_small_bw = (
+        fusion.fuse(
+            sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            blending_widths={dim: 0.001 for dim in ["y", "x"]},
+        )
+        .compute()
+        .data
+    )
+
+    fused_large_bw = (
+        fusion.fuse(
+            sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            blending_widths={dim: 10 for dim in ["y", "x"]},
+        )
+        .compute()
+        .data
+    )
+
+    # make sure the fusion results are different
+    assert not np.allclose(fused_small_bw, fused_large_bw)
