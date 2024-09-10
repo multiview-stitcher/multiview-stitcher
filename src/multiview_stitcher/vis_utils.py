@@ -21,6 +21,10 @@ def plot_positions(
     n_colors=2,
     nscoord=None,
     display_view_indices=True,
+    custom_labels=None,
+    label_size=10,
+    show_plot=True,
+    output_filename=None,
 ):
     """
     Plot tile / view positions in both 2D or 3D.
@@ -41,6 +45,14 @@ def plot_positions(
     nscoord : dict, optional
         non-spatial coordinate to use for visualization (e.g. {'c': 'EGFP', 't': 0}),
         by default {}
+    custom_labels : list of str, optional
+        Custom labels to use for the views, by default None
+    label_size : int, optional
+        Size of the labels, by default 10
+    show_plot : bool, optional
+        Whether to show the plot, by default True
+    output_filename : str, optional
+        Filename where to save the plot if not None, by default None
 
     Returns
     -------
@@ -103,7 +115,11 @@ def plot_positions(
                 z = 0
             else:
                 z, y, x = center
-            ax.text(z, x, y, str(iview), size=10, zorder=1, color="k")
+            if custom_labels is not None:
+                text = custom_labels[iview]
+            else:
+                text = str(iview)
+            ax.text(z, x, y, text, size=label_size, zorder=1, color="k", horizontalalignment="center")
 
     if edges is not None:
         node_poss = [
@@ -163,7 +179,10 @@ def plot_positions(
     ax.invert_zaxis()
 
     plt.tight_layout()
-    plt.show()
+    if output_filename is not None:
+        plt.savefig(output_filename)
+    if show_plot:
+        plt.show()
 
     return fig, ax
 
