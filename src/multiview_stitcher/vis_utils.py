@@ -22,7 +22,7 @@ def plot_positions(
     nscoord=None,
     display_view_indices=True,
     custom_labels=None,
-    label_size=10,
+    view_labels_size=10,
     show_plot=True,
     output_filename=None,
 ):
@@ -47,8 +47,8 @@ def plot_positions(
         by default {}
     custom_labels : list of str, optional
         Custom labels to use for the views, by default None
-    label_size : int, optional
-        Size of the labels, by default 10
+    view_labels_size : int, optional
+        Size of the view labels, by default 10
     show_plot : bool, optional
         Whether to show the plot, by default True
     output_filename : str, optional
@@ -119,7 +119,7 @@ def plot_positions(
                 text = custom_labels[iview]
             else:
                 text = str(iview)
-            ax.text(z, x, y, text, size=label_size, zorder=1, color="k", horizontalalignment="center")
+            ax.text(z, x, y, text, size=view_labels_size, zorder=1, color="k", horizontalalignment="center")
 
     if edges is not None:
         node_poss = [
