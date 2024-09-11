@@ -21,7 +21,7 @@ def plot_positions(
     n_colors=2,
     nscoord=None,
     display_view_indices=True,
-    custom_labels=None,
+    view_labels=None,
     view_labels_size=10,
     show_plot=True,
     output_filename=None,
@@ -45,7 +45,7 @@ def plot_positions(
     nscoord : dict, optional
         non-spatial coordinate to use for visualization (e.g. {'c': 'EGFP', 't': 0}),
         by default {}
-    custom_labels : list of str, optional
+    view_labels : list of str, optional
         Custom labels to use for the views, by default None
     view_labels_size : int, optional
         Size of the view labels, by default 10
@@ -115,8 +115,8 @@ def plot_positions(
                 z = 0
             else:
                 z, y, x = center
-            if custom_labels is not None:
-                text = custom_labels[iview]
+            if view_labels is not None:
+                text = view_labels[iview]
             else:
                 text = str(iview)
             ax.text(z, x, y, text, size=view_labels_size, zorder=1, color="k", horizontalalignment="center")
