@@ -581,14 +581,15 @@ def register_pair_of_msims(
         reg_sims = [sim1, sim2]
 
     if registration_binning is None:
+        logger.info("Determining optimal registration binning")
         registration_binning = get_optimal_registration_binning(
             reg_sims[0], reg_sims[1]
         )
 
-    if (
-        registration_binning is not None
-        and max(registration_binning.values()) > 1
-    ):
+    # logging without use of %s
+    logger.info("Registration binning: %s", registration_binning)
+
+    if max(registration_binning.values()) > 1:
         reg_sims_b = [
             sim.coarsen(registration_binning, boundary="trim")
             .mean()
