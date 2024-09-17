@@ -72,16 +72,19 @@ def get_optimal_registration_binning(
       - sample physical space homogeneously
       - don't occupy too much memory
 
+    Implementation:
+      - input are two spatial images which already overlap
+      - start with binning of 1
+      - if total number of pixels in the stack is too large, double binning of the dimension
+        with smallest spacing (with x and y tied to each other)
     """
 
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim1)
     ndim = len(spatial_dims)
-    spacings = [
+    input_spacings = [
         spatial_image_utils.get_spacing_from_sim(sim, asarray=False)
         for sim in [sim1, sim2]
     ]
-
-    registration_binning = {dim: 1 for dim in spatial_dims}
 
     if overlap_tolerance is not None:
         raise (NotImplementedError("overlap_tolerance"))
@@ -91,14 +94,14 @@ def get_optimal_registration_binning(
         for idim, dim in enumerate(spatial_dims)
     }
 
+    registration_binning = {dim: 1 for dim in spatial_dims}
+    spacings = input_spacings
     while (
         max(
             [
                 np.prod(
                     [
-                        overlap[dim]
-                        / spacings[isim][dim]
-                        / registration_binning[dim]
+                        overlap[dim] / registration_binning[dim]
                         for dim in spatial_dims
                     ]
                 )
@@ -115,14 +118,14 @@ def get_optimal_registration_binning(
         )
 
         if ndim == 3 and dim_to_bin == 0:
-            registration_binning["z"] = registration_binning["z"] * 2
+            registration_binning["z"] = registration_binning["z"] + 1
         else:
             for dim in ["x", "y"]:
-                registration_binning[dim] = registration_binning[dim] * 2
+                registration_binning[dim] = registration_binning[dim] + 1
 
         spacings = [
             {
-                dim: spacings[isim][dim] * registration_binning[dim]
+                dim: input_spacings[isim][dim] * registration_binning[dim]
                 for dim in spatial_dims
             }
             for isim in range(2)
