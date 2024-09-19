@@ -1,4 +1,5 @@
 import copy
+import logging
 import warnings
 from collections.abc import Iterable
 from itertools import chain, product
@@ -25,6 +26,8 @@ with DisableLogger():
     )
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
+
+logger = logging.getLogger(__name__)
 
 
 class NotEnoughOverlapError(Exception):
@@ -559,18 +562,34 @@ def prune_graph_to_alternating_colors(g, n_colors=2, return_colors=True):
 
     # modify overlap values
     # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
+    # TODO: check in which cases this is necessary
 
     g_pruned = copy.deepcopy(g)
 
-    edge_vals = nx.edge_betweenness_centrality(g)
+    centrality = nx.edge_betweenness_centrality(g)
+    max_centrality = max(centrality.values())
+    min_centrality = min(centrality.values())
 
     edges = list(g_pruned.edges(data=True))
+    min_overlap = min([e[2]["overlap"] for e in edges])
+
+    # normalize centrality values
+    if max_centrality > min_centrality:
+        centrality = {
+            e: (centrality[e] - min_centrality)
+            / (max_centrality - min_centrality)
+            * 0.5
+            * min_overlap
+            for e in centrality
+        }
+
+    edge_vals = {}
     for e in edges:
-        edge_vals[tuple(e[:2])] = edge_vals[tuple(e[:2])] + e[2]["overlap"]
+        edge_vals[tuple(e[:2])] = centrality[tuple(e[:2])] + e[2]["overlap"]
+
+    logger.info(edge_vals)
 
     sorted_unique_vals = sorted(np.unique(list(edge_vals.values())))
-
-    # nx.set_edge_attributes(g, edge_vals, name="edge_val")
 
     thresh_ind = 0
     while 1:
@@ -584,6 +603,7 @@ def prune_graph_to_alternating_colors(g, n_colors=2, return_colors=True):
                 (a, b)
                 for a, b, attrs in g_pruned.edges(data=True)
                 if edge_vals[(a, b)] <= sorted_unique_vals[thresh_ind]
+                and min([len(g_pruned.edges(n)) for n in (a, b)]) > 1
             ]
         )
         thresh_ind += 1
