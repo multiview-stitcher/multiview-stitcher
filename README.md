@@ -2,6 +2,7 @@
 [![PyPI](https://img.shields.io/pypi/v/multiview-stitcher.svg?color=green)](https://pypi.org/project/multiview-stitcher)
 [![Python Version](https://img.shields.io/pypi/pyversions/multiview-stitcher.svg?color=green)](https://python.org)
 [![tests](https://github.com/multiview-stitcher/multiview-stitcher/actions/workflows/test_and_deploy.yml/badge.svg)](https://github.com/multiview-stitcher/multiview-stitcher/actions)
+[![DOI](https://zenodo.org/badge/697999800.svg)](https://zenodo.org/doi/10.5281/zenodo.13151252)
 
 
 # multiview-stitcher
@@ -36,14 +37,87 @@ There's an associated napari plugin: [napari-stitcher](https://github.com/multiv
 
 Image data by [Arthur Michaut](https://research.pasteur.fr/fr/member/arthur-michaut/) @ [Jérôme Gros Lab](https://research.pasteur.fr/fr/team/dynamic-regulation-of-morphogenesis/) @ Institut Pasteur.
 
-### Work in progress
+### Code example
 
-WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open but has not been released yet.
+These code snippets walk you through a small stitching workflow consisting of
+1) Preparing the input image data and metadata (tile positions, spacing, channels)
+2) Registering the tiles
+3) Stitching / fusing the tiles
 
-### Previous work
+#### 1) Prepare data for stitching
 
-`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
 
+```python
+import numpy as np
+from multiview_stitcher import msi_utils
+from multiview_stitcher import spatial_image_utils as si_utils
+
+# input data (can be any numpy compatible array: numpy, dask, cupy, etc.)
+tile_arrays = [np.random.randint(0, 100, (2, 10, 100, 100)) for _ in range(3)]
+
+# indicate the tile offsets and spacing
+tile_translations = [
+    {"z": 2.5, "y": -10, "x": 30},
+    {"z": 2.5, "y": 30, "x": 10},
+    {"z": 2.5, "y": 30, "x": 50},
+]
+spacing = {"z": 2, "y": 0.5, "x": 0.5}
+
+channels = ["DAPI", "GFP"]
+
+# build input for stitching
+msims = []
+for tile_array, tile_translation in zip(tile_arrays, tile_translations):
+    sim = si_utils.get_sim_from_array(
+        tile_array,
+        dims=["c", "z", "y", "x"],
+        scale=spacing,
+        translation=tile_translation,
+        transform_key="stage_metadata",
+        c_coords=channels,
+    )
+    msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[]))
+
+# plot the tile configuration
+# from multiview_stitcher import vis_utils
+# fig, ax = vis_utils.plot_positions(msims, transform_key='stage_metadata', use_positional_colors=False)
+```
+
+![Visualization of input tile configuration](docs/images/tile_configuration.png)
+
+#### 2) Register the tiles
+
+```python
+from dask.diagnostics import ProgressBar
+from multiview_stitcher import registration
+
+with ProgressBar():
+    params = registration.register(
+        msims,
+        reg_channel="DAPI",  # channel to use for registration
+        transform_key="stage_metadata",
+        new_transform_key="translation_registered",
+    )
+
+# plot the tile configuration after registration
+# vis_utils.plot_positions(msims, transform_key='translation_registered', use_positional_colors=False)
+```
+
+#### 3) Stitch / fuse the tiles
+```python
+from multiview_stitcher import fusion
+
+fused_sim = fusion.fuse(
+    [msi_utils.get_sim_from_msim(msim) for msim in msims],
+    transform_key="translation_registered",
+)
+
+# get fused array as a dask array
+fused_sim.data
+
+# get fused array as a numpy array
+fused_sim.data.compute()
+```
 
 ----------------------------------
 ## Installation
@@ -56,6 +130,28 @@ or from the source code in this github repository:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
+## Stitching in the browser
+
+`multiview-stitcher` can run without installation in your browser.
+
+### Try it out
+
+- open [JupyterLite](https://jupyter.org/try-jupyter/lab/) in a private browser window
+- upload this notebook into the jupyter lab window: [notebooks/stitching_in_the_browser.ipynb](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks/stitching_in_the_browser.ipynb)
+- upload files to stitch into a 'data' folder in the jupyter lab window
+- follow the notebook
+
+#### Limitations
+- stitching will run with a single thread
+- while the code runs locally, your local file system is not directly accessible from within the browser environment
+
+## Work in progress
+
+WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open and has not reached a stable release yet. The API is subject to change.
+
+## Previous work
+
+`multiview-stitcher` improves and replaces [MVRegFUS](https://github.com/m-albert/MVRegFus).
 
 ## Issues
 

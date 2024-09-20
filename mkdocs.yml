@@ -15,21 +15,32 @@ plugins:
       handlers:
         python:
           paths: [src]
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
 nav:
   - multiview-stitcher:
     - index.md
     - installation.md
-    - getting_started.md
+    - code_example.md
+    - notebooks.md
     - features.md
     - objects.md
     - data_formats.md
     - implementation_details.md
     - napari_stitcher.md
+    - stitching_in_the_browser.md
     - related_projects.md
     - contributing.md
   - API:
     - api/registration.md
-    - api/transformation.md
     - api/fusion.md
 
 theme:

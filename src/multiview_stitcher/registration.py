@@ -27,6 +27,7 @@ except ImportError:
     ants = None
 
 from multiview_stitcher import (
+    fusion,
     msi_utils,
     mv_graph,
     param_utils,
@@ -71,16 +72,19 @@ def get_optimal_registration_binning(
       - sample physical space homogeneously
       - don't occupy too much memory
 
+    Implementation:
+      - input are two spatial images which already overlap
+      - start with binning of 1
+      - if total number of pixels in the stack is too large, double binning of the dimension
+        with smallest spacing (with x and y tied to each other)
     """
 
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim1)
     ndim = len(spatial_dims)
-    spacings = [
+    input_spacings = [
         spatial_image_utils.get_spacing_from_sim(sim, asarray=False)
         for sim in [sim1, sim2]
     ]
-
-    registration_binning = {dim: 1 for dim in spatial_dims}
 
     if overlap_tolerance is not None:
         raise (NotImplementedError("overlap_tolerance"))
@@ -90,14 +94,14 @@ def get_optimal_registration_binning(
         for idim, dim in enumerate(spatial_dims)
     }
 
+    registration_binning = {dim: 1 for dim in spatial_dims}
+    spacings = input_spacings
     while (
         max(
             [
                 np.prod(
                     [
-                        overlap[dim]
-                        / spacings[isim][dim]
-                        / registration_binning[dim]
+                        overlap[dim] / registration_binning[dim]
                         for dim in spatial_dims
                     ]
                 )
@@ -114,14 +118,14 @@ def get_optimal_registration_binning(
         )
 
         if ndim == 3 and dim_to_bin == 0:
-            registration_binning["z"] = registration_binning["z"] * 2
+            registration_binning["z"] = registration_binning["z"] + 1
         else:
             for dim in ["x", "y"]:
-                registration_binning[dim] = registration_binning[dim] * 2
+                registration_binning[dim] = registration_binning[dim] + 1
 
         spacings = [
             {
-                dim: spacings[isim][dim] * registration_binning[dim]
+                dim: input_spacings[isim][dim] * registration_binning[dim]
                 for dim in spatial_dims
             }
             for isim in range(2)
@@ -580,14 +584,15 @@ def register_pair_of_msims(
         reg_sims = [sim1, sim2]
 
     if registration_binning is None:
+        logger.info("Determining optimal registration binning")
         registration_binning = get_optimal_registration_binning(
             reg_sims[0], reg_sims[1]
         )
 
-    if (
-        registration_binning is not None
-        and max(registration_binning.values()) > 1
-    ):
+    # logging without use of %s
+    logger.info("Registration binning: %s", registration_binning)
+
+    if max(registration_binning.values()) > 1:
         reg_sims_b = [
             sim.coarsen(registration_binning, boundary="trim")
             .mean()
@@ -665,7 +670,7 @@ def register_pair_of_msims(
         initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
         pairwise_reg_func_kwargs[
             "initial_affine"
-        ] = param_utils.get_xparam_from_param(initial_affine)
+        ] = param_utils.affine_to_xaffine(initial_affine)
 
     else:
         raise ValueError("Unknown registration function signature")
@@ -703,7 +708,7 @@ def register_pair_of_msims(
 
     param_ds = xr.Dataset(
         data_vars={
-            "transform": param_utils.get_xparam_from_param(affine_phys),
+            "transform": param_utils.affine_to_xaffine(affine_phys),
             "quality": xr.DataArray(quality),
         }
     )
@@ -1443,6 +1448,7 @@ def register(
     msims: list[MultiscaleSpatialImage],
     transform_key,
     reg_channel_index=None,
+    reg_channel=None,
     new_transform_key=None,
     registration_binning=None,
     overlap_tolerance=0.0,
@@ -1478,6 +1484,9 @@ def register(
         Input views
     reg_channel_index : int, optional
         Index of channel to be used for registration, by default None
+    reg_channel : str, optional
+        Name of channel to be used for registration, by default None
+        Overrides reg_channel_index
     transform_key : str, optional
         Extrinsic coordinate system to use as a starting point
         for the registration, by default None
@@ -1538,15 +1547,16 @@ def register(
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-    if reg_channel_index is None:
-        for msim in msims:
-            if "c" in msi_utils.get_dims(msim):
-                raise (Exception("Please choose a registration channel."))
+    if reg_channel is None:
+        if reg_channel_index is None:
+            for msim in msims:
+                if "c" in msi_utils.get_dims(msim):
+                    raise (Exception("Please choose a registration channel."))
+        else:
+            reg_channel = sims[0].coords["c"][reg_channel_index]
 
     msims_reg = [
-        msi_utils.multiscale_sel_coords(
-            msim, {"c": sims[imsim].coords["c"][reg_channel_index]}
-        )
+        msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
         if "c" in msi_utils.get_dims(msim)
         else msim
         for imsim, msim in enumerate(msims)
@@ -1648,7 +1658,20 @@ def compute_pairwise_registrations(
         for pair in edges
     ]
 
-    params = compute(params_xds, scheduler=scheduler)[0]
+    # In case of 3D data, compute pairwise registrations sequentially.
+    # Transformations are still computed in parallel for each pair.
+    # This is to be conservative with memory usage until a more advanced
+    # memory management is implemented. Ideally, registration methods
+    # should report their memory usage and we can use this information
+    # to annotate the dask graph.
+    if scheduler is None:
+        ndim = msi_utils.get_ndim(msims[0])
+        if ndim == 3:
+            logger.info("Computing pairwise registrations sequentially")
+            params = [compute(p, scheduler=scheduler)[0] for p in params_xds]
+        else:
+            logger.info("Computing pairwise registrations in parallel")
+            params = compute(params_xds, scheduler=scheduler)[0]
 
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
@@ -1828,7 +1851,7 @@ E.g. using pip:
     # ants coordinates are in xyz order
     p = param_utils.invert_coordinate_order(p)
 
-    p = param_utils.get_xparam_from_param(p)
+    p = param_utils.affine_to_xaffine(p)
 
     quality = link_quality_metric_func(
         fixed_ants.numpy(), aff["warpedmovout"].numpy()
@@ -1840,3 +1863,42 @@ E.g. using pip:
     reg_result["quality"] = quality
 
     return reg_result
+
+
+def get_pairs_from_sample_masks(
+    mask_sims,
+    transform_key="affine_manual",
+    fused_mask_spacing=None,
+):
+    """
+    Find pairs of tiles that have overlapping/touching masks.
+    Masks are assumed to be binary and can e.g. represent a sample segmentation.
+    """
+
+    with xr.set_options(keep_attrs=True):
+        label_sims = [
+            mask_sim * (i + 1) for i, mask_sim in enumerate(mask_sims)
+        ]
+
+    if fused_mask_spacing is None:
+        fused_mask_spacing = spatial_image_utils.get_spacing_from_sim(
+            label_sims[0]
+        )
+
+    fused_labels = fusion.fuse(
+        label_sims,
+        transform_key=transform_key,
+        fusion_func=lambda transformed_views: np.nanmin(
+            transformed_views, axis=0
+        ),
+        interpolation_order=0,
+        output_spacing=fused_mask_spacing,
+    ).compute()
+
+    fused_labels = fused_labels.compute()
+
+    pairs = mv_graph.get_connected_labels(
+        fused_labels.data, structure=np.ones((3, 3, 3))
+    )
+
+    return pairs, fused_labels

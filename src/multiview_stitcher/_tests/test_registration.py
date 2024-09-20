@@ -433,3 +433,25 @@ def test_global_optimization(transform):
     if transform == "translation":
         for p in params:
             assert np.allclose(p.sel(t=0).data[:2, :2], np.eye(2))
+
+
+def test_reg_channel():
+    example_data_path = sample_data.get_mosaic_sample_data_path()
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    registration.register(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        reg_channel="EGFP",
+    )
+
+    registration.register(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        reg_channel="EGFP",
+        reg_channel_index=99,  # should be ignored
+    )

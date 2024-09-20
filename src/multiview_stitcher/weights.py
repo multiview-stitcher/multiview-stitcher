@@ -1,6 +1,13 @@
-import dask.array as da
+from typing import Union
+
 import numpy as np
-from scipy.ndimage import gaussian_filter
+import xarray as xr
+from scipy.ndimage import distance_transform_edt, gaussian_filter
+from spatial_image import to_spatial_image
+
+from multiview_stitcher import transformation
+
+BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
 def calculate_required_overlap(
@@ -130,82 +137,99 @@ def normalize_weights(weights):
     return weights
 
 
-def get_smooth_border_weight_from_shape(shape, chunks, widths=None):
+def get_blending_weights(
+    target_bb: BoundingBox,
+    source_bb: BoundingBox,
+    affine: xr.DataArray,
+    blending_widths: dict[str, float] = None,
+):
     """
-    Get a weight image for blending that is 0 at the border and 1 at the center.
-    Transition widths can be specified for each dimension.
+    Calculate smooth blending weights for fusion.
 
-    20230926: this adds too many small dask tasks, need to optimize
+    Parameters
+    ----------
+    target_bb : Target bounding box.
+    source_bb : Source bounding box.
+    params : list of xarray.DataArray
+        Transformation parameters for each view.
+    blending_widths : dict
+        Physical blending widths for each dimension.
 
-    Possible better strategy:
-
-    Assume that only the border chunks of the input files need to be different
-    from da.ones.
-
-    OR: multiscale strategy
-    - first fuse smallest scale
-    - then go on with only those chunks that need to be filled in
-    - not clear if it's beneficial, as it's already known which chunks are needed
-
-    OR: Manually construct output array
-
-    [!!] OR: Use interpolation to calculate distance map
-    - reduce input to one value per chunk, i.e. chunksize of [1]*ndim
-    - use this to define which input chunk is required for fusion
-    - also use this to calculate weights at border
-      (only where above coarse interpolation step gave < 1)
-
+    Returns
+    -------
+    target_weights : spatial_image
     """
 
-    ndim = len(shape)
+    if blending_widths is None:
+        blending_widths = {"z": 3, "y": 10, "x": 10}
 
-    # get distance to border for each dim
+    sdims = sorted(source_bb["origin"].keys())[::-1]
+    ndim = len(sdims)
 
-    dim_dists = [
-        da.arange(shape[dim], chunks=chunks[dim]).astype(float)
-        for dim in range(ndim)
-    ]
+    mask = np.zeros([3 + 2 for dim in sdims])
+    mask[(slice(1, -1),) * ndim] = 1
+    support_spacing = {
+        dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
+        for dim in sdims
+    }
+    support_origin = source_bb["origin"]
 
-    dim_dists = [
-        da.min(da.abs(da.stack([dd, dd - shape[idim]])), axis=0)
-        for idim, dd in enumerate(dim_dists)
-    ]
+    # slightly enlargen the support to avoid edge effects
+    # otherwise there's no smooth transition at shared coordinate boundaries
+    edt_support_spacing = {
+        dim: support_spacing[dim]
+        * (source_bb["shape"][dim] - 1 + 2 * 1)
+        / (source_bb["shape"][dim] - 1)
+        for dim in sdims
+    }
+    edt_support_origin = {
+        dim: source_bb["origin"][dim] - 1 * source_bb["spacing"][dim]
+        for dim in sdims
+    }
 
-    dim_ws = [
-        smooth_transition(
-            dim_dists[dim], x_offset=widths[dim], x_stretch=widths[dim]
-        )
-        for dim in range(ndim)
-    ]
+    edt_support = distance_transform_edt(
+        mask,
+        sampling=[
+            edt_support_spacing[dim] / blending_widths[dim] for dim in sdims
+        ],
+    )
+    edt_support = to_spatial_image(
+        edt_support,
+        scale=edt_support_spacing,
+        translation=edt_support_origin,
+    )
 
-    # get product of weights for each dim
-    w = da.ones(shape, chunks=chunks, dtype=float)
-    for dim in range(len(shape)):
-        tmp_dim_w = dim_ws[dim]
-        for _ in range(ndim - dim - 1):
-            tmp_dim_w = tmp_dim_w[:, None]
-        w *= tmp_dim_w
+    target_weights = transformation.transform_sim(
+        edt_support.astype(np.float32),
+        p=np.linalg.inv(affine),
+        output_stack_properties=target_bb,
+        order=1,
+        cval=np.nan,
+    )
 
-    return w
+    support = to_spatial_image(
+        mask,
+        scale=support_spacing,
+        translation=support_origin,
+    )
 
+    target_support = transformation.transform_sim(
+        support.astype(np.float32),
+        p=np.linalg.inv(affine),
+        output_stack_properties=target_bb,
+        order=0,
+        cval=np.nan,
+    )
 
-def smooth_transition(x, x_offset=0.5, x_stretch=None, k=3):
-    """
-    Transform the distance from the border to a weight for blending.
-    """
-    # https://math.stackexchange.com/questions/1832177/sigmoid-function-with-fixed-bounds-and-variable-steepness-partially-solved
+    target_weights = target_weights * ~np.isnan(target_support)
 
-    if x_stretch is None:
-        x_stretch = x_offset
+    def cosine_weights(x):
+        mask = x < 1
+        x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
+        x = np.clip(x, 0, 1)
+        # x[~mask] = 1
+        return x
 
-    xp = x
-    xp = xp - x_offset  # w is 0 at offset
-    xp = xp / x_stretch / 2.0  # w is +/-0.5 at offset +/- x_stretch
+    target_weights.data = cosine_weights(target_weights.data)
 
-    w = 1 - 1 / (1 + (1 / (xp + 0.5 + 1e-9) - 1) ** (-k))
-
-    # w[xp <= -0.5] = 0.0
-    w[xp <= -0.5] = 1e-7
-    w[xp >= 0.5] = 1.0
-
-    return w
+    return target_weights
