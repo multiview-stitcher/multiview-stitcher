@@ -119,7 +119,16 @@ def plot_positions(
                 text = view_labels[iview]
             else:
                 text = str(iview)
-            ax.text(z, x, y, text, size=view_labels_size, zorder=1, color="k", horizontalalignment="center")
+            ax.text(
+                z,
+                x,
+                y,
+                text,
+                size=view_labels_size,
+                zorder=1,
+                color="k",
+                horizontalalignment="center",
+            )
 
     if edges is not None:
         node_poss = [
