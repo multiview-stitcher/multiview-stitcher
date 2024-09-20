@@ -38,10 +38,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install setuptools tox tox-gh-actions
+          python -m pip install setuptools
       - name: Install package
         run: |
-          python -m pip install -e .
+          python -m pip install .[testing]
       - name: checkout czi
         uses: actions/checkout@v4
         if: runner.os == 'Windows'
@@ -53,12 +53,9 @@ jobs:
         if: runner.os == 'Windows'
         run: pip install ./aicspylibczi && rm -rf ./aicspylibczi
         shell: bash
-
-      # this runs the platform-specific tests declared in tox.ini
-      - name: Test with tox
-        uses: aganders3/headless-gui@v1
-        with:
-          run: python -m tox
+      - name: Test with pytest
+        run: |
+          pytest .
         env:
           PLATFORM: ${{ matrix.platform }}
 
