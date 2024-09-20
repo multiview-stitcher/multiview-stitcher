@@ -45,6 +45,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AllenCellModeling/aicspylibczi
+          submodules: true
           path: aicspylibczi
       - name: install czi
         run: pip install ./aicspylibczi
