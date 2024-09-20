@@ -125,8 +125,8 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     if "z" in spatial_dims:
         pixel_sizes["z"] = bioioim.physical_pixel_sizes.Z
 
-    view_sims = []
     if "m" in xim.dims:
+        view_sims = []
         tile_mosaic_positions = bioioim.get_mosaic_tile_positions()
         views = range(len(xim.coords["m"]))
         for _iview, (view, tile_mosaic_position) in enumerate(
@@ -155,37 +155,31 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
             )
 
             view_sims.append(view_sim)
-        else:
-            tile_position = {
-                "y": bioioim.ome_metadata.images[0]
-                .pixels.planes[0]
-                .position_y,
-                "x": bioioim.ome_metadata.images[0]
-                .pixels.planes[0]
-                .position_x,
-            }
-            origin_values = {
-                mosaic_axis: tile_position[mosaic_axis]
-                * pixel_sizes[mosaic_axis]
-                for ima, mosaic_axis in enumerate(["y", "x"])
-            }
-            if "z" in spatial_dims:
-                origin_values["z"] = 0
+        return view_sims
+    else:
+        tile_position = {
+            "y": bioioim.ome_metadata.images[0].pixels.planes[0].position_y,
+            "x": bioioim.ome_metadata.images[0].pixels.planes[0].position_x,
+        }
+        origin_values = {
+            mosaic_axis: tile_position[mosaic_axis] * pixel_sizes[mosaic_axis]
+            for ima, mosaic_axis in enumerate(["y", "x"])
+        }
+        if "z" in spatial_dims:
+            origin_values["z"] = 0
 
-            return [
-                si_utils.get_sim_from_array(
-                    xim.data,
-                    dims=xim.dims,
-                    scale=pixel_sizes,
-                    translation=origin_values,
-                    affine=None,
-                    transform_key=METADATA_TRANSFORM_KEY,
-                    c_coords=xim.coords["c"].values,
-                    t_coords=xim.coords["t"].values,
-                )
-            ]
-
-    return view_sims
+        return [
+            si_utils.get_sim_from_array(
+                xim.data,
+                dims=xim.dims,
+                scale=pixel_sizes,
+                translation=origin_values,
+                affine=None,
+                transform_key=METADATA_TRANSFORM_KEY,
+                c_coords=xim.coords["c"].values,
+                t_coords=xim.coords["t"].values,
+            )
+        ]
 
 
 def save_sim_as_tif(path, sim):
