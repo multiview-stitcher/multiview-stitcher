@@ -119,42 +119,71 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
 
     spatial_dims = [dim for dim in xim.dims if dim in si_utils.SPATIAL_DIMS]
 
-    views = range(len(xim.coords["m"]))
-
     pixel_sizes = {}
     pixel_sizes["x"] = bioioim.physical_pixel_sizes.X
     pixel_sizes["y"] = bioioim.physical_pixel_sizes.Y
     if "z" in spatial_dims:
         pixel_sizes["z"] = bioioim.physical_pixel_sizes.Z
 
-    tile_mosaic_positions = bioioim.get_mosaic_tile_positions()
-
     view_sims = []
-    for _iview, (view, tile_mosaic_position) in enumerate(
-        zip(views, tile_mosaic_positions)
-    ):
-        view_xim = xim.sel(m=view)
+    if "m" in xim.dims:
+        tile_mosaic_positions = bioioim.get_mosaic_tile_positions()
+        views = range(len(xim.coords["m"]))
+        for _iview, (view, tile_mosaic_position) in enumerate(
+            zip(views, tile_mosaic_positions)
+        ):
+            view_xim = xim.sel(m=view)
 
-        origin_values = {
-            mosaic_axis: tile_mosaic_position[ima] * pixel_sizes[mosaic_axis]
-            for ima, mosaic_axis in enumerate(["y", "x"])
-        }
+            origin_values = {
+                mosaic_axis: tile_mosaic_position[ima]
+                * pixel_sizes[mosaic_axis]
+                for ima, mosaic_axis in enumerate(["y", "x"])
+            }
 
-        if "z" in spatial_dims:
-            origin_values["z"] = 0
+            if "z" in spatial_dims:
+                origin_values["z"] = 0
 
-        view_sim = si_utils.get_sim_from_array(
-            view_xim.data,
-            dims=view_xim.dims,
-            scale=pixel_sizes,
-            translation=origin_values,
-            affine=None,
-            transform_key=METADATA_TRANSFORM_KEY,
-            c_coords=view_xim.coords["c"].values,
-            t_coords=view_xim.coords["t"].values,
-        )
+            view_sim = si_utils.get_sim_from_array(
+                view_xim.data,
+                dims=view_xim.dims,
+                scale=pixel_sizes,
+                translation=origin_values,
+                affine=None,
+                transform_key=METADATA_TRANSFORM_KEY,
+                c_coords=view_xim.coords["c"].values,
+                t_coords=view_xim.coords["t"].values,
+            )
 
-        view_sims.append(view_sim)
+            view_sims.append(view_sim)
+        else:
+            tile_position = {
+                "y": bioioim.ome_metadata.images[0]
+                .pixels.planes[0]
+                .position_y,
+                "x": bioioim.ome_metadata.images[0]
+                .pixels.planes[0]
+                .position_x,
+            }
+            origin_values = {
+                mosaic_axis: tile_position[mosaic_axis]
+                * pixel_sizes[mosaic_axis]
+                for ima, mosaic_axis in enumerate(["y", "x"])
+            }
+            if "z" in spatial_dims:
+                origin_values["z"] = 0
+
+            return [
+                si_utils.get_sim_from_array(
+                    xim.data,
+                    dims=xim.dims,
+                    scale=pixel_sizes,
+                    translation=origin_values,
+                    affine=None,
+                    transform_key=METADATA_TRANSFORM_KEY,
+                    c_coords=xim.coords["c"].values,
+                    t_coords=xim.coords["t"].values,
+                )
+            ]
 
     return view_sims
 
