@@ -1772,6 +1772,30 @@ E.g. using pip:
     spatial_dims = fixed_data.dims
     ndim = len(fixed_spacing)
 
+    changed_units = False
+    # fixed_spacing_orig = fixed_spacing.copy()
+    # moving_spacing_orig = moving_spacing.copy()
+    # fixed_origin_orig = fixed_origin.copy()
+    # moving_origin_orig = moving_origin.copy()
+
+    # there's an ants problem with small spacings and mattes mutual information
+    # https://github.com/ANTsX/ANTs/issues/1348
+    if (
+        min(
+            [fixed_spacing[dim] for dim in spatial_dims]
+            + [moving_spacing[dim] for dim in spatial_dims]
+        )
+        < 1e-3
+    ):
+        logger.info("Scaling units for ANTsPy registration.")
+        changed_units = True
+        unit_scale_factor = 1e3
+        for dim in spatial_dims:
+            fixed_spacing[dim] = unit_scale_factor * fixed_spacing[dim]
+            moving_spacing[dim] = unit_scale_factor * moving_spacing[dim]
+            fixed_origin[dim] = unit_scale_factor * fixed_origin[dim]
+            moving_origin[dim] = unit_scale_factor * moving_origin[dim]
+
     # convert input images to ants images
     fixed_ants = ants.from_numpy(
         fixed_data.astype(np.float32),
@@ -1852,6 +1876,9 @@ E.g. using pip:
     p = param_utils.invert_coordinate_order(p)
 
     p = param_utils.affine_to_xaffine(p)
+
+    if changed_units:
+        p.data[:ndim, ndim] = p.data[:ndim, ndim] / unit_scale_factor
 
     quality = link_quality_metric_func(
         fixed_ants.numpy(), aff["warpedmovout"].numpy()
