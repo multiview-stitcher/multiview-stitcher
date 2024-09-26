@@ -1672,6 +1672,8 @@ def compute_pairwise_registrations(
         else:
             logger.info("Computing pairwise registrations in parallel")
             params = compute(params_xds, scheduler=scheduler)[0]
+    else:
+        params = compute(params_xds, scheduler=scheduler)[0]
 
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
