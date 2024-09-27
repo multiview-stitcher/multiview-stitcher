@@ -888,7 +888,8 @@ pairs : list of tuples, optional
 
           <details class="quote">
             <summary>Source code in <code>src/multiview_stitcher/registration.py</code></summary>
-            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-1447">1447</a></span>
+            <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-1446">1446</a></span>
+<span class="normal"><a href="#__codelineno-0-1447">1447</a></span>
 <span class="normal"><a href="#__codelineno-0-1448">1448</a></span>
 <span class="normal"><a href="#__codelineno-0-1449">1449</a></span>
 <span class="normal"><a href="#__codelineno-0-1450">1450</a></span>
@@ -1072,193 +1073,192 @@ pairs : list of tuples, optional
 <span class="normal"><a href="#__codelineno-0-1628">1628</a></span>
 <span class="normal"><a href="#__codelineno-0-1629">1629</a></span>
 <span class="normal"><a href="#__codelineno-0-1630">1630</a></span>
-<span class="normal"><a href="#__codelineno-0-1631">1631</a></span>
-<span class="normal"><a href="#__codelineno-0-1632">1632</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
-</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a>    <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
-</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a>    <span class="n">transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a>    <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a>    <span class="n">reg_channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a>    <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>    <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a>    <span class="n">overlap_tolerance</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a>    <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span>
-</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a>    <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>    <span class="n">groupwise_resolution_method</span><span class="o">=</span><span class="s2">&quot;global_optimization&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a>    <span class="n">groupwise_resolution_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>    <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s2">&quot;alternating_pattern&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>    <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>    <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
-</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>    <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>    <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a>    <span class="n">scheduler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a><span class="p">):</span>
-</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a>
-</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a><span class="sd">    Register a list of views to a common extrinsic coordinate system.</span>
-</span><span id="__span-0-1469"><a id="__codelineno-0-1469" name="__codelineno-0-1469"></a>
-</span><span id="__span-0-1470"><a id="__codelineno-0-1470" name="__codelineno-0-1470"></a><span class="sd">    This function is the main entry point for registration.</span>
-</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a>
-</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a><span class="sd">    1) Build a graph of pairwise overlaps between views</span>
-</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a><span class="sd">    2) Determine registration pairs from this graph</span>
-</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a><span class="sd">    3) Register each pair of views.</span>
-</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a><span class="sd">       Need to add option to pass registration functions here.</span>
-</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a><span class="sd">    4) Determine the parameters mapping each view into the new extrinsic</span>
-</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a><span class="sd">       coordinate system.</span>
-</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a><span class="sd">       Currently done by determining a reference view and concatenating for reach</span>
-</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a><span class="sd">       view the pairwise transforms along the shortest paths towards the ref view.</span>
-</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a>
-</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a><span class="sd">    Parameters</span>
-</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a><span class="sd">    ----------</span>
-</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a><span class="sd">    msims : list of MultiscaleSpatialImage</span>
-</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a><span class="sd">        Input views</span>
-</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a><span class="sd">    reg_channel_index : int, optional</span>
-</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a><span class="sd">        Index of channel to be used for registration, by default None</span>
-</span><span id="__span-0-1487"><a id="__codelineno-0-1487" name="__codelineno-0-1487"></a><span class="sd">    reg_channel : str, optional</span>
-</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a><span class="sd">        Name of channel to be used for registration, by default None</span>
-</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a><span class="sd">        Overrides reg_channel_index</span>
-</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a><span class="sd">    transform_key : str, optional</span>
-</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a><span class="sd">        Extrinsic coordinate system to use as a starting point</span>
-</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a><span class="sd">        for the registration, by default None</span>
-</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a><span class="sd">    new_transform_key : str, optional</span>
-</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a><span class="sd">        If set, the registration result will be registered as a new extrinsic</span>
-</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a><span class="sd">        coordinate system in the input views (with the given name), by default None</span>
-</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a><span class="sd">    registration_binning : dict, optional</span>
-</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a><span class="sd">        Binning applied to each dimensionn during registration, by default None</span>
-</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a><span class="sd">    overlap_tolerance : float, optional</span>
-</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a><span class="sd">        Extend overlap regions considered for pairwise registration.</span>
-</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a><span class="sd">        - if 0, the overlap region is the intersection of the bounding boxes.</span>
-</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a><span class="sd">        - if &gt; 0, the overlap region is the intersection of the bounding boxes</span>
-</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a><span class="sd">            extended by this value in all spatial dimensions.</span>
-</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a><span class="sd">        - if None, the full images are used for registration</span>
-</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a><span class="sd">    pairwise_reg_func : func, optional</span>
-</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a><span class="sd">        Function used for registration.</span>
-</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a><span class="sd">    pairwise_reg_func_kwargs : dict, optional</span>
-</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a><span class="sd">        Additional keyword arguments passed to the registration function</span>
-</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a><span class="sd">    groupwise_resolution_method : str, optional</span>
-</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a><span class="sd">        Method used to determine the final transform parameters</span>
-</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a><span class="sd">        from pairwise registrations:</span>
-</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a><span class="sd">        - &#39;global_optimization&#39;: global optimization considering all pairwise transforms</span>
-</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a><span class="sd">        - &#39;shortest_paths&#39;: concatenation of pairwise transforms along shortest paths</span>
-</span><span id="__span-0-1513"><a id="__codelineno-0-1513" name="__codelineno-0-1513"></a><span class="sd">    groupwise_resolution_kwargs : dict, optional</span>
-</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a><span class="sd">        Additional keyword arguments passed to the groupwise optimization function</span>
-</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a><span class="sd">    pre_registration_pruning_method : str, optional</span>
-</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a><span class="sd">        Method used to eliminate registration edges (e.g. diagonals) from the view adjacency</span>
-</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a><span class="sd">        graph before registration. Available methods:</span>
-</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a><span class="sd">        - None: No pruning, useful when no regular arrangement is present.</span>
-</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a><span class="sd">        - &#39;alternating_pattern&#39;: Prune to edges between squares of differering</span>
-</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a><span class="sd">            colors in checkerboard pattern. Useful for regular 2D tile arrangements (of both 2D or 3D data).</span>
-</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a><span class="sd">        - &#39;shortest_paths_overlap_weighted&#39;: Prune to shortest paths in overlap graph</span>
-</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a><span class="sd">            (weighted by overlap). Useful to minimize the number of pairwise registrations.</span>
-</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a><span class="sd">        - &#39;otsu_threshold_on_overlap&#39;: Prune to edges with overlap above Otsu threshold.</span>
-</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a><span class="sd">            This is useful for regular 2D or 3D grid arrangements, as diagonal edges will be pruned.</span>
-</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a><span class="sd">    post_registration_do_quality_filter : bool, optional</span>
-</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a><span class="sd">    post_registration_quality_threshold : float, optional</span>
-</span><span id="__span-0-1527"><a id="__codelineno-0-1527" name="__codelineno-0-1527"></a><span class="sd">        Threshold used to filter edges by quality after registration,</span>
-</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a><span class="sd">        by default None (no filtering)</span>
-</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a><span class="sd">    plot_summary : bool, optional</span>
-</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a><span class="sd">        If True, plot a graph showing registered stack boundaries and</span>
-</span><span id="__span-0-1531"><a id="__codelineno-0-1531" name="__codelineno-0-1531"></a><span class="sd">        performed pairwise registrations including correlations, by default False</span>
-</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a><span class="sd">    pairs : list of tuples, optional</span>
-</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a><span class="sd">        If set, initialises the view adjacency graph using the indicates</span>
-</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a><span class="sd">        pairs of view/tile indices, by default None</span>
-</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a>
-</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a><span class="sd">    Returns</span>
-</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a><span class="sd">    -------</span>
-</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a><span class="sd">    list of xr.DataArray</span>
-</span><span id="__span-0-1539"><a id="__codelineno-0-1539" name="__codelineno-0-1539"></a><span class="sd">        Parameters mapping each view into a new extrinsic coordinate system</span>
-</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a><span class="sd">    &quot;&quot;&quot;</span>
-</span><span id="__span-0-1541"><a id="__codelineno-0-1541" name="__codelineno-0-1541"></a>
-</span><span id="__span-0-1542"><a id="__codelineno-0-1542" name="__codelineno-0-1542"></a>    <span class="k">if</span> <span class="n">pairwise_reg_func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1543"><a id="__codelineno-0-1543" name="__codelineno-0-1543"></a>        <span class="n">pairwise_reg_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
-</span><span id="__span-0-1544"><a id="__codelineno-0-1544" name="__codelineno-0-1544"></a>
-</span><span id="__span-0-1545"><a id="__codelineno-0-1545" name="__codelineno-0-1545"></a>    <span class="k">if</span> <span class="n">groupwise_resolution_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1546"><a id="__codelineno-0-1546" name="__codelineno-0-1546"></a>        <span class="n">groupwise_resolution_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
-</span><span id="__span-0-1547"><a id="__codelineno-0-1547" name="__codelineno-0-1547"></a>
-</span><span id="__span-0-1548"><a id="__codelineno-0-1548" name="__codelineno-0-1548"></a>    <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
-</span><span id="__span-0-1549"><a id="__codelineno-0-1549" name="__codelineno-0-1549"></a>
-</span><span id="__span-0-1550"><a id="__codelineno-0-1550" name="__codelineno-0-1550"></a>    <span class="k">if</span> <span class="n">reg_channel</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1551"><a id="__codelineno-0-1551" name="__codelineno-0-1551"></a>        <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1552"><a id="__codelineno-0-1552" name="__codelineno-0-1552"></a>            <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">:</span>
-</span><span id="__span-0-1553"><a id="__codelineno-0-1553" name="__codelineno-0-1553"></a>                <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">):</span>
-</span><span id="__span-0-1554"><a id="__codelineno-0-1554" name="__codelineno-0-1554"></a>                    <span class="k">raise</span> <span class="p">(</span><span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Please choose a registration channel.&quot;</span><span class="p">))</span>
-</span><span id="__span-0-1555"><a id="__codelineno-0-1555" name="__codelineno-0-1555"></a>        <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-1556"><a id="__codelineno-0-1556" name="__codelineno-0-1556"></a>            <span class="n">reg_channel</span> <span class="o">=</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">][</span><span class="n">reg_channel_index</span><span class="p">]</span>
-</span><span id="__span-0-1557"><a id="__codelineno-0-1557" name="__codelineno-0-1557"></a>
-</span><span id="__span-0-1558"><a id="__codelineno-0-1558" name="__codelineno-0-1558"></a>    <span class="n">msims_reg</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-1559"><a id="__codelineno-0-1559" name="__codelineno-0-1559"></a>        <span class="n">msi_utils</span><span class="o">.</span><span class="n">multiscale_sel_coords</span><span class="p">(</span><span class="n">msim</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">reg_channel</span><span class="p">})</span>
-</span><span id="__span-0-1560"><a id="__codelineno-0-1560" name="__codelineno-0-1560"></a>        <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span>
-</span><span id="__span-0-1561"><a id="__codelineno-0-1561" name="__codelineno-0-1561"></a>        <span class="k">else</span> <span class="n">msim</span>
-</span><span id="__span-0-1562"><a id="__codelineno-0-1562" name="__codelineno-0-1562"></a>        <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">)</span>
-</span><span id="__span-0-1563"><a id="__codelineno-0-1563" name="__codelineno-0-1563"></a>    <span class="p">]</span>
-</span><span id="__span-0-1564"><a id="__codelineno-0-1564" name="__codelineno-0-1564"></a>
-</span><span id="__span-0-1565"><a id="__codelineno-0-1565" name="__codelineno-0-1565"></a>    <span class="n">g</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">build_view_adjacency_graph_from_msims</span><span class="p">(</span>
-</span><span id="__span-0-1566"><a id="__codelineno-0-1566" name="__codelineno-0-1566"></a>        <span class="n">msims_reg</span><span class="p">,</span>
-</span><span id="__span-0-1567"><a id="__codelineno-0-1567" name="__codelineno-0-1567"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1568"><a id="__codelineno-0-1568" name="__codelineno-0-1568"></a>        <span class="n">pairs</span><span class="o">=</span><span class="n">pairs</span><span class="p">,</span>
-</span><span id="__span-0-1569"><a id="__codelineno-0-1569" name="__codelineno-0-1569"></a>    <span class="p">)</span>
-</span><span id="__span-0-1570"><a id="__codelineno-0-1570" name="__codelineno-0-1570"></a>
-</span><span id="__span-0-1571"><a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>    <span class="k">if</span> <span class="n">pre_registration_pruning_method</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1572"><a id="__codelineno-0-1572" name="__codelineno-0-1572"></a>        <span class="n">g_reg</span> <span class="o">=</span> <span class="n">prune_view_adjacency_graph</span><span class="p">(</span>
-</span><span id="__span-0-1573"><a id="__codelineno-0-1573" name="__codelineno-0-1573"></a>            <span class="n">g</span><span class="p">,</span>
-</span><span id="__span-0-1574"><a id="__codelineno-0-1574" name="__codelineno-0-1574"></a>            <span class="n">method</span><span class="o">=</span><span class="n">pre_registration_pruning_method</span><span class="p">,</span>
-</span><span id="__span-0-1575"><a id="__codelineno-0-1575" name="__codelineno-0-1575"></a>        <span class="p">)</span>
-</span><span id="__span-0-1576"><a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>    <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-1577"><a id="__codelineno-0-1577" name="__codelineno-0-1577"></a>        <span class="n">g_reg</span> <span class="o">=</span> <span class="n">g</span>
-</span><span id="__span-0-1578"><a id="__codelineno-0-1578" name="__codelineno-0-1578"></a>
-</span><span id="__span-0-1579"><a id="__codelineno-0-1579" name="__codelineno-0-1579"></a>    <span class="n">g_reg_computed</span> <span class="o">=</span> <span class="n">compute_pairwise_registrations</span><span class="p">(</span>
-</span><span id="__span-0-1580"><a id="__codelineno-0-1580" name="__codelineno-0-1580"></a>        <span class="n">msims_reg</span><span class="p">,</span>
-</span><span id="__span-0-1581"><a id="__codelineno-0-1581" name="__codelineno-0-1581"></a>        <span class="n">g_reg</span><span class="p">,</span>
-</span><span id="__span-0-1582"><a id="__codelineno-0-1582" name="__codelineno-0-1582"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1583"><a id="__codelineno-0-1583" name="__codelineno-0-1583"></a>        <span class="n">registration_binning</span><span class="o">=</span><span class="n">registration_binning</span><span class="p">,</span>
-</span><span id="__span-0-1584"><a id="__codelineno-0-1584" name="__codelineno-0-1584"></a>        <span class="n">overlap_tolerance</span><span class="o">=</span><span class="n">overlap_tolerance</span><span class="p">,</span>
-</span><span id="__span-0-1585"><a id="__codelineno-0-1585" name="__codelineno-0-1585"></a>        <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">pairwise_reg_func</span><span class="p">,</span>
-</span><span id="__span-0-1586"><a id="__codelineno-0-1586" name="__codelineno-0-1586"></a>        <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="n">pairwise_reg_func_kwargs</span><span class="p">,</span>
-</span><span id="__span-0-1587"><a id="__codelineno-0-1587" name="__codelineno-0-1587"></a>        <span class="n">scheduler</span><span class="o">=</span><span class="n">scheduler</span><span class="p">,</span>
-</span><span id="__span-0-1588"><a id="__codelineno-0-1588" name="__codelineno-0-1588"></a>    <span class="p">)</span>
-</span><span id="__span-0-1589"><a id="__codelineno-0-1589" name="__codelineno-0-1589"></a>
-</span><span id="__span-0-1590"><a id="__codelineno-0-1590" name="__codelineno-0-1590"></a>    <span class="k">if</span> <span class="n">post_registration_do_quality_filter</span><span class="p">:</span>
-</span><span id="__span-0-1591"><a id="__codelineno-0-1591" name="__codelineno-0-1591"></a>        <span class="c1"># filter edges by quality</span>
-</span><span id="__span-0-1592"><a id="__codelineno-0-1592" name="__codelineno-0-1592"></a>        <span class="n">g_reg_computed</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">filter_edges</span><span class="p">(</span>
-</span><span id="__span-0-1593"><a id="__codelineno-0-1593" name="__codelineno-0-1593"></a>            <span class="n">g_reg_computed</span><span class="p">,</span>
-</span><span id="__span-0-1594"><a id="__codelineno-0-1594" name="__codelineno-0-1594"></a>            <span class="n">threshold</span><span class="o">=</span><span class="n">post_registration_quality_threshold</span><span class="p">,</span>
-</span><span id="__span-0-1595"><a id="__codelineno-0-1595" name="__codelineno-0-1595"></a>            <span class="n">weight_key</span><span class="o">=</span><span class="s2">&quot;quality&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1596"><a id="__codelineno-0-1596" name="__codelineno-0-1596"></a>        <span class="p">)</span>
-</span><span id="__span-0-1597"><a id="__codelineno-0-1597" name="__codelineno-0-1597"></a>
-</span><span id="__span-0-1598"><a id="__codelineno-0-1598" name="__codelineno-0-1598"></a>    <span class="n">params</span><span class="p">,</span> <span class="n">groupwise_opt_info</span> <span class="o">=</span> <span class="n">groupwise_resolution</span><span class="p">(</span>
-</span><span id="__span-0-1599"><a id="__codelineno-0-1599" name="__codelineno-0-1599"></a>        <span class="n">g_reg_computed</span><span class="p">,</span>
-</span><span id="__span-0-1600"><a id="__codelineno-0-1600" name="__codelineno-0-1600"></a>        <span class="n">method</span><span class="o">=</span><span class="n">groupwise_resolution_method</span><span class="p">,</span>
-</span><span id="__span-0-1601"><a id="__codelineno-0-1601" name="__codelineno-0-1601"></a>        <span class="o">**</span><span class="n">groupwise_resolution_kwargs</span><span class="p">,</span>
-</span><span id="__span-0-1602"><a id="__codelineno-0-1602" name="__codelineno-0-1602"></a>    <span class="p">)</span>
-</span><span id="__span-0-1603"><a id="__codelineno-0-1603" name="__codelineno-0-1603"></a>
-</span><span id="__span-0-1604"><a id="__codelineno-0-1604" name="__codelineno-0-1604"></a>    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">params</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="o">.</span><span class="n">nodes</span><span class="p">())]</span>
-</span><span id="__span-0-1605"><a id="__codelineno-0-1605" name="__codelineno-0-1605"></a>
-</span><span id="__span-0-1606"><a id="__codelineno-0-1606" name="__codelineno-0-1606"></a>    <span class="k">if</span> <span class="n">new_transform_key</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="__span-0-1607"><a id="__codelineno-0-1607" name="__codelineno-0-1607"></a>        <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">):</span>
-</span><span id="__span-0-1608"><a id="__codelineno-0-1608" name="__codelineno-0-1608"></a>            <span class="n">msi_utils</span><span class="o">.</span><span class="n">set_affine_transform</span><span class="p">(</span>
-</span><span id="__span-0-1609"><a id="__codelineno-0-1609" name="__codelineno-0-1609"></a>                <span class="n">msim</span><span class="p">,</span>
-</span><span id="__span-0-1610"><a id="__codelineno-0-1610" name="__codelineno-0-1610"></a>                <span class="n">params</span><span class="p">[</span><span class="n">imsim</span><span class="p">],</span>
-</span><span id="__span-0-1611"><a id="__codelineno-0-1611" name="__codelineno-0-1611"></a>                <span class="n">transform_key</span><span class="o">=</span><span class="n">new_transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1612"><a id="__codelineno-0-1612" name="__codelineno-0-1612"></a>                <span class="n">base_transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1613"><a id="__codelineno-0-1613" name="__codelineno-0-1613"></a>            <span class="p">)</span>
-</span><span id="__span-0-1614"><a id="__codelineno-0-1614" name="__codelineno-0-1614"></a>
-</span><span id="__span-0-1615"><a id="__codelineno-0-1615" name="__codelineno-0-1615"></a>        <span class="k">if</span> <span class="n">plot_summary</span><span class="p">:</span>
-</span><span id="__span-0-1616"><a id="__codelineno-0-1616" name="__codelineno-0-1616"></a>            <span class="n">edges</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="o">.</span><span class="n">edges</span><span class="p">())</span>
-</span><span id="__span-0-1617"><a id="__codelineno-0-1617" name="__codelineno-0-1617"></a>            <span class="n">_fig</span><span class="p">,</span> <span class="n">_ax</span> <span class="o">=</span> <span class="n">vis_utils</span><span class="o">.</span><span class="n">plot_positions</span><span class="p">(</span>
-</span><span id="__span-0-1618"><a id="__codelineno-0-1618" name="__codelineno-0-1618"></a>                <span class="n">msims</span><span class="p">,</span>
-</span><span id="__span-0-1619"><a id="__codelineno-0-1619" name="__codelineno-0-1619"></a>                <span class="n">transform_key</span><span class="o">=</span><span class="n">new_transform_key</span><span class="p">,</span>
-</span><span id="__span-0-1620"><a id="__codelineno-0-1620" name="__codelineno-0-1620"></a>                <span class="n">edges</span><span class="o">=</span><span class="n">edges</span><span class="p">,</span>
-</span><span id="__span-0-1621"><a id="__codelineno-0-1621" name="__codelineno-0-1621"></a>                <span class="n">edge_color_vals</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
-</span><span id="__span-0-1622"><a id="__codelineno-0-1622" name="__codelineno-0-1622"></a>                    <span class="p">[</span>
-</span><span id="__span-0-1623"><a id="__codelineno-0-1623" name="__codelineno-0-1623"></a>                        <span class="n">g_reg_computed</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="o">*</span><span class="n">e</span><span class="p">)[</span><span class="s2">&quot;quality&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
-</span><span id="__span-0-1624"><a id="__codelineno-0-1624" name="__codelineno-0-1624"></a>                        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">edges</span>
-</span><span id="__span-0-1625"><a id="__codelineno-0-1625" name="__codelineno-0-1625"></a>                    <span class="p">]</span>
-</span><span id="__span-0-1626"><a id="__codelineno-0-1626" name="__codelineno-0-1626"></a>                <span class="p">),</span>
-</span><span id="__span-0-1627"><a id="__codelineno-0-1627" name="__codelineno-0-1627"></a>                <span class="n">edge_label</span><span class="o">=</span><span class="s2">&quot;pairwise view correlation&quot;</span><span class="p">,</span>
-</span><span id="__span-0-1628"><a id="__codelineno-0-1628" name="__codelineno-0-1628"></a>                <span class="n">display_view_indices</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-0-1629"><a id="__codelineno-0-1629" name="__codelineno-0-1629"></a>                <span class="n">use_positional_colors</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-1630"><a id="__codelineno-0-1630" name="__codelineno-0-1630"></a>            <span class="p">)</span>
-</span><span id="__span-0-1631"><a id="__codelineno-0-1631" name="__codelineno-0-1631"></a>
-</span><span id="__span-0-1632"><a id="__codelineno-0-1632" name="__codelineno-0-1632"></a>    <span class="k">return</span> <span class="n">params</span>  <span class="c1"># , groupwise_opt_info</span>
+<span class="normal"><a href="#__codelineno-0-1631">1631</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-1446"><a id="__codelineno-0-1446" name="__codelineno-0-1446"></a><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+</span><span id="__span-0-1447"><a id="__codelineno-0-1447" name="__codelineno-0-1447"></a>    <span class="n">msims</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MultiscaleSpatialImage</span><span class="p">],</span>
+</span><span id="__span-0-1448"><a id="__codelineno-0-1448" name="__codelineno-0-1448"></a>    <span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1449"><a id="__codelineno-0-1449" name="__codelineno-0-1449"></a>    <span class="n">reg_channel_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1450"><a id="__codelineno-0-1450" name="__codelineno-0-1450"></a>    <span class="n">reg_channel</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1451"><a id="__codelineno-0-1451" name="__codelineno-0-1451"></a>    <span class="n">new_transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1452"><a id="__codelineno-0-1452" name="__codelineno-0-1452"></a>    <span class="n">registration_binning</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1453"><a id="__codelineno-0-1453" name="__codelineno-0-1453"></a>    <span class="n">overlap_tolerance</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+</span><span id="__span-0-1454"><a id="__codelineno-0-1454" name="__codelineno-0-1454"></a>    <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span>
+</span><span id="__span-0-1455"><a id="__codelineno-0-1455" name="__codelineno-0-1455"></a>    <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1456"><a id="__codelineno-0-1456" name="__codelineno-0-1456"></a>    <span class="n">groupwise_resolution_method</span><span class="o">=</span><span class="s2">&quot;global_optimization&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1457"><a id="__codelineno-0-1457" name="__codelineno-0-1457"></a>    <span class="n">groupwise_resolution_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1458"><a id="__codelineno-0-1458" name="__codelineno-0-1458"></a>    <span class="n">pre_registration_pruning_method</span><span class="o">=</span><span class="s2">&quot;alternating_pattern&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1459"><a id="__codelineno-0-1459" name="__codelineno-0-1459"></a>    <span class="n">post_registration_do_quality_filter</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-1460"><a id="__codelineno-0-1460" name="__codelineno-0-1460"></a>    <span class="n">post_registration_quality_threshold</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
+</span><span id="__span-0-1461"><a id="__codelineno-0-1461" name="__codelineno-0-1461"></a>    <span class="n">plot_summary</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-1462"><a id="__codelineno-0-1462" name="__codelineno-0-1462"></a>    <span class="n">pairs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1463"><a id="__codelineno-0-1463" name="__codelineno-0-1463"></a>    <span class="n">scheduler</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-1464"><a id="__codelineno-0-1464" name="__codelineno-0-1464"></a><span class="p">):</span>
+</span><span id="__span-0-1465"><a id="__codelineno-0-1465" name="__codelineno-0-1465"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+</span><span id="__span-0-1466"><a id="__codelineno-0-1466" name="__codelineno-0-1466"></a>
+</span><span id="__span-0-1467"><a id="__codelineno-0-1467" name="__codelineno-0-1467"></a><span class="sd">    Register a list of views to a common extrinsic coordinate system.</span>
+</span><span id="__span-0-1468"><a id="__codelineno-0-1468" name="__codelineno-0-1468"></a>
+</span><span id="__span-0-1469"><a id="__codelineno-0-1469" name="__codelineno-0-1469"></a><span class="sd">    This function is the main entry point for registration.</span>
+</span><span id="__span-0-1470"><a id="__codelineno-0-1470" name="__codelineno-0-1470"></a>
+</span><span id="__span-0-1471"><a id="__codelineno-0-1471" name="__codelineno-0-1471"></a><span class="sd">    1) Build a graph of pairwise overlaps between views</span>
+</span><span id="__span-0-1472"><a id="__codelineno-0-1472" name="__codelineno-0-1472"></a><span class="sd">    2) Determine registration pairs from this graph</span>
+</span><span id="__span-0-1473"><a id="__codelineno-0-1473" name="__codelineno-0-1473"></a><span class="sd">    3) Register each pair of views.</span>
+</span><span id="__span-0-1474"><a id="__codelineno-0-1474" name="__codelineno-0-1474"></a><span class="sd">       Need to add option to pass registration functions here.</span>
+</span><span id="__span-0-1475"><a id="__codelineno-0-1475" name="__codelineno-0-1475"></a><span class="sd">    4) Determine the parameters mapping each view into the new extrinsic</span>
+</span><span id="__span-0-1476"><a id="__codelineno-0-1476" name="__codelineno-0-1476"></a><span class="sd">       coordinate system.</span>
+</span><span id="__span-0-1477"><a id="__codelineno-0-1477" name="__codelineno-0-1477"></a><span class="sd">       Currently done by determining a reference view and concatenating for reach</span>
+</span><span id="__span-0-1478"><a id="__codelineno-0-1478" name="__codelineno-0-1478"></a><span class="sd">       view the pairwise transforms along the shortest paths towards the ref view.</span>
+</span><span id="__span-0-1479"><a id="__codelineno-0-1479" name="__codelineno-0-1479"></a>
+</span><span id="__span-0-1480"><a id="__codelineno-0-1480" name="__codelineno-0-1480"></a><span class="sd">    Parameters</span>
+</span><span id="__span-0-1481"><a id="__codelineno-0-1481" name="__codelineno-0-1481"></a><span class="sd">    ----------</span>
+</span><span id="__span-0-1482"><a id="__codelineno-0-1482" name="__codelineno-0-1482"></a><span class="sd">    msims : list of MultiscaleSpatialImage</span>
+</span><span id="__span-0-1483"><a id="__codelineno-0-1483" name="__codelineno-0-1483"></a><span class="sd">        Input views</span>
+</span><span id="__span-0-1484"><a id="__codelineno-0-1484" name="__codelineno-0-1484"></a><span class="sd">    reg_channel_index : int, optional</span>
+</span><span id="__span-0-1485"><a id="__codelineno-0-1485" name="__codelineno-0-1485"></a><span class="sd">        Index of channel to be used for registration, by default None</span>
+</span><span id="__span-0-1486"><a id="__codelineno-0-1486" name="__codelineno-0-1486"></a><span class="sd">    reg_channel : str, optional</span>
+</span><span id="__span-0-1487"><a id="__codelineno-0-1487" name="__codelineno-0-1487"></a><span class="sd">        Name of channel to be used for registration, by default None</span>
+</span><span id="__span-0-1488"><a id="__codelineno-0-1488" name="__codelineno-0-1488"></a><span class="sd">        Overrides reg_channel_index</span>
+</span><span id="__span-0-1489"><a id="__codelineno-0-1489" name="__codelineno-0-1489"></a><span class="sd">    transform_key : str, optional</span>
+</span><span id="__span-0-1490"><a id="__codelineno-0-1490" name="__codelineno-0-1490"></a><span class="sd">        Extrinsic coordinate system to use as a starting point</span>
+</span><span id="__span-0-1491"><a id="__codelineno-0-1491" name="__codelineno-0-1491"></a><span class="sd">        for the registration, by default None</span>
+</span><span id="__span-0-1492"><a id="__codelineno-0-1492" name="__codelineno-0-1492"></a><span class="sd">    new_transform_key : str, optional</span>
+</span><span id="__span-0-1493"><a id="__codelineno-0-1493" name="__codelineno-0-1493"></a><span class="sd">        If set, the registration result will be registered as a new extrinsic</span>
+</span><span id="__span-0-1494"><a id="__codelineno-0-1494" name="__codelineno-0-1494"></a><span class="sd">        coordinate system in the input views (with the given name), by default None</span>
+</span><span id="__span-0-1495"><a id="__codelineno-0-1495" name="__codelineno-0-1495"></a><span class="sd">    registration_binning : dict, optional</span>
+</span><span id="__span-0-1496"><a id="__codelineno-0-1496" name="__codelineno-0-1496"></a><span class="sd">        Binning applied to each dimensionn during registration, by default None</span>
+</span><span id="__span-0-1497"><a id="__codelineno-0-1497" name="__codelineno-0-1497"></a><span class="sd">    overlap_tolerance : float, optional</span>
+</span><span id="__span-0-1498"><a id="__codelineno-0-1498" name="__codelineno-0-1498"></a><span class="sd">        Extend overlap regions considered for pairwise registration.</span>
+</span><span id="__span-0-1499"><a id="__codelineno-0-1499" name="__codelineno-0-1499"></a><span class="sd">        - if 0, the overlap region is the intersection of the bounding boxes.</span>
+</span><span id="__span-0-1500"><a id="__codelineno-0-1500" name="__codelineno-0-1500"></a><span class="sd">        - if &gt; 0, the overlap region is the intersection of the bounding boxes</span>
+</span><span id="__span-0-1501"><a id="__codelineno-0-1501" name="__codelineno-0-1501"></a><span class="sd">            extended by this value in all spatial dimensions.</span>
+</span><span id="__span-0-1502"><a id="__codelineno-0-1502" name="__codelineno-0-1502"></a><span class="sd">        - if None, the full images are used for registration</span>
+</span><span id="__span-0-1503"><a id="__codelineno-0-1503" name="__codelineno-0-1503"></a><span class="sd">    pairwise_reg_func : func, optional</span>
+</span><span id="__span-0-1504"><a id="__codelineno-0-1504" name="__codelineno-0-1504"></a><span class="sd">        Function used for registration.</span>
+</span><span id="__span-0-1505"><a id="__codelineno-0-1505" name="__codelineno-0-1505"></a><span class="sd">    pairwise_reg_func_kwargs : dict, optional</span>
+</span><span id="__span-0-1506"><a id="__codelineno-0-1506" name="__codelineno-0-1506"></a><span class="sd">        Additional keyword arguments passed to the registration function</span>
+</span><span id="__span-0-1507"><a id="__codelineno-0-1507" name="__codelineno-0-1507"></a><span class="sd">    groupwise_resolution_method : str, optional</span>
+</span><span id="__span-0-1508"><a id="__codelineno-0-1508" name="__codelineno-0-1508"></a><span class="sd">        Method used to determine the final transform parameters</span>
+</span><span id="__span-0-1509"><a id="__codelineno-0-1509" name="__codelineno-0-1509"></a><span class="sd">        from pairwise registrations:</span>
+</span><span id="__span-0-1510"><a id="__codelineno-0-1510" name="__codelineno-0-1510"></a><span class="sd">        - &#39;global_optimization&#39;: global optimization considering all pairwise transforms</span>
+</span><span id="__span-0-1511"><a id="__codelineno-0-1511" name="__codelineno-0-1511"></a><span class="sd">        - &#39;shortest_paths&#39;: concatenation of pairwise transforms along shortest paths</span>
+</span><span id="__span-0-1512"><a id="__codelineno-0-1512" name="__codelineno-0-1512"></a><span class="sd">    groupwise_resolution_kwargs : dict, optional</span>
+</span><span id="__span-0-1513"><a id="__codelineno-0-1513" name="__codelineno-0-1513"></a><span class="sd">        Additional keyword arguments passed to the groupwise optimization function</span>
+</span><span id="__span-0-1514"><a id="__codelineno-0-1514" name="__codelineno-0-1514"></a><span class="sd">    pre_registration_pruning_method : str, optional</span>
+</span><span id="__span-0-1515"><a id="__codelineno-0-1515" name="__codelineno-0-1515"></a><span class="sd">        Method used to eliminate registration edges (e.g. diagonals) from the view adjacency</span>
+</span><span id="__span-0-1516"><a id="__codelineno-0-1516" name="__codelineno-0-1516"></a><span class="sd">        graph before registration. Available methods:</span>
+</span><span id="__span-0-1517"><a id="__codelineno-0-1517" name="__codelineno-0-1517"></a><span class="sd">        - None: No pruning, useful when no regular arrangement is present.</span>
+</span><span id="__span-0-1518"><a id="__codelineno-0-1518" name="__codelineno-0-1518"></a><span class="sd">        - &#39;alternating_pattern&#39;: Prune to edges between squares of differering</span>
+</span><span id="__span-0-1519"><a id="__codelineno-0-1519" name="__codelineno-0-1519"></a><span class="sd">            colors in checkerboard pattern. Useful for regular 2D tile arrangements (of both 2D or 3D data).</span>
+</span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a><span class="sd">        - &#39;shortest_paths_overlap_weighted&#39;: Prune to shortest paths in overlap graph</span>
+</span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a><span class="sd">            (weighted by overlap). Useful to minimize the number of pairwise registrations.</span>
+</span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a><span class="sd">        - &#39;otsu_threshold_on_overlap&#39;: Prune to edges with overlap above Otsu threshold.</span>
+</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a><span class="sd">            This is useful for regular 2D or 3D grid arrangements, as diagonal edges will be pruned.</span>
+</span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a><span class="sd">    post_registration_do_quality_filter : bool, optional</span>
+</span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a><span class="sd">    post_registration_quality_threshold : float, optional</span>
+</span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a><span class="sd">        Threshold used to filter edges by quality after registration,</span>
+</span><span id="__span-0-1527"><a id="__codelineno-0-1527" name="__codelineno-0-1527"></a><span class="sd">        by default None (no filtering)</span>
+</span><span id="__span-0-1528"><a id="__codelineno-0-1528" name="__codelineno-0-1528"></a><span class="sd">    plot_summary : bool, optional</span>
+</span><span id="__span-0-1529"><a id="__codelineno-0-1529" name="__codelineno-0-1529"></a><span class="sd">        If True, plot a graph showing registered stack boundaries and</span>
+</span><span id="__span-0-1530"><a id="__codelineno-0-1530" name="__codelineno-0-1530"></a><span class="sd">        performed pairwise registrations including correlations, by default False</span>
+</span><span id="__span-0-1531"><a id="__codelineno-0-1531" name="__codelineno-0-1531"></a><span class="sd">    pairs : list of tuples, optional</span>
+</span><span id="__span-0-1532"><a id="__codelineno-0-1532" name="__codelineno-0-1532"></a><span class="sd">        If set, initialises the view adjacency graph using the indicates</span>
+</span><span id="__span-0-1533"><a id="__codelineno-0-1533" name="__codelineno-0-1533"></a><span class="sd">        pairs of view/tile indices, by default None</span>
+</span><span id="__span-0-1534"><a id="__codelineno-0-1534" name="__codelineno-0-1534"></a>
+</span><span id="__span-0-1535"><a id="__codelineno-0-1535" name="__codelineno-0-1535"></a><span class="sd">    Returns</span>
+</span><span id="__span-0-1536"><a id="__codelineno-0-1536" name="__codelineno-0-1536"></a><span class="sd">    -------</span>
+</span><span id="__span-0-1537"><a id="__codelineno-0-1537" name="__codelineno-0-1537"></a><span class="sd">    list of xr.DataArray</span>
+</span><span id="__span-0-1538"><a id="__codelineno-0-1538" name="__codelineno-0-1538"></a><span class="sd">        Parameters mapping each view into a new extrinsic coordinate system</span>
+</span><span id="__span-0-1539"><a id="__codelineno-0-1539" name="__codelineno-0-1539"></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="__span-0-1540"><a id="__codelineno-0-1540" name="__codelineno-0-1540"></a>
+</span><span id="__span-0-1541"><a id="__codelineno-0-1541" name="__codelineno-0-1541"></a>    <span class="k">if</span> <span class="n">pairwise_reg_func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1542"><a id="__codelineno-0-1542" name="__codelineno-0-1542"></a>        <span class="n">pairwise_reg_func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-0-1543"><a id="__codelineno-0-1543" name="__codelineno-0-1543"></a>
+</span><span id="__span-0-1544"><a id="__codelineno-0-1544" name="__codelineno-0-1544"></a>    <span class="k">if</span> <span class="n">groupwise_resolution_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1545"><a id="__codelineno-0-1545" name="__codelineno-0-1545"></a>        <span class="n">groupwise_resolution_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-0-1546"><a id="__codelineno-0-1546" name="__codelineno-0-1546"></a>
+</span><span id="__span-0-1547"><a id="__codelineno-0-1547" name="__codelineno-0-1547"></a>    <span class="n">sims</span> <span class="o">=</span> <span class="p">[</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span> <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">]</span>
+</span><span id="__span-0-1548"><a id="__codelineno-0-1548" name="__codelineno-0-1548"></a>
+</span><span id="__span-0-1549"><a id="__codelineno-0-1549" name="__codelineno-0-1549"></a>    <span class="k">if</span> <span class="n">reg_channel</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1550"><a id="__codelineno-0-1550" name="__codelineno-0-1550"></a>        <span class="k">if</span> <span class="n">reg_channel_index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1551"><a id="__codelineno-0-1551" name="__codelineno-0-1551"></a>            <span class="k">for</span> <span class="n">msim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">:</span>
+</span><span id="__span-0-1552"><a id="__codelineno-0-1552" name="__codelineno-0-1552"></a>                <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">):</span>
+</span><span id="__span-0-1553"><a id="__codelineno-0-1553" name="__codelineno-0-1553"></a>                    <span class="k">raise</span> <span class="p">(</span><span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Please choose a registration channel.&quot;</span><span class="p">))</span>
+</span><span id="__span-0-1554"><a id="__codelineno-0-1554" name="__codelineno-0-1554"></a>        <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-0-1555"><a id="__codelineno-0-1555" name="__codelineno-0-1555"></a>            <span class="n">reg_channel</span> <span class="o">=</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">][</span><span class="n">reg_channel_index</span><span class="p">]</span>
+</span><span id="__span-0-1556"><a id="__codelineno-0-1556" name="__codelineno-0-1556"></a>
+</span><span id="__span-0-1557"><a id="__codelineno-0-1557" name="__codelineno-0-1557"></a>    <span class="n">msims_reg</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-1558"><a id="__codelineno-0-1558" name="__codelineno-0-1558"></a>        <span class="n">msi_utils</span><span class="o">.</span><span class="n">multiscale_sel_coords</span><span class="p">(</span><span class="n">msim</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">reg_channel</span><span class="p">})</span>
+</span><span id="__span-0-1559"><a id="__codelineno-0-1559" name="__codelineno-0-1559"></a>        <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_dims</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span>
+</span><span id="__span-0-1560"><a id="__codelineno-0-1560" name="__codelineno-0-1560"></a>        <span class="k">else</span> <span class="n">msim</span>
+</span><span id="__span-0-1561"><a id="__codelineno-0-1561" name="__codelineno-0-1561"></a>        <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">)</span>
+</span><span id="__span-0-1562"><a id="__codelineno-0-1562" name="__codelineno-0-1562"></a>    <span class="p">]</span>
+</span><span id="__span-0-1563"><a id="__codelineno-0-1563" name="__codelineno-0-1563"></a>
+</span><span id="__span-0-1564"><a id="__codelineno-0-1564" name="__codelineno-0-1564"></a>    <span class="n">g</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">build_view_adjacency_graph_from_msims</span><span class="p">(</span>
+</span><span id="__span-0-1565"><a id="__codelineno-0-1565" name="__codelineno-0-1565"></a>        <span class="n">msims_reg</span><span class="p">,</span>
+</span><span id="__span-0-1566"><a id="__codelineno-0-1566" name="__codelineno-0-1566"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1567"><a id="__codelineno-0-1567" name="__codelineno-0-1567"></a>        <span class="n">pairs</span><span class="o">=</span><span class="n">pairs</span><span class="p">,</span>
+</span><span id="__span-0-1568"><a id="__codelineno-0-1568" name="__codelineno-0-1568"></a>    <span class="p">)</span>
+</span><span id="__span-0-1569"><a id="__codelineno-0-1569" name="__codelineno-0-1569"></a>
+</span><span id="__span-0-1570"><a id="__codelineno-0-1570" name="__codelineno-0-1570"></a>    <span class="k">if</span> <span class="n">pre_registration_pruning_method</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1571"><a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>        <span class="n">g_reg</span> <span class="o">=</span> <span class="n">prune_view_adjacency_graph</span><span class="p">(</span>
+</span><span id="__span-0-1572"><a id="__codelineno-0-1572" name="__codelineno-0-1572"></a>            <span class="n">g</span><span class="p">,</span>
+</span><span id="__span-0-1573"><a id="__codelineno-0-1573" name="__codelineno-0-1573"></a>            <span class="n">method</span><span class="o">=</span><span class="n">pre_registration_pruning_method</span><span class="p">,</span>
+</span><span id="__span-0-1574"><a id="__codelineno-0-1574" name="__codelineno-0-1574"></a>        <span class="p">)</span>
+</span><span id="__span-0-1575"><a id="__codelineno-0-1575" name="__codelineno-0-1575"></a>    <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-0-1576"><a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>        <span class="n">g_reg</span> <span class="o">=</span> <span class="n">g</span>
+</span><span id="__span-0-1577"><a id="__codelineno-0-1577" name="__codelineno-0-1577"></a>
+</span><span id="__span-0-1578"><a id="__codelineno-0-1578" name="__codelineno-0-1578"></a>    <span class="n">g_reg_computed</span> <span class="o">=</span> <span class="n">compute_pairwise_registrations</span><span class="p">(</span>
+</span><span id="__span-0-1579"><a id="__codelineno-0-1579" name="__codelineno-0-1579"></a>        <span class="n">msims_reg</span><span class="p">,</span>
+</span><span id="__span-0-1580"><a id="__codelineno-0-1580" name="__codelineno-0-1580"></a>        <span class="n">g_reg</span><span class="p">,</span>
+</span><span id="__span-0-1581"><a id="__codelineno-0-1581" name="__codelineno-0-1581"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1582"><a id="__codelineno-0-1582" name="__codelineno-0-1582"></a>        <span class="n">registration_binning</span><span class="o">=</span><span class="n">registration_binning</span><span class="p">,</span>
+</span><span id="__span-0-1583"><a id="__codelineno-0-1583" name="__codelineno-0-1583"></a>        <span class="n">overlap_tolerance</span><span class="o">=</span><span class="n">overlap_tolerance</span><span class="p">,</span>
+</span><span id="__span-0-1584"><a id="__codelineno-0-1584" name="__codelineno-0-1584"></a>        <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">pairwise_reg_func</span><span class="p">,</span>
+</span><span id="__span-0-1585"><a id="__codelineno-0-1585" name="__codelineno-0-1585"></a>        <span class="n">pairwise_reg_func_kwargs</span><span class="o">=</span><span class="n">pairwise_reg_func_kwargs</span><span class="p">,</span>
+</span><span id="__span-0-1586"><a id="__codelineno-0-1586" name="__codelineno-0-1586"></a>        <span class="n">scheduler</span><span class="o">=</span><span class="n">scheduler</span><span class="p">,</span>
+</span><span id="__span-0-1587"><a id="__codelineno-0-1587" name="__codelineno-0-1587"></a>    <span class="p">)</span>
+</span><span id="__span-0-1588"><a id="__codelineno-0-1588" name="__codelineno-0-1588"></a>
+</span><span id="__span-0-1589"><a id="__codelineno-0-1589" name="__codelineno-0-1589"></a>    <span class="k">if</span> <span class="n">post_registration_do_quality_filter</span><span class="p">:</span>
+</span><span id="__span-0-1590"><a id="__codelineno-0-1590" name="__codelineno-0-1590"></a>        <span class="c1"># filter edges by quality</span>
+</span><span id="__span-0-1591"><a id="__codelineno-0-1591" name="__codelineno-0-1591"></a>        <span class="n">g_reg_computed</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">filter_edges</span><span class="p">(</span>
+</span><span id="__span-0-1592"><a id="__codelineno-0-1592" name="__codelineno-0-1592"></a>            <span class="n">g_reg_computed</span><span class="p">,</span>
+</span><span id="__span-0-1593"><a id="__codelineno-0-1593" name="__codelineno-0-1593"></a>            <span class="n">threshold</span><span class="o">=</span><span class="n">post_registration_quality_threshold</span><span class="p">,</span>
+</span><span id="__span-0-1594"><a id="__codelineno-0-1594" name="__codelineno-0-1594"></a>            <span class="n">weight_key</span><span class="o">=</span><span class="s2">&quot;quality&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1595"><a id="__codelineno-0-1595" name="__codelineno-0-1595"></a>        <span class="p">)</span>
+</span><span id="__span-0-1596"><a id="__codelineno-0-1596" name="__codelineno-0-1596"></a>
+</span><span id="__span-0-1597"><a id="__codelineno-0-1597" name="__codelineno-0-1597"></a>    <span class="n">params</span><span class="p">,</span> <span class="n">groupwise_opt_info</span> <span class="o">=</span> <span class="n">groupwise_resolution</span><span class="p">(</span>
+</span><span id="__span-0-1598"><a id="__codelineno-0-1598" name="__codelineno-0-1598"></a>        <span class="n">g_reg_computed</span><span class="p">,</span>
+</span><span id="__span-0-1599"><a id="__codelineno-0-1599" name="__codelineno-0-1599"></a>        <span class="n">method</span><span class="o">=</span><span class="n">groupwise_resolution_method</span><span class="p">,</span>
+</span><span id="__span-0-1600"><a id="__codelineno-0-1600" name="__codelineno-0-1600"></a>        <span class="o">**</span><span class="n">groupwise_resolution_kwargs</span><span class="p">,</span>
+</span><span id="__span-0-1601"><a id="__codelineno-0-1601" name="__codelineno-0-1601"></a>    <span class="p">)</span>
+</span><span id="__span-0-1602"><a id="__codelineno-0-1602" name="__codelineno-0-1602"></a>
+</span><span id="__span-0-1603"><a id="__codelineno-0-1603" name="__codelineno-0-1603"></a>    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">params</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="o">.</span><span class="n">nodes</span><span class="p">())]</span>
+</span><span id="__span-0-1604"><a id="__codelineno-0-1604" name="__codelineno-0-1604"></a>
+</span><span id="__span-0-1605"><a id="__codelineno-0-1605" name="__codelineno-0-1605"></a>    <span class="k">if</span> <span class="n">new_transform_key</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-0-1606"><a id="__codelineno-0-1606" name="__codelineno-0-1606"></a>        <span class="k">for</span> <span class="n">imsim</span><span class="p">,</span> <span class="n">msim</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">msims</span><span class="p">):</span>
+</span><span id="__span-0-1607"><a id="__codelineno-0-1607" name="__codelineno-0-1607"></a>            <span class="n">msi_utils</span><span class="o">.</span><span class="n">set_affine_transform</span><span class="p">(</span>
+</span><span id="__span-0-1608"><a id="__codelineno-0-1608" name="__codelineno-0-1608"></a>                <span class="n">msim</span><span class="p">,</span>
+</span><span id="__span-0-1609"><a id="__codelineno-0-1609" name="__codelineno-0-1609"></a>                <span class="n">params</span><span class="p">[</span><span class="n">imsim</span><span class="p">],</span>
+</span><span id="__span-0-1610"><a id="__codelineno-0-1610" name="__codelineno-0-1610"></a>                <span class="n">transform_key</span><span class="o">=</span><span class="n">new_transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1611"><a id="__codelineno-0-1611" name="__codelineno-0-1611"></a>                <span class="n">base_transform_key</span><span class="o">=</span><span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1612"><a id="__codelineno-0-1612" name="__codelineno-0-1612"></a>            <span class="p">)</span>
+</span><span id="__span-0-1613"><a id="__codelineno-0-1613" name="__codelineno-0-1613"></a>
+</span><span id="__span-0-1614"><a id="__codelineno-0-1614" name="__codelineno-0-1614"></a>        <span class="k">if</span> <span class="n">plot_summary</span><span class="p">:</span>
+</span><span id="__span-0-1615"><a id="__codelineno-0-1615" name="__codelineno-0-1615"></a>            <span class="n">edges</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">g_reg_computed</span><span class="o">.</span><span class="n">edges</span><span class="p">())</span>
+</span><span id="__span-0-1616"><a id="__codelineno-0-1616" name="__codelineno-0-1616"></a>            <span class="n">_fig</span><span class="p">,</span> <span class="n">_ax</span> <span class="o">=</span> <span class="n">vis_utils</span><span class="o">.</span><span class="n">plot_positions</span><span class="p">(</span>
+</span><span id="__span-0-1617"><a id="__codelineno-0-1617" name="__codelineno-0-1617"></a>                <span class="n">msims</span><span class="p">,</span>
+</span><span id="__span-0-1618"><a id="__codelineno-0-1618" name="__codelineno-0-1618"></a>                <span class="n">transform_key</span><span class="o">=</span><span class="n">new_transform_key</span><span class="p">,</span>
+</span><span id="__span-0-1619"><a id="__codelineno-0-1619" name="__codelineno-0-1619"></a>                <span class="n">edges</span><span class="o">=</span><span class="n">edges</span><span class="p">,</span>
+</span><span id="__span-0-1620"><a id="__codelineno-0-1620" name="__codelineno-0-1620"></a>                <span class="n">edge_color_vals</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+</span><span id="__span-0-1621"><a id="__codelineno-0-1621" name="__codelineno-0-1621"></a>                    <span class="p">[</span>
+</span><span id="__span-0-1622"><a id="__codelineno-0-1622" name="__codelineno-0-1622"></a>                        <span class="n">g_reg_computed</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="o">*</span><span class="n">e</span><span class="p">)[</span><span class="s2">&quot;quality&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</span><span id="__span-0-1623"><a id="__codelineno-0-1623" name="__codelineno-0-1623"></a>                        <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">edges</span>
+</span><span id="__span-0-1624"><a id="__codelineno-0-1624" name="__codelineno-0-1624"></a>                    <span class="p">]</span>
+</span><span id="__span-0-1625"><a id="__codelineno-0-1625" name="__codelineno-0-1625"></a>                <span class="p">),</span>
+</span><span id="__span-0-1626"><a id="__codelineno-0-1626" name="__codelineno-0-1626"></a>                <span class="n">edge_label</span><span class="o">=</span><span class="s2">&quot;pairwise view correlation&quot;</span><span class="p">,</span>
+</span><span id="__span-0-1627"><a id="__codelineno-0-1627" name="__codelineno-0-1627"></a>                <span class="n">display_view_indices</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-1628"><a id="__codelineno-0-1628" name="__codelineno-0-1628"></a>                <span class="n">use_positional_colors</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-1629"><a id="__codelineno-0-1629" name="__codelineno-0-1629"></a>            <span class="p">)</span>
+</span><span id="__span-0-1630"><a id="__codelineno-0-1630" name="__codelineno-0-1630"></a>
+</span><span id="__span-0-1631"><a id="__codelineno-0-1631" name="__codelineno-0-1631"></a>    <span class="k">return</span> <span class="n">params</span>  <span class="c1"># , groupwise_opt_info</span>
 </span></code></pre></div></td></tr></table></div>
           </details>
   </div>
