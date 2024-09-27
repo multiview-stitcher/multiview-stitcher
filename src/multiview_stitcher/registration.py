@@ -852,16 +852,17 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     into the coordinates of a new coordinate system.
     """
 
-    # ndim = msi_utils.get_ndim(g_reg.nodes[list(g_reg.nodes)[0]]["msim"])
     ndim = (
         g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
     )
 
     # use quality as weight in shortest path (mean over tp currently)
+    # make sure that quality is non-negative (shortest path algo requires this)
+    quality_min = np.min([g_reg.edges[e]["quality"] for e in g_reg.edges])
     for e in g_reg.edges:
         g_reg.edges[e]["quality_mean"] = np.mean(g_reg.edges[e]["quality"])
         g_reg.edges[e]["quality_mean_inv"] = 1 / (
-            g_reg.edges[e]["quality_mean"] + 0.5
+            (g_reg.edges[e]["quality_mean"] - quality_min) + 0.5
         )
 
     # get directed graph and invert transforms along edges
@@ -890,7 +891,6 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
             )
 
         # get shortest paths to ref_node
-        # paths = nx.shortest_path(g_reg, source=ref_node, weight="overlap_inv")
         paths = {
             n: nx.shortest_path(
                 subgraph, target=n, source=ref_node, weight="quality_mean_inv"
@@ -899,7 +899,6 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
         }
 
         for n in subgraph.nodes:
-            # reg_path = g_reg.nodes[n]["reg_path"]
             reg_path = paths[n]
 
             path_pairs = [
