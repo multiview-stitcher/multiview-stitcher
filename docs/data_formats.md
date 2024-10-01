@@ -8,11 +8,15 @@ Manual reading of tif files is supported with a convenience function.
 
 ## CZI
 
-Mosaic czi file support thanks to [aicsimageio].
+Mosaic czi file support thanks to [bioio].
 
 ## LIF
 
-Mosaic lif file support thanks to [aicsimageio].
+Mosaic lif file support thanks to [bioio].
+
+## ND2
+
+Mosaic nd2 file support thanks to [bioio].
 
 ## NGFF
 
