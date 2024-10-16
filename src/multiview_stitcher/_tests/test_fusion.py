@@ -19,7 +19,16 @@ from multiview_stitcher import (
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
-def test_fuse_sims():
+@pytest.mark.parametrize(
+    "fusion_func",
+    [
+        fusion.weighted_average_fusion,
+        fusion.simple_average_fusion,
+        fusion.max_fusion,
+        fusion.first_available_view_fusion,
+    ],
+)
+def test_fuse_sims(fusion_func):
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
         sample_data.get_mosaic_sample_data_path()
     )
@@ -37,6 +46,7 @@ def test_fuse_sims():
     xfused = fusion.fuse(
         sims,
         transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion_func,
     )
 
     # check output is dask array and hasn't been converted into numpy array
