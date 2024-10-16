@@ -23,23 +23,33 @@ from multiview_stitcher import spatial_image_utils as si_utils
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
-def overlay_fusion(
+def first_available_view_fusion(
     transformed_views,
+    blending_weights,
 ):
     """
-    Simple pixel-wise fusion using first provided view (no blending)
+    Simple pixel-wise fusion using first available view (no blending).
 
     Parameters
     ----------
     transformed_views : list of ndarrays
         transformed input views
+    blending_weights : list of ndarrays
+        blending weights for each view
 
     Returns
     -------
     ndarray
-        Value of first input view at each pixel
+        Value of first available input view at each pixel
     """
-    return transformed_views[0]
+
+    transformed_views = np.array(transformed_views)
+
+    return np.take_along_axis(
+        transformed_views,
+        np.expand_dims(np.argmax(blending_weights > 0, axis=0), axis=0),
+        axis=0,
+    )[0]
 
 
 def max_fusion(
