@@ -1,8 +1,8 @@
 # Overview
 
-[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is an extensible framework including a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
+[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-stitcher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is an extensible framework including a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
-For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-sticher) provides visualization functionality using the Napari viewer, including a standalone widget.
+For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget.
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 

@@ -15,7 +15,7 @@
 [![codecov](https://codecov.io/gh/multiview-stitcher/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/multiview-stitcher/multiview-stitcher)
 -->
 
-[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-sticher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
+[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-stitcher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
 For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget.
 
