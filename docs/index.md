@@ -11,12 +11,14 @@ It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial
 
 ### Napari plugin
 
-There's an associated napari plugin: [napari-stitcher](https://github.com/napari-stitcher).
+There's an associated napari plugin: [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
 
-### Work in progress
-
-WARNING: THIS IS WORK IN PROGRESS, THE API IS NOT YET STABLE.
 
 ### Previous work
 
-`multiview-stitcher` improves and replaces [MVRegFus](https://github.com/multiview-stitcher/MVRegFus).
+`multiview-stitcher` improves and replaces [MVRegFus](https://github.com/m-albert/MVRegFus).
+
+
+!!! note
+
+    `multiview-stitcher` is a work in progress. The API is not yet stable.

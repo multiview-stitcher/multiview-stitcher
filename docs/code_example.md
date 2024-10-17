@@ -1,9 +1,11 @@
 # Code example
 
 These code snippets walk you through a small stitching workflow consisting of
-1) Preparing the input image data and metadata (tile positions, spacing, channels)
-2) Registering the tiles
-3) Stitching / fusing the tiles
+
+  1. Preparing the input image data and metadata (tile positions, spacing, channels)
+  2. Registering the tiles
+  3. Stitching / fusing the tiles
+
 
 ### 1) Prepare data for stitching
 

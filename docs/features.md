@@ -2,66 +2,74 @@
 
 Below is a list of features which are either already implemented or are on the roadmap.
 
+## Dimensionality
+- [x] 2D
+- [x] 3D
+
 ## Registration
 
-### Pairwise registration
-- [x] phase correlation
+### Pairwise registration methods
+- [x] Phase correlation
 - [x] ANTsPy
-- [ ] elastix (`itk-elastix`) will be used for up to affine transformations
-- [ ] bead alignment
-- [ ] phase correlation for rotation + translation
+- [ ] Elastix (`itk-elastix`)
+- [ ] Bead alignment
+- [ ] Phase correlation for rotation + translation
 
-### Group registration
+### Global paramater resolution
 
-- [x] registration graph construction
-- [x] automatic determination of suitable reference view
-- [x] parameter concatenation along graph connectivity paths
-- [ ] global optimization of registration parameters from (potentially overdetermined) pairwise transforms
-- [ ] drift correction / temporal alignment
+- [x] Graph construction
+- [x] Automatic determination of reference view
+- [x] Parameter concatenation along graph connectivity paths
+- [x] Global optimization of registration parameters from (potentially overdetermined) pairwise transforms
 
 ## Transformations
 
-- [x] chunked `dask_image.ndinterp.affine_transform`
-- [ ] cupy-based transform
-- [ ] chaining transformations instead of working with static coordinate systems
+- [x] Chunked `dask_image.ndinterp.affine_transform`
+- [ ] Cupy-based transform
+- [ ] Chaining transformations instead of working with static coordinate systems
 
 ## Fusion
 
-- [x] chunkwise
-- [ ] modular API to plug in different fusion functions including:
-- Supported weights:
-  - [x] blending
-  - [x] content-based
-- Supported fusion methods:
-  - [x] weighted average
-  - [ ] multi-view deconvolution
-- [ ] fusion of overlapping label maps
-- [ ] GPU compatibility
+### General
 
-## Data formats
-- [x] zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: [multiscale-spatial-data](https://github.com/spatial-image/multiscale-spatial-image)
-- [-] czi input
-  - [x] multi-positioning
-  - [ ] light-sheet
-- [x] tif input
-- [x] tif writing
+- [x] Modular API to plug in different fusion and weight functions
+- [ ] Support for fusion label maps
+- [ ] Cupy-based fusion
+
+### Supported fusion methods:
+
+  - [x] Weighted average
+  - [x] Maximum intensity projection
+  - [ ] Multi-view deconvolution
+
+### Supported weights:
+
+  - [x] Linear blending
+  - [x] Content-based
+
+## Supported data formats
+
+- [x] OME-Zarr
+- [x] Zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: [multiscale-spatial-data](https://github.com/spatial-image/multiscale-spatial-image)
+- CZI input
+  - [x] Multi-positioning
+  - [ ] Light-sheet
+- [x] TIF input
+- [x] TIF writing
 
 ## Visualization
 
 ### Napari
-See [napari-stitcher](github.com/napari-stitcher).
+
+See [napari-stitcher](github.com/multiview-stitcher/napari-stitcher).
+
 - [x] 2D slice view: multiscale rendering
 - 3D rendered view:
-  - [x] lowest scale
-  - [ ] chunked rendering
-- [x] colormaps optimized for highlighting differences between overlapping views
-
-## Dimensionality
-- [x] 2d
-- [x] 3d
+  - [x] Lowest scale
+  - [ ] Chunked rendering
+- [x] Colormaps optimized for highlighting differences between overlapping views
 
 ## Supported usage modes
-- [x] as a library to build custom reconstruction workflows
-- [ ] predefined workflows/pipelines adapted to specific setups
-- [(x)] napari plugin
-- [ ] processing on HPC
+- [x] As a library to build custom reconstruction workflows
+- [x] Napari plugin
+- [ ] Convenience function for processing on HPC

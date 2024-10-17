@@ -69,4 +69,4 @@ Further fusion weights can be obtained by the weight calculation function specif
 
 ### Content based fusion
 
-To improve multi-view fusion in the context of strongly scattering samples, [content-based fusion](https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf) turns out to be helpful. This fusion method is available in `multiview-stitcher` by using `multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion, weights_method=weights.content_based)` (see [above](###Fusion-framework)).
+To improve multi-view fusion in the context of strongly scattering samples, [content-based fusion](https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf) turns out to be helpful. This fusion method is available in `multiview-stitcher` by using `multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion, weights_method=weights.content_based)`.

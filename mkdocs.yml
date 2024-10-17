@@ -15,7 +15,13 @@ plugins:
       handlers:
         python:
           paths: [src]
+          selection:
+            docstring_style: numpy
   - search
+  - mermaid2:
+      version: 11.3.0
+      arguments:
+        securityLevel: 'loose'
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -24,22 +30,32 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  # https://squidfunk.github.io/mkdocs-material/reference/admonitions
+  - admonition
+  - pymdownx.details
   - pymdownx.superfences
 
 nav:
-  - multiview-stitcher:
-    - index.md
-    - installation.md
-    - code_example.md
-    - notebooks.md
-    - features.md
-    - objects.md
-    - data_formats.md
-    - implementation_details.md
-    - napari_stitcher.md
-    - stitching_in_the_browser.md
-    - related_projects.md
-    - contributing.md
+  - index.md
+  - installation.md
+  - code_example.md
+  - chart.md
+  - notebooks.md
+  - features.md
+  - data_formats.md
+  - implementation_details.md
+  - objects.md
+  - napari_stitcher.md
+  - stitching_in_the_browser.md
+  - related_projects.md
+  - contributing.md
   - API:
     - api/registration.md
     - api/fusion.md
@@ -50,8 +66,10 @@ theme:
     - content.tabs.link
     - content.code.annotate
     - content.code.copy
-    - navigation.tabs
+    # - navigation.tabs
     - navigation.footer  # next/previous links in footer
+    - navigation.instant
+    - navigation.instant.progress
   icon:
     logo: fontawesome/solid/clone
     repo: fontawesome/brands/github

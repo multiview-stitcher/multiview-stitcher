@@ -1,11 +1,12 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: check-docstring-first
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: check-yaml # checks for correct yaml syntax for github actions ex.
+        args: ['--unsafe']
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.0.290
     hooks:
