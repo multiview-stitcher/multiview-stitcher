@@ -61,7 +61,7 @@ Below is a list of features which are either already implemented or are on the r
 
 ### Napari
 
-See [napari-stitcher](github.com/multiview-stitcher/napari-stitcher).
+See [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
 
 - [x] 2D slice view: multiscale rendering
 - 3D rendered view:
