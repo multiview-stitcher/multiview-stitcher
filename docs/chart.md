@@ -4,6 +4,7 @@
 ### Higher-level
 
 ```mermaid
+%%{init: { "graph": { "htmlLabels": true, "curve": "linear" } } }%%
 graph TD
 %%   A[Numpy-like arrays] --> |Define geometry| B{Tiles};
   Tiles@{ shape: procs, label: "Tiles"}
@@ -15,15 +16,15 @@ graph TD
   ArrayDA@{ shape: win-pane, label: "Dask" }
   ArrayCP@{ shape: win-pane, label: "CuPy" }
 
-  Scale@{ shape: notch-rect, label: "Scale<br> Translation" }
-  Dimensions@{ shape: notch-rect, label: "Image dimensions<br>(C,) (T,) (Z,) Y, X" }
+  Scale@{ shape: notch-rect, label: "Scale\n Translation" }
+  Dimensions@{ shape: notch-rect, label: "Image dimensions\n(C,) (T,) (Z,) Y, X" }
 
   Fused@{ shape: tag-rect, label: "Fused image" }
-  Fuse@{ shape: circle, label: "Fuse tiles"}
+  Fuse@{ shape: rounded, label: "Fuse tiles"}
 
-  GraphConst@{ shape: circle, label: "Construct graph" }
-  PairReg@{ shape: circle, label: "Pairwise<br>view registration" }
-  GloRes@{ shape: circle, label: "Global parameter<br>resolution" }
+  GraphConst@{ shape: rounded, label: "Construct graph" }
+  PairReg@{ shape: rounded, label: "Pairwise\n view registration" }
+  GloRes@{ shape: rounded, label: "Global parameter\n resolution" }
   Params@{ shape: procs, label: "Transform parameters"}
 
   Storage@{ shape: lin-cyl, label: "Storage" }
@@ -32,10 +33,10 @@ graph TD
 %%   Tile2 --> Tiles
   TileN --> Tiles
 
-  Tiles --> |Select initial<br> transform_key| GraphConst
+  Tiles --> |Select initial transform_key| GraphConst
   Params --> |Set new transform_key| Tiles
 
-  Tiles --> |Select<br> transform_key| Fuse
+  Tiles --> |Select transform_key| Fuse
 
   subgraph Input tile definition
     subgraph Input-arrays
@@ -44,7 +45,7 @@ graph TD
         ArrayCP
     end
     Input-arrays --> Tile_i
-    Scale --> |Defines default<br> transform_key| Tile_i
+    Scale --> |Defines default transform_key| Tile_i
     Dimensions --> Tile_i
     %% Array2 --> Tile1
     %% Scale2 --> Tile2
@@ -77,8 +78,8 @@ graph TD
   ArrayDA@{ shape: win-pane, label: "Dask" }
   ArrayCP@{ shape: win-pane, label: "CuPy" }
 
-  Scale@{ shape: notch-rect, label: "Scale<br> Translation" }
-  Dimensions@{ shape: notch-rect, label: "Image dimensions<br>(C,) (T,) (Z,) Y, X" }
+  Scale@{ shape: notch-rect, label: "Scale Translation" }
+  Dimensions@{ shape: notch-rect, label: "Image dimensions\n(C,) (T,) (Z,) Y, X" }
 
   Fused@{ shape: tag-rect, label: "Fused image" }
   Fuse@{ shape: circle, label: "Fuse tiles"}
@@ -125,10 +126,10 @@ graph TD
   Tile_i --> Tiles
   TileN --> Tiles
 
-  Tiles --> |Select initial<br> transform_key| Graph-construction
+  Tiles --> |Select initial transform_key| Graph-construction
   Params --> |Set new transform_key| Tiles
 
-  Tiles --> |Select<br> transform_key| Fuse
+  Tiles --> |Select transform_key| Fuse
 
   subgraph Input tile definition
     subgraph Input-arrays
@@ -137,7 +138,7 @@ graph TD
         ArrayCP
     end
     Input-arrays --> Tile_i
-    Scale --> |Defines default<br> transform_key| Tile_i
+    Scale --> |Defines default transform_key| Tile_i
     Dimensions --> Tile_i
     TileN
   end
