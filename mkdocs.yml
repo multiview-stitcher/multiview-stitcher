@@ -70,15 +70,17 @@ theme:
     - navigation.footer  # next/previous links in footer
     - navigation.instant
     - navigation.instant.progress
+  logo: images/logo.png
   icon:
-    logo: fontawesome/solid/clone
+    # logo: fontawesome/solid/clone
+
     repo: fontawesome/brands/github
   favicon:
   palette:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: dark blue
+      primary: white
       accent: dark blue
       toggle:
         icon: material/lightbulb-outline
@@ -86,8 +88,8 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: teal
-      accent: light green
+      primary: grey
+      accent: light blue
       toggle:
         icon: material/lightbulb
         name: Switch to light mode

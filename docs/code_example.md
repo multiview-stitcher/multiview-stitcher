@@ -7,7 +7,7 @@ These code snippets walk you through a small stitching workflow consisting of
   3. Stitching / fusing the tiles
 
 
-### 1) Prepare data for stitching
+#### 1) Prepare data for stitching
 
 
 ```python
@@ -48,7 +48,7 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 
 ![Visualization of input tile configuration](images/tile_configuration.png)
 
-### 2) Register the tiles
+#### 2) Register the tiles
 
 ```python
 from dask.diagnostics import ProgressBar
@@ -66,7 +66,7 @@ with ProgressBar():
 # vis_utils.plot_positions(msims, transform_key='translation_registered', use_positional_colors=False)
 ```
 
-### 3) Stitch / fuse the tiles
+#### 3) Stitch / fuse the tiles
 ```python
 from multiview_stitcher import fusion
 
