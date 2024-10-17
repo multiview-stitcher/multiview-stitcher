@@ -7,7 +7,9 @@
     <meta http-equiv="refresh" content="1; url=main/" />
   </noscript>
   <script>
-    window.location.replace("main/" + window.location.hash);
+    window.location.replace(
+      "main/" + window.location.search + window.location.hash
+    );
   </script>
 </head>
 <body>
