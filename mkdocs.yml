@@ -15,6 +15,7 @@ plugins:
       handlers:
         python:
           paths: [src]
+  - search
 
 markdown_extensions:
   - pymdownx.highlight:
