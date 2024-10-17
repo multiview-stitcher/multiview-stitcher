@@ -1,1 +1,22 @@
-[{"version": "0.1.17", "title": "0.1.17", "aliases": []}, {"version": "0.1.14", "title": "0.1.14", "aliases": []}, {"version": "0.1.13", "title": "0.1.13", "aliases": []}, {"version": "main", "title": "main", "aliases": []}]
+[
+  {
+    "version": "main",
+    "title": "main",
+    "aliases": []
+  },
+  {
+    "version": "0.1.17",
+    "title": "0.1.17",
+    "aliases": []
+  },
+  {
+    "version": "0.1.14",
+    "title": "0.1.14",
+    "aliases": []
+  },
+  {
+    "version": "0.1.13",
+    "title": "0.1.13",
+    "aliases": []
+  }
+]
