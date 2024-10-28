@@ -50,7 +50,7 @@ def apply_recursive_dict(func, d):
 
 
 def link_quality_metric_func(im0, im1t):
-    quality = stats.spearmanr(im0.flatten(), im1t.flatten() - 1).correlation
+    quality = stats.spearmanr(im0.flatten(), im1t.flatten()).correlation
     return quality
 
 
