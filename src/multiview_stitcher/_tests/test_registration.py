@@ -321,6 +321,7 @@ def test_get_optimal_registration_binning():
         for pre_reg_pm in [
             "shortest_paths_overlap_weighted",
             "otsu_threshold_on_overlap",
+            "keep_axis_aligned",
             None,
         ]
         for ndim in [2, 3]
