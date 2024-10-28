@@ -352,14 +352,27 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
         return [np.zeros(ndim)]
 
     for t_ in t_candidates:
-        im1t = ndimage.affine_transform(
-            im1 + 1,
-            param_utils.affine_from_translation(list(t_)),
-            order=1,
-            mode="constant",
-            cval=0,
-        )
-        mask = im1t > 0
+        # if im1 is unsigned integer, get mask by assuming there's
+        # no lower value than cval
+        is_unsigned_integer = np.issubdtype(im1.dtype, np.unsignedinteger)
+        if is_unsigned_integer:
+            im1t = ndimage.affine_transform(
+                im1,
+                param_utils.affine_from_translation(list(t_)),
+                order=1,
+                mode="constant",
+                cval=-1,
+            )
+            mask = im1t >= 0
+        else:  # transform to float otherwise
+            im1t = ndimage.affine_transform(
+                im1,
+                param_utils.affine_from_translation(list(t_)),
+                order=1,
+                mode="constant",
+                cval=np.nan,
+            )
+            mask = ~np.isnan(im1t)
 
         if float(np.sum(mask)) / np.prod(im1.shape) < 0.1:
             disambiguate_metric_val = -1
@@ -378,20 +391,27 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
             # correlation for disambiguation (need to solidify this)
             min_shape = np.min(im0[mask_slices].shape)
             ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
-            if ssim_win_size < 3 or np.max(im1t[mask_slices]) <= 1:
+            if (
+                ssim_win_size < 3
+                or (is_unsigned_integer and np.max(im1t[mask_slices]) <= 0)
+                or (
+                    not is_unsigned_integer
+                    and np.all(np.isnan(im1t[mask_slices]))
+                )
+            ):
+                logger.debug("SSIM window size too small")
                 disambiguate_metric_val = -1
             else:
                 disambiguate_metric_val = structural_similarity(
                     im0[mask_slices],
-                    im1t[mask_slices] - 1,
+                    im1t[mask_slices],
                     data_range=data_range,
                     win_size=ssim_win_size,
                 )
-
             # spearman seems to be better than structural_similarity
             # for filtering out bad links between views
             quality_metric_val = link_quality_metric_func(
-                im0[mask], im1t[mask] - 1
+                im0[mask], im1t[mask]
             )
 
         disambiguate_metric_vals.append(disambiguate_metric_val)

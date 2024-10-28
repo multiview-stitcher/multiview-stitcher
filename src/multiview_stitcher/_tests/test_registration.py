@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 import xarray as xr
 from scipy import ndimage
+from skimage.exposure import rescale_intensity
 
 from multiview_stitcher import (
     io,
@@ -32,11 +33,11 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
         for sim in sims
     ]
 
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
     msims = [
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
-
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
     ##### test pairwise registration
     pd = registration.register_pair_of_msims_over_time(
@@ -74,30 +75,60 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
         )
 
     ##### test groupwise registration
-    p = registration.register(
-        [msims[0], msims[1]],
-        registration_binning={dim: 1 for dim in spatial_dims},
-        transform_key=METADATA_TRANSFORM_KEY,
-        pairwise_reg_func=pairwise_reg_func,
-    )
 
-    # for groupwise registration, check relative position of a control point
-    ctrl_pt = np.zeros((2,))
-    ctrl_pts_t = [
-        transformation.transform_pts([ctrl_pt], affine.squeeze())[0]
-        for affine in p
-    ]
-    rel_pos = ctrl_pts_t[0] - ctrl_pts_t[1]
+    ### test for different dtypes and normalizations
 
-    # somehow antspy sporadically yields different results in ~1/10 times
-    if pairwise_reg_func != registration.registration_ANTsPy:
-        # assert offset
-        assert np.allclose(
-            rel_pos,
-            # np.array([2.5, 7.5]),
-            gt_shift,
-            atol=1.5,
+    msimss = [msims]
+
+    sim_extrema = [(float(sim.min()), float(sim.max())) for sim in sims]
+
+    for out_range, dtype in zip(
+        [(-1, 1), (0, 1), (-300, 0)], [np.float32, np.float32, np.int32]
+    ):
+        msimss += [
+            [
+                msi_utils.get_msim_from_sim(
+                    xr.apply_ufunc(
+                        rescale_intensity,
+                        sim,
+                        dask="allowed",
+                        kwargs={
+                            "in_range": sim_extrema[isim],
+                            "out_range": out_range,
+                        },
+                        keep_attrs=True,
+                    ).astype(dtype),
+                    scale_factors=[],
+                )
+                for isim, sim in enumerate(sims)
+            ]
+        ]
+
+    for msims in msimss:
+        p = registration.register(
+            [msims[0], msims[1]],
+            registration_binning={dim: 1 for dim in spatial_dims},
+            transform_key=METADATA_TRANSFORM_KEY,
+            pairwise_reg_func=pairwise_reg_func,
         )
+
+        # for groupwise registration, check relative position of a control point
+        ctrl_pt = np.zeros((2,))
+        ctrl_pts_t = [
+            transformation.transform_pts([ctrl_pt], affine.squeeze())[0]
+            for affine in p
+        ]
+        rel_pos = ctrl_pts_t[0] - ctrl_pts_t[1]
+
+        # somehow antspy sporadically yields different results in ~1/10 times
+        if pairwise_reg_func != registration.registration_ANTsPy:
+            # assert offset
+            assert np.allclose(
+                rel_pos,
+                # np.array([2.5, 7.5]),
+                gt_shift,
+                atol=1.5,
+            )
 
 
 @pytest.mark.parametrize(
