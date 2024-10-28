@@ -1214,12 +1214,16 @@ def optimize_bead_subgraph(
         - 1
     )
 
-    if transform == "translation":
+    if transform.lower() == "translation":
         transform_generator = TranslationTransform(dimensionality=ndim)
-    elif transform == "rigid":
+    elif transform.lower() == "rigid":
         transform_generator = EuclideanTransform(dimensionality=ndim)
-    elif transform == "affine":
+    elif transform.lower() == "affine":
         transform_generator = AffineTransform(dimensionality=ndim)
+    else:
+        raise ValueError(
+            f"Unknown transformation type in parameter resolution: {transform}"
+        )
 
     mean_residuals = []
     dfs = []
