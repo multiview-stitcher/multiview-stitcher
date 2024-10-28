@@ -1570,20 +1570,25 @@ def register(
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-    if reg_channel is None:
-        if reg_channel_index is None:
-            for msim in msims:
-                if "c" in msi_utils.get_dims(msim):
-                    raise (Exception("Please choose a registration channel."))
-        else:
-            reg_channel = sims[0].coords["c"][reg_channel_index]
+    if "c" in msi_utils.get_dims(msims[0]):
+        if reg_channel is None:
+            if reg_channel_index is None:
+                for msim in msims:
+                    if "c" in msi_utils.get_dims(msim):
+                        raise (
+                            Exception("Please choose a registration channel.")
+                        )
+            else:
+                reg_channel = sims[0].coords["c"][reg_channel_index]
 
-    msims_reg = [
-        msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
-        if "c" in msi_utils.get_dims(msim)
-        else msim
-        for imsim, msim in enumerate(msims)
-    ]
+        msims_reg = [
+            msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
+            if "c" in msi_utils.get_dims(msim)
+            else msim
+            for imsim, msim in enumerate(msims)
+        ]
+    else:
+        msims_reg = msims
 
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims_reg,
@@ -1652,7 +1657,7 @@ def register(
                 use_positional_colors=False,
             )
 
-    return params  # , groupwise_opt_info
+    return params
 
 
 def compute_pairwise_registrations(
