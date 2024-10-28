@@ -808,6 +808,10 @@ def prune_view_adjacency_graph(
         Prune to edges with overlap above Otsu threshold.
         This works well for regular grid arrangements, as
         diagonal edges will be pruned.
+    - 'keep_axis_aligned':
+        Keep only edges that align with the axes of the
+        tiles. This is useful for regular grid arrangements,
+        in which case it excludes 'diagonal' edges.
     """
     if not len(g.edges):
         raise (
@@ -819,18 +823,16 @@ def prune_view_adjacency_graph(
 
     if method is None:
         return g
-
-    if method == "alternating_pattern":
+    elif method == "alternating_pattern":
         return mv_graph.prune_graph_to_alternating_colors(
             g, return_colors=False
         )
-
-    if method == "shortest_paths_overlap_weighted":
+    elif method == "shortest_paths_overlap_weighted":
         return mv_graph.prune_to_shortest_weighted_paths(g)
-
     elif method == "otsu_threshold_on_overlap":
         return mv_graph.filter_edges(g)
-
+    elif method == "keep_axis_aligned":
+        return mv_graph.prune_to_axis_aligned_edges(g)
     else:
         raise ValueError(f"Unknown graph pruning method: {method}")
 
@@ -1539,6 +1541,8 @@ def register(
             (weighted by overlap). Useful to minimize the number of pairwise registrations.
         - 'otsu_threshold_on_overlap': Prune to edges with overlap above Otsu threshold.
             This is useful for regular 2D or 3D grid arrangements, as diagonal edges will be pruned.
+        - 'keep_axis_aligned': Keep only edges that align with tile axes. This is useful for regular grid
+            arrangements and to explicitely prune diagonals, e.g. when other methods fail.
     post_registration_do_quality_filter : bool, optional
     post_registration_quality_threshold : float, optional
         Threshold used to filter edges by quality after registration,

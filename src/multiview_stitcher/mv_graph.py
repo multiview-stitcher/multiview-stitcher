@@ -89,6 +89,10 @@ def build_view_adjacency_graph_from_msims(
         for sim in sims
     ]
 
+    nx.set_node_attributes(
+        g, dict(enumerate(stack_propss)), name="stack_props"
+    )
+
     if pairs is None:
         # calculate overlap between pairs of views that are close to each other
         # (closer than the maximum diameter of the views)
@@ -688,6 +692,48 @@ def prune_to_shortest_weighted_paths(g):
                 )
 
     return g_reg
+
+
+def prune_to_axis_aligned_edges(g, max_angle=0.2):
+    """
+    Prune away edges that are not orthogonal to image axes.
+    This is specifically useful for filtering out diagonal edges on a regular grid of views.
+    """
+
+    edges_to_keep = []
+    for edge in g.edges:
+        verts1 = get_vertices_from_stack_props(g.nodes[edge[0]]["stack_props"])
+        verts2 = get_vertices_from_stack_props(g.nodes[edge[1]]["stack_props"])
+        ndim = len(verts1[0])
+
+        # get normalized edge vector
+        edge_vec = np.mean(verts2, 0) - np.mean(verts1, 0)
+        edge_vec = edge_vec / np.linalg.norm(edge_vec)
+
+        # get normalized axes vectors
+        # only calculate this for the first view and assume
+        # both views have the same axes
+
+        # get non diagonal axes
+        vert_grid_inds = np.array(list(np.ndindex(tuple([2] * ndim))))
+
+        ax_vecs = []
+        for ind in range(len(vert_grid_inds)):
+            if np.sum(vert_grid_inds[ind]) != 1:
+                continue
+            ax_vec = verts1[ind] - verts1[0]
+            ax_vecs.append(ax_vec / np.linalg.norm(ax_vec))
+
+        # calc angle between edge and axes
+        for ax_vec in ax_vecs:
+            angle = np.arccos(np.abs(np.dot(edge_vec, ax_vec)))
+            if angle < max_angle:
+                edges_to_keep.append(edge)
+                break
+
+    g_pruned = g.edge_subgraph(edges_to_keep)
+
+    return g_pruned
 
 
 def filter_edges(g, weight_key="overlap", threshold=None):
