@@ -1475,9 +1475,9 @@ def optimize_bead_subgraph(
 
             # check for convergence
             if iteration > 5:
-                abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
-                if abs_change < abs_tol:
-                    break
+                # abs_change = np.abs(mean_residuals[-1] - mean_residuals[-2])
+                # if abs_change < abs_tol:
+                #     break
 
                 rel_change = (
                     np.abs(mean_residuals[-1] - mean_residuals[-2])
@@ -1498,16 +1498,62 @@ def optimize_bead_subgraph(
 
             edges, edge_residual_values = zip(*edge_residuals.items())
 
-            mean_edge_residual_value = np.mean(edge_residual_values)
+            # edge_residual_values /= np.array([g_beads_subgraph.edges[e]["quality"] for e in edges])
 
+            mean_edge_residual_value = np.mean(edge_residual_values)
+            # import pdb; pdb.set_trace()
             if (
-                mean_edge_residual_value < abs_tol
-                or np.max(edge_residual_values) / mean_edge_residual_value
-                < max_residual_max_mean_ratio
+                mean_edge_residual_value
+                < abs_tol
+                # or np.max(edge_residual_values) / mean_edge_residual_value
+                # < max_residual_max_mean_ratio
             ):
                 edge_to_remove = None
             else:
+                edge_residual_values = [
+                    (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
+                    * (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
+                    * np.sqrt(np.max(edge_residuals[e]))
+                    * np.log10(
+                        np.max(
+                            [
+                                len(list(g_beads_subgraph.neighbors(n)))
+                                for n in e
+                            ]
+                        )
+                    )
+                    for e in edges
+                ]
+
                 edge_to_remove = edges[np.argmax(edge_residual_values)]
+                residual_order = np.argsort(edge_residual_values)[::-1]
+                # find first node which had more than one edge and
+                # cutting it would leave its nodes in separate connected components
+                candidate_ind = 0
+                found = False
+                while True:
+                    edge_to_remove = edges[residual_order[candidate_ind]]
+                    nodes = list(edge_to_remove)
+                    # tmp_subgraph = g_beads_subgraph.edge_subgraph(
+                    #     [e for e in g_beads_subgraph.edges if e != edge_to_remove]
+                    # )
+                    # copy graph and remove edge
+                    tmp_subgraph = copy.deepcopy(g_beads_subgraph)
+                    tmp_subgraph.remove_edge(*edge_to_remove)
+                    ccs = list(nx.connected_components(tmp_subgraph))
+                    cc_ind_node1 = [
+                        i for i, cc in enumerate(ccs) if nodes[0] in cc
+                    ][0]
+                    # import pdb; pdb.set_trace()
+                    if nodes[1] in ccs[cc_ind_node1]:
+                        found = True
+                        break
+                    if candidate_ind == len(residual_order) - 1:
+                        break
+                    candidate_ind += 1
+
+                if not found:
+                    edge_to_remove = None
 
         elif type_of_residual == "node":
             mean_iter_residual = np.mean(iter_residuals)
