@@ -630,22 +630,10 @@ def prune_to_shortest_weighted_paths(g):
 
     """
 
-    g_reg = nx.Graph()
-    g_reg.add_nodes_from(g.nodes())
+    g_reg = copy.deepcopy(g)
+    g_reg.remove_edges_from(g_reg.edges)
 
     ccs = list(nx.connected_components(g))
-
-    #     if len(ccs) > 1:
-    #         warnings.warn(
-    #             """
-    # The provided tiles/views are not globally linked, instead there
-    # are %s connected components composed of the following tile indices:\n"""
-    #             % (len(ccs))
-    #             + "\n".join([str(list(cc)) for cc in ccs])
-    #             + "\nProceeding without registering between the disconnected components.",
-    #             UserWarning,
-    #             stacklevel=1,
-    #         )
 
     if np.max([len(cc) for cc in ccs]) < 2:
         raise (NotEnoughOverlapError("No overlap between views/tiles."))
