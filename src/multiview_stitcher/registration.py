@@ -14,6 +14,7 @@ from dask import compute, delayed
 from dask.utils import has_keyword
 from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
+from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 from skimage.transform import (
     EuclideanTransform,
@@ -292,6 +293,16 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
     im0 = fixed_data.data
     im1 = moving_data.data
     ndim = im0.ndim
+
+    # normalize images
+    im0, im1 = (
+        rescale_intensity(
+            im,
+            in_range=(im.min(), im.max()),
+            out_range=(0, 1),
+        )
+        for im in [im0, im1]
+    )
 
     if "upsample_factor" not in kwargs:
         kwargs["upsample_factor"] = 10 if ndim == 2 else 2
