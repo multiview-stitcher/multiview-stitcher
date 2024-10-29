@@ -373,17 +373,15 @@ def test_register(
 @pytest.mark.parametrize(
     """
     groupwise_resolution_method,
-    type_of_residual,
     """,
     [
-        ("shortest_paths", None),
-        ("global_optimization", "edge"),
-        ("global_optimization", "node"),
+        "shortest_paths",
+        "global_optimization",
+        "global_optimization",
     ],
 )
 def test_cc_registration(
     groupwise_resolution_method,
-    type_of_residual,
 ):
     # Generate a cc
     sims = sample_data.generate_tiled_dataset(
@@ -414,11 +412,6 @@ def test_cc_registration(
         pairwise_reg_func=registration.phase_correlation_registration,
         new_transform_key="affine_registered",
         groupwise_resolution_method=groupwise_resolution_method,
-        groupwise_resolution_kwargs={
-            "type_of_residual": type_of_residual,
-        }
-        if type_of_residual is not None
-        else {},
     )
 
     assert len(params) == 3
