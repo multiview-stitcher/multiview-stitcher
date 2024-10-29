@@ -1011,19 +1011,16 @@ def groupwise_resolution_global_optimization(
 
     ndim = g_reg.edges[list(g_reg.edges)[0]]["transform"].shape[-1] - 1
 
-    # # if abs_tol is None, assign multiple of max spacing
-    # if abs_tol is None:
-
-    #     abs_tol = 0.1 * np.max(
-    #         [
-    #             np.max(
-    #                 spatial_image_utils.get_spacing_from_sim(
-    #                     g_reg.nodes[node], asarray=True
-    #                 )
-    #             )
-    #             for node in g_reg.nodes
-    #         ]
-    #     )
+    # if abs_tol is None, assign multiple of max spacing
+    if abs_tol is None:
+        abs_tol = 0.5 * np.max(
+            [
+                np.max(list(g_reg.nodes[n]["stack_props"]["spacing"].values()))
+                for n in g_reg.nodes
+            ]
+        )
+        # log without using f strings
+        logger.info("Global optimization: setting abs_tol to %s", abs_tol)
 
     # find timepoints
     all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
