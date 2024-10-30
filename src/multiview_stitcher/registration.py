@@ -1447,7 +1447,7 @@ def optimize_bead_subgraph(
                 "Removing edge %s and restarting glob opt.", edge_to_remove
             )
         else:
-            logger.debug(
+            logger.info(
                 "Finished glob opt. Max and mean residuals: %s \t %s",
                 np.max(iter_residuals),
                 np.mean(iter_residuals),
