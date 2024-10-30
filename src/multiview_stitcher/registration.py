@@ -1312,7 +1312,7 @@ def optimize_bead_subgraph(
     if max_iter is None:
         max_iter = 100
     if rel_tol is None:
-        rel_tol = 1e-5
+        rel_tol = 1e-2
     if abs_tol is None:
         abs_tol = 1e-7
     if max_residual_max_mean_ratio is None:
@@ -1350,6 +1350,7 @@ def optimize_bead_subgraph(
     # first loop: iterate until max / mean residual ratio is below threshold
     while True:
         # second loop: optimise transformations of each node
+        iter_all_residuals = []
         for iteration in range(max_iter):
             if not len(list(g_beads_subgraph.edges)):
                 break
@@ -1485,15 +1486,36 @@ def optimize_bead_subgraph(
                 )
             )
 
+            iter_all_residuals.append(edge_residuals)
+
+            logger.debug(
+                "Glob opt iter %s, node %s, mean residual %s, max residual %s",
+                iteration,
+                curr_node,
+                mean_residuals[-1],
+                max_residuals[-1],
+            )
+
             # check for convergence
             if iteration > 5:
                 if mean_residuals[-1] < abs_tol:
                     break
-                rel_change = (
-                    np.abs(mean_residuals[-1] - mean_residuals[-2])
-                    / mean_residuals[-1]
+
+                max_rel_change = np.max(
+                    [
+                        np.abs(
+                            (
+                                iter_all_residuals[-1][e]
+                                - iter_all_residuals[-2][e]
+                            )
+                            / mean_residuals[-1]
+                        )
+                        for e in g_beads_subgraph.edges
+                    ]
                 )
-                if rel_change < rel_tol:
+
+                logger.debug("Max rel change %s", max_rel_change)
+                if max_rel_change < rel_tol and mean_residuals[-1] < abs_tol:
                     break
 
         # keep parameters after one iteration if there are
@@ -1556,11 +1578,11 @@ def optimize_bead_subgraph(
         if edge_to_remove is not None:
             g_beads_subgraph.remove_edge(*edge_to_remove)
 
-            # reset view transforms with identity transforms
-            for node in g_beads_subgraph.nodes:
-                g_beads_subgraph.nodes[node][
-                    "affine"
-                ] = param_utils.identity_transform(ndim)
+            # # reset view transforms with identity transforms
+            # for node in g_beads_subgraph.nodes:
+            #     g_beads_subgraph.nodes[node][
+            #         "affine"
+            #     ] = param_utils.identity_transform(ndim)
 
             logger.debug(
                 "Removing edge %s and restarting glob opt.", edge_to_remove
