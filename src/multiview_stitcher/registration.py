@@ -1411,7 +1411,8 @@ def optimize_bead_subgraph(
         edges = list(g_beads_subgraph.edges)
         if (
             mean_residuals[-1] < abs_tol
-            and max_residuals[-1] / mean_residuals[-1]
+            and mean_residuals[-1] < 1e-6
+            or (max_residuals[-1] / mean_residuals[-1])
             < max_residual_max_mean_ratio
         ):
             edge_to_remove = None
