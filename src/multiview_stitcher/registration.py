@@ -1342,7 +1342,7 @@ def optimize_bead_subgraph(
 
     mean_residuals = []
     max_residuals = []
-    dfs = []
+    # dfs = []
 
     ndim**2
 
@@ -1418,9 +1418,7 @@ def optimize_bead_subgraph(
 
                 transform_generator.estimate(node_pts, adjecent_pts)
 
-                curr_residuals = transform_generator.residuals(
-                    node_pts, adjecent_pts
-                )
+                transform_generator.residuals(node_pts, adjecent_pts)
 
                 if curr_node != ref_node:
                     new_affines.append(
@@ -1435,22 +1433,6 @@ def optimize_bead_subgraph(
                     new_affines.append(param_utils.identity_transform(ndim))
 
                 total_iterations += 1
-
-                df_iter_node = pd.concat(
-                    [
-                        pd.DataFrame(
-                            {
-                                "residual": np.mean(curr_residuals),
-                                "iteration": iteration,
-                                "total_iteration": total_iterations,
-                            },
-                            index=[str(curr_node)],
-                        ),
-                    ],
-                    axis=1,
-                ).reset_index(names=["node"])
-
-                dfs.append(df_iter_node)
 
             for i, curr_node in enumerate(sorted_nodes):
                 g_beads_subgraph.nodes[curr_node]["affine"] = new_affines[i]
@@ -1514,7 +1496,7 @@ def optimize_bead_subgraph(
                     ]
                 )
 
-                logger.debug("Max rel change %s", max_rel_change)
+                # logger.debug("Max rel change %s", max_rel_change)
                 if max_rel_change < rel_tol and mean_residuals[-1] < abs_tol:
                     break
 
@@ -1595,7 +1577,13 @@ def optimize_bead_subgraph(
             )
             break
 
-    df = pd.concat(dfs, axis=0) if len(dfs) else None
+    df = pd.DataFrame(
+        {
+            "mean_residual": mean_residuals,
+            "max_residual": max_residuals,
+            "iteration": np.arange(len(mean_residuals)),
+        }
+    )
 
     params = {
         node: g_beads_subgraph.nodes[node]["affine"]
@@ -1622,6 +1610,7 @@ def register(
     plot_summary=False,
     pairs=None,
     scheduler=None,
+    return_metrics=False,
 ):
     """
 
@@ -1694,11 +1683,17 @@ def register(
     pairs : list of tuples, optional
         If set, initialises the view adjacency graph using the indicates
         pairs of view/tile indices, by default None
+    scheduler : str, optional
+        Dask scheduler to use for parallel computation, by default None
+    return_metrics : bool, optional
+        If True, return registration metrics as second return value, by default False
 
     Returns
     -------
     list of xr.DataArray
         Parameters mapping each view into a new extrinsic coordinate system
+    pd.DataFrame (optional)
+        Registration metrics
     """
 
     if pairwise_reg_func_kwargs is None:
@@ -1797,7 +1792,10 @@ def register(
                 use_positional_colors=False,
             )
 
-    return params
+    if return_metrics:
+        return params, groupwise_opt_info
+    else:
+        return params
 
 
 def compute_pairwise_registrations(
