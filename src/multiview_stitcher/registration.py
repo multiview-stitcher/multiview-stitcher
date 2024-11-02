@@ -571,31 +571,7 @@ def register_pair_of_msims(
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
 
-    lowers, uppers = get_overlap_bboxes(
-        sim1,
-        sim2,
-        input_transform_key=transform_key,
-        output_transform_key=None,
-        extension_in_physical_units=overlap_tolerance
-        if overlap_tolerance is not None
-        else 0.0,
-    )
-
-    if overlap_tolerance is not None:
-        reg_sims = [
-            sim.sel(
-                {
-                    dim: slice(
-                        lowers[isim][idim] - 0.001,
-                        uppers[isim][idim] + 0.001,
-                    )
-                    for idim, dim in enumerate(spatial_dims)
-                }
-            )
-            for isim, sim in enumerate([sim1, sim2])
-        ]
-    else:
-        reg_sims = [sim1, sim2]
+    reg_sims = [sim1, sim2]
 
     if registration_binning is None:
         logger.info("Determining optimal registration binning")
@@ -615,6 +591,30 @@ def register_pair_of_msims(
         ]
     else:
         reg_sims_b = reg_sims
+
+    lowers, uppers = get_overlap_bboxes(
+        reg_sims_b[0],
+        reg_sims_b[1],
+        input_transform_key=transform_key,
+        output_transform_key=None,
+        extension_in_physical_units=overlap_tolerance
+        if overlap_tolerance is not None
+        else 0.0,
+    )
+
+    if overlap_tolerance is not None:
+        reg_sims_b = [
+            sim.sel(
+                {
+                    dim: slice(
+                        lowers[isim][idim] - 0.001,
+                        uppers[isim][idim] + 0.001,
+                    )
+                    for idim, dim in enumerate(spatial_dims)
+                }
+            )
+            for isim, sim in enumerate(reg_sims_b)
+        ]
 
     # # Optionally perform CLAHE before registration
     # for i in range(2):
