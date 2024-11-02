@@ -1203,7 +1203,7 @@ def optimize_bead_subgraph(
     if max_iter is None:
         max_iter = 100
     if rel_tol is None:
-        rel_tol = 1e-2
+        rel_tol = 1e-4
     if abs_tol is None:
         abs_tol = 1e-7
     if max_residual_max_mean_ratio is None:
@@ -1407,6 +1407,7 @@ def optimize_bead_subgraph(
 
             # check for convergence
             if iteration > 5:
+                # check if mean residual is below abs_tol
                 if mean_residuals[-1] < abs_tol:
                     break
 
@@ -1417,14 +1418,14 @@ def optimize_bead_subgraph(
                                 iter_all_residuals[-1][e]
                                 - iter_all_residuals[-2][e]
                             )
-                            / mean_residuals[-1]
+                            / max_residuals[-1]
                         )
                         for e in g_beads_subgraph.edges
                     ]
                 )
 
-                # logger.debug("Max rel change %s", max_rel_change)
-                if max_rel_change < rel_tol and mean_residuals[-1] < abs_tol:
+                # check if max relative change is below rel_tol
+                if max_rel_change < rel_tol:
                     break
 
         # keep parameters after one iteration if there are
