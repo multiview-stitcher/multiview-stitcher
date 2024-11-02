@@ -1316,7 +1316,7 @@ def optimize_bead_subgraph(
     nx.relabel_nodes(g_beads_subgraph, mapping, copy=False)
 
     if max_iter is None:
-        max_iter = 100
+        max_iter = 500
     if rel_tol is None:
         rel_tol = 1e-4
     if abs_tol is None:
@@ -1523,8 +1523,8 @@ def optimize_bead_subgraph(
             # check for convergence
             if iteration > 5:
                 # check if mean residual is below abs_tol
-                if mean_residuals[-1] < abs_tol:
-                    break
+                # if mean_residuals[-1] < abs_tol:
+                #     break
 
                 max_rel_change = np.max(
                     [
