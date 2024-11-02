@@ -1309,6 +1309,12 @@ def optimize_bead_subgraph(
 
     g_beads_subgraph = copy.deepcopy(g_beads_subgraph)
 
+    # this makes node labels directly usable as indices
+    # (for optimisation purposes)
+    mapping = {n: i for i, n in enumerate(g_beads_subgraph.nodes)}
+    inverse_mapping = dict(enumerate(g_beads_subgraph.nodes))
+    nx.relabel_nodes(g_beads_subgraph, mapping, copy=False)
+
     if max_iter is None:
         max_iter = 100
     if rel_tol is None:
@@ -1340,50 +1346,94 @@ def optimize_bead_subgraph(
             f"Unknown transformation type in parameter resolution: {transform}"
         )
 
+    all_nodes = list(mapping.values())
+
+    new_affines = np.array(
+        [
+            param_utils.matmul_xparams(
+                param_utils.identity_transform(ndim),
+                g_beads_subgraph.nodes[n]["affine"],
+            ).data
+            for n in all_nodes
+        ]
+    )
+
     mean_residuals = []
     max_residuals = []
-    # dfs = []
-
-    ndim**2
 
     total_iterations = 0
     # first loop: iterate until max / mean residual ratio is below threshold
     while True:
         # second loop: optimise transformations of each node
         iter_all_residuals = []
-        for iteration in range(max_iter):
-            if not len(list(g_beads_subgraph.edges)):
-                break
-            new_affines = []
-            for curr_node in sorted_nodes:
-                node_edges = list(g_beads_subgraph.edges(curr_node))
 
-                if len(node_edges) == 0:
-                    new_affines.append(param_utils.identity_transform(ndim))
+        edges = list(g_beads_subgraph.edges)
+
+        if not len(edges):
+            break
+
+        node_edges = [list(g_beads_subgraph.edges(n)) for n in all_nodes]
+
+        node_beads = [
+            np.concatenate(
+                [
+                    g_beads_subgraph.edges[e]["beads"][n]
+                    for ie, e in enumerate(node_edges[n])
+                ],
+                axis=0,
+            )
+            for n in all_nodes
+        ]
+
+        node_beads = [
+            np.concatenate([nb, np.ones((len(nb), 1))], axis=1)
+            for nb in node_beads
+        ]
+
+        adj_nodes = [
+            [
+                n
+                for ie, e in enumerate(node_edges[curr_node])
+                for n in e
+                if n != curr_node
+            ]
+            for curr_node in all_nodes
+        ]
+
+        adj_beads = [
+            [
+                g_beads_subgraph.edges[e]["beads"][n]
+                for ie, e in enumerate(node_edges[curr_node])
+                for n in e
+                if n != curr_node
+            ]
+            for curr_node in all_nodes
+        ]
+
+        adj_beads = [
+            [
+                np.concatenate([abb, np.ones((len(abb), 1))], axis=1)
+                for abb in ab
+            ]
+            for ab in adj_beads
+        ]
+
+        for iteration in range(max_iter):
+            for _icn, curr_node in enumerate(sorted_nodes):
+                if not len(node_edges[curr_node]):
                     continue
 
-                node_pts = transformation.transform_pts(
-                    np.concatenate(
-                        [
-                            g_beads_subgraph.edges[e]["beads"][curr_node]
-                            for ie, e in enumerate(node_edges)
-                        ],
-                        axis=0,
-                    ),
-                    g_beads_subgraph.nodes[curr_node]["affine"],
-                )
-                adjecent_pts = np.concatenate(
+                node_pts = np.dot(
+                    new_affines[curr_node], node_beads[curr_node].T
+                ).T[:, :-1]
+
+                adj_pts = np.concatenate(
                     [
-                        transformation.transform_pts(
-                            g_beads_subgraph.edges[e]["beads"][n],
-                            g_beads_subgraph.nodes[n]["affine"],
-                        )
-                        for ie, e in enumerate(node_edges)
-                        for n in e
-                        if n != curr_node
+                        np.dot(new_affines[an], adj_beads[curr_node][ian].T).T
+                        for ian, an in enumerate(adj_nodes[curr_node])
                     ],
                     axis=0,
-                )
+                )[:, :-1]
 
                 ### repeat points based on edge quality
                 ### (not used currently, as although it seems to improve convergence, it slows down performance)
@@ -1401,7 +1451,7 @@ def optimize_bead_subgraph(
                 #             edge_repeats[ie],
                 #             axis=0,
                 #         )
-                #         for ie in range(len(node_edges))
+                #         for ie in range(len(node_edges[curr_node]))
                 #     ], axis=0
                 # )
 
@@ -1412,30 +1462,22 @@ def optimize_bead_subgraph(
                 #             edge_repeats[ie],
                 #             axis=0,
                 #         )
-                #         for ie in range(len(node_edges))
+                #         for ie in range(len(node_edges[curr_node]))
                 #     ], axis=0
                 # )
 
-                transform_generator.estimate(node_pts, adjecent_pts)
-
-                transform_generator.residuals(node_pts, adjecent_pts)
-
                 if curr_node != ref_node:
-                    new_affines.append(
-                        param_utils.matmul_xparams(
-                            param_utils.affine_to_xaffine(
-                                transform_generator.params
-                            ),
-                            g_beads_subgraph.nodes[curr_node]["affine"],
-                        )
-                    )
-                else:
-                    new_affines.append(param_utils.identity_transform(ndim))
+                    transform_generator.estimate(node_pts, adj_pts)
+                    transform_generator.residuals(node_pts, adj_pts)
+
+                    new_affines[curr_node] = param_utils.matmul_xparams(
+                        param_utils.affine_to_xaffine(
+                            transform_generator.params
+                        ),
+                        new_affines[curr_node],
+                    ).data
 
                 total_iterations += 1
-
-            for i, curr_node in enumerate(sorted_nodes):
-                g_beads_subgraph.nodes[curr_node]["affine"] = new_affines[i]
 
             # calculate edge residuals
             edge_residuals = {}
@@ -1443,11 +1485,11 @@ def optimize_bead_subgraph(
                 node1, node2 = e
                 node1_pts = transformation.transform_pts(
                     g_beads_subgraph.edges[e]["beads"][node1],
-                    g_beads_subgraph.nodes[node1]["affine"],
+                    new_affines[node1],
                 )
                 node2_pts = transformation.transform_pts(
                     g_beads_subgraph.edges[e]["beads"][node2],
-                    g_beads_subgraph.nodes[node2]["affine"],
+                    new_affines[node2],
                 )
                 edge_residuals[e] = np.linalg.norm(
                     node1_pts - node2_pts, axis=1
@@ -1560,12 +1602,6 @@ def optimize_bead_subgraph(
         if edge_to_remove is not None:
             g_beads_subgraph.remove_edge(*edge_to_remove)
 
-            # # reset view transforms with identity transforms
-            # for node in g_beads_subgraph.nodes:
-            #     g_beads_subgraph.nodes[node][
-            #         "affine"
-            #     ] = param_utils.identity_transform(ndim)
-
             logger.debug(
                 "Removing edge %s and restarting glob opt.", edge_to_remove
             )
@@ -1577,6 +1613,12 @@ def optimize_bead_subgraph(
             )
             break
 
+    if total_iterations:
+        for n in all_nodes:
+            g_beads_subgraph.nodes[n]["affine"] = new_affines[n]
+
+    nx.relabel_nodes(g_beads_subgraph, inverse_mapping, copy=False)
+
     df = pd.DataFrame(
         {
             "mean_residual": mean_residuals,
@@ -1586,7 +1628,9 @@ def optimize_bead_subgraph(
     )
 
     params = {
-        node: g_beads_subgraph.nodes[node]["affine"]
+        node: param_utils.affine_to_xaffine(
+            g_beads_subgraph.nodes[node]["affine"]
+        )
         for node in g_beads_subgraph.nodes
     }
     return params, df
