@@ -410,8 +410,8 @@ def fuse(
                 params=tmp_params,
                 output_properties=output_chunk_bb_with_overlap,
                 fusion_func=fusion_func,
-                weights_func=None,
-                weights_func_kwargs=None,
+                weights_func=weights_func,
+                weights_func_kwargs=weights_func_kwargs,
                 trim_overlap_in_pixels=overlap_in_pixels,
                 interpolation_order=1,
                 full_view_bbs=full_view_bbs,
@@ -557,12 +557,7 @@ def fuse_np(
         ).data
         for sim, param in zip(sims, params)
     ]
-    # else:
-    #     field_ims_t = [
-    #         sims[iview].reindex({
-    #             dim: sims[iview].coords[dim] - int(np.round(params[iview].sel(x_in="1", x_out=dim)))
-    #             for dim in sdims})
-    #         for iview in range(len(sims))]
+    field_ims_t = np.array(field_ims_t)
 
     # get blending weights
     if fusion_requires_blending_weights:
