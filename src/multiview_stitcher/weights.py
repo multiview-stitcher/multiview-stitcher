@@ -107,6 +107,9 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
     W[nan_mask] = 0
     WW = gaussian_filter(W, *args, **kwargs)
 
+    # avoid division by zero
+    WW[nan_mask] = 1
+
     Z = VV / WW
 
     Z[nan_mask] = np.nan
