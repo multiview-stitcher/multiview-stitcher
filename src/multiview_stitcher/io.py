@@ -1,4 +1,5 @@
 import itertools
+import warnings
 from pathlib import Path
 from typing import Optional, Union
 
@@ -12,6 +13,11 @@ try:
     from aicsimageio import AICSImage
 except ImportError:
     AICSImage = None
+
+try:
+    import czifile
+except ImportError:
+    czifile = None
 
 import contextlib
 
@@ -243,12 +249,10 @@ def get_info_from_multiview_czi(filename):
     readability and generalizability.
     """
 
-    try:
-        import czifile
-    except ImportError:
+    if czifile is None:
         raise ImportError(
             "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
-        ) from None
+        )
 
     from xml.etree import ElementTree as etree
 
@@ -395,7 +399,8 @@ def get_info_from_multiview_czi(filename):
     infoDict["spacing"] = spacing
     infoDict["originalShape"] = np.array(originalShape)
     infoDict["channels"] = channels
-    # infoDict['detection_wavelengths'] = channels
+    infoDict["n_illuminations"] = infoDict["originalShape"][1]
+    infoDict["n_views"] = nViews
 
     with contextlib.suppress(Exception):
         infoDict["dT"] = float(
@@ -403,3 +408,55 @@ def get_info_from_multiview_czi(filename):
         )
 
     return infoDict
+
+
+def read_view_from_multiview_czi(
+    input_file, view=None, ch=None, ill=None, z=None, resize=True, order=1
+):
+    """
+    Use czifile to read images (as there's a bug in aicspylibczi20221013, namely that
+    neighboring tiles are included (prestitching?) in a given read out tile).
+    """
+
+    if czifile is None:
+        raise ImportError(
+            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
+        )
+
+    if isinstance(input_file, (str, Path)):
+        czifile_file = czifile.CziFile(input_file)
+    else:
+        czifile_file = input_file
+
+    image = []
+    for directory_entry in czifile_file.filtered_subblock_directory:
+        plane_is_wanted = True
+        for dim in directory_entry.dimension_entries:
+            if dim.dimension == "V" and view is not None and dim.start != view:
+                plane_is_wanted = False
+                break
+
+            if dim.dimension == "C" and ch is not None and dim.start != ch:
+                plane_is_wanted = False
+                break
+
+            if dim.dimension == "I" and ill is not None and dim.start != ill:
+                plane_is_wanted = False
+                break
+
+            if dim.dimension == "Z" and z is not None and dim.start != z:
+                plane_is_wanted = False
+                break
+
+        if not plane_is_wanted:
+            continue
+
+        subblock = directory_entry.data_segment()
+        tile = subblock.data(resize=resize, order=order)
+
+        try:
+            image.append(tile)
+        except ValueError as e:
+            warnings.warn(str(e), UserWarning, stacklevel=1)
+
+    return np.array(image).squeeze()
