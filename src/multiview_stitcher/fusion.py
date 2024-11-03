@@ -740,25 +740,24 @@ def calc_stack_properties_from_view_properties_and_params(
 
     if mode == "sample":
         zero_z_face_vertices = stack_vertices[
-            np.where(stack_vertices[:, 0] == 0)
+            np.where(stack_vertices[:, 0] == 1)
         ]
-        zero_z_face_vertices[:, 1] = np.mean(
-            zero_z_face_vertices[:, 1]
+        zero_z_face_vertices[:, 2] = np.mean(
+            zero_z_face_vertices[:, 2]
         )  # take mean in x
         transformed_vertices = get_transformed_stack_vertices(
             zero_z_face_vertices, views_props, params
         )
-        volume = (
-            np.min(transformed_vertices, 0),
-            np.max(transformed_vertices, 0),
-        )  # lower, upper
+        volume = np.min(np.min(transformed_vertices, 1), 0), np.max(
+            np.max(transformed_vertices, 1), 0
+        )
 
     elif mode == "union":
         transformed_vertices = get_transformed_stack_vertices(
             stack_vertices, views_props, params
         )
-        volume = np.min(transformed_vertices, 0), np.max(
-            transformed_vertices, 0
+        volume = np.min(np.min(transformed_vertices, 1), 0), np.max(
+            np.max(transformed_vertices, 1), 0
         )
 
     elif mode == "intersection":
@@ -820,7 +819,7 @@ def get_transformed_stack_vertices(
 ):
     ndim = len(stack_properties_list[0]["spacing"])
     vertices = np.zeros(
-        (len(stack_properties_list) * len(stack_keypoints), ndim)
+        (len(stack_properties_list), len(stack_keypoints), ndim)
     )
     for iim, sp in enumerate(stack_properties_list):
         tmp_vertices = stack_keypoints * np.array(sp["shape"]) * np.array(
@@ -830,9 +829,7 @@ def get_transformed_stack_vertices(
             np.dot(params[iim][:ndim, :ndim], tmp_vertices.T).T
             + params[iim][:ndim, ndim]
         )
-        vertices[
-            iim * len(stack_keypoints) : (iim + 1) * len(stack_keypoints)
-        ] = tmp_vertices_transformed
+        vertices[iim] = tmp_vertices_transformed
 
     return vertices
 
