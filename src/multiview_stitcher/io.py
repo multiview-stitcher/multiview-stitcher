@@ -13,6 +13,8 @@ try:
 except ImportError:
     AICSImage = None
 
+import contextlib
+
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = "affine_metadata"
@@ -231,3 +233,173 @@ def save_sim_as_tif(path, sim):
     store.close()
 
     return
+
+
+def get_info_from_multiview_czi(filename):
+    """
+    Get information from multiview CZI dataset using czifile.
+
+    This code has been taken from MVRegFus and needs to be improved in terms of
+    readability and generalizability.
+    """
+
+    try:
+        import czifile
+    except ImportError:
+        raise ImportError(
+            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
+        ) from None
+
+    from xml.etree import ElementTree as etree
+
+    pathToImage = filename
+
+    infoDict = {}
+
+    imageFile = czifile.CziFile(pathToImage)
+    originalShape = imageFile.shape
+    metadata = imageFile.metadata()
+    imageFile.close()
+
+    metadata = etree.fromstring(metadata)
+
+    e_chs = metadata.findall(
+        ".//Dimensions/Channels/Channel/DetectionWavelength"
+    )
+    channels = list(range(len(e_chs)))
+    # wavelengths = [int(float(ch.text)) for ch in e_chs]
+
+    # hopefully more general
+    nViews = metadata.findall(".//MultiView")
+    multiView = True
+    if len(nViews):
+        nViews = len(metadata.findall(".//MultiView/View"))
+    else:
+        nViews = 1
+        multiView = False
+
+    nX = int(metadata.findall(".//SizeX")[0].text)
+    nY = int(metadata.findall(".//SizeY")[0].text)
+
+    spacing = np.array(
+        [
+            float(i.text)
+            for i in metadata.findall(".//Scaling")[0].findall(".//Value")
+        ]
+    ) * np.power(10, 6)
+    spacing = spacing.astype(np.float64)
+
+    if multiView:
+
+        def count_planes_of_view_in_czifile(self, view):
+            """
+            get number of zplanes of a given view independently of number of channels and illuminations
+            """
+
+            curr_ch = 0
+            curr_ill = 0
+            i = 0
+            for directory_entry in self.filtered_subblock_directory:
+                plane_is_wanted = True
+                ch_or_ill_changed = False
+                for dim in directory_entry.dimension_entries:
+                    if (
+                        dim.dimension == "V"
+                        and view is not None
+                        and dim.start != view
+                    ):
+                        plane_is_wanted = False
+                        break
+
+                    if dim.dimension == "C" and curr_ch != dim.start:
+                        ch_or_ill_changed = True
+                        break
+
+                    if dim.dimension == "I" and curr_ill != dim.start:
+                        ch_or_ill_changed = True
+                        break
+
+                if plane_is_wanted and not ch_or_ill_changed:
+                    i += 1
+
+            return i
+
+        axisOfRotation = np.array(
+            [
+                float(i)
+                for i in metadata.findall(".//AxisOfRotation")[0].text.split(
+                    " "
+                )
+            ]
+        )
+        axisOfRotation = np.where(axisOfRotation)[0][0]
+        centerOfRotation = np.array(
+            [
+                -float(i)
+                for i in metadata.findall(".//CenterPosition")[0].text.split(
+                    " "
+                )
+            ]
+        )
+
+        rPositions, xPositions, yPositions, zPositions = [], [], [], []
+        nZs = []
+        for i in range(nViews):
+            baseNode = metadata.findall(".//View[@V='%s']" % i)
+            baseNode = baseNode[1] if len(baseNode) == 2 else baseNode[0]
+            xPositions.append(float(baseNode.findall(".//PositionX")[0].text))
+            yPositions.append(float(baseNode.findall(".//PositionY")[0].text))
+            zPositions.append(float(baseNode.findall(".//PositionZ")[0].text))
+            rPositions.append(
+                float(baseNode.findall(".//Offset")[0].text) / 180.0 * np.pi
+            )
+            nZs.append(count_planes_of_view_in_czifile(imageFile, i))
+
+        sizes = np.array([[nX, nY, nZs[i]] for i in range(nViews)])
+        positions = np.array(
+            [xPositions, yPositions, zPositions, rPositions]
+        ).swapaxes(0, 1)
+        origins = np.array(
+            [
+                positions[i][:3]
+                - np.array([sizes[i][0] / 2, sizes[i][1] / 2, 0]) * spacing
+                for i in range(len(positions))
+            ]
+        )
+
+        # infoDict['angles'] = np.array(rPositions)
+        infoDict["origins"] = origins
+        infoDict["positions"] = positions
+        infoDict["centerOfRotation"] = centerOfRotation
+        infoDict["axisOfRotation"] = axisOfRotation
+        infoDict["sizes"] = sizes
+    else:
+        nZ = int(metadata.findall(".//SizeZ")[0].text)
+        size = np.array([nX, nY, nZ])
+
+        # position = metadata.findall('.//Positions')[3].findall('Position')[0].values()
+        position = (
+            metadata.findall(".//Positions")[3]
+            .findall("Position")[0]
+            .attrib.values()
+        )
+        position = np.array([float(i) for i in position])
+        origin = np.array(
+            position[:3] - np.array([size[0] / 2, size[1] / 2, 0]) * spacing
+        )
+
+        infoDict["sizes"] = np.array([size])
+        infoDict["positions"] = np.array([position])
+        infoDict["origins"] = np.array([origin])
+
+    infoDict["spacing"] = spacing
+    infoDict["originalShape"] = np.array(originalShape)
+    infoDict["channels"] = channels
+    # infoDict['detection_wavelengths'] = channels
+
+    with contextlib.suppress(Exception):
+        infoDict["dT"] = float(
+            int(metadata.findall("//TimeSpan/Value")[0].text) / 1000
+        )
+
+    return infoDict
