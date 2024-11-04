@@ -247,6 +247,10 @@ def get_info_from_multiview_czi(filename):
 
     This code has been taken from MVRegFus and needs to be improved in terms of
     readability and generalizability.
+
+    Small changes wrt to original code:
+     - return n_illuminations and n_views.
+     - definition of 'origins'
     """
 
     if czifile is None:
@@ -366,7 +370,9 @@ def get_info_from_multiview_czi(filename):
         origins = np.array(
             [
                 positions[i][:3]
-                - np.array([sizes[i][0] / 2, sizes[i][1] / 2, 0]) * spacing
+                # - np.array([sizes[i][0] / 2, sizes[i][1] / 2, 0]) * spacing
+                - np.array([sizes[i][0] / 2, sizes[i][1] / 2, sizes[i][2] / 2])
+                * spacing
                 for i in range(len(positions))
             ]
         )
@@ -389,7 +395,9 @@ def get_info_from_multiview_czi(filename):
         )
         position = np.array([float(i) for i in position])
         origin = np.array(
-            position[:3] - np.array([size[0] / 2, size[1] / 2, 0]) * spacing
+            # position[:3] - np.array([size[0] / 2, size[1] / 2, 0]) * spacing
+            position[:3]
+            - np.array([size[0] / 2, size[1] / 2, size[2] / 2]) * spacing
         )
 
         infoDict["sizes"] = np.array([size])
