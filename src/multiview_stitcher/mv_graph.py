@@ -25,6 +25,9 @@ with DisableLogger():
         Segment,
     )
 
+# patch Geometry3D.ConvexPolyhedron._euler_check to always return True
+ConvexPolyhedron._euler_check = lambda self: True
+
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 logger = logging.getLogger(__name__)
