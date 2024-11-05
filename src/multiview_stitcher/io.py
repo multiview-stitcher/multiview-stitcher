@@ -266,7 +266,6 @@ def get_info_from_multiview_czi(filename):
 
     imageFile = czifile.CziFile(pathToImage)
     metadata = imageFile.metadata()
-    imageFile.close()
 
     metadata = etree.fromstring(metadata)
 
@@ -274,7 +273,6 @@ def get_info_from_multiview_czi(filename):
         ".//Dimensions/Channels/Channel/DetectionWavelength"
     )
     channels = list(range(len(e_chs)))
-    # wavelengths = [int(float(ch.text)) for ch in e_chs]
 
     # hopefully more general
     nViews = metadata.findall(".//MultiView")
@@ -432,6 +430,8 @@ def get_info_from_multiview_czi(filename):
         infoDict["dT"] = float(
             int(metadata.findall("//TimeSpan/Value")[0].text) / 1000
         )
+
+    imageFile.close()
 
     return infoDict
 
