@@ -1198,7 +1198,15 @@ def optimize_bead_subgraph(
     # (for optimisation purposes)
     mapping = {n: i for i, n in enumerate(g_beads_subgraph.nodes)}
     inverse_mapping = dict(enumerate(g_beads_subgraph.nodes))
+
+    # relabel nodes
     nx.relabel_nodes(g_beads_subgraph, mapping, copy=False)
+    # relabel bead dicts
+    for e in g_beads_subgraph.edges:
+        g_beads_subgraph.edges[e]["beads"] = {
+            mapping[k]: v
+            for k, v in g_beads_subgraph.edges[e]["beads"].items()
+        }
 
     if max_iter is None:
         max_iter = 500
@@ -1503,6 +1511,8 @@ def optimize_bead_subgraph(
         for n in all_nodes:
             g_beads_subgraph.nodes[n]["affine"] = new_affines[n]
 
+    # undo node relabeling
+    # skip bead dict unrelabeling, as it is not needed
     nx.relabel_nodes(g_beads_subgraph, inverse_mapping, copy=False)
 
     df = pd.DataFrame(
