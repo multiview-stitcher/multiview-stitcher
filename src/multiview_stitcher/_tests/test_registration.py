@@ -420,6 +420,52 @@ def test_cc_registration(
 
 @pytest.mark.parametrize(
     """
+    groupwise_resolution_method,
+    """,
+    [
+        "shortest_paths",
+        "global_optimization",
+        "global_optimization",
+    ],
+)
+def test_manual_pair_registration(
+    groupwise_resolution_method,
+):
+    # Generate a cc
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_t=2,
+        N_c=2,
+        tile_size=15,
+        tiles_x=2,
+        tiles_y=3,
+        tiles_z=1,
+        overlap=5,
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # choose pairs which do not represent continuous indices
+    pairs = [(1, 3), (3, 2), (2, 5)]
+
+    # Run registration
+    params = registration.register(
+        msims,
+        reg_channel_index=0,
+        transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=registration.phase_correlation_registration,
+        new_transform_key="affine_registered",
+        groupwise_resolution_method=groupwise_resolution_method,
+        pairs=pairs,
+    )
+
+    assert len(params) == 6
+
+
+@pytest.mark.parametrize(
+    """
     transform,
     """,
     ["translation", "rigid", "affine"],
