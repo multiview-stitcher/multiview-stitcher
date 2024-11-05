@@ -403,7 +403,7 @@ def get_info_from_multiview_czi(filename):
 
     infoDict["spacing"] = spacing
     infoDict["channels"] = channels
-    # infoDict["n_illuminations"] = imageFile.shape[1]
+    infoDict["n_views"] = nViews
 
     # determine number of illuminations
     # code written with Tereza 20241105
