@@ -276,9 +276,9 @@ def get_info_from_multiview_czi(filename):
 
     # hopefully more general
     nViews = metadata.findall(".//MultiView")
-    if len(nViews) > 1:
+    if len(nViews):
         nViews = len(metadata.findall(".//MultiView/View"))
-        multiView = True
+        multiView = nViews > 1
     else:
         nViews = 1
         multiView = False
