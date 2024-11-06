@@ -407,21 +407,35 @@ def get_info_from_multiview_czi(filename):
 
     # determine number of illuminations
     # code written with Tereza 20241105
-    light_sheet_mode = metadata.find(".//LightSheetMode")
+    lightsheet_mode = metadata.find(".//LightSheetMode")
 
     # this works for LS7
-    if light_sheet_mode is not None:
-        n_ills = int(metadata.find(".//LightSheetMode").text)
-        online_fusion = int(
-            metadata.find(".//LightSheetDualSideProcessing").text
-        )
-        if online_fusion:
-            n_ills = 1
+    if lightsheet_mode is not None:
+        lightsheet_mode = int(metadata.find(".//LightSheetMode").text)
 
+        # online_fusion = int(
+        #     metadata.find(".//LightSheetDualSideProcessing").text
+        # )
+
+        if lightsheet_mode == 0:  # just one acquired (checked)
+            n_ills = 1
+        elif (
+            lightsheet_mode == 1
+        ):  # two illuminations acquired, online fusion (hypothesis)
+            n_ills = 1
+        elif (
+            lightsheet_mode == 2
+        ):  # two illuminations acquired, no online fusion (checked)
+            n_ills = 2
+        else:
+            raise ValueError(
+                f"Light sheet mode {lightsheet_mode} not recognized."
+            )
         infoDict["n_illuminations"] = n_ills
 
+    # this works for Z1
     else:
-        try:  # this works for Z1
+        try:
             infoDict["n_illuminations"] = imageFile.shape[1]
         except ValueError:  # fall back to no illuminations
             infoDict["n_illuminations"] = 1
