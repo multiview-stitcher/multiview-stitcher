@@ -1,5 +1,5 @@
 import numpy as np
-from matplotlib import cm, colors
+from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 
 from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
@@ -119,7 +119,16 @@ def plot_positions(
                 text = view_labels[iview]
             else:
                 text = str(iview)
-            ax.text(z, x, y, text, size=view_labels_size, zorder=1, color="k", horizontalalignment="center")
+            ax.text(
+                z,
+                x,
+                y,
+                text,
+                size=view_labels_size,
+                zorder=1,
+                color="k",
+                horizontalalignment="center",
+            )
 
     if edges is not None:
         node_poss = [
@@ -141,7 +150,7 @@ def plot_positions(
             norm = colors.Normalize(vmin=edge_clims[0], vmax=edge_clims[1])
 
             if edge_cmap is None:
-                edge_cmap = cm.get_cmap(
+                edge_cmap = colormaps.get_cmap(
                     "Spectral",
                 )
 
