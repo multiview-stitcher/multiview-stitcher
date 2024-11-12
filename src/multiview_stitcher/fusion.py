@@ -10,7 +10,6 @@ import spatial_image as si
 import xarray as xr
 from dask import delayed
 from dask.utils import has_keyword
-from tqdm import tqdm
 
 from multiview_stitcher import (
     mv_graph,
@@ -300,12 +299,8 @@ def fuse(
         fused_output_chunks = np.empty(
             np.max(block_indices, 0) + 1, dtype=object
         )
-        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in tqdm(
-            zip(
-                output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
-            ),
-            total=len(output_chunk_bbs),
-            desc="Constructing output dask array graph",
+        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
+            output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
         ):
             # calculate relevant slices for each output chunk
             # this is specific to each non spatial coordinate
