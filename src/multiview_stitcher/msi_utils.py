@@ -227,8 +227,15 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
 
 def set_affine_transform(
-    msim, xaffine, transform_key, base_transform_key=None
+    msim, xaffine=None, transform_key=None, base_transform_key=None
 ):
+    if transform_key is None:
+        raise ValueError("transform_key must be provided")
+
+    if xaffine is None:
+        ndim = get_ndim(msim)
+        xaffine = param_utils.identity_transform(ndim)
+
     if not isinstance(xaffine, xr.DataArray):
         xaffine = xr.DataArray(xaffine, dims=["t", "x_in", "x_out"])
 
