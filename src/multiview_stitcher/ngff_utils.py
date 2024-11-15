@@ -68,6 +68,8 @@ def msim_to_ngff_multiscales(msim, transform_key):
         for ngff_im in ngff_ims
     ]
 
+    sdims = msi_utils.get_spatial_dims(msim)
+
     ngff_multiscales = ngff_zarr.Multiscales(
         ngff_ims,
         metadata=ngff_zarr.zarr_metadata.Metadata(
@@ -84,6 +86,18 @@ def msim_to_ngff_multiscales(msim, transform_key):
                 )
             ],
         ),
+        scale_factors=[
+            {
+                sdim: int(
+                    ngff_ims[0].data.shape[ngff_ims[0].dims.index(sdim)]
+                    / ngff_ims[iscale].data.shape[
+                        ngff_ims[iscale].dims.index(sdim)
+                    ]
+                )
+                for sdim in sdims
+            }
+            for iscale in range(1, len(ngff_ims))
+        ],
     )
 
     return ngff_multiscales
