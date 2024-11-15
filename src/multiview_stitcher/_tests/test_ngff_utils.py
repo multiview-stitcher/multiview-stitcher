@@ -32,12 +32,11 @@ def test_round_trip(ndim):
             msim, transform_key=io.METADATA_TRANSFORM_KEY
         )
         ngff_zarr.to_ngff_zarr(zarr_path, ngff_multiscales)
-        ngff_utils.ngff_multiscales_to_msim(
+        msim_read = ngff_utils.ngff_multiscales_to_msim(
             ngff_zarr.from_ngff_zarr(zarr_path),
             transform_key=io.METADATA_TRANSFORM_KEY,
         )
 
-    import pdb
-
-    pdb.set_trace()
-    # assert msim_read.equals(msim)
+    assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
+        msi_utils.get_sorted_scale_keys(msim_read)
+    )
