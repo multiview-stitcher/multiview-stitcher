@@ -10,7 +10,7 @@ Custom functions for pairwise registration can be passed to the `registration.re
 def register(
     ...
     transform_key,
-    pairwise_reg_func: func = phase_correlation_registration,
+    pairwise_reg_func: Callable = phase_correlation_registration,
     pairwise_reg_func_kwargs: dict = None,
     ...
 )
@@ -64,7 +64,7 @@ def custom_pairwise_registration_function(
     fixed_spacing: dict[str, float], # e.g. {"z": 1.0, "y": 0.5, "x": 0.5}
     moving_spacing: dict[str, float],
     initial_affine: xr.DataArray, # see note below
-    **kwargs,
+    **kwargs, # `pairwise_reg_func_kwargs` passed to `registration.register`
 ) -> dict:
     # Registration code here
 
@@ -84,8 +84,9 @@ Custom functions can be passed to the `fusion.fuse` function. `multiview-stitche
 def fuse(
     ...
     transform_key: str = None,
-    fusion_func: func = weighted_average_fusion,
-    weights_func: func = None, # by default no additional fusion weights are used
+    fusion_func: Callable = weighted_average_fusion,
+    fusion_func_kwargs: dict = None,
+    weights_func: Callable = None, # by default no additional fusion weights are used
     weights_func_kwargs: dict = None,
     ...
 ```
@@ -99,6 +100,7 @@ def custom_fusion_function(
     transformed_views: List[Array-like], # list of pre-transformed view chunks
     blending_weights: List[Array-like], # optional functional argument
     fusion_weights: List[Array-like], # optional functional argument
+    **kwargs, # `fusion_func_kwargs` passed to `fusion.fuse`
 ) -> Array-like:
 
     # Fusion code here
@@ -118,7 +120,7 @@ Custom function for calculating additional fusion weights passed to the fusion f
 def custom_weight_function(
     transformed_views : List[Array-like],
     blending_weights : List[Array-like],
-    **kwargs,
+    **kwargs, # `weights_func_kwargs` passed to `fusion.fuse`
 ) - > List[Array-like]:
 
     # Weight calculation code here

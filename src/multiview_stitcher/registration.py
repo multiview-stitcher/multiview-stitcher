@@ -548,7 +548,7 @@ def register_pair_of_msims(
         - if > 0, the overlap region is the intersection of the bounding boxes
             extended by this value in all spatial dimensions.
         - if None, the full images are used for registration
-    pairwise_reg_func : func, optional
+    pairwise_reg_func : Callable, optional
         Function used for registration, which is passed as input two spatial images,
         a transform_key and precomputed bounding boxes. Returns a transform in
         homogeneous coordinates. By default phase_correlation_registration
@@ -1520,7 +1520,7 @@ def register(
         - if > 0, the overlap region is the intersection of the bounding boxes
             extended by this value in all spatial dimensions.
         - if None, the full images are used for registration
-    pairwise_reg_func : func, optional
+    pairwise_reg_func : Callable, optional
         Function used for registration.
     pairwise_reg_func_kwargs : dict, optional
         Additional keyword arguments passed to the registration function

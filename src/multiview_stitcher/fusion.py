@@ -1,6 +1,6 @@
 import itertools
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import product
 from typing import Union
 
@@ -117,9 +117,10 @@ def simple_average_fusion(
 def fuse(
     sims: list,
     transform_key: str = None,
-    fusion_func=weighted_average_fusion,
-    weights_func=None,
-    weights_func_kwargs=None,
+    fusion_func: Callable = weighted_average_fusion,
+    fusion_method_kwargs: dict = None,
+    weights_func: Callable = None,
+    weights_func_kwargs: dict = None,
     output_spacing: dict[str, float] = None,
     output_stack_mode: str = "union",
     output_origin: dict[str, float] = None,
@@ -144,15 +145,17 @@ def fuse(
     transform_key : str, optional
         Which (extrinsic coordinate system) to use as transformation parameters.
         By default None (intrinsic coordinate system).
-    fusion_func : func, optional
+    fusion_func : Callable, optional
         Fusion function to be applied. This function receives the following
         inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
         By default weighted_average_fusion
-    weights_func : func, optional
+    fusion_method_kwargs : dict, optional
+    weights_func : Callable, optional
         Function to calculate fusion weights. This function receives the
         following inputs: transformed_views (as spatial images), params.
         It returns (non-normalized) fusion weights for each view.
         By default None.
+    weights_func_kwargs : dict, optional
     output_spacing : dict, optional
         Spacing of the fused image for each spatial dimension, by default None
     output_stack_mode : str, optional
@@ -405,6 +408,7 @@ def fuse(
                 params=tmp_params,
                 output_properties=output_chunk_bb_with_overlap,
                 fusion_func=fusion_func,
+                fusion_method_kwargs=fusion_method_kwargs,
                 weights_func=weights_func,
                 weights_func_kwargs=weights_func_kwargs,
                 trim_overlap_in_pixels=overlap_in_pixels,
@@ -474,9 +478,10 @@ def fuse_np(
     sims: Sequence[Union[xr.DataArray, np.ndarray]],
     params: Sequence[xr.DataArray],
     output_properties: BoundingBox,
-    fusion_func=weighted_average_fusion,
-    weights_func=None,
-    weights_func_kwargs=None,
+    fusion_func: Callable = weighted_average_fusion,
+    fusion_method_kwargs: dict = None,
+    weights_func: Callable = None,
+    weights_func_kwargs: Callable = None,
     trim_overlap_in_pixels: int = 0,
     interpolation_order: int = 1,
     full_view_bbs: Sequence[BoundingBox] = None,
@@ -495,7 +500,7 @@ def fuse_np(
         _description_
     output_chunk_properties : dict[str, dict[str, Union[int, float]]]
         _description_
-    fusion_func : _type_, optional
+    fusion_func : Callable, optional
         _description_, by default weighted_average_fusion
     weights_func : _type_, optional
         _description_, by default None
@@ -534,6 +539,9 @@ def fuse_np(
     else:
         fusion_requires_blending_weights = False
 
+    if fusion_method_kwargs is None:
+        fusion_method_kwargs = {}
+
     if weights_func_kwargs is None:
         weights_func_kwargs = {}
 
@@ -569,7 +577,6 @@ def fuse_np(
     else:
         field_ws_t = None
 
-    fusion_method_kwargs = {}
     fusion_method_kwargs["transformed_views"] = field_ims_t
     if has_keyword(fusion_func, "params"):
         fusion_method_kwargs["params"] = params
