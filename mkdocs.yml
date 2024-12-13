@@ -52,6 +52,7 @@ nav:
   - data_formats.md
   - implementation_details.md
   - objects.md
+  - extension_api.md
   - napari_stitcher.md
   - stitching_in_the_browser.md
   - related_projects.md
