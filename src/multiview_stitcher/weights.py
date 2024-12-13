@@ -28,7 +28,7 @@ def calculate_required_overlap(
 
 
 def content_based(
-    transformed_sims,
+    transformed_views,
     blending_weights,
     sigma_1=5,
     sigma_2=11,
@@ -57,8 +57,8 @@ def content_based(
         Content based weights for each view.
     """
 
-    transformed_sims = transformed_sims.astype(np.float32)
-    transformed_sims[blending_weights < 1e-7] = np.nan
+    transformed_views = transformed_views.astype(np.float32)
+    transformed_views[blending_weights < 1e-7] = np.nan
 
     weights = [
         nan_gaussian_filter_dask_image(
@@ -72,7 +72,7 @@ def content_based(
             sigma=sigma_2,
             mode="reflect",
         )
-        for sim_t in transformed_sims
+        for sim_t in transformed_views
     ]
 
     weights = np.stack(weights, axis=0)

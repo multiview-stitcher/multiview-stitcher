@@ -116,7 +116,7 @@ Custom function for calculating additional fusion weights passed to the fusion f
 
 ```python
 def custom_weight_function(
-    transformed_sims : List[Array-like],
+    transformed_views : List[Array-like],
     blending_weights : List[Array-like],
     **kwargs,
 ) - > List[Array-like]:

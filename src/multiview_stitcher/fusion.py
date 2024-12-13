@@ -578,7 +578,7 @@ def fuse_np(
 
     # calculate fusion weights if required
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
-        weights_func_kwargs["transformed_sims"] = field_ims_t
+        weights_func_kwargs["transformed_views"] = field_ims_t
         if has_keyword(weights_func, "params"):
             weights_func_kwargs["params"] = params
         if fusion_requires_blending_weights:
