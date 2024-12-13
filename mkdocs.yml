@@ -76,7 +76,7 @@ theme:
     # logo: fontawesome/solid/clone
 
     repo: fontawesome/brands/github
-  favicon:
+  favicon: images/logo.png
   palette:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
