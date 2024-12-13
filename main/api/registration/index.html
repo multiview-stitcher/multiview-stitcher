@@ -849,7 +849,7 @@ overlap_tolerance : float, optional
     - if &gt; 0, the overlap region is the intersection of the bounding boxes
         extended by this value in all spatial dimensions.
     - if None, the full images are used for registration
-pairwise_reg_func : func, optional
+pairwise_reg_func : Callable, optional
     Function used for registration.
 pairwise_reg_func_kwargs : dict, optional
     Additional keyword arguments passed to the registration function
@@ -1137,7 +1137,7 @@ pairs : list of tuples, optional
 </span><span id="__span-0-1520"><a id="__codelineno-0-1520" name="__codelineno-0-1520"></a><span class="sd">        - if &gt; 0, the overlap region is the intersection of the bounding boxes</span>
 </span><span id="__span-0-1521"><a id="__codelineno-0-1521" name="__codelineno-0-1521"></a><span class="sd">            extended by this value in all spatial dimensions.</span>
 </span><span id="__span-0-1522"><a id="__codelineno-0-1522" name="__codelineno-0-1522"></a><span class="sd">        - if None, the full images are used for registration</span>
-</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a><span class="sd">    pairwise_reg_func : func, optional</span>
+</span><span id="__span-0-1523"><a id="__codelineno-0-1523" name="__codelineno-0-1523"></a><span class="sd">    pairwise_reg_func : Callable, optional</span>
 </span><span id="__span-0-1524"><a id="__codelineno-0-1524" name="__codelineno-0-1524"></a><span class="sd">        Function used for registration.</span>
 </span><span id="__span-0-1525"><a id="__codelineno-0-1525" name="__codelineno-0-1525"></a><span class="sd">    pairwise_reg_func_kwargs : dict, optional</span>
 </span><span id="__span-0-1526"><a id="__codelineno-0-1526" name="__codelineno-0-1526"></a><span class="sd">        Additional keyword arguments passed to the registration function</span>
