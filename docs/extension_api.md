@@ -1,6 +1,7 @@
 # Extension API
 
-While `multiview-stitcher` contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. This page provides an overview of the extension API.
+!!! `multiview-stitcher` as a modular stitching framework
+    While `multiview-stitcher` contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. This page provides an overview of the extension API.
 
 ## Pairwise registration
 
