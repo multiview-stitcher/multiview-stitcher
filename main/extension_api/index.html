@@ -851,8 +851,10 @@
 
 
 <h1 id="extension-api">Extension API</h1>
-<p>!!! <code>multiview-stitcher</code> as a modular framework for registration and fusion
-    While <code>multiview-stitcher</code> contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. This page provides an overview of the extension API.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>multiview-stitcher</code> as a modular framework for registration and fusion</p>
+<p>While <code>multiview-stitcher</code> contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. This page provides an overview of the extension API.</p>
+</div>
 <h2 id="pairwise-registration">Pairwise registration</h2>
 <p>Custom functions for pairwise registration can be passed to the <code>registration.register</code> function:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
