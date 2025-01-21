@@ -367,21 +367,23 @@ def test_direct_zarr_fusion(ndim):
     with tempfile.TemporaryDirectory() as tmpdir:
         for iview in range(nviews):
             sims_zarr[iview].data = da.to_zarr(
-                sims_zarr[iview].data,
+                sims[iview].data,
                 os.path.join(tmpdir, f"data_zarr_f{iview}.zarr"),
                 overwrite=True,
                 return_stored=True,
                 compute=True,
             )
 
-    fused_sims = [
-        fusion.fuse(
-            input_sims,
-            transform_key=METADATA_TRANSFORM_KEY,
-        )
-        for input_sims in [sims, sims_zarr]
-    ]
+        fused_sims = [
+            fusion.fuse(
+                input_sims,
+                transform_key=METADATA_TRANSFORM_KEY,
+            )
+            for input_sims in [sims, sims_zarr]
+        ]
 
-    fused_sims_c = [s.compute(scheduler="single-threaded") for s in fused_sims]
+        fused_sims_c = [
+            s.compute(scheduler="single-threaded") for s in fused_sims
+        ]
 
     assert np.allclose(*fused_sims_c)
