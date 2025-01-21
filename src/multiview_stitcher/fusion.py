@@ -1,4 +1,5 @@
 import itertools
+import logging
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -21,6 +22,8 @@ from multiview_stitcher import (
 from multiview_stitcher import spatial_image_utils as si_utils
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
+
+logger = logging.getLogger(__name__)
 
 
 def max_fusion(
@@ -258,10 +261,17 @@ def fuse(
     views_bb = [si_utils.get_stack_properties_from_sim(sim) for sim in sims]
 
     access_zarr_directly = True
+    logger.info(
+        f"Accessing zarr arrays directly for fusion: {access_zarr_directly}"
+    )
     if access_zarr_directly:
         sims_data_zarrs = [
             misc_utils.get_zarr_array_from_dask_array(sim.data) for sim in sims
         ]
+        logger.info(
+            "The following sim indices can be accessed directly from zarr arrays: "
+            f"{[isim is not None for isim, sim_data_zarr in enumerate(sims_data_zarrs)]}"
+        )
 
     merges = []
     for ns_coords in itertools.product(
