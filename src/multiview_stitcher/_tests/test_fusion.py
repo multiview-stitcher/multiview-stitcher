@@ -333,3 +333,55 @@ def test_fusion_chunksizes(input_chunksize):
             fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
             for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
         )
+@pytest.mark.parametrize(
+    "ndim,",
+    [
+        2,
+        3,
+    ],
+)
+
+
+def test_direct_zarr_fusion(ndim):
+    nviews = 3
+
+    sims = [
+        sample_data.generate_tiled_dataset(
+            ndim=ndim,
+            overlap=0,
+            N_c=1,
+            N_t=1,
+            tile_size=20,
+            tiles_x=1,
+            tiles_y=1,
+            tiles_z=1,
+            spacing_x=1,
+            spacing_y=1,
+            spacing_z=1,
+        )[0]
+        for _ in range(nviews)
+    ]
+
+    sims_zarr = [sim.copy() for sim in sims]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for iview in range(nviews):
+            sims_zarr[iview].data = da.to_zarr(
+                sims_zarr[iview].data,
+                os.path.join(tmpdir, f"data_zarr_f{iview}.zarr"),
+                overwrite=True,
+                return_stored=True,
+                compute=True,
+            )
+
+    fused_sims = [
+        fusion.fuse(
+            input_sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for input_sims in [sims, sims_zarr]
+    ]
+
+    fused_sims_c = [s.compute(scheduler="single-threaded") for s in fused_sims]
+
+    assert np.allclose(*fused_sims_c)

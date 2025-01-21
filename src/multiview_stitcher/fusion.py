@@ -12,6 +12,7 @@ from dask import delayed
 from dask.utils import has_keyword
 
 from multiview_stitcher import (
+    misc_utils,
     mv_graph,
     param_utils,
     transformation,
@@ -256,9 +257,15 @@ def fuse(
 
     views_bb = [si_utils.get_stack_properties_from_sim(sim) for sim in sims]
 
+    access_zarr_directly = True
+    if access_zarr_directly:
+        sims_data_zarrs = [
+            misc_utils.get_zarr_array_from_dask_array(sim.data) for sim in sims
+        ]
+
     merges = []
     for ns_coords in itertools.product(
-        *tuple([sims[0].coords[nsdim] for nsdim in nsdims])
+        *tuple([sims[0].coords[nsdim].values for nsdim in nsdims])
     ):
         sim_coord_dict = {
             ndsim: ns_coords[i] for i, ndsim in enumerate(nsdims)
@@ -341,23 +348,68 @@ def fuse(
                 continue
 
             tol = 1e-6
+
+            # get relevant spatial array slices and indices
+            phys_sl = {
+                iview: {
+                    dim: slice(
+                        views_overlap_bb[iview]["origin"][dim] - tol,
+                        views_overlap_bb[iview]["origin"][dim]
+                        + (views_overlap_bb[iview]["shape"][dim] - 1)
+                        * views_overlap_bb[iview]["spacing"][dim]
+                        + tol,
+                    )
+                    for dim in sdims
+                }
+                for iview in relevant_view_indices
+            }
+
             sims_slices = [
                 sims[iview].sel(
-                    sim_coord_dict
-                    | {
-                        dim: slice(
-                            views_overlap_bb[iview]["origin"][dim] - tol,
-                            views_overlap_bb[iview]["origin"][dim]
-                            + (views_overlap_bb[iview]["shape"][dim] - 1)
-                            * views_overlap_bb[iview]["spacing"][dim]
-                            + tol,
-                        )
-                        for dim in sdims
-                    },
+                    sim_coord_dict | phys_sl[iview],
                     drop=True,
                 )
                 for iview in relevant_view_indices
             ]
+
+            if access_zarr_directly:
+                # determine pixel indices
+                pixel_sl = {
+                    iview: {
+                        dim: sims[iview]
+                        .get_index(dim)
+                        .slice_indexer(
+                            phys_sl[iview][dim].start, phys_sl[iview][dim].stop
+                        )
+                        if dim in sdims
+                        else slice(
+                            sims[iview]
+                            .get_index(dim)
+                            .get_indexer([sim_coord_dict[dim]])[0],
+                            sims[iview]
+                            .get_index(dim)
+                            .get_indexer([sim_coord_dict[dim]])[0]
+                            + 1,
+                        )
+                        for dim in sdims + nsdims
+                    }
+                    for iview in relevant_view_indices
+                }
+
+                for _iiview, iview in enumerate(relevant_view_indices):
+                    # replace data arrays by direct slices into input zarr arrays
+                    if sims_data_zarrs[iview] is not None:
+                        sims_slices[
+                            iview
+                        ].data = misc_utils.get_dask_array_from_slice_into_zarr_array(
+                            sims_data_zarrs[iview],
+                            tuple(
+                                [
+                                    pixel_sl[iview][dim]
+                                    for dim in sims[iview].dims
+                                ]
+                            ),
+                        ).squeeze()
 
             # determine whether to fuse plany by plane
             #  to avoid weighting edge artifacts
@@ -441,7 +493,7 @@ def fuse(
 
         merge = merge.expand_dims(nsdims)
         merge = merge.assign_coords(
-            {ns_coord.name: [ns_coord.values] for ns_coord in ns_coords}
+            {nsdim: [ns_coord] for nsdim, ns_coord in zip(nsdims, ns_coords)}
         )
         merges.append(merge)
 
