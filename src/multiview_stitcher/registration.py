@@ -1542,6 +1542,8 @@ def optimize_bead_subgraph(
                                 - iter_all_residuals[-2][e]
                             )
                             / max_residuals[-1]
+                            if max_residuals[-1] > 0
+                            else 0
                         )
                         for e in g_beads_subgraph.edges
                     ]
