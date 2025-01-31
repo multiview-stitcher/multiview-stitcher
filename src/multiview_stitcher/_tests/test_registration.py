@@ -561,3 +561,44 @@ def test_constant_pairwise_reg():
             transform_key=METADATA_TRANSFORM_KEY,
             pairwise_reg_func=registration.phase_correlation_registration,
         )
+
+
+def test_overlap_tolerance():
+    example_data_path = sample_data.get_mosaic_sample_data_path()
+    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+
+    sim0 = sims[0]
+    sim1 = sims[1]
+
+    shape_x = len(sims[1].coords["x"])
+    shift_x = (
+        sims[1].coords["x"].data[shape_x // 10] - sims[1].coords["x"].data[0]
+    )
+    sim1_shifted = sims[1].assign_coords(
+        {"x": sims[1].coords["x"].data + shift_x}
+    )
+
+    registration.register(
+        [
+            msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            for sim in [sim0, sim1]
+        ],
+        transform_key=METADATA_TRANSFORM_KEY,
+        reg_channel_index=0,
+    )
+
+    registration.register(
+        [
+            msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            for sim in [sim0, sim1_shifted]
+        ],
+        transform_key=METADATA_TRANSFORM_KEY,
+        overlap_tolerance={"x": shift_x * 2},
+        reg_channel_index=0,
+    )
+
+    import pdb
+
+    pdb.set_trace()
+
+    assert ()
