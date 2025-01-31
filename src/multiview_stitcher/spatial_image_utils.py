@@ -180,6 +180,30 @@ def get_stack_properties_from_sim(sim, transform_key=None, asarray=False):
     return stack_properties
 
 
+def extend_stack_props(stack_props, extend_by):
+    """
+    Extend stack properties by a given extent along each spatial dimension.
+
+    Parameters
+    ----------
+    stack_props
+    extend_by : dict or float
+    """
+    sdims = [
+        sdim
+        for sdim in SPATIAL_DIMS
+        if sdim in list(stack_props["spacing"].keys())
+    ]
+    if isinstance(extend_by, dict):
+        extend_by = {dim: extend_by for dim in sdims}
+
+    for dim, val in extend_by.items():
+        stack_props["shape"][dim] += 2 * val
+        stack_props["origin"][dim] -= val * stack_props["spacing"][dim]
+
+    return stack_props
+
+
 def ensure_dim(sim, dim):
     if dim in sim.dims:
         return sim
