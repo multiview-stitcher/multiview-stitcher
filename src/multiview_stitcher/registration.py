@@ -1624,6 +1624,7 @@ def register(
         msims_reg,
         transform_key=transform_key,
         pairs=pairs,
+        overlap_tolerance=overlap_tolerance,
     )
 
     if pre_registration_pruning_method is not None:
