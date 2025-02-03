@@ -194,7 +194,7 @@ def extend_stack_props(stack_props, extend_by):
         for sdim in SPATIAL_DIMS
         if sdim in list(stack_props["spacing"].keys())
     ]
-    if isinstance(extend_by, dict):
+    if not isinstance(extend_by, dict):
         extend_by = {dim: extend_by for dim in sdims}
 
     for dim, val in extend_by.items():
