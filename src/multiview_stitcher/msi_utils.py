@@ -2,7 +2,6 @@ from functools import wraps
 from pathlib import Path
 
 import dask.array as da
-import datatree
 import multiscale_spatial_image as msi
 import xarray as xr
 
@@ -75,7 +74,7 @@ def get_sorted_scale_keys(msim):
 
 
 def multiscale_spatial_image_from_zarr(path, chunks=None):
-    dims = datatree.open_datatree(path, engine="zarr")["scale0/image"].dims
+    dims = xr.open_datatree(path, engine="zarr")["scale0/image"].dims
     sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
     ndim = len(sdims)
     nsdims = [dim for dim in dims if dim not in sdims]
@@ -86,7 +85,7 @@ def multiscale_spatial_image_from_zarr(path, chunks=None):
         for nsdim in nsdims:
             chunks[nsdim] = 1
 
-    multiscale = datatree.open_datatree(path, engine="zarr", chunks=chunks)
+    multiscale = xr.open_datatree(path, engine="zarr", chunks=chunks)
 
     # compute transforms
     sorted_scales = get_sorted_scale_keys(multiscale)

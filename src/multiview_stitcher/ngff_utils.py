@@ -1,7 +1,7 @@
 import ngff_zarr
 import numpy as np
 import spatial_image as si
-from datatree import DataTree
+from xarray import DataTree
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -144,6 +144,6 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key):
         curr_scale_msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
 
-    msim = DataTree.from_dict(d=msim_dict)
+    msim = DataTree.from_dict(msim_dict)
 
     return msim
