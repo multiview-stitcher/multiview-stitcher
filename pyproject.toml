@@ -29,7 +29,6 @@ select = [
 ignore = [
     "E501", # line too long. let black handle this
     "UP006", "UP007", # type annotation. As using magicgui require runtime type annotation then we disable this.
-    "SIM117", # flake8-simplify - some of merged with statements are not looking great with black, reanble after drop python 3.9
 ]
 
 exclude = [
