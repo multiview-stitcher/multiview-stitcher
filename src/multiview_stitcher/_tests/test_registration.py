@@ -578,27 +578,43 @@ def test_overlap_tolerance():
         {"x": sims[1].coords["x"].data + shift_x}
     )
 
-    registration.register(
+    params_orig = registration.register(
         [
             msi_utils.get_msim_from_sim(sim, scale_factors=[])
             for sim in [sim0, sim1]
         ],
         transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="registered_orig",
         reg_channel_index=0,
     )
 
-    registration.register(
+    params_shifted = registration.register(
         [
             msi_utils.get_msim_from_sim(sim, scale_factors=[])
             for sim in [sim0, sim1_shifted]
         ],
         transform_key=METADATA_TRANSFORM_KEY,
-        overlap_tolerance={"x": shift_x * 2},
+        new_transform_key="registered_shifted",
+        # overlap_tolerance={"x": shift_x * 2},
+        overlap_tolerance=shift_x * 2,
         reg_channel_index=0,
     )
+
+    print(params_orig, params_shifted)
 
     import pdb
 
     pdb.set_trace()
-
     assert ()
+
+    sims = [
+        sim.assign_coords(
+            {
+                "y": sim.coords["y"].data
+                - sim.coords["y"].data[0]
+                + (sim.coords["y"].data[0] - sims[0].coords["y"].data[0]) * 0.9
+                # "x": sims[1].coords["y"].data, # can be left out
+            }
+        )
+        for sim in sims
+    ]
