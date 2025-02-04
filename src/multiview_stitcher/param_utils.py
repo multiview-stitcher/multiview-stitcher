@@ -90,6 +90,12 @@ def affine_from_rotation(angle, direction, point=None):
     defined by point and direction.
     """
 
+    direction = np.array(direction).astype(np.float64)
+    direction /= np.linalg.norm(direction)
+
+    if point is not None:
+        point = np.array(point).astype(np.float64)
+
     R = Rotation.from_rotvec(angle * np.array(direction)).as_matrix()
 
     M = np.identity(4)
