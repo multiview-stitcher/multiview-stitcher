@@ -171,7 +171,7 @@ def get_blending_weights(
     nviews = len(source_bbs)
 
     sl = tuple([slice(0, target_bb["shape"][dim]) for dim in sdims])
-    pts = np.mgrid[*sl].reshape(len(sdims), -1).T.astype(np.float32)
+    pts = np.mgrid[sl].reshape(len(sdims), -1).T.astype(np.float32)
     pts *= np.array([target_bb["spacing"][dim] for dim in sdims])
     pts += np.array([target_bb["origin"][dim] for dim in sdims])
 
