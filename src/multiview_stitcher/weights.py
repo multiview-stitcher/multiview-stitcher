@@ -2,10 +2,10 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
-from scipy.ndimage import distance_transform_edt, gaussian_filter
-from spatial_image import to_spatial_image
+from scipy.ndimage import gaussian_filter
 
-from multiview_stitcher import transformation
+from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher.geometry import interior_distance
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
@@ -142,8 +142,8 @@ def normalize_weights(weights):
 
 def get_blending_weights(
     target_bb: BoundingBox,
-    source_bb: BoundingBox,
-    affine: xr.DataArray,
+    source_bbs: list[BoundingBox],
+    affines: list[xr.DataArray],
     blending_widths: dict[str, float] = None,
 ):
     """
@@ -166,73 +166,34 @@ def get_blending_weights(
     if blending_widths is None:
         blending_widths = {"z": 3, "y": 10, "x": 10}
 
-    sdims = sorted(source_bb["origin"].keys())[::-1]
-    ndim = len(sdims)
+    sdims = si_utils.get_spatial_dims_from_stack_properties(target_bb)
+    len(sdims)
+    nviews = len(source_bbs)
 
-    mask = np.zeros([3 + 2 for dim in sdims])
-    mask[(slice(1, -1),) * ndim] = 1
-    support_spacing = {
-        dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
-        for dim in sdims
-    }
-    support_origin = source_bb["origin"]
+    sl = tuple([slice(0, target_bb["shape"][dim]) for dim in sdims])
+    pts = np.mgrid[*sl].reshape(len(sdims), -1).T.astype(np.float32)
+    pts *= np.array([target_bb["spacing"][dim] for dim in sdims])
+    pts += np.array([target_bb["origin"][dim] for dim in sdims])
 
-    # slightly enlargen the support to avoid edge effects
-    # otherwise there's no smooth transition at shared coordinate boundaries
-    edt_support_spacing = {
-        dim: support_spacing[dim]
-        * (source_bb["shape"][dim] - 1 + 2 * 1)
-        / (source_bb["shape"][dim] - 1)
-        for dim in sdims
-    }
-    edt_support_origin = {
-        dim: source_bb["origin"][dim] - 1 * source_bb["spacing"][dim]
-        for dim in sdims
-    }
-
-    edt_support = distance_transform_edt(
-        mask,
-        sampling=[
-            edt_support_spacing[dim] / blending_widths[dim] for dim in sdims
-        ],
+    target_weights = np.zeros(
+        (nviews,) + tuple(target_bb["shape"][dim] for dim in sdims)
     )
-    edt_support = to_spatial_image(
-        edt_support,
-        scale=edt_support_spacing,
-        translation=edt_support_origin,
-    )
-
-    target_weights = transformation.transform_sim(
-        edt_support.astype(np.float32),
-        p=np.linalg.inv(affine),
-        output_stack_properties=target_bb,
-        order=1,
-        cval=np.nan,
-    )
-
-    support = to_spatial_image(
-        mask,
-        scale=support_spacing,
-        translation=support_origin,
-    )
-
-    target_support = transformation.transform_sim(
-        support.astype(np.float32),
-        p=np.linalg.inv(affine),
-        output_stack_properties=target_bb,
-        order=0,
-        cval=np.nan,
-    )
-
-    target_weights = target_weights * ~np.isnan(target_support)
+    for iview, source_bb in enumerate(source_bbs):
+        target_weights[iview] = interior_distance(
+            pts,
+            source_bb,
+            affines[iview],
+            dim_factors={dim: 1 / blending_widths[dim] for dim in sdims},
+        ).reshape([target_bb["shape"][dim] for dim in sdims])
 
     def cosine_weights(x):
         mask = x < 1
         x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
         x = np.clip(x, 0, 1)
-        # x[~mask] = 1
         return x
 
-    target_weights.data = cosine_weights(target_weights.data)
+    target_weights = cosine_weights(target_weights)
+
+    target_weights = normalize_weights(target_weights)
 
     return target_weights

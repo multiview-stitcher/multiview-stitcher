@@ -122,7 +122,11 @@ def get_sim_from_array(
 
 
 def get_spatial_dims_from_sim(sim):
-    return [dim for dim in ["z", "y", "x"] if dim in sim.dims]
+    return [dim for dim in SPATIAL_DIMS if dim in sim.dims]
+
+
+def get_spatial_dims_from_stack_properties(stack_properties):
+    return [dim for dim in SPATIAL_DIMS if dim in stack_properties["spacing"]]
 
 
 def get_nonspatial_dims_from_sim(sim):

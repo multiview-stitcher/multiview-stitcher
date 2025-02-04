@@ -1,7 +1,6 @@
 import multiview_stitcher.spatial_image_utils as si_utils
 from multiview_stitcher import (
     io,
-    param_utils,
     sample_data,
     weights,
 )
@@ -16,16 +15,21 @@ def test_blending_weights():
         sample_data.get_mosaic_sample_data_path()
     )
 
-    ndim = si_utils.get_ndim_from_sim(sims[0])
+    si_utils.get_ndim_from_sim(sims[0])
 
     stack_propss = [
         si_utils.get_stack_properties_from_sim(sim) for sim in sims
     ]
 
-    affine = param_utils.identity_transform(ndim)
+    affines = [
+        si_utils.get_affine_from_sim(
+            sim, transform_key=io.METADATA_TRANSFORM_KEY
+        )
+        for sim in sims
+    ]
 
     weights.get_blending_weights(
         stack_propss[0],
-        stack_propss[1],
-        affine=affine,
+        stack_propss,
+        affines=affines,
     )

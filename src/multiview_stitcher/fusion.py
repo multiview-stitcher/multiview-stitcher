@@ -564,16 +564,12 @@ def fuse_np(
 
     # get blending weights
     if fusion_requires_blending_weights:
-        field_ws_t = [
-            weights.get_blending_weights(
-                target_bb=output_properties,
-                source_bb=full_view_bbs[iview],
-                affine=params[iview],
-                blending_widths=blending_widths,
-            )
-            for iview in range(len(sims))
-        ]
-        field_ws_t = weights.normalize_weights(field_ws_t)
+        field_ws_t = weights.get_blending_weights(
+            target_bb=output_properties,
+            source_bbs=full_view_bbs,
+            affines=params,
+            blending_widths=blending_widths,
+        )
     else:
         field_ws_t = None
 
