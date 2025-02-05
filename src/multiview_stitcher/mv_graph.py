@@ -724,6 +724,14 @@ def prune_to_axis_aligned_edges(g, max_angle=0.2):
 
     g_pruned = g.edge_subgraph(edges_to_keep)
 
+    # unfreeze graph
+    g_pruned = nx.Graph(g_pruned)
+
+    # add nodes that are not connected by any edge
+    for node in g.nodes:
+        if node not in g_pruned.nodes:
+            g_pruned.add_node(node, **g.nodes[node])
+
     return g_pruned
 
 
