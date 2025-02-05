@@ -8,6 +8,7 @@ from skimage.exposure import rescale_intensity
 from multiview_stitcher import (
     io,
     msi_utils,
+    mv_graph,
     param_utils,
     registration,
     sample_data,
@@ -487,3 +488,47 @@ def test_reg_channel():
         reg_channel="EGFP",
         reg_channel_index=99,  # should be ignored
     )
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_prune_view_adjacency_graph():
+    # create random distribution of sims
+    size = 10
+    N = 10
+
+    np.random.seed(0)
+    positions = np.random.random((N, 2)) * N * size / 2 - size * N / 2
+    sdims = ["y", "x"]
+    sims = [
+        spatial_image_utils.get_sim_from_array(
+            np.zeros([size] * 2, dtype=np.uint8),
+            dims=sdims,
+            translation=dict(zip(sdims, positions[iview])),
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for iview in range(N)
+    ]
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # from multiview_stitcher import vis_utils
+    # vis_utils.plot_positions(msims, transform_key=METADATA_TRANSFORM_KEY)
+
+    g = mv_graph.build_view_adjacency_graph_from_msims(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    for pre_registration_pruning_method in [
+        "shortest_paths_overlap_weighted",
+        "otsu_threshold_on_overlap",
+        "keep_axis_aligned",
+    ]:
+        g_reg = registration.prune_view_adjacency_graph(
+            g,
+            method=pre_registration_pruning_method,
+        )
+
+        assert len(g_reg.nodes) == N
