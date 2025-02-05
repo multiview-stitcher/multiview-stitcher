@@ -2,6 +2,7 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
+from numba import njit
 from scipy.ndimage import gaussian_filter
 
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -117,6 +118,7 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
     return Z
 
 
+@njit
 def normalize_weights(weights):
     """
     Normalize weights.
@@ -132,8 +134,14 @@ def normalize_weights(weights):
         Normalized weights.
     """
 
-    wsum = np.nansum(weights, axis=0)
-    wsum[wsum == 0] = 1
+    wsum = np.zeros(weights.shape[1:])
+    for index in np.ndindex(weights.shape[1:]):
+        for iview in range(weights.shape[0]):
+            if not np.isnan(weights[iview][index]):
+                wsum[index] += weights[iview][index]
+
+        if wsum[index] == 0:
+            wsum[index] = 1
 
     weights = weights / wsum
 
@@ -170,10 +178,11 @@ def get_blending_weights(
     len(sdims)
     nviews = len(source_bbs)
 
-    sl = tuple([slice(0, target_bb["shape"][dim]) for dim in sdims])
-    pts = np.mgrid[sl].reshape(len(sdims), -1).T.astype(np.float32)
-    pts *= np.array([target_bb["spacing"][dim] for dim in sdims])
-    pts += np.array([target_bb["origin"][dim] for dim in sdims])
+    pts = sim_meshgrid(
+        shape=tuple([target_bb["shape"][dim] for dim in sdims]),
+        spacing=tuple([target_bb["spacing"][dim] for dim in sdims]),
+        origin=tuple([target_bb["origin"][dim] for dim in sdims]),
+    )
 
     target_weights = np.zeros(
         (nviews,) + tuple(target_bb["shape"][dim] for dim in sdims)
@@ -186,14 +195,42 @@ def get_blending_weights(
             dim_factors={dim: 1 / blending_widths[dim] for dim in sdims},
         ).reshape([target_bb["shape"][dim] for dim in sdims])
 
-    def cosine_weights(x):
-        mask = x < 1
-        x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
-        x = np.clip(x, 0, 1)
-        return x
-
     target_weights = cosine_weights(target_weights)
 
     target_weights = normalize_weights(target_weights)
 
     return target_weights
+
+
+@njit
+def cosine_weights(x):
+    for index in np.ndindex(x.shape):
+        if x[index] < 1:
+            x[index] = (np.cos((1 - x[index]) * np.pi) + 1) / 2
+        else:
+            x[index] = 1
+    return x
+
+
+@njit
+def sim_meshgrid(shape, spacing, origin, dtype=np.float32):
+    """
+    https://stackoverflow.com/questions/70613681/numba-compatible-numpy-meshgrid
+    """
+    out_length = 1
+    for i in range(len(shape)):
+        out_length *= shape[i]
+
+    coords = np.empty(
+        (
+            out_length,
+            len(shape),
+        ),
+        dtype=dtype,
+    )
+
+    for i, index in enumerate(np.ndindex(shape)):
+        for idim in range(len(shape)):
+            coords[i, idim] = index[idim] * spacing[idim] + origin[idim]
+
+    return coords

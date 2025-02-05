@@ -2,6 +2,7 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
+from numba import njit
 
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher import transformation
@@ -64,26 +65,56 @@ def interior_distance(
             - ot
         )
 
-    cuboid_coords = np.zeros((len(pts), ndim))
-    for idim, _dim in enumerate(sdims):
-        cuboid_coords[:, idim] = np.dot(pts - ot, cuboid_vectors_t[idim])
+    cuboid_vectors_t = cuboid_vectors_t.astype(np.float32)
+    ot = ot.astype(np.float32)
+    extent = extent.astype(np.float32)
 
-    # vectorize further
-    cuboid_coords = np.dot(pts - ot, cuboid_vectors_t.T)
+    # project
+    cuboid_coords = dot(pts - ot, cuboid_vectors_t.T)
 
-    # check if pt is in cuboid
-    insides = np.min(
-        [cuboid_coords > 0.0, cuboid_coords <= extent], axis=(0, -1)
+    distances = process_cuboid_coords(
+        cuboid_coords,
+        extent,
+        tuple([dim_factors[dim] for dim in sdims]),
     )
 
-    # distance from pt to cuboid
-    distances = np.min([cuboid_coords, extent - cuboid_coords], axis=0)
-    if dim_factors is not None:
-        distances = distances * np.array([dim_factors[dim] for dim in sdims])
+    return distances
 
-    distances = np.min(distances, axis=-1)
 
-    # set distances to 0 for points outside
-    distances = distances * insides
+@njit
+def dot(arrA, arrB):
+    """numpy.dot as function takes 2 arguments."""
+    return np.dot(arrA, arrB)
+
+
+@njit
+def process_cuboid_coords(cuboid_coords, extent, dim_factors):
+    """
+    Process cuboid coordinates to get distances.
+
+    Parameters
+    ----------
+    cuboid_coords : np.ndarray
+        Cuboid coordinates.
+
+    Returns
+    -------
+    tuple
+        Tuple of distances and insides.
+    """
+    distances = np.ones(cuboid_coords.shape[0], dtype=np.float32) * np.inf
+
+    for i, coords in enumerate(cuboid_coords):
+        for idim, coord in enumerate(coords):
+            if coord < 0.0 or coord > extent[idim]:
+                distances[i] = 0
+                break
+            else:
+                distances[i] = min(
+                    [
+                        distances[i],
+                        min([coord, extent[idim] - coord]) * dim_factors[idim],
+                    ]
+                )
 
     return distances
