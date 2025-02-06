@@ -149,6 +149,12 @@ def get_blending_weights(
     """
     Calculate smooth blending weights for fusion.
 
+    Note: The resulting weights
+    - are not normalized
+    - are not pixel perfect at the edges and need to be restricted
+      to valid regions in the target space (done in fusion function)
+    - should be non-zero for all valid pixels in the target space
+
     Parameters
     ----------
     target_bb : Target bounding box.
@@ -175,7 +181,6 @@ def get_blending_weights(
         dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
         for dim in sdims
     }
-    support_origin = source_bb["origin"]
 
     # slightly enlargen the support to avoid edge effects
     # otherwise there's no smooth transition at shared coordinate boundaries
@@ -207,24 +212,27 @@ def get_blending_weights(
         p=np.linalg.inv(affine),
         output_stack_properties=target_bb,
         order=1,
-        cval=np.nan,
+        cval=0.0,
     )
 
-    support = to_spatial_image(
-        mask,
-        scale=support_spacing,
-        translation=support_origin,
-    )
+    ## Note: Restriction to valid regions in the target space
+    ## is done in the fusion function.
 
-    target_support = transformation.transform_sim(
-        support.astype(np.float32),
-        p=np.linalg.inv(affine),
-        output_stack_properties=target_bb,
-        order=0,
-        cval=np.nan,
-    )
+    # support = to_spatial_image(
+    #     mask,
+    #     scale=support_spacing,
+    #     translation=support_origin,
+    # )
 
-    target_weights = target_weights * ~np.isnan(target_support)
+    # target_support = transformation.transform_sim(
+    #     support.astype(np.float32),
+    #     p=np.linalg.inv(affine),
+    #     output_stack_properties=target_bb,
+    #     order=0,
+    #     cval=np.nan,
+    # )
+
+    # target_weights = target_weights * ~np.isnan(target_support)
 
     def cosine_weights(x):
         mask = x < 1
