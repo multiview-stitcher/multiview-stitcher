@@ -1,7 +1,7 @@
 import numpy as np
 import xarray as xr
 from scipy.spatial.transform import Rotation
-from skimage.transform import AffineTransform
+from skimage.transform import EuclideanTransform
 
 
 def affine_from_translation(translation):
@@ -54,16 +54,20 @@ def random_rotation(ndim=2, scale=0.1):
 
 
 def random_affine(
-    ndim=2,
-    translation_scale=10,
-    rotation_scale=0.1,
-    scale_scale=0.1,
+    ndim=2, translation_scale=10, rotation_scale=0.1, scale_scale=0.1
 ):
-    return AffineTransform(
-        translation=random_translation(ndim, translation_scale),
-        rotation=random_rotation(ndim, rotation_scale),
-        scale=random_scale(ndim, scale_scale),
-    ).params
+    rigid = EuclideanTransform(
+        dimensionality=ndim,
+        rotation=np.random.random(ndim) * rotation_scale - rotation_scale / 2,
+        translation=np.random.random(ndim) * translation_scale
+        - translation_scale / 2,
+    )
+
+    scale = np.diag(
+        list(1 + np.random.random(ndim) * scale_scale - scale_scale / 2) + [1]
+    )
+
+    return rigid.params @ scale
 
 
 def invert_coordinate_order(affine):
