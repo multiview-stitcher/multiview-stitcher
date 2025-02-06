@@ -54,6 +54,15 @@ def transform_sim(
         ),
     )
 
+    # take care of floating point errors: round parameters to 10 decimals
+    # TODO: This is a hack, we should find a better way to deal with floating
+    # point errors. Could not reproduce the following error in a simple test yet:
+    # In a fractal stitching task: fused output contained empty z slices.
+
+    decimals = 10
+    matrix_prime = np.around(matrix_prime, decimals=decimals)
+    offset_prime = np.around(offset_prime, decimals=decimals)
+
     affine_transform_kwargs = {
         "matrix": matrix_prime,
         "offset": offset_prime,

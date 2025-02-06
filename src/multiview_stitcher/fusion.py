@@ -573,6 +573,7 @@ def fuse_np(
             )
             for iview in range(len(sims))
         ]
+        field_ws_t = field_ws_t * ~np.isnan(field_ims_t)
         field_ws_t = weights.normalize_weights(field_ws_t)
     else:
         field_ws_t = None
