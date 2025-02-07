@@ -494,16 +494,103 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="extension_api/" class="md-nav__link">
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
         
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
+            
   
   <span class="md-ellipsis">
     Extension API
   </span>
   
 
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            Extension API
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_api_pairwise_registration.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    None
+  </span>
+  
+
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_api_fusion.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    None
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extension_api_global_param_resolution.md" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    None
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -602,7 +689,9 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_15" >
         
           
           <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="0">
@@ -739,6 +828,10 @@
 <p>For visualization, the associated <a href="https://github.com/multiview-stitcher/napari-stitcher"><code>napari-stitcher</code></a> provides visualization functionality using the Napari viewer, including a standalone widget.</p>
 <p>With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the <a href="https://github.com/ome/ngff">NGFF specification</a>.</p>
 <p>It leverages <a href="https://github.com/xarray"><code>xarray</code></a> in combination with <a href="https://github.com/spatial-data"><code>spatial-image</code></a> classes for image metadata handling and <a href="https://github.com/dask"><code>dask</code></a> (and <a href="https://github.com/dask-image"><code>dask-image</code></a>) for chunked and distributed image processing.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>multiview-stitcher</code> as a modular framework for registration and fusion</p>
+<p>While <code>multiview-stitcher</code> contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. Have a look at the extension API documentation for more information.</p>
+</div>
 <h2 id="napari-plugin">Napari plugin</h2>
 <p>There's an associated napari plugin: <a href="https://github.com/multiview-stitcher/napari-stitcher">napari-stitcher</a>.</p>
 <h2 id="previous-work">Previous work</h2>
@@ -824,7 +917,7 @@
       <div class="md-progress" data-md-component="progress" role="progressbar"></div>
     
     
-    <script id="__config" type="application/json">{"base": ".", "features": ["content.tabs.link", "content.code.annotate", "content.code.copy", "navigation.footer", "navigation.instant", "navigation.instant.progress"], "search": "assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    <script id="__config" type="application/json">{"base": ".", "features": ["content.tabs.link", "content.code.annotate", "content.code.copy", "navigation.footer", "navigation.instant", "navigation.instant.progress", "navigation.expand"], "search": "assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
       <script src="assets/javascripts/bundle.83f73b43.min.js"></script>
