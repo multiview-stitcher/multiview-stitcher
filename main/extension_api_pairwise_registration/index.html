@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/features/">
+        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/extension_api_pairwise_registration/">
       
       
-        <link rel="prev" href="../notebooks/">
+        <link rel="prev" href="../objects/">
       
       
-        <link rel="next" href="../data_formats/">
+        <link rel="next" href="../extension_api_fusion/">
       
       
       <link rel="icon" href="../images/logo.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Features - multiview-stitcher</title>
+        <title>Pairwise registration - multiview-stitcher</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#features" class="md-skip">
+        <a href="#pairwise-registration" class="md-skip">
           Skip to content
         </a>
       
@@ -117,7 +117,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Features
+              Pairwise registration
             
           </span>
         </div>
@@ -356,30 +356,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Features
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -388,161 +368,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#dimensionality" class="md-nav__link">
-    <span class="md-ellipsis">
-      Dimensionality
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      Registration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Registration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#pairwise-registration-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      Pairwise registration methods
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#global-paramater-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      Global paramater resolution
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      Transformations
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fusion" class="md-nav__link">
-    <span class="md-ellipsis">
-      Fusion
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Fusion">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#general" class="md-nav__link">
-    <span class="md-ellipsis">
-      General
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#supported-fusion-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported fusion methods:
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#supported-weights" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported weights:
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supported-data-formats" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported data formats
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
-    <span class="md-ellipsis">
-      Visualization
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Visualization">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#napari" class="md-nav__link">
-    <span class="md-ellipsis">
-      Napari
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supported-usage-modes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported usage modes
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -611,19 +436,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
         
           
           <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
@@ -637,7 +462,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_10">
             <span class="md-nav__icon md-icon"></span>
             Extension API
@@ -648,10 +473,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../extension_api_pairwise_registration/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Pairwise registration
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -660,6 +505,86 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#registration-in-pixel-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      Registration in pixel space
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#registration-in-physical-coordinate-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      Registration in physical coordinate space
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fusion
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-fusion-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom fusion methods
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-weight-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom weight functions
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-parameter-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Global parameter resolution
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -907,51 +832,18 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#dimensionality" class="md-nav__link">
+  <a href="#registration-in-pixel-space" class="md-nav__link">
     <span class="md-ellipsis">
-      Dimensionality
+      Registration in pixel space
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#registration" class="md-nav__link">
+  <a href="#registration-in-physical-coordinate-space" class="md-nav__link">
     <span class="md-ellipsis">
-      Registration
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Registration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#pairwise-registration-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      Pairwise registration methods
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#global-paramater-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      Global paramater resolution
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      Transformations
+      Registration in physical coordinate space
     </span>
   </a>
   
@@ -968,27 +860,18 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#general" class="md-nav__link">
+  <a href="#custom-fusion-methods" class="md-nav__link">
     <span class="md-ellipsis">
-      General
+      Custom fusion methods
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#supported-fusion-methods" class="md-nav__link">
+  <a href="#custom-weight-functions" class="md-nav__link">
     <span class="md-ellipsis">
-      Supported fusion methods:
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#supported-weights" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported weights:
+      Custom weight functions
     </span>
   </a>
   
@@ -1000,42 +883,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supported-data-formats" class="md-nav__link">
+  <a href="#global-parameter-resolution" class="md-nav__link">
     <span class="md-ellipsis">
-      Supported data formats
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
-    <span class="md-ellipsis">
-      Visualization
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Visualization">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#napari" class="md-nav__link">
-    <span class="md-ellipsis">
-      Napari
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supported-usage-modes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Supported usage modes
+      Global parameter resolution
     </span>
   </a>
   
@@ -1059,79 +909,109 @@
   
 
 
-<h1 id="features">Features</h1>
-<p>Below is a list of features which are either already implemented or are on the roadmap.</p>
-<h2 id="dimensionality">Dimensionality</h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> 2D</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> 3D</li>
-</ul>
-<h2 id="registration">Registration</h2>
-<h3 id="pairwise-registration-methods">Pairwise registration methods</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Phase correlation</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> ANTsPy</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Elastix (<code>itk-elastix</code>)</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Bead alignment</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Phase correlation for rotation + translation</li>
-</ul>
-<h3 id="global-paramater-resolution">Global paramater resolution</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Graph construction</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Automatic determination of reference view</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Parameter concatenation along graph connectivity paths</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Global optimization of registration parameters from (potentially overdetermined) pairwise transforms</li>
-</ul>
-<h2 id="transformations">Transformations</h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Chunked <code>dask_image.ndinterp.affine_transform</code></li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Cupy-based transform</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Chaining transformations instead of working with static coordinate systems</li>
-</ul>
+<h1 id="pairwise-registration">Pairwise registration</h1>
+<p>Custom functions for pairwise registration can be passed to the <code>registration.register</code> function:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">def</span> <span class="nf">register</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="o">...</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">pairwise_reg_func</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">=</span> <span class="n">phase_correlation_registration</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">pairwise_reg_func_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="o">...</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Custom registration functions can have one of the following two signatures. <code>registration.register</code> will automatically detect which signature is used and call the function accordingly, passing to the function
+- <code>pairwise_reg_func_kwargs</code>
+- the below detailed parameters to the functions.</p>
+<h2 id="registration-in-pixel-space">Registration in pixel space</h2>
+<p>This API is for adding registration functions that operate on pixel data without any knowledge of the physical space.</p>
+<div class="admonition note">
+<p class="admonition-title">Initial transformation</p>
+<p>The moving data array is pre-transformed to match the pixel coordinate space of the fixed data array, using the affine matrices of the <code>transform_key</code> passed to <code>registration.register</code>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Expected output transformation</p>
+<p>The affine matrix returned by a registration following this API transforms pixel indices of the fixed image to pixel indices of the moving image. <code>registration.register</code> will take care of converting this matrix to a transformation that transforms the physical space.</p>
+</div>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span> <span class="nf">pairwise_registration</span><span class="p">(</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">fixed_data</span><span class="p">:</span> <span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">moving_data</span><span class="p">:</span> <span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># additional keyword arguments passed `pairwise_reg_func_kwargs`</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="c1"># Registration code here</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        <span class="s2">&quot;affine_matrix&quot;</span><span class="p">:</span> <span class="n">affine_matrix</span><span class="p">,</span> <span class="c1"># homogenous matrix of shape (ndim + 1, ndim + 1), axis order (z, y, x)</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="s2">&quot;quality&quot;</span><span class="p">:</span> <span class="p">,</span> <span class="c1"># float between 0 and 1 (if not available, set to 1.0)</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="p">}</span>
+</span></code></pre></div>
+<p>Example implementation: <code>multiview_stitcher.registration.phase_correlation_registration</code> (default pairwise registration function).</p>
+<h2 id="registration-in-physical-coordinate-space">Registration in physical coordinate space</h2>
+<p>This API is for adding registration functions that operate in physical coordinates.</p>
+<div class="admonition note">
+<p class="admonition-title">Transformations in physical space</p>
+<p>Both the pre-calculated <code>initial_affine</code> parameter passed to the pairwise registration function and the affine matrix returned by a registration following this API transform physical positions of the fixed image to physical positions of the moving image. Here, physical positions are calculated as <code>origin + spacing * pixel_index</code>.</p>
+</div>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span> <span class="nf">custom_pairwise_registration_function</span><span class="p">(</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">fixed_data</span><span class="p">:</span> <span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">moving_data</span><span class="p">:</span> <span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">fixed_origin</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span> <span class="c1"># e.g. {&quot;z&quot;: 10.0, &quot;y&quot;: 20.0, &quot;x&quot;: 30.0}</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">moving_origin</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">fixed_spacing</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span> <span class="c1"># e.g. {&quot;z&quot;: 1.0, &quot;y&quot;: 0.5, &quot;x&quot;: 0.5}</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">moving_spacing</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">initial_affine</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">,</span> <span class="c1"># see note below</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># `pairwise_reg_func_kwargs` passed to `registration.register`</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="c1"># Registration code here</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>        <span class="s2">&quot;affine_matrix&quot;</span><span class="p">:</span> <span class="n">affine_matrix</span><span class="p">,</span> <span class="c1"># homogenous matrix of shape (ndim + 1, ndim + 1), axis order (z, y, x)</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        <span class="s2">&quot;quality&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="c1"># float between 0 and 1 (if not available, set to 1.0)</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="p">}</span>
+</span></code></pre></div>
+<p>For a description of the object that will be passed as an initial affine matrix, see <a href="../objects/#affine-transformation-parameters">here</a>.</p>
 <h2 id="fusion">Fusion</h2>
-<h3 id="general">General</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Modular API to plug in different fusion and weight functions</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Support for fusion label maps</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Cupy-based fusion</li>
-</ul>
-<h3 id="supported-fusion-methods">Supported fusion methods:</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Weighted average</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Maximum intensity projection</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Multi-view deconvolution</li>
-</ul>
-<h3 id="supported-weights">Supported weights:</h3>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Linear blending</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Content-based</li>
-</ul>
-<h2 id="supported-data-formats">Supported data formats</h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> OME-Zarr</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: <a href="https://github.com/spatial-image/multiscale-spatial-image">multiscale-spatial-data</a></li>
-<li>CZI input</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Multi-positioning</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Light-sheet</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> TIF input</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> TIF writing</li>
-</ul>
-<h2 id="visualization">Visualization</h2>
-<h3 id="napari">Napari</h3>
-<p>See <a href="https://github.com/multiview-stitcher/napari-stitcher">napari-stitcher</a>.</p>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> 2D slice view: multiscale rendering</li>
-<li>3D rendered view:</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Lowest scale</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Chunked rendering</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Colormaps optimized for highlighting differences between overlapping views</li>
-</ul>
-<h2 id="supported-usage-modes">Supported usage modes</h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> As a library to build custom reconstruction workflows</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled checked/><span class="task-list-indicator"></span></label> Napari plugin</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Convenience function for processing on HPC</li>
-</ul>
+<p>Custom functions can be passed to the <code>fusion.fuse</code> function. <code>multiview-stitcher</code> provides the custom fusion and weights functions with pre-transformed chunks corresponding to the <code>transform_key</code> passed to <code>fusion.fuse</code>. Only those views will be passed which contribute to the given output chunks. The elements of the input lists correspond to the different input views / tiles and conserve the order of the input views / tiles passed to <code>fusion.fuse</code>.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">def</span> <span class="nf">fuse</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="o">...</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">transform_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">fusion_func</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">=</span> <span class="n">weighted_average_fusion</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">fusion_func_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">weights_func</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="c1"># by default no additional fusion weights are used</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">weights_func_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="o">...</span>
+</span></code></pre></div>
+<h3 id="custom-fusion-methods">Custom fusion methods</h3>
+<p>Custom function for fusion of pre-transformed view chunks. This could implement e.g. a maximum intensity projection, a weighted average, or a multi-view deconvolution.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">def</span> <span class="nf">custom_fusion_function</span><span class="p">(</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">transformed_views</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span> <span class="c1"># list of pre-transformed view chunks</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">blending_weights</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span> <span class="c1"># optional functional argument</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">fusion_weights</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span> <span class="c1"># optional functional argument</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># `fusion_func_kwargs` passed to `fusion.fuse`</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">:</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="c1"># Fusion code here</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="k">return</span> <span class="n">fused_array</span>
+</span></code></pre></div>
+<p>If the optional funtion arguments are not part of the function signature, the arguments will be ignored.</p>
+<p>Example implementation: <code>multiview_stitcher.fusion.weighted_average_fusion</code>.</p>
+<h3 id="custom-weight-functions">Custom weight functions</h3>
+<p>Custom function for calculating additional fusion weights passed to the fusion function as <code>fusion_weights</code>. This could implement e.g. a content-based weighting scheme. The function should return a list of weights, one for each view chunk.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span> <span class="nf">custom_weight_function</span><span class="p">(</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">transformed_views</span> <span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">blending_weights</span> <span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># `weights_func_kwargs` passed to `fusion.fuse`</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">)</span> <span class="o">-</span> <span class="o">&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">]:</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="c1"># Weight calculation code here</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="k">return</span> <span class="n">weights</span>
+</span></code></pre></div>
+<p>Example implementation: <code>multiview_stitcher.weights.content_based</code>.</p>
+<h2 id="global-parameter-resolution">Global parameter resolution</h2>
+<p>Custom function API to be added.</p>
 
 
 
@@ -1163,7 +1043,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../notebooks/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Notebooks">
+          <a href="../objects/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Objects">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1173,20 +1053,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Notebooks
+                Objects
               </div>
             </div>
           </a>
         
         
           
-          <a href="../data_formats/" class="md-footer__link md-footer__link--next" aria-label="Next: Data formats">
+          <a href="../extension_api_fusion/" class="md-footer__link md-footer__link--next" aria-label="Next: Fusion">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Data formats
+                Fusion
               </div>
             </div>
             <div class="md-footer__button md-icon">
