@@ -52,7 +52,10 @@ nav:
   - data_formats.md
   - implementation_details.md
   - objects.md
-  - extension_api.md
+  - Extension API:
+    - extension_api_pairwise_registration.md
+    - extension_api_fusion.md
+    - extension_api_global_param_resolution.md
   - napari_stitcher.md
   - stitching_in_the_browser.md
   - related_projects.md
@@ -71,6 +74,7 @@ theme:
     - navigation.footer  # next/previous links in footer
     - navigation.instant
     - navigation.instant.progress
+    - navigation.expand
   logo: images/logo.png
   icon:
     # logo: fontawesome/solid/clone
