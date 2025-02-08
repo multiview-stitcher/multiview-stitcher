@@ -11,9 +11,8 @@ def transform_sim(
     sim,
     p=None,
     output_stack_properties=None,
-    order=1,
-    cval=0.0,
     keep_transform_keys=False,
+    **affine_transform_kwargs,
 ):
     """
     Transform a spatial image
@@ -66,13 +65,13 @@ def transform_sim(
     affine_transform_kwargs = {
         "matrix": matrix_prime,
         "offset": offset_prime,
-        "order": order,
         "output_shape": tuple(
             [output_stack_properties["shape"][dim] for dim in spatial_dims]
         ),
         "mode": "constant",
-        "cval": cval,
-    }
+        "cval": 0.0,
+        "order": 1,
+    } | affine_transform_kwargs
 
     if isinstance(sim.data, da.core.Array):
         out_data = dask_image_affine_transform(
