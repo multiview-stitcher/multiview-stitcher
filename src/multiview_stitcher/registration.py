@@ -706,7 +706,6 @@ def register_pair_of_msims(
             lowers[i][idim] = lowers[i][idim] - overlap_tolerance[dim]
             uppers[i][idim] = uppers[i][idim] + overlap_tolerance[dim]
 
-    # if overlap_tolerance is not None:
     tol = 1e-6
     reg_sims_b = [
         sim.sel(
