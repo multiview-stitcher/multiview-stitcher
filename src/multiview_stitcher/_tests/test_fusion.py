@@ -382,6 +382,8 @@ def test_direct_zarr_fusion(ndim):
             for input_sims in [sims, sims_zarr]
         ]
 
+        # add check that the dask graphs changed
+
         fused_sims_c = [
             s.compute(scheduler="single-threaded") for s in fused_sims
         ]
