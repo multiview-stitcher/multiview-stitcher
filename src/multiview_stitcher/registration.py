@@ -707,12 +707,13 @@ def register_pair_of_msims(
             uppers[i][idim] = uppers[i][idim] + overlap_tolerance[dim]
 
     # if overlap_tolerance is not None:
+    tol = 1e-6
     reg_sims_b = [
         sim.sel(
             {
                 dim: slice(
-                    lowers[isim][idim] - 0.001,
-                    uppers[isim][idim] + 0.001,
+                    lowers[isim][idim] - tol,
+                    uppers[isim][idim] + tol,
                 )
                 for idim, dim in enumerate(spatial_dims)
             }
