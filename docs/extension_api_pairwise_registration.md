@@ -21,7 +21,7 @@ Custom registration functions can have one of the following two signatures. `reg
 This API is for adding registration functions that operate on pixel data without any knowledge of the physical space.
 
 !!! note "Initial transformation"
-    The moving data array is pre-transformed to match the pixel coordinate space of the fixed data array, using the affine matrices of the `transform_key` passed to `registration.register`.
+    The moving data array is pre-transformed to match the pixel coordinate space of the fixed data array, using the affine matrices of the `transform_key` passed to `registration.register`. Image data is passed as float dtype and NaN values mark pixels that map outside the image domains after transformation.
 
 !!! note "Expected output transformation"
     The affine matrix returned by a registration following this API transforms pixel indices of the fixed image to pixel indices of the moving image. `registration.register` will take care of converting this matrix to a transformation that transforms the physical space.
