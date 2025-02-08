@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 import warnings
+from typing import Union
 
 import dask.array as da
 import networkx as nx
@@ -140,7 +141,6 @@ def get_overlap_bboxes(
     sim2,
     input_transform_key=None,
     output_transform_key=None,
-    extension_in_physical_units=0.0,
 ):
     """
     Get bounding box(es) of overlap between two spatial images
@@ -188,12 +188,10 @@ def get_overlap_bboxes(
 
     lowers = [
         np.max(np.min(corners_target_space[isim], axis=1), axis=0)
-        - extension_in_physical_units
         for isim in range(2)
     ]
     uppers = [
         np.min(np.max(corners_target_space[isim], axis=1), axis=0)
-        + extension_in_physical_units
         for isim in range(2)
     ]
 
@@ -240,7 +238,7 @@ def sims_to_intrinsic_coord_system(
 
     reg_sims_b_t = [
         transformation.transform_sim(
-            sim,
+            sim.astype(float),
             [None, transf_affine][isim],
             output_stack_properties={
                 "origin": {
@@ -254,6 +252,8 @@ def sims_to_intrinsic_coord_system(
                     dim: shape[idim] for idim, dim in enumerate(spatial_dims)
                 },
             },
+            mode="constant",
+            cval=np.nan,
         )
         for isim, sim in enumerate(reg_sims_b)
     ]
@@ -271,7 +271,12 @@ def sims_to_intrinsic_coord_system(
     return reg_sims_b_t[0], reg_sims_b_t[1]
 
 
-def phase_correlation_registration(fixed_data, moving_data, **kwargs):
+def phase_correlation_registration(
+    fixed_data,
+    moving_data,
+    disambiguate_region_mode="union",
+    **skimage_phase_corr_kwargs,
+):
     """
     Phase correlation registration using a modified version of skimage's
     phase_cross_correlation function.
@@ -298,14 +303,26 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
     im0, im1 = (
         rescale_intensity(
             im,
-            in_range=(im.min(), im.max()),
+            in_range=(np.nanmin(im), np.nanmax(im)),
             out_range=(0, 1),
         )
         for im in [im0, im1]
     )
 
-    if "upsample_factor" not in kwargs:
-        kwargs["upsample_factor"] = 10 if ndim == 2 else 2
+    im0nm = np.isnan(im0)
+    im1nm = np.isnan(im1)
+
+    valid_pixels1 = np.sum(~im1nm)
+
+    if np.any([im0nm, im1nm]):
+        im0nn = np.nan_to_num(im0)
+        im1nn = np.nan_to_num(im1)
+    else:
+        im0nn = im0
+        im1nn = im1
+
+    if "upsample_factor" not in skimage_phase_corr_kwargs:
+        skimage_phase_corr_kwargs["upsample_factor"] = 10 if ndim == 2 else 2
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -314,15 +331,28 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
         # normalization and keep the one with the highest
         # structural similarity score during manual "disambiguation"
         # (which should be a metric orthogonal to the corr coef)
+
         shift_candidates = []
         for normalization in ["phase", None]:
             shift_candidates.append(
                 skimage.registration.phase_cross_correlation(
-                    im0,
-                    im1,
+                    im0nn,
+                    im1nn,
                     disambiguate=False,
                     normalization=normalization,
-                    **kwargs,
+                    **skimage_phase_corr_kwargs,
+                )[0]
+            )
+
+        if np.any([im0nm, im1nm]):
+            shift_candidates.append(
+                skimage.registration.phase_cross_correlation(
+                    im0,
+                    im1,
+                    reference_mask=im0nm,
+                    moving_mask=im1nm,
+                    disambiguate=False,
+                    **skimage_phase_corr_kwargs,
                 )[0]
             )
 
@@ -336,8 +366,8 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
     # the shift along x and y is smaller than 50 pixels
     max_shift_per_dim = np.max([im.shape for im in [im0, im1]])
 
-    data_range = np.max([im0, im1]) - np.min([im0, im1])
-    im1_min = np.min(im1)
+    data_range = np.nanmax([im0, im1]) - np.nanmin([im0, im1])
+    im1_min = np.nanmin(im1)
 
     disambiguate_metric_vals = []
     quality_metric_vals = []
@@ -363,31 +393,58 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
     if not len(t_candidates):
         return [np.zeros(ndim)]
 
-    for t_ in t_candidates:
-        # if im1 is unsigned integer, get mask by assuming there's
-        # no lower value than cval
+    def get_bb_from_nanmask(mask):
+        bbs = []
+        for idim in range(mask.ndim):
+            axes = list(range(mask.ndim))
+            axes.remove(idim)
+            valids = np.where(np.max(mask, axis=tuple(axes)))
+            bbs.append([np.min(valids), np.max(valids)])
+        return bbs
 
+    im0_bb = get_bb_from_nanmask(~im0nm)
+
+    for t_ in t_candidates:
         im1t = ndimage.affine_transform(
-            im1 + 1,
+            im1,
             param_utils.affine_from_translation(list(t_)),
             order=1,
             mode="constant",
-            cval=im1_min,
+            cval=np.nan,
         )
-        mask = im1t > im1_min
+        mask = ~np.isnan(im1t) * ~im0nm
 
-        if float(np.sum(mask)) / np.prod(im1.shape) < 0.1:
+        if np.all(~mask) or float(np.sum(mask)) / valid_pixels1 < 0.1:
             disambiguate_metric_val = -1
             quality_metric_val = -1
         else:
-            mask_slices = tuple(
-                [
-                    slice(0, im0.shape[idim] - int(np.ceil(t_[idim])))
-                    if t_[idim] >= 0
-                    else slice(-int(np.ceil(t_[idim])), im0.shape[idim])
-                    for idim in range(ndim)
-                ]
-            )
+            im1t_bb = get_bb_from_nanmask(~np.isnan(im1t))
+
+            if disambiguate_region_mode == "union":
+                mask_slices = tuple(
+                    [
+                        slice(
+                            min(im0_bb[idim][0], im1t_bb[idim][0] + 1),
+                            max(im0_bb[idim][1], im1t_bb[idim][1] + 1),
+                        )
+                        for idim in range(ndim)
+                    ]
+                )
+            elif disambiguate_region_mode == "intersection":
+                mask_slices = tuple(
+                    [
+                        slice(
+                            max(im0_bb[idim][0], im1t_bb[idim][0] + 1),
+                            min(im0_bb[idim][1], im1t_bb[idim][1] + 1),
+                        )
+                        for idim in range(ndim)
+                    ]
+                )
+
+            if np.nanmax(im1t[mask_slices]) <= im1_min:
+                disambiguate_metric_val = -1
+                quality_metric_val = -1
+                continue
 
             # structural similarity seems to be better than
             # correlation for disambiguation (need to solidify this)
@@ -398,8 +455,8 @@ def phase_correlation_registration(fixed_data, moving_data, **kwargs):
                 disambiguate_metric_val = -1
             else:
                 disambiguate_metric_val = structural_similarity(
-                    im0[mask_slices],
-                    im1t[mask_slices] - 1,
+                    np.nan_to_num(im0[mask_slices]),
+                    np.nan_to_num(im1t[mask_slices]),
                     data_range=data_range,
                     win_size=ssim_win_size,
                 )
@@ -553,7 +610,7 @@ def register_pair_of_msims(
     msim2,
     transform_key,
     registration_binning=None,
-    overlap_tolerance=0.0,
+    overlap_tolerance: Union[int, dict[str, int]] = None,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
 ):
@@ -599,6 +656,20 @@ def register_pair_of_msims(
     spatial_dims = msi_utils.get_spatial_dims(msim1)
     ndim = len(spatial_dims)
 
+    if overlap_tolerance is None:
+        overlap_tolerance = {dim: 0.0 for dim in spatial_dims}
+    elif isinstance(overlap_tolerance, (int, float)):
+        overlap_tolerance = {
+            dim: float(overlap_tolerance) for dim in spatial_dims
+        }
+    elif isinstance(overlap_tolerance, dict):
+        overlap_tolerance = {
+            dim: float(overlap_tolerance[dim])
+            if dim in overlap_tolerance
+            else 0.0
+            for dim in spatial_dims
+        }
+
     sim1 = msi_utils.get_sim_from_msim(msim1)
     sim2 = msi_utils.get_sim_from_msim(msim2)
 
@@ -628,24 +699,26 @@ def register_pair_of_msims(
         reg_sims_b[1],
         input_transform_key=transform_key,
         output_transform_key=None,
-        extension_in_physical_units=overlap_tolerance
-        if overlap_tolerance is not None
-        else 0.0,
     )
 
-    if overlap_tolerance is not None:
-        reg_sims_b = [
-            sim.sel(
-                {
-                    dim: slice(
-                        lowers[isim][idim] - 0.001,
-                        uppers[isim][idim] + 0.001,
-                    )
-                    for idim, dim in enumerate(spatial_dims)
-                }
-            )
-            for isim, sim in enumerate(reg_sims_b)
-        ]
+    for idim, dim in enumerate(spatial_dims):
+        for i in range(2):
+            lowers[i][idim] = lowers[i][idim] - overlap_tolerance[dim]
+            uppers[i][idim] = uppers[i][idim] + overlap_tolerance[dim]
+
+    # if overlap_tolerance is not None:
+    reg_sims_b = [
+        sim.sel(
+            {
+                dim: slice(
+                    lowers[isim][idim] - 0.001,
+                    uppers[isim][idim] + 0.001,
+                )
+                for idim, dim in enumerate(spatial_dims)
+            }
+        )
+        for isim, sim in enumerate(reg_sims_b)
+    ]
 
     # # Optionally perform CLAHE before registration
     # for i in range(2):
@@ -1491,7 +1564,7 @@ def register(
     reg_channel=None,
     new_transform_key=None,
     registration_binning=None,
-    overlap_tolerance=0.0,
+    overlap_tolerance: Union[int, dict[str, int]] = 0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
     groupwise_resolution_method="global_optimization",

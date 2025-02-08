@@ -563,17 +563,30 @@ def test_constant_pairwise_reg():
         )
 
 
-def test_overlap_tolerance():
-    example_data_path = sample_data.get_mosaic_sample_data_path()
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
+@pytest.mark.parametrize(
+    "ndim",
+    [2, 3],
+)
+def test_overlap_tolerance(ndim):
+    """
+    Check that overlap_tolerance works as expected by recovering
+    non overlapping images with a known shift.
+    """
 
-    sim0 = sims[0]
-    sim1 = sims[1]
+    overlap_x = 10
+    shift_x = overlap_x / 2.0
 
-    shape_x = len(sims[1].coords["x"])
-    shift_x = (
-        sims[1].coords["x"].data[shape_x // 10] - sims[1].coords["x"].data[0]
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        N_c=1,
+        N_t=1,
+        tile_size=30,
+        overlap=overlap_x,
+        tiles_x=2,
+        tiles_y=1,
     )
+    sim0, sim1 = sims
+
     sim1_shifted = sims[1].assign_coords(
         {"x": sims[1].coords["x"].data + shift_x}
     )
@@ -586,6 +599,7 @@ def test_overlap_tolerance():
         transform_key=METADATA_TRANSFORM_KEY,
         new_transform_key="registered_orig",
         reg_channel_index=0,
+        scheduler="single-threaded",
     )
 
     params_shifted = registration.register(
@@ -595,26 +609,19 @@ def test_overlap_tolerance():
         ],
         transform_key=METADATA_TRANSFORM_KEY,
         new_transform_key="registered_shifted",
-        # overlap_tolerance={"x": shift_x * 2},
-        overlap_tolerance=shift_x * 2,
+        overlap_tolerance={"x": shift_x * 2},
         reg_channel_index=0,
+        scheduler="single-threaded",
     )
 
-    print(params_orig, params_shifted)
-
-    import pdb
-
-    pdb.set_trace()
-    assert ()
-
-    sims = [
-        sim.assign_coords(
-            {
-                "y": sim.coords["y"].data
-                - sim.coords["y"].data[0]
-                + (sim.coords["y"].data[0] - sims[0].coords["y"].data[0]) * 0.9
-                # "x": sims[1].coords["y"].data, # can be left out
-            }
+    params_diff = param_utils.translation_from_affine(
+        (
+            params_shifted[1]
+            - params_shifted[0]
+            - (params_orig[1] - params_orig[0])
         )
-        for sim in sims
-    ]
+        .sel(t=0)
+        .data
+    )
+
+    np.allclose(params_diff, [0] * (ndim - 1) + [shift_x], atol=1.5)
