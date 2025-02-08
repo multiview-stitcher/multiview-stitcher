@@ -781,18 +781,11 @@ def register_pair_of_msims(
 def register_pair_of_msims_over_time(
     msim1,
     msim2,
-    transform_key,
-    registration_binning=None,
-    overlap_tolerance=0.0,
-    pairwise_reg_func=phase_correlation_registration,
-    pairwise_reg_func_kwargs=None,
+    **register_kwargs,
 ):
     """
     Apply register_pair_of_msims to each time point of the input images.
     """
-
-    if pairwise_reg_func_kwargs is None:
-        pairwise_reg_func_kwargs = {}
 
     msim1 = msi_utils.ensure_dim(msim1, "t")
     msim2 = msi_utils.ensure_dim(msim2, "t")
@@ -808,11 +801,7 @@ def register_pair_of_msims_over_time(
                 register_pair_of_msims(
                     msi_utils.multiscale_sel_coords(msim1, {"t": t}),
                     msi_utils.multiscale_sel_coords(msim2, {"t": t}),
-                    transform_key=transform_key,
-                    registration_binning=registration_binning,
-                    pairwise_reg_func=pairwise_reg_func,
-                    pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
-                    overlap_tolerance=overlap_tolerance,
+                    **register_kwargs,
                 )
                 for t in sim1.coords["t"].values
             ],
@@ -1694,12 +1683,8 @@ def register(
 def compute_pairwise_registrations(
     msims,
     g_reg,
-    transform_key=None,
-    registration_binning=None,
-    overlap_tolerance=0.0,
-    pairwise_reg_func=phase_correlation_registration,
-    pairwise_reg_func_kwargs=None,
     scheduler=None,
+    **register_kwargs,
 ):
     g_reg_computed = g_reg.copy()
     edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
@@ -1708,11 +1693,7 @@ def compute_pairwise_registrations(
         register_pair_of_msims_over_time(
             msims[pair[0]],
             msims[pair[1]],
-            transform_key=transform_key,
-            registration_binning=registration_binning,
-            overlap_tolerance=overlap_tolerance,
-            pairwise_reg_func=pairwise_reg_func,
-            pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
+            **register_kwargs,
         )
         for pair in edges
     ]
