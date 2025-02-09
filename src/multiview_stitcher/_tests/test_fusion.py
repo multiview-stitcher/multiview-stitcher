@@ -334,24 +334,26 @@ def test_fusion_chunksizes(input_chunksize):
             for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
         )
 @pytest.mark.parametrize(
-    "ndim,",
+    "test_params",
     [
-        2,
-        3,
+        {"t": 1, "c": 1, "ndim": 3, "input_chunking": 10},
+        {"t": 1, "c": 2, "ndim": 2, "input_chunking": 10},
+        {"t": 2, "c": 2, "ndim": 2, "input_chunking": 10},
     ],
 )
-def test_circumvent_dask_for_zarr_backed_input(ndim):
+def test_circumvent_dask_for_zarr_backed_input(test_params):
     """
     Test that the circumvent_dask_for_zarr_backed_input flag works as expected.
     """
 
+    ndim = 2
     nviews = 2
     sims = [
         sample_data.generate_tiled_dataset(
             ndim=ndim,
             overlap=0,
-            N_c=1,
-            N_t=1,
+            N_c=test_params["c"],
+            N_t=test_params["t"],
             tile_size=20,
             tiles_x=2,
             tiles_y=1,
@@ -366,7 +368,7 @@ def test_circumvent_dask_for_zarr_backed_input(ndim):
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
 
     for sim in sims:
-        sim.data = sim.data.rechunk(10)
+        sim.data = sim.data.rechunk(test_params["input_chunking"])
         p = param_utils.affine_to_xaffine(param_utils.random_affine(ndim=ndim))
         si_utils.set_sim_affine(sim, p, transform_key="random")
 
