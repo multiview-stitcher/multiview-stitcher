@@ -346,34 +346,33 @@ def test_circumvent_dask_for_zarr_backed_input(test_params):
     Test that the circumvent_dask_for_zarr_backed_input flag works as expected.
     """
 
+    # create minimal example grid with overlap
     ndim = 2
     nviews = 2
-    sims = [
-        sample_data.generate_tiled_dataset(
-            ndim=ndim,
-            overlap=0,
-            N_c=test_params["c"],
-            N_t=test_params["t"],
-            tile_size=20,
-            tiles_x=2,
-            tiles_y=1,
-            tiles_z=1,
-            spacing_x=1,
-            spacing_y=1,
-            spacing_z=1,
-        )[0]
-        for _ in range(nviews)
-    ]
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        overlap=7,
+        N_c=test_params["c"],
+        N_t=test_params["t"],
+        tile_size=20,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1,
+        spacing_y=1,
+        spacing_z=1,
+    )
 
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
 
+    # rechunk input data
     for sim in sims:
         sim.data = sim.data.rechunk(test_params["input_chunking"])
-        p = param_utils.affine_to_xaffine(param_utils.random_affine(ndim=ndim))
-        si_utils.set_sim_affine(sim, p, transform_key="random")
+        # p = param_utils.affine_to_xaffine(param_utils.random_affine(ndim=ndim))
+        # si_utils.set_sim_affine(sim, p, transform_key="random")
 
+    # persist input data to zarr
     sims_zarr = [sim.copy() for sim in sims]
-
     with tempfile.TemporaryDirectory() as tmpdir:
         for iview in range(nviews):
             sims_zarr[iview].data = da.to_zarr(
@@ -384,12 +383,14 @@ def test_circumvent_dask_for_zarr_backed_input(test_params):
                 compute=True,
             )
 
+        # fuse with output chunksize which is unaligned
+        # with input chunksize and overlap
         fused_sims = [
             fusion.fuse(
                 sims_zarr,
-                # transform_key=METADATA_TRANSFORM_KEY,
-                transform_key="random",
-                output_chunksize={dim: 10 for dim in sdims},
+                transform_key=METADATA_TRANSFORM_KEY,
+                # transform_key="random",
+                output_chunksize={dim: 8 for dim in sdims},
                 circumvent_dask_for_zarr_backed_input=do_circumvent,
             )
             for do_circumvent in [True, False]
@@ -399,7 +400,10 @@ def test_circumvent_dask_for_zarr_backed_input(test_params):
             s.compute(scheduler="single-threaded") for s in fused_sims
         ]
 
+    # make sure the results are the same
     assert np.allclose(*fused_sims_c)
 
-    # check that dask graph changed
+    # check that the dask graphs changed
+    # (actually the dask graph including the circumvention is larger
+    # when counting the number of keys in the dask graph)
     assert np.diff([len(f.data.dask.to_dict().keys()) for f in fused_sims])
