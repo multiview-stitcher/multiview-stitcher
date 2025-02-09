@@ -176,6 +176,12 @@ def fuse(
         if this argument is present.
     output_chunksize : int or dict, optional
         Chunksize of the dask data array of the fused image, by default 512
+    overlap_in_pixels : int, optional
+        Overlap in pixels used for fusion, by default None
+    interpolation_order : int, optional
+        Order of transformation interpolation, by default 1
+    blending_widths : dict, optional
+        Widths of blending weights per spatial dimension, by default None
     circumvent_dask_for_zarr_backed_input: bool, optional
         Optional (experimental) optimization for input arrays created from zarr arrays
         using dask.array.from_zarr. In this case, and if this option is enabled,
