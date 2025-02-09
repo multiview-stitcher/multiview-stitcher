@@ -134,6 +134,7 @@ def fuse(
     overlap_in_pixels: int = None,
     interpolation_order: int = 1,
     blending_widths: dict[str, float] = None,
+    circumvent_dask_for_zarr_backed_input: bool = False,
 ):
     """
 
@@ -177,6 +178,13 @@ def fuse(
         Chunksize of the dask data array of the fused image. If the first tile is a chunked dask array,
         its chunksize is used as the default. If the first tile is not a chunked dask array,
         the default chunksize defined in spatial_image_utils.py is used.
+        Chunksize of the dask data array of the fused image, by default 512
+    circumvent_dask_for_zarr_backed_input: bool, optional
+        Optional (experimental) optimization for input arrays created from zarr arrays
+        using dask.array.from_zarr. In this case, and if this option is enabled,
+        the fusion function will attempt to access the input arrays directly
+        from the zarr arrays. This can simplify the dask graph and improve stability
+        for large input and output arrays. By default False
 
     Returns
     -------
@@ -260,17 +268,17 @@ def fuse(
 
     views_bb = [si_utils.get_stack_properties_from_sim(sim) for sim in sims]
 
-    access_zarr_directly = True
-    logger.info(
-        f"Accessing zarr arrays directly for fusion: {access_zarr_directly}"
-    )
-    if access_zarr_directly:
+    if circumvent_dask_for_zarr_backed_input:
         sims_data_zarrs = [
             misc_utils.get_zarr_array_from_dask_array(sim.data) for sim in sims
         ]
+
         logger.info(
-            "The following sim indices can be accessed directly from zarr arrays: "
-            f"{[isim is not None for isim, sim_data_zarr in enumerate(sims_data_zarrs)]}"
+            "The following sim indices are accessed directly from zarr arrays: ",
+            [
+                isim is not None
+                for isim, sim_data_zarr in enumerate(sims_data_zarrs)
+            ],
         )
 
     merges = []
@@ -382,7 +390,7 @@ def fuse(
                 for iview in relevant_view_indices
             ]
 
-            if access_zarr_directly:
+            if circumvent_dask_for_zarr_backed_input:
                 # determine pixel indices
                 pixel_sl = {
                     iview: {
@@ -406,11 +414,11 @@ def fuse(
                     for iview in relevant_view_indices
                 }
 
-                for _iiview, iview in enumerate(relevant_view_indices):
+                for iiview, iview in enumerate(relevant_view_indices):
                     # replace data arrays by direct slices into input zarr arrays
                     if sims_data_zarrs[iview] is not None:
                         sims_slices[
-                            iview
+                            iiview
                         ].data = misc_utils.get_dask_array_from_slice_into_zarr_array(
                             sims_data_zarrs[iview],
                             tuple(
@@ -419,7 +427,9 @@ def fuse(
                                     for dim in sims[iview].dims
                                 ]
                             ),
-                        ).squeeze()
+                        ).reshape(
+                            sims_slices[iiview].shape
+                        )
 
             # determine whether to fuse plany by plane
             #  to avoid weighting edge artifacts
