@@ -340,11 +340,12 @@ def test_fusion_chunksizes(input_chunksize):
         3,
     ],
 )
+def test_circumvent_dask_for_zarr_backed_input(ndim):
+    """
+    Test that the circumvent_dask_for_zarr_backed_input flag works as expected.
+    """
 
-
-def test_direct_zarr_fusion(ndim):
-    nviews = 3
-
+    nviews = 2
     sims = [
         sample_data.generate_tiled_dataset(
             ndim=ndim,
@@ -352,7 +353,7 @@ def test_direct_zarr_fusion(ndim):
             N_c=1,
             N_t=1,
             tile_size=20,
-            tiles_x=1,
+            tiles_x=2,
             tiles_y=1,
             tiles_z=1,
             spacing_x=1,
@@ -361,6 +362,13 @@ def test_direct_zarr_fusion(ndim):
         )[0]
         for _ in range(nviews)
     ]
+
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+
+    for sim in sims:
+        sim.data = sim.data.rechunk(10)
+        p = param_utils.affine_to_xaffine(param_utils.random_affine(ndim=ndim))
+        si_utils.set_sim_affine(sim, p, transform_key="random")
 
     sims_zarr = [sim.copy() for sim in sims]
 
@@ -376,16 +384,20 @@ def test_direct_zarr_fusion(ndim):
 
         fused_sims = [
             fusion.fuse(
-                input_sims,
-                transform_key=METADATA_TRANSFORM_KEY,
+                sims_zarr,
+                # transform_key=METADATA_TRANSFORM_KEY,
+                transform_key="random",
+                output_chunksize={dim: 10 for dim in sdims},
+                circumvent_dask_for_zarr_backed_input=do_circumvent,
             )
-            for input_sims in [sims, sims_zarr]
+            for do_circumvent in [True, False]
         ]
-
-        # add check that the dask graphs changed
 
         fused_sims_c = [
             s.compute(scheduler="single-threaded") for s in fused_sims
         ]
 
     assert np.allclose(*fused_sims_c)
+
+    # check that dask graph changed
+    assert np.diff([len(f.data.dask.to_dict().keys()) for f in fused_sims])
