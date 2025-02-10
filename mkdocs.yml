@@ -46,6 +46,10 @@ nav:
   - index.md
   - installation.md
   - code_example.md
+  - Troubleshooting guide:
+    - Registration:
+      - troubleshoot_registration_accuracy.md
+      - troubleshoot_registration_OOM.md
   - chart.md
   - notebooks.md
   - features.md
