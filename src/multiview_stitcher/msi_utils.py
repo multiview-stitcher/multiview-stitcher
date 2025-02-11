@@ -126,7 +126,9 @@ def complete_msim_zarr(msim, path):
     for scale_key in get_sorted_scale_keys(msim):
         if scale_key in msim_disk:
             ds = xr.open_zarr(path, group=scale_key)
-            ds_diff = xr.Dataset(msim[scale_key].drop_vars(ds.data_vars))
+            ds_diff = xr.Dataset(
+                msim[scale_key].to_dataset().drop_vars(ds.data_vars)
+            )
             ds_diff.to_zarr(path, group=scale_key, mode="a")
 
         else:
