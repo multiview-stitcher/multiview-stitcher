@@ -110,39 +110,10 @@ def multiscale_spatial_image_to_zarr(msim, path):
     msim.to_zarr(path)
 
 
-def complete_msim_zarr(msim, path):
+def update_msim_transforms_zarr(msim, path, overwrite=False):
     """
-    Complete zarr store with data from msim that doesn't exist in store.
-    """
-
-    path = Path(path)
-
-    if not path.exists():
-        raise ValueError("Path does not exist")
-        # multiscale_spatial_image_to_zarr(msim, path)
-        # return
-
-    msim_disk = multiscale_spatial_image_from_zarr(path)
-
-    for scale_key in get_sorted_scale_keys(msim):
-        if scale_key in msim_disk:
-            ds = xr.open_zarr(path, group=scale_key)
-            ds_diff = xr.Dataset(
-                msim[scale_key].to_dataset().drop_vars(ds.data_vars)
-            )
-            ds_diff.to_zarr(path, group=scale_key, mode="a")
-
-        else:
-            ds.to_zarr(
-                path,
-                group=scale_key,
-            )
-
-
-def update_msim_metadata_zarr(msim, path):
-    """
-    Update (or write) multiview-stitcher flavor metadata to zarr store.
-    Overwrites all data variables except "image".
+    Update (or write) multiview-stitcher flavor transform metadata to zarr store.
+    Concerns all data variables except "image".
     """
 
     path = Path(path)
@@ -156,19 +127,16 @@ def update_msim_metadata_zarr(msim, path):
         for data_var in [
             dv for dv in msim[scale_key].data_vars if dv != "image"
         ]:
-            # if data_var exists on disk, rename the folder
+            # import pdb; pdb.set_trace()
             if (
                 scale_key in msim_disk_scale_keys
                 and data_var in msim_disk[scale_key].data_vars
+                and not overwrite
             ):
-                msim_disk[scale_key][data_var].to_zarr(
-                    os.path.join(path, scale_key, data_var + "_old"),
-                    group=scale_key,
-                    mode="w",
-                )
+                continue
             msim[scale_key][data_var].to_zarr(
-                os.path.join(path, scale_key, data_var),
-                group=scale_key,
+                path,
+                group=os.path.join(scale_key, data_var),
                 mode="w",
             )
 
