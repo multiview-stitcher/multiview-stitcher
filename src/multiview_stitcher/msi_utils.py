@@ -1,3 +1,4 @@
+import os
 from functools import wraps
 from pathlib import Path
 
@@ -136,6 +137,42 @@ def complete_msim_zarr(msim, path):
                 path,
                 group=scale_key,
             )
+
+
+def update_msim_metadata_zarr(msim, path):
+    """
+    Update (or write) multiview-stitcher flavor metadata to zarr store.
+    Overwrites all data variables except "image".
+    """
+
+    path = Path(path)
+
+    if not path.exists():
+        raise ValueError("Path does not exist")
+
+    msim_disk = multiscale_spatial_image_from_zarr(path)
+    msim_disk_scale_keys = get_sorted_scale_keys(msim_disk)
+    for scale_key in get_sorted_scale_keys(msim):
+        for data_var in [
+            dv for dv in msim[scale_key].data_vars if dv != "image"
+        ]:
+            # if data_var exists on disk, rename the folder
+            if (
+                scale_key in msim_disk_scale_keys
+                and data_var in msim_disk[scale_key].data_vars
+            ):
+                msim_disk[scale_key][data_var].to_zarr(
+                    os.path.join(path, scale_key, data_var + "_old"),
+                    group=scale_key,
+                    mode="w",
+                )
+            msim[scale_key][data_var].to_zarr(
+                os.path.join(path, scale_key, data_var),
+                group=scale_key,
+                mode="w",
+            )
+
+    return
 
 
 def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
