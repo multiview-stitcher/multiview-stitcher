@@ -3,8 +3,7 @@ import tempfile
 from pathlib import Path
 
 import multiview_stitcher.spatial_image_utils as si_utils
-from multiview_stitcher import fusion, msi_utils, sample_data
-from multiview_stitcher.io import METADATA_TRANSFORM_KEY
+from multiview_stitcher import fusion, msi_utils, param_utils, sample_data
 
 # to be used in the future when we have test data to be cached
 # @pytest.fixture(scope="session")
@@ -27,15 +26,14 @@ def create_input(
     if test_params is None:
         test_params = {"t": 1, "c": 1, "ndim": 3, "input_chunking": 10}
     ndim = test_params["ndim"]
-    nviews = 2
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
-        overlap=7,
+        overlap=50,
         N_c=test_params["c"],
         N_t=test_params["t"],
-        tile_size=20,
-        tiles_x=2,
-        tiles_y=1,
+        tile_size=300,
+        tiles_x=3,
+        tiles_y=3,
         tiles_z=1,
         spacing_x=1,
         spacing_y=1,
@@ -45,11 +43,18 @@ def create_input(
     # rechunk input data
     for sim in sims:
         sim.data = sim.data.rechunk(test_params["input_chunking"])
-        # p = param_utils.affine_to_xaffine(param_utils.random_affine(ndim=ndim))
-        # si_utils.set_sim_affine(sim, p, transform_key="random")
+        p = param_utils.affine_to_xaffine(
+            param_utils.random_affine(
+                ndim=ndim,
+                rotation_scale=0,
+                scale_scale=0,
+                translation_scale=10,
+            )
+        )
+        si_utils.set_sim_affine(sim, p, transform_key="random")
 
     # persist input data to zarr
-    for iview in range(nviews):
+    for iview in range(len(sims)):
         msi_utils.multiscale_spatial_image_to_zarr(
             msi_utils.get_msim_from_sim(sims[iview], scale_factors=[]),
             os.path.join(tmp_dir, f"msim_view_{iview}.zarr"),
@@ -73,8 +78,8 @@ def fuse_zarr_to_zarr(
 
     fused_sim = fusion.fuse(
         sims,
-        transform_key=METADATA_TRANSFORM_KEY,
-        # transform_key="random",
+        # transform_key=METADATA_TRANSFORM_KEY,
+        transform_key="random",
         output_chunksize={dim: 8 for dim in sdims},
     )
 
