@@ -5,6 +5,7 @@
 [![codecov](https://codecov.io/gh/multiview-stitcher/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/multiview-stitcher/multiview-stitcher)
 [![DOI](https://zenodo.org/badge/697999800.svg)](https://zenodo.org/doi/10.5281/zenodo.13151252)
 
+Documentation available [here](https://multiview-stitcher.github.io/multiview-stitcher).
 
 # multiview-stitcher
 
@@ -16,7 +17,7 @@
 [![codecov](https://codecov.io/gh/multiview-stitcher/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/multiview-stitcher/multiview-stitcher)
 -->
 
-[`multiview-stitcher`](https://github.com/multiview-stitcher/multiview-stitcher) is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
+`multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
 
 For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget.
 
@@ -26,17 +27,8 @@ It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial
 
 ## Quickstart
 
-### Notebooks
-
-Check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks).
-
-### Napari plugin
-
-There's an associated napari plugin: [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
-
-![](https://github.com/multiview-stitcher/napari-stitcher/blob/dc6b571049c971709eb41064930be9b880d806f4/misc-data/20230929_screenshot.png)
-
-Image data by [Arthur Michaut](https://research.pasteur.fr/fr/member/arthur-michaut/) @ [Jérôme Gros Lab](https://research.pasteur.fr/fr/team/dynamic-regulation-of-morphogenesis/) @ Institut Pasteur.
+- [Documentation](https://multiview-stitcher.github.io/multiview-stitcher) and [code example](https://multiview-stitcher.github.io/multiview-stitcher/main/code_example/)
+- Check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks).
 
 ### Code example
 
@@ -119,6 +111,14 @@ fused_sim.data
 # get fused array as a numpy array
 fused_sim.data.compute()
 ```
+
+## Napari plugin
+
+There's an associated napari plugin: [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
+
+![](https://github.com/multiview-stitcher/napari-stitcher/blob/dc6b571049c971709eb41064930be9b880d806f4/misc-data/20230929_screenshot.png)
+
+Image data by [Arthur Michaut](https://research.pasteur.fr/fr/member/arthur-michaut/) @ [Jérôme Gros Lab](https://research.pasteur.fr/fr/team/dynamic-regulation-of-morphogenesis/) @ Institut Pasteur.
 
 ----------------------------------
 ## Installation
