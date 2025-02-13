@@ -204,6 +204,27 @@ def test_fused_field_slice():
     assert not any(fused.data.flatten() - imval)
 
 
+def test_3D_single_plane_fusion():
+    """
+    Make sure that 3D single plane fusion works
+    (i.e. the z axis of the input has length 1)
+    """
+    sim = si_utils.get_sim_from_array(
+        np.ones((1, 10, 10)),
+        dims=["z", "y", "x"],
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    # fails if output_chunksize[z] != 1 because the
+    # weight calculation assumes shape > 1
+    fusion.fuse(
+        [sim],
+        output_shape={"z": 2, "y": 10, "x": 10},
+        output_chunksize={"z": 1, "y": 10, "x": 10},
+        transform_key=METADATA_TRANSFORM_KEY,
+    ).compute(scheduler="single-threaded")
+
+
 def test_blending_widths():
     """
     Simple test to check that the blending widths are taken into account
