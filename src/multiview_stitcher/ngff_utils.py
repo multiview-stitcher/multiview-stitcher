@@ -1,5 +1,3 @@
-from functools import partial
-
 import ngff_zarr
 import numpy as np
 import spatial_image as si
@@ -155,14 +153,13 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key):
     return msim
 
 
-def write_sim_to_multiscales_ngff(
+def write_sim_to_ome_zarr(
     sim, output_zarr_url, downscale_factors_per_spatial_dim=None
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
     to a multiscale NGFF zarr file (v0.4).
-    Returns a dask array backed by the highest resolution
-    in the newly created zarr file (e.g. the computed value of `sim.data`)
+    Returns a sim backed by the newly created zarr file.
     """
 
     ndim = sim.data.ndim
@@ -225,7 +222,7 @@ def write_sim_to_multiscales_ngff(
     )
 
     # Write the lowest resolution
-    highest_res_array = sim.data.to_zarr(
+    sim.data = sim.data.to_zarr(
         output_zarr_arr,
         overwrite=True,
         dimension_separator="/",
@@ -268,10 +265,14 @@ def write_sim_to_multiscales_ngff(
         if dim in dims
     ]
 
-    parent_res_array = highest_res_array
+    # thanks to https://github.com/CamachoDejay/teaching-bioimage-analysis-python/blob/6076e00e392075ba9c07e67e868a39d4889e6298/short_examples/zarr-from-tiles/zarr-minimal-example-tiles.ipynb
+    def mean_dtype(arr, **kwargs):
+        return np.mean(arr, **kwargs).astype(arr.dtype)
+
+    parent_res_array = sim.data
     for res_level in range(1, n_resolutions):
         curr_res_array = da.coarsen(
-            partial(np.mean, dtype=parent_res_array.dtype),
+            mean_dtype,
             parent_res_array,
             axes={
                 idim: res_rel_factors[res_level][dim]
@@ -319,12 +320,15 @@ def write_sim_to_multiscales_ngff(
         ],
     )
 
-    # output_group.attrs['omero'] = {
-    #         'channels': [{
-    #                 'color': 'ffffff',
-    #                 'label': f"{ch}",
-    #                 'active': True,
-    #                 } for ch in sim.coords['c'].values],
-    #         }
+    output_group.attrs["omero"] = {
+        "channels": [
+            {
+                "color": "ffffff",
+                "label": f"{ch}",
+                "active": True,
+            }
+            for ch in sim.coords["c"].values
+        ],
+    }
 
-    return highest_res_array
+    return sim
