@@ -270,12 +270,28 @@ def serve_dir(dir_path, port=8000):
 def generate_neuroglancer_json(
     sims,
     zarr_paths,
-    port,
+    zarr_urls,
+    transform_key,
     channel_coord=None,
 ):
     dims = sims[0].dims
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
     spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
+
+    full_affines = [np.eye(len(dims) + 1) for _ in sims]
+    for isim, sim in enumerate(sims):
+        affine = spatial_image_utils.get_affine_from_sim(
+            sim, transform_key=transform_key
+        )
+        if "t" in affine.dims:
+            affine = affine.sel(t=0)
+        affine = np.array(affine)
+        affine_ndim = affine.shape[-1] - 1
+        # https://github.com/google/neuroglancer/issues/538
+        affine[:-1, -1] = affine[:-1, -1] / np.array(
+            [spacing[dim] for dim in sdims]
+        )
+        full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
 
     # get contrast limits from first image
     if "c" in dims:
@@ -295,23 +311,36 @@ def generate_neuroglancer_json(
         channel_index = 0
         window = None
 
+    output_dimensions = {
+        dim: [spacing[dim] * 1e-6 if dim in sdims else 1.0, ""] for dim in dims
+    }
+
     ng_config = {
-        "dimensions": {
-            dim: [spacing[dim] * 1e-6 if dim in sdims else 1.0, ""]
-            for dim in dims
-        },
+        "dimensions": output_dimensions,
         "displayDimensions": sdims[::-1],
         "layerListPanel": {"visible": True},
         # 'position': [center[idim] for idim, dim in enumerate(sdims)],
         "layers": [
             {
                 "type": "image",
-                "source": f"zarr://http://localhost:{port}/{os.path.basename(url)}",
+                "source": {
+                    "url": f"zarr://{url}",
+                    "transform": {
+                        # neuroglancer drops last row of homogeneous matrix
+                        "matrix": [
+                            list(row) for row in full_affines[iview][:-1]
+                        ],
+                        "outputDimensions": {
+                            (dim if dim != "c" else "c'"): d
+                            for dim, d in output_dimensions.items()
+                        },
+                    },
+                },
                 "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
                 "localPosition": [channel_index] if "c" in dims else [],
                 # 'localPosition': [0 for nsdim in nsdims] + [centers[iview][idim] for idim, dim in enumerate(sdims)],
                 "tab": "rendering",
-                # 'opacity': 1.0,
+                "opacity": 1.0,
                 # 'volumeRendering': 'on',
                 "name": f"View {iview}",
             }
@@ -329,7 +358,7 @@ def generate_neuroglancer_json(
                 if window is not None
                 else {}
             )
-            for iview, url in enumerate(zarr_paths)
+            for iview, url in enumerate(zarr_urls)
         ],
     }
     # import pprint
@@ -347,11 +376,42 @@ def get_neuroglancer_url(ng_json):
 def view_neuroglancer(
     sims,
     zarr_paths,
+    transform_key,
     port=8000,
     channel_coord=None,
 ):
+    """
+    Visualize a list of spatial_images together with their OME-Zarrs on disk
+    in Neuroglancer. No installation of Neuroglancer is required.
+
+    TODO:
+    - check 2D
+    - check transforms for full affine
+
+    Parameters
+    ----------
+    sims : list of spatial_images
+    zarr_paths : list of str
+        path to OME-Zarrs that have previously been saved from the sims
+    transform_key : str
+        transform_key to use for visualization
+    port : int, optional
+        Port to serve OME-Zarrs. By default 8000
+    channel_coord : str, optional
+        Which channel to use for initializing contrast limits, by default None
+    """
+
+    zarr_urls = [
+        f"http://localhost:{port}/{os.path.basename(zarr_path)}"
+        for zarr_path in zarr_paths
+    ]
+
     ng_json = generate_neuroglancer_json(
-        sims, zarr_paths, port=port, channel_coord=channel_coord
+        sims,
+        zarr_paths,
+        zarr_urls,
+        channel_coord=channel_coord,
+        transform_key=transform_key,
     )
     ng_url = get_neuroglancer_url(ng_json)
 
