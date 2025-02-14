@@ -8,6 +8,16 @@ from multiview_stitcher.misc_utils import DisableLogger
 with DisableLogger():
     from Geometry3D import Visualizer
 
+import json
+import os
+import urllib
+import webbrowser
+from http.server import (
+    HTTPServer,
+    SimpleHTTPRequestHandler,
+    test,
+)
+
 
 def plot_positions(
     msims,
@@ -223,3 +233,143 @@ def show_geometry3d_visualizer(self):
         ax.plot(x, z, y, color=color, linewidth=size)
 
     return fig, ax
+
+
+def serve_dir(dir_path, port=8000):
+    """
+    Serve a directory with a simple HTTP server.
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to the directory to serve
+    port : int, optional
+        Port to use for the server, by default 8000
+    """
+
+    # code taken from ome-zarr-py
+    class CORSRequestHandler(SimpleHTTPRequestHandler):
+        def end_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            SimpleHTTPRequestHandler.end_headers(self)
+
+        def translate_path(self, path: str) -> str:
+            # Since we don't call the class constructor ourselves,
+            # we set the directory here instead
+            self.directory = dir_path
+            super_path = super().translate_path(path)
+            return super_path
+
+    print("Serving images until interrupted...")
+
+    # start serving content
+    # suppress console output?
+    test(CORSRequestHandler, HTTPServer, port=port)
+
+
+def generate_neuroglancer_json(
+    sims,
+    zarr_paths,
+    port,
+    channel_coord=None,
+):
+    dims = sims[0].dims
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
+
+    # get contrast limits from first image
+    if "c" in dims:
+        if channel_coord is None:
+            channel_coord = sims[0].coords["c"].values[0]
+        else:
+            channel_coord = str(channel_coord)
+        with open(os.path.join(zarr_paths[0], ".zattrs")) as f:
+            metadata0 = json.load(f)
+        channel_index = [
+            ic
+            for ic, c in enumerate(metadata0["omero"]["channels"])
+            if c["label"] == str(channel_coord)
+        ][0]
+        window = metadata0["omero"]["channels"][channel_index]["window"]
+    else:
+        channel_index = 0
+        window = None
+
+    ng_config = {
+        "dimensions": {
+            dim: [spacing[dim] * 1e-6 if dim in sdims else 1.0, ""]
+            for dim in dims
+        },
+        "displayDimensions": sdims[::-1],
+        "layerListPanel": {"visible": True},
+        # 'position': [center[idim] for idim, dim in enumerate(sdims)],
+        "layers": [
+            {
+                "type": "image",
+                "source": f"zarr://http://localhost:{port}/{os.path.basename(url)}",
+                "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
+                "localPosition": [channel_index] if "c" in dims else [],
+                # 'localPosition': [0 for nsdim in nsdims] + [centers[iview][idim] for idim, dim in enumerate(sdims)],
+                "tab": "rendering",
+                # 'opacity': 1.0,
+                # 'volumeRendering': 'on',
+                "name": f"View {iview}",
+            }
+            | (
+                {
+                    "shaderControls": {
+                        "normalized":
+                        # {'range': [2, 51], 'window': [0, 319]}
+                        {
+                            "range": [window["min"], window["max"]],
+                            "window": [window["start"], window["end"]],
+                        },
+                    },
+                }
+                if window is not None
+                else {}
+            )
+            for iview, url in enumerate(zarr_paths)
+        ],
+    }
+    # import pprint
+    # pprint.pprint(ng_config)
+    return ng_config
+
+
+def get_neuroglancer_url(ng_json):
+    ng_url = "https://neuroglancer-demo.appspot.com/#!" + urllib.parse.quote(
+        json.dumps(ng_json, separators=(",", ":"))
+    )
+    return ng_url
+
+
+def view_neuroglancer(
+    sims,
+    zarr_paths,
+    port=8000,
+    channel_coord=None,
+):
+    ng_json = generate_neuroglancer_json(
+        sims, zarr_paths, port=port, channel_coord=channel_coord
+    )
+    ng_url = get_neuroglancer_url(ng_json)
+
+    print("Opening Neuroglancer in browser...")
+    print("Controls:")
+    print("All panels")
+    print("\t\tZoom: Ctrl + Mousewheel")
+    print("Projection panels:")
+    print("\t\tPan: Drag")
+    print("\t\tRotate: Shift + Drag")
+    print("3D view:")
+    print("\t\tPan: Shift + Drag")
+    print("\t\tRotate: Drag")
+
+    webbrowser.open(ng_url)
+
+    parent_dir, image_name = os.path.split(zarr_paths[0])
+    parent_dir = str(parent_dir)
+
+    # serve the zarr files
+    serve_dir(parent_dir, port=port)
