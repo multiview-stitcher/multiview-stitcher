@@ -326,6 +326,12 @@ def write_sim_to_ome_zarr(
                 "color": "ffffff",
                 "label": f"{ch}",
                 "active": True,
+                "window": {
+                    "end": 1,
+                    "max": 1,
+                    "min": 0,
+                    "start": 0,
+                },
             }
             for ch in sim.coords["c"].values
         ],
