@@ -234,9 +234,9 @@ def write_sim_to_ome_zarr(
         [
             {
                 "type": "scale",
-                "scale": [1] * (ndim - len(sdims))
+                "scale": [1.0] * (ndim - len(sdims))
                 + [
-                    s * res_abs_factors[res_level][dim]
+                    float(s * res_abs_factors[res_level][dim])
                     for dim, s in spacing.items()
                 ],
             },
@@ -245,7 +245,7 @@ def write_sim_to_ome_zarr(
                 "translation": [0] * (ndim - len(sdims))
                 + [
                     origin[dim]
-                    - (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
+                    + (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
                     for dim in sdims
                 ],
             },
@@ -253,14 +253,14 @@ def write_sim_to_ome_zarr(
         # [0] * (ndim - len(sdims)) + [origin[dim] for dim in sdims]}]
         for res_level in range(n_resolutions)
     ]
-    [
+    axes = [
         {
             "name": dim,
             "type": "channel"
             if dim == "c"
-            else ("time" if dim == "t" else "spatial"),
+            else ("time" if dim == "t" else "space"),
         }
-        | ({"unit": "micrometers"} if dim in sdims else {})
+        | ({"unit": "micrometer"} if dim in sdims else {})
         for dim in sim.dims
         if dim in dims
     ]
@@ -310,7 +310,7 @@ def write_sim_to_ome_zarr(
     output_group = zarr.group(store=store)
     writer.write_multiscales_metadata(
         group=output_group,
-        axes=dims,
+        axes=axes,
         datasets=[
             {
                 "path": f"{res_level}",
@@ -320,6 +320,18 @@ def write_sim_to_ome_zarr(
         ],
     )
 
+    if "c" in sim.dims:
+        contrast_min = np.array(
+            curr_res_array.min(
+                axis=[idim for idim, dim in enumerate(sim.dims) if dim != "c"]
+            )
+        )
+        contrast_max = np.array(
+            curr_res_array.max(
+                axis=[idim for idim, dim in enumerate(sim.dims) if dim != "c"]
+            )
+        )
+
     output_group.attrs["omero"] = {
         "channels": [
             {
@@ -327,13 +339,13 @@ def write_sim_to_ome_zarr(
                 "label": f"{ch}",
                 "active": True,
                 "window": {
-                    "end": 1,
-                    "max": 1,
+                    "end": int(contrast_max[ich]),
+                    "max": int(contrast_max[ich]),
                     "min": 0,
-                    "start": 0,
+                    "start": int(contrast_min[ich]),
                 },
             }
-            for ch in sim.coords["c"].values
+            for ich, ch in enumerate(sim.coords["c"].values)
         ],
     }
 
