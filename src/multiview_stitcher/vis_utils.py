@@ -273,11 +273,18 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
     with open(os.path.join(zarr_path, ".zattrs")) as f:
         metadata = json.load(f)
 
-    channel_index = [
+    channel_matches = [
         ic
         for ic, c in enumerate(metadata["omero"]["channels"])
-        if c["label"] == channel_label
-    ][0]
+        if str(c["label"]) == str(channel_label)
+    ]
+
+    if not len(channel_matches) == 1:
+        raise ValueError(
+            f"Channel {channel_label} not found in metadata in {zarr_path}"
+        )
+    else:
+        channel_index = channel_matches[0]
     window = metadata["omero"]["channels"][channel_index]["window"]
 
     return np.array([window["start"], window["end"]])
@@ -314,15 +321,11 @@ def generate_neuroglancer_json(
     if "c" in dims:
         if channel_coord is None:
             channel_coord = str(sims[0].coords["c"].values[0])
-        elif channel_coord not in sims[0].coords["c"].values:
-            raise ValueError(
-                f"Channel {channel_coord} not found in {sims[0].coords['c'].values}"
-            )
         channel_index = list(sims[0].coords["c"].values).index(channel_coord)
         limits = np.array(
             [
                 get_contrast_min_max_from_ome_zarr_omero_metadata(
-                    zarr_path, channel_coord
+                    zarr_path, str(channel_coord)
                 )
                 for zarr_path in zarr_paths
             ]
