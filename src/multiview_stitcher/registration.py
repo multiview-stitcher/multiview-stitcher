@@ -141,6 +141,7 @@ def get_overlap_bboxes(
     sim2,
     input_transform_key=None,
     output_transform_key=None,
+    overlap_tolerance=None,
 ):
     """
     Get bounding box(es) of overlap between two spatial images
@@ -153,13 +154,24 @@ def get_overlap_bboxes(
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
 
-    corners = [
-        mv_graph.get_vertices_from_stack_props(
-            spatial_image_utils.get_stack_properties_from_sim(
-                sim, transform_key=input_transform_key
-            )
-        ).reshape(-1, ndim)
+    stack_propss = [
+        spatial_image_utils.get_stack_properties_from_sim(
+            sim, transform_key=input_transform_key
+        )
         for sim in [sim1, sim2]
+    ]
+
+    if overlap_tolerance is not None:
+        stack_propss = [
+            spatial_image_utils.extend_stack_props(
+                stack_props, extend_by=overlap_tolerance
+            )
+            for stack_props in stack_propss
+        ]
+
+    corners = [
+        mv_graph.get_vertices_from_stack_props(stack_props).reshape(-1, ndim)
+        for stack_props in stack_propss
     ]
 
     if output_transform_key is None:
@@ -699,6 +711,7 @@ def register_pair_of_msims(
         reg_sims_b[1],
         input_transform_key=transform_key,
         output_transform_key=None,
+        overlap_tolerance=overlap_tolerance,
     )
 
     for idim, dim in enumerate(spatial_dims):

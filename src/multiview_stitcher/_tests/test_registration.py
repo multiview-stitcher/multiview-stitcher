@@ -574,7 +574,7 @@ def test_overlap_tolerance(ndim):
     """
 
     overlap_x = 10
-    shift_x = overlap_x / 2.0
+    shift_x = overlap_x
 
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
@@ -590,6 +590,16 @@ def test_overlap_tolerance(ndim):
     sim1_shifted = sims[1].assign_coords(
         {"x": sims[1].coords["x"].data + shift_x}
     )
+
+    # from multiview_stitcher import vis_utils
+    # vis_utils.plot_positions([msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    #         for sim in
+    #         [sim0, sim1_shifted]
+    #         # [sim0, sim1]
+    #         ],
+    #     transform_key=METADATA_TRANSFORM_KEY,
+    #     use_positional_colors=False,
+    #     )
 
     params_orig = registration.register(
         [
@@ -609,7 +619,7 @@ def test_overlap_tolerance(ndim):
         ],
         transform_key=METADATA_TRANSFORM_KEY,
         new_transform_key="registered_shifted",
-        overlap_tolerance={"x": shift_x * 2},
+        overlap_tolerance={"x": overlap_x},
         reg_channel_index=0,
         scheduler="single-threaded",
     )
