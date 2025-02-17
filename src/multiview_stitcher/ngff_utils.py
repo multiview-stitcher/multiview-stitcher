@@ -1,3 +1,6 @@
+import os
+import warnings
+
 import ngff_zarr
 import numpy as np
 import spatial_image as si
@@ -154,13 +157,29 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key):
 
 
 def write_sim_to_ome_zarr(
-    sim, output_zarr_url, downscale_factors_per_spatial_dim=None
+    sim,
+    output_zarr_url,
+    downscale_factors_per_spatial_dim=None,
+    overwrite=False,
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
     to a multiscale NGFF zarr file (v0.4).
     Returns a sim backed by the newly created zarr file.
     """
+
+    if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
+        # warn that the file already exists
+
+        warnings.warn(
+            f"File {output_zarr_url}/0 already exists. "
+            "Use overwrite=True to overwrite it.",
+            UserWarning,
+            stacklevel=1,
+        )
+
+        sim.data = da.from_zarr(f"{output_zarr_url}/0")
+        return sim
 
     ndim = sim.data.ndim
     dims = sim.dims
