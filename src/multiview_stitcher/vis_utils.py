@@ -267,6 +267,22 @@ def serve_dir(dir_path, port=8000):
     test(CORSRequestHandler, HTTPServer, port=port)
 
 
+def get_contrast_min_max_from_ome_zarr_omero_metadata(
+    zarr_path, channel_label
+):
+    with open(os.path.join(zarr_path, ".zattrs")) as f:
+        metadata = json.load(f)
+
+    channel_index = [
+        ic
+        for ic, c in enumerate(metadata["omero"]["channels"])
+        if c["label"] == channel_label
+    ][0]
+    window = metadata["omero"]["channels"][channel_index]["window"]
+
+    return np.array([window["start"], window["end"]])
+
+
 def generate_neuroglancer_json(
     sims,
     zarr_paths,
@@ -276,6 +292,7 @@ def generate_neuroglancer_json(
 ):
     dims = sims[0].dims
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    ndim = len(sdims)
     spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
 
     full_affines = [np.eye(len(dims) + 1) for _ in sims]
@@ -296,17 +313,27 @@ def generate_neuroglancer_json(
     # get contrast limits from first image
     if "c" in dims:
         if channel_coord is None:
-            channel_coord = sims[0].coords["c"].values[0]
-        else:
-            channel_coord = str(channel_coord)
-        with open(os.path.join(zarr_paths[0], ".zattrs")) as f:
-            metadata0 = json.load(f)
-        channel_index = [
-            ic
-            for ic, c in enumerate(metadata0["omero"]["channels"])
-            if c["label"] == str(channel_coord)
-        ][0]
-        window = metadata0["omero"]["channels"][channel_index]["window"]
+            channel_coord = str(sims[0].coords["c"].values[0])
+        elif channel_coord not in sims[0].coords["c"].values:
+            raise ValueError(
+                f"Channel {channel_coord} not found in {sims[0].coords['c'].values}"
+            )
+        channel_index = list(sims[0].coords["c"].values).index(channel_coord)
+        limits = np.array(
+            [
+                get_contrast_min_max_from_ome_zarr_omero_metadata(
+                    zarr_path, channel_coord
+                )
+                for zarr_path in zarr_paths
+            ]
+        )
+        vmin, vmax = (float(v) for v in [np.min(limits), np.max(limits)])
+        window = {
+            "min": vmin,
+            "max": vmax,
+            "start": vmin,
+            "end": vmax,
+        }
     else:
         channel_index = 0
         window = None
@@ -320,6 +347,7 @@ def generate_neuroglancer_json(
         "displayDimensions": sdims[::-1],
         "layerListPanel": {"visible": True},
         # 'position': [center[idim] for idim, dim in enumerate(sdims)],
+        "layout": "xy" if ndim == 2 else "4panel",
         "layers": [
             {
                 "type": "image",
@@ -340,7 +368,7 @@ def generate_neuroglancer_json(
                 "localPosition": [channel_index] if "c" in dims else [],
                 # 'localPosition': [0 for nsdim in nsdims] + [centers[iview][idim] for idim, dim in enumerate(sdims)],
                 "tab": "rendering",
-                "opacity": 1.0,
+                "opacity": 0.6,
                 # 'volumeRendering': 'on',
                 "name": f"View {iview}",
             }
