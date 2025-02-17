@@ -198,8 +198,10 @@ def extend_stack_props(stack_props, extend_by):
         extend_by = {dim: extend_by for dim in sdims}
 
     for dim, val in extend_by.items():
-        stack_props["shape"][dim] += 2 * val
-        stack_props["origin"][dim] -= val * stack_props["spacing"][dim]
+        stack_props["shape"][dim] += int(
+            np.ceil(2 * val / stack_props["spacing"][dim])
+        )
+        stack_props["origin"][dim] -= val
 
     return stack_props
 
