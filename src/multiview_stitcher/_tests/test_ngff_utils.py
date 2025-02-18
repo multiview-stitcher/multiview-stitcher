@@ -84,6 +84,7 @@ def test_ome_zarr_ng(ndim, N_t, N_c):
 
         if N_c is not None:
             assert "omero" in metadata
+            assert "window" in metadata["omero"]["channels"][0]
 
         ng_json = vis_utils.generate_neuroglancer_json(
             [sim],
