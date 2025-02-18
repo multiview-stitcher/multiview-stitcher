@@ -286,7 +286,7 @@ def sims_to_intrinsic_coord_system(
 def phase_correlation_registration(
     fixed_data,
     moving_data,
-    disambiguate_region_mode="union",
+    disambiguate_region_mode=None,
     **skimage_phase_corr_kwargs,
 ):
     """
@@ -323,6 +323,13 @@ def phase_correlation_registration(
 
     im0nm = np.isnan(im0)
     im1nm = np.isnan(im1)
+
+    # use intersection mode if there are nan pixels in either image
+    if disambiguate_region_mode is None:
+        if np.any([im0nm, im1nm]):
+            disambiguate_region_mode = "intersection"
+        else:
+            disambiguate_region_mode = "union"
 
     valid_pixels1 = np.sum(~im1nm)
 
@@ -713,11 +720,6 @@ def register_pair_of_msims(
         output_transform_key=None,
         overlap_tolerance=overlap_tolerance,
     )
-
-    for idim, dim in enumerate(spatial_dims):
-        for i in range(2):
-            lowers[i][idim] = lowers[i][idim] - overlap_tolerance[dim]
-            uppers[i][idim] = uppers[i][idim] + overlap_tolerance[dim]
 
     tol = 1e-6
     reg_sims_b = [
