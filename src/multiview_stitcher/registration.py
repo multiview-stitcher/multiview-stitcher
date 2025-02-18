@@ -443,8 +443,8 @@ def phase_correlation_registration(
                 mask_slices = tuple(
                     [
                         slice(
-                            min(im0_bb[idim][0], im1t_bb[idim][0] + 1),
-                            max(im0_bb[idim][1], im1t_bb[idim][1] + 1),
+                            min(im0_bb[idim][0], im1t_bb[idim][0]),
+                            max(im0_bb[idim][1], im1t_bb[idim][1]) + 1,
                         )
                         for idim in range(ndim)
                     ]
@@ -453,8 +453,8 @@ def phase_correlation_registration(
                 mask_slices = tuple(
                     [
                         slice(
-                            max(im0_bb[idim][0], im1t_bb[idim][0] + 1),
-                            min(im0_bb[idim][1], im1t_bb[idim][1] + 1),
+                            max(im0_bb[idim][0], im1t_bb[idim][0]),
+                            min(im0_bb[idim][1], im1t_bb[idim][1]) + 1,
                         )
                         for idim in range(ndim)
                     ]
