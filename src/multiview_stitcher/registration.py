@@ -819,6 +819,7 @@ def register_pair_of_msims(
         sim2,
         input_transform_key=transform_key,
         output_transform_key=transform_key,
+        overlap_tolerance=overlap_tolerance,
     )
 
     param_ds = param_ds.assign(
