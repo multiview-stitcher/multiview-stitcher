@@ -1,9 +1,17 @@
+import json
+import os
 import tempfile
 
 import ngff_zarr
 import pytest
 
-from multiview_stitcher import io, msi_utils, ngff_utils, sample_data
+from multiview_stitcher import (
+    io,
+    msi_utils,
+    ngff_utils,
+    sample_data,
+    vis_utils,
+)
 
 
 @pytest.mark.parametrize(
@@ -40,3 +48,52 @@ def test_round_trip(ndim):
     assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
         msi_utils.get_sorted_scale_keys(msim_read)
     )
+
+
+@pytest.mark.parametrize(
+    "ndim, N_t, N_c",
+    [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
+)
+def test_ome_zarr_ng(ndim, N_t, N_c):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        overlap=0,
+        N_c=N_c if N_c is not None else 1,
+        N_t=N_t if N_t is not None else 1,
+        tile_size=10,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.1,
+        spacing_y=0.1,
+        spacing_z=2,
+    )[1]
+
+    # make sure to also test for the absence of c and t
+    if N_c is None:
+        sim = sim.drop_vars("c")
+
+    if N_t is None:
+        sim = sim.drop_vars("t")
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        with open(os.path.join(zarr_path, ".zattrs")) as f:
+            metadata = json.load(f)
+
+        if N_c is not None:
+            assert "omero" in metadata
+
+        ng_json = vis_utils.generate_neuroglancer_json(
+            [sim],
+            [zarr_path],
+            [
+                f"https://localhost:8000/{os.path.basename(zp)}"
+                for zp in [zarr_path]
+            ],
+            # channel_coord=sim.coords["c"].values[0],
+            transform_key=io.METADATA_TRANSFORM_KEY,
+        )
+
+    assert len(ng_json.keys())

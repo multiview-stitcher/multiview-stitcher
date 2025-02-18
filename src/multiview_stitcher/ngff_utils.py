@@ -289,6 +289,7 @@ def write_sim_to_ome_zarr(
         return np.mean(arr, **kwargs).astype(arr.dtype)
 
     parent_res_array = sim.data
+    curr_res_array = sim.data  # in case of only one resolution level
     for res_level in range(1, n_resolutions):
         curr_res_array = da.coarsen(
             mean_dtype,
@@ -351,21 +352,21 @@ def write_sim_to_ome_zarr(
             )
         )
 
-    output_group.attrs["omero"] = {
-        "channels": [
-            {
-                "color": "ffffff",
-                "label": f"{ch}",
-                "active": True,
-                "window": {
-                    "end": int(contrast_max[ich]),
-                    "max": int(contrast_max[ich]),
-                    "min": 0,
-                    "start": int(contrast_min[ich]),
-                },
-            }
-            for ich, ch in enumerate(sim.coords["c"].values)
-        ],
-    }
+        output_group.attrs["omero"] = {
+            "channels": [
+                {
+                    "color": "ffffff",
+                    "label": f"{ch}",
+                    "active": True,
+                    "window": {
+                        "end": int(contrast_max[ich]),
+                        "max": int(contrast_max[ich]),
+                        "min": 0,
+                        "start": int(contrast_min[ich]),
+                    },
+                }
+                for ich, ch in enumerate(sim.coords["c"].values)
+            ],
+        }
 
     return sim

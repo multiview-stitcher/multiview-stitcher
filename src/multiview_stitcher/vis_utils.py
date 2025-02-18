@@ -321,7 +321,11 @@ def generate_neuroglancer_json(
     if "c" in dims:
         if channel_coord is None:
             channel_coord = str(sims[0].coords["c"].values[0])
-        channel_index = list(sims[0].coords["c"].values).index(channel_coord)
+        else:
+            channel_coord = str(channel_coord)
+        channel_index = [str(c) for c in sims[0].coords["c"].values].index(
+            channel_coord
+        )
         limits = np.array(
             [
                 get_contrast_min_max_from_ome_zarr_omero_metadata(
