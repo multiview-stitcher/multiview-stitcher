@@ -40,6 +40,7 @@ class NotEnoughOverlapError(Exception):
 def build_view_adjacency_graph_from_msims(
     msims,
     transform_key,
+    overlap_tolerance=None,
     expand=False,
     pairs=None,
 ):
@@ -55,9 +56,11 @@ def build_view_adjacency_graph_from_msims(
     msims : list of MultiscaleSpatialImage
         Input views.
     transform_key : _type_, optional
-        Extrinsic coordinate system to consider, by default None
+        Extrinsic coordinate system to consider
+    overlap_tolerance : float, optional
+        Tolerance for overlap, by default no tolerance
     expand : bool, optional
-        If True, spatial extents of input images is dilated, by default False
+        Whether to consider views that only touch as overlapping, by default False
     pairs : list of tuples, optional
         List of pairs of view indices to consider, by default None
 
@@ -91,6 +94,12 @@ def build_view_adjacency_graph_from_msims(
         )
         for sim in sims
     ]
+
+    if overlap_tolerance is not None:
+        stack_propss = [
+            si_utils.extend_stack_props(sp, overlap_tolerance)
+            for sp in stack_propss
+        ]
 
     nx.set_node_attributes(
         g, dict(enumerate(stack_propss)), name="stack_props"
@@ -176,6 +185,7 @@ def get_overlap_between_pair_of_stack_props(
     - if there is no overlap, return overlap area of -1
     - if there's a one pixel wide overlap, overlap_area is 0
     - assumes spacing is the same for sim1 and sim2
+    - expand: if True, overlap is expanded by a small amount
     """
 
     ndim = len(stack_props_1["origin"])
