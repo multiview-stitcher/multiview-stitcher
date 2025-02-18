@@ -721,16 +721,21 @@ def register_pair_of_msims(
         overlap_tolerance=overlap_tolerance,
     )
 
+    reg_sims_spacing = [
+        spatial_image_utils.get_spacing_from_sim(sim) for sim in reg_sims_b
+    ]
+
     tol = 1e-6
     reg_sims_b = [
         sim.sel(
             {
+                # add spacing to include bounding pixels
                 dim: slice(
-                    lowers[isim][idim] - tol,
-                    uppers[isim][idim] + tol,
+                    lowers[isim][idim] - tol - reg_sims_spacing[isim][dim],
+                    uppers[isim][idim] + tol + reg_sims_spacing[isim][dim],
                 )
                 for idim, dim in enumerate(spatial_dims)
-            }
+            },
         )
         for isim, sim in enumerate(reg_sims_b)
     ]
