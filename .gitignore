@@ -90,7 +90,4 @@ _playground/
 site/
 
 notebooks/data
-notebooks/Grid*
-notebooks/*.zarr
-
 src/multiview_stitcher/_benchmarks/data
