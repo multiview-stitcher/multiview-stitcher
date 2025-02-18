@@ -9,6 +9,8 @@ from numpy._typing import ArrayLike
 
 from multiview_stitcher import param_utils
 
+DEFAULT_TRANSFORM_KEY = "affine_manual"
+
 SPATIAL_DIMS = ["z", "y", "x"]
 SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
@@ -30,7 +32,7 @@ def get_sim_from_array(
     scale: Optional[dict] = None,
     translation: Optional[dict] = None,
     affine: Optional[xr.DataArray] = None,
-    transform_key: str = "affine_manual",
+    transform_key: str = DEFAULT_TRANSFORM_KEY,
     c_coords: Optional[Union[list, tuple, ArrayLike]] = None,
     t_coords: Optional[Union[list, tuple, ArrayLike]] = None,
 ):
@@ -51,7 +53,7 @@ def get_sim_from_array(
     affine : Optional[xr.DataArray], optional
         Affine transform, e.g. xr.DataArray(np.eye(4), dims=["x_in", "x_out"])
     transform_key : str, optional
-        By default "affine_manual"
+        By default DEFAULT_TRANSFORM_KEY
     c_coords : Optional[Union[list, tuple, ArrayLike]], optional
         Channel coordinates, e.g. ['DAPI', 'GFP', 'RFP']
     t_coords : Optional[Union[list, tuple, ArrayLike]], optional
