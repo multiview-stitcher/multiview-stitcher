@@ -89,6 +89,6 @@ _playground/
 # mkdocs documentation
 site/
 
-notebooks/fused*
+notebooks/data
 notebooks/Grid*
-notebooks/*.zarr
+src/multiview_stitcher/_benchmarks
