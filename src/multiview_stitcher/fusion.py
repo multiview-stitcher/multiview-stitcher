@@ -812,7 +812,7 @@ def combine_stack_props(stack_props_list):
             for sp in stack_props_list
         ],
         axis=0,
-    ).astype(np.uint16)
+    ).astype(np.uint64)
 
     return combined_stack_props
 
@@ -845,7 +845,7 @@ def calc_stack_properties_from_volume(volume, spacing):
     """
 
     origin = volume[0]
-    shape = np.ceil((volume[1] - volume[0]) / spacing).astype(np.uint16)
+    shape = np.ceil((volume[1] - volume[0]) / spacing).astype(np.uint64)
 
     properties_dict = {}
     properties_dict["shape"] = shape

@@ -235,7 +235,7 @@ def sims_to_intrinsic_coord_system(
     transf_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
 
     shape = np.floor(np.array(uppers[0] - lowers[0]) / spacing + 1).astype(
-        np.uint16
+        np.uint64
     )
 
     reg_sims_b_t = [

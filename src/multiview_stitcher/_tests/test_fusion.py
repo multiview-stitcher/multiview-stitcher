@@ -255,3 +255,28 @@ def test_blending_widths():
 
     # make sure the fusion results are different
     assert not np.allclose(fused_small_bw, fused_large_bw)
+
+
+def test_large_shape_fusion():
+    """
+    Make sure that arrays with shape > uin16 limit can be fused
+    """
+    sims = [
+        si_utils.get_sim_from_array(
+            np.ones((2, 50000)),
+            dims=["y", "x"],
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for _ in range(2)
+    ]
+
+    sims[1] = sims[1].assign_coords(x=sims[1].coords["x"] + 50000)
+
+    # fails if output_chunksize[z] != 1 because the
+    # weight calculation assumes shape > 1
+    fused = fusion.fuse(
+        sims,
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    assert fused.data.shape[-1] > 60000
