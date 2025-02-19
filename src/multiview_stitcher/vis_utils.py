@@ -451,6 +451,7 @@ def view_neuroglancer(
     ng_url = get_neuroglancer_url(ng_json)
 
     print("Opening Neuroglancer in browser...")
+    print("URL:", ng_url)
     print("Controls:")
     print("All panels")
     print("\t\tZoom: Ctrl + Mousewheel")
