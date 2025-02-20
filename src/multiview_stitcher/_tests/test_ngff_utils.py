@@ -86,15 +86,16 @@ def test_ome_zarr_ng(ndim, N_t, N_c):
             assert "omero" in metadata
             assert "window" in metadata["omero"]["channels"][0]
 
-        ng_json = vis_utils.generate_neuroglancer_json(
-            [sim],
-            [zarr_path],
-            [
-                f"https://localhost:8000/{os.path.basename(zp)}"
-                for zp in [zarr_path]
-            ],
-            # channel_coord=sim.coords["c"].values[0],
-            transform_key=io.METADATA_TRANSFORM_KEY,
-        )
-
-    assert len(ng_json.keys())
+        for single_layer in [True, False]:
+            ng_json = vis_utils.generate_neuroglancer_json(
+                [sim],
+                [zarr_path],
+                [
+                    f"https://localhost:8000/{os.path.basename(zp)}"
+                    for zp in [zarr_path]
+                ],
+                # channel_coord=sim.coords["c"].values[0],
+                transform_key=io.METADATA_TRANSFORM_KEY,
+                single_layer=single_layer,
+            )
+            assert len(ng_json.keys())
