@@ -296,6 +296,7 @@ def generate_neuroglancer_json(
     zarr_urls,
     transform_key,
     channel_coord=None,
+    single_layer=False,
 ):
     dims = sims[0].dims
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
@@ -354,8 +355,12 @@ def generate_neuroglancer_json(
         "displayDimensions": sdims[::-1],
         "layerListPanel": {"visible": True},
         # 'position': [center[idim] for idim, dim in enumerate(sdims)],
+        # "concurrentDownloads": 100, # leave at default
         "layout": "xy" if ndim == 2 else "4panel",
-        "layers": [
+    }
+
+    if not single_layer:
+        ng_config["layers"] = [
             {
                 "type": "image",
                 "source": {
@@ -382,9 +387,7 @@ def generate_neuroglancer_json(
             | (
                 {
                     "shaderControls": {
-                        "normalized":
-                        # {'range': [2, 51], 'window': [0, 319]}
-                        {
+                        "normalized": {
                             "range": [window["min"], window["max"]],
                             "window": [window["start"], window["end"]],
                         },
@@ -394,8 +397,49 @@ def generate_neuroglancer_json(
                 else {}
             )
             for iview, url in enumerate(zarr_urls)
-        ],
-    }
+        ]
+
+    else:
+        ng_config["layers"] = [
+            {
+                "type": "image",
+                "source": [
+                    {
+                        "url": f"zarr://{url}",
+                        "transform": {
+                            # neuroglancer drops last row of homogeneous matrix
+                            "matrix": [
+                                list(row) for row in full_affines[iview][:-1]
+                            ],
+                            "outputDimensions": {
+                                (dim if dim != "c" else "c'"): d
+                                for dim, d in output_dimensions.items()
+                            },
+                        },
+                    }
+                    for iview, url in enumerate(zarr_urls)
+                ],
+                "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
+                "localPosition": [channel_index] if "c" in dims else [],
+                "tab": "rendering",
+                "opacity": 0.6,
+                # 'volumeRendering': 'on',
+                "name": "Tiles",
+            }
+            | (
+                {
+                    "shaderControls": {
+                        "normalized": {
+                            "range": [window["min"], window["max"]],
+                            "window": [window["start"], window["end"]],
+                        },
+                    },
+                }
+                if window is not None
+                else {}
+            )
+        ]
+
     # import pprint
     # pprint.pprint(ng_config)
     return ng_config
@@ -414,6 +458,7 @@ def view_neuroglancer(
     transform_key,
     port=8000,
     channel_coord=None,
+    single_layer=False,
 ):
     """
     Visualize a list of spatial_images together with their OME-Zarrs on disk
@@ -447,6 +492,7 @@ def view_neuroglancer(
         zarr_urls,
         channel_coord=channel_coord,
         transform_key=transform_key,
+        single_layer=single_layer,
     )
     ng_url = get_neuroglancer_url(ng_json)
 
