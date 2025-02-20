@@ -164,6 +164,8 @@ def plot_positions(
                     "Spectral",
                 )
 
+            edge_cmap.set_bad(color="gray")
+
             edge_colors = [edge_cmap(norm(val)) for val in edge_color_vals]
         else:
             edge_colors = ["k" for _ in edges]
