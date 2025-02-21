@@ -517,6 +517,37 @@ def get_affine_from_intrinsic_affine(
     return M_W
 
 
+def dispatch_pairwise_reg_func(
+    pairwise_reg_func, fixed_data, moving_data, **pairwise_reg_func_kwargs
+):
+    """
+    Check that images are not constant and apply the registration function.
+    """
+    int_extrema = [
+        [func(im) for im in [fixed_data, moving_data]]
+        for func in [np.nanmin, np.nanmax]
+    ]
+
+    # return if no translation if images are constant
+    for i in range(2):
+        if int_extrema[0][i] == int_extrema[1][i]:
+            warnings.warn(
+                "An overlap region between tiles/views is all zero or constant. Assuming identity transform.",
+                UserWarning,
+                stacklevel=2,
+            )
+            reg_result = {}
+            reg_result["affine_matrix"] = param_utils.identity_transform(
+                fixed_data.ndim
+            )
+            reg_result["quality"] = np.nan
+            return reg_result
+
+    return pairwise_reg_func(
+        fixed_data, moving_data, **pairwise_reg_func_kwargs
+    )
+
+
 def register_pair_of_msims(
     msim1,
     msim2,
@@ -689,7 +720,8 @@ def register_pair_of_msims(
     else:
         raise ValueError("Unknown registration function signature")
 
-    param_dict_d = delayed(pairwise_reg_func, nout=1)(
+    param_dict_d = delayed(dispatch_pairwise_reg_func, nout=1)(
+        pairwise_reg_func,
         fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
         moving_data=xr.DataArray(moving_data, dims=spatial_dims),
         **pairwise_reg_func_kwargs,

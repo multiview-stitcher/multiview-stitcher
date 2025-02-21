@@ -532,3 +532,32 @@ def test_prune_view_adjacency_graph():
         )
 
         assert len(g_reg.nodes) == N
+
+
+def test_constant_pairwise_reg():
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_t=1,
+        N_c=1,
+        tile_size=10,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        overlap=5,
+    )
+
+    sims[0].data *= 0
+
+    with pytest.warns(
+        UserWarning,
+        match="An overlap region between tiles/views is all zero or constant",
+    ):
+        registration.register(
+            [
+                msi_utils.get_msim_from_sim(sim, scale_factors=[])
+                for sim in sims
+            ],
+            reg_channel_index=0,
+            transform_key=METADATA_TRANSFORM_KEY,
+            pairwise_reg_func=registration.phase_correlation_registration,
+        )
