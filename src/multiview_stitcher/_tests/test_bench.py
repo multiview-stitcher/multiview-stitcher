@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 import xarray as xr
 
@@ -7,7 +8,9 @@ import multiview_stitcher.spatial_image_utils as si_utils
 from multiview_stitcher import (
     io,
     msi_utils,
+    mv_graph,
     registration,
+    transformation,
 )
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
@@ -21,16 +24,25 @@ datasets = [
     {
         "name": "tcyx_2x1_0",
         "image_paths": [test_bench_data_dir / "tcyx_2x1_0.czi"],
-        "parameter_path": test_bench_data_dir / "tcyx_2x1_0.json",
+        "parameter_path": test_bench_data_dir / "tcyx_2x1_0.zarr",
         "dims": ["t", "c", "y", "x"],
         "visibility": "private",
     },
     {
         "name": "tcyx_3x3_0",
         "image_paths": [test_bench_data_dir / "tcyx_3x3_0.czi"],
-        "parameter_path": test_bench_data_dir / "tcyx_3x3_0.json",
+        "parameter_path": test_bench_data_dir / "tcyx_3x3_0_scene1.zarr",
         "dims": ["t", "c", "y", "x"],
         "visibility": "private",
+        "scene": 0,
+    },
+    {
+        "name": "tcyx_3x3_0",
+        "image_paths": [test_bench_data_dir / "tcyx_3x3_0.czi"],
+        "parameter_path": test_bench_data_dir / "tcyx_3x3_0_scene0.zarr",
+        "dims": ["t", "c", "y", "x"],
+        "visibility": "private",
+        "scene": 1,
     },
 ]
 
@@ -51,8 +63,9 @@ def write_params(params, dataset):
 
 def get_msims_from_dataset(dataset):
     if dataset["image_paths"][0].suffix == ".czi":
+        scene = 0 if "scene" not in dataset else dataset["scene"]
         sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-            dataset["image_paths"][0]
+            dataset["image_paths"][0], scene_index=scene
         )
 
     msims = [
@@ -84,89 +97,77 @@ def register_dataset(msims, dataset):
     [ds for ds in datasets if ds["visibility"] == "private"],
 )
 def test_pairwise_reg_against_sample_gt(dataset):
-    pass
+    """
 
+    Compare registered parameters with the reference parameters.
 
-#     get_msims_from_dataset(dataset)
+    Idea for parameter comparison:
+    - for each overlapping pair (according to metadata transformation):
+      - calculate overlap bbox vertices in metadata transformation, pts1, pts2
+      - ref reg Tr1, : project pts1, project pts2
+      - new reg Tn1: project pts1, project pts2
+      - make sure Tr2(pts2) - Tr1(pts1) ~= Tn2(pts2) - Tn1(pts1)
+    - make sure this is true for all overlapping pairs
 
-# get overlap bboxes
+    Parameters
+    ----------
+    dataset : dict
+    """
 
-# # assert matrix
-# assert np.allclose(
-#     # p["transform"].sel(t=0, x_in=[0, 1], x_out=[0, 1]),
-#     p["transform"].sel(t=0, x_in=["x", "y"], x_out=["x", "y"]),
-#     np.array([[1.0, 0.0], [0.0, 1.0]]),
-#     atol=0.05,
-# )
+    msims = get_msims_from_dataset(dataset)
 
-# gt_shift = xr.DataArray(
-#     [2.5, 7.5],
-#     dims=["x_in"],
-#     coords={"x_in": ["y", "x"]},
-# )
-# tolerance = 1.5
+    params_ref = read_params(dataset)
+    params_reg = register_dataset(msims, dataset)
+    # params_reg = params_ref# + np.random.random() / 100.
 
-# # somehow antspy sporadically yields different results in ~1/10 times
-# if pairwise_reg_func != registration.registration_ANTsPy:
-#     # assert offset
-#     assert np.allclose(
-#         p["transform"].sel(t=0, x_in=["y", "x"], x_out="1") - gt_shift,
-#         np.zeros((2,)),
-#         atol=tolerance,
-#     )
+    g_adj = mv_graph.build_view_adjacency_graph_from_msims(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
 
-# ##### test groupwise registration
+    pairs = list(g_adj.edges())
+    sdims = si_utils.get_spatial_dims_from_sim(
+        msi_utils.get_sim_from_msim(msims[0])
+    )
 
-# ### test for different dtypes and normalizations
+    spacing = si_utils.get_spacing_from_sim(
+        msi_utils.get_sim_from_msim(msims[0])
+    )
+    tolerance = max([spacing[dim] for dim in sdims])
 
-# msimss = [msims]
+    # compare the registered parameters with the reference
+    for ipair, pair in enumerate(pairs):
+        lower, upper = registration.get_overlap_bboxes(
+            msi_utils.get_sim_from_msim(msims[pair[0]]),
+            msi_utils.get_sim_from_msim(msims[pair[1]]),
+            input_transform_key=METADATA_TRANSFORM_KEY,
+            output_transform_key=None,
+        )
+        lower, upper = lower[0], upper[0]
 
-# sim_extrema = [(float(sim.min()), float(sim.max())) for sim in sims]
+        # get vertices of the overlap bbox
+        vs = mv_graph.get_vertices_from_stack_props(
+            {
+                "origin": {dim: lower[idim] for idim, dim in enumerate(sdims)},
+                "shape": {dim: 2 for dim in sdims},
+                "spacing": {
+                    dim: upper[idim] - lower[idim]
+                    for idim, dim in enumerate(sdims)
+                },
+            }
+        )
 
-# for out_range, dtype in zip(
-#     [(-1, 1), (0, 1), (-300, 0)], [np.float32, np.float32, np.int32]
-# ):
-#     msimss += [
-#         [
-#             msi_utils.get_msim_from_sim(
-#                 xr.apply_ufunc(
-#                     rescale_intensity,
-#                     sim,
-#                     dask="allowed",
-#                     kwargs={
-#                         "in_range": sim_extrema[isim],
-#                         "out_range": out_range,
-#                     },
-#                     keep_attrs=True,
-#                 ).astype(dtype),
-#                 scale_factors=[],
-#             )
-#             for isim, sim in enumerate(sims)
-#         ]
-#     ]
+        for t in params_ref[0].coords["t"].values:
+            param_displacements = []
+            for _iparam, params in enumerate([params_reg, params_ref]):
+                vertices_in_world_coords = [
+                    transformation.transform_pts(vs, p.sel(t=t))
+                    for p in [params[pair[0]], params[pair[1]]]
+                ]
+                param_displacements.append(
+                    vertices_in_world_coords[1] - vertices_in_world_coords[0]
+                )
 
-# for msims in msimss:
-#     p = registration.register(
-#         [msims[0], msims[1]],
-#         registration_binning={dim: 1 for dim in spatial_dims},
-#         transform_key=METADATA_TRANSFORM_KEY,
-#         pairwise_reg_func=pairwise_reg_func,
-#     )
-
-#     # for groupwise registration, check relative position of a control point
-#     ctrl_pt = np.zeros((2,))
-#     ctrl_pts_t = [
-#         transformation.transform_pts([ctrl_pt], affine.squeeze())[0]
-#         for affine in p
-#     ]
-#     rel_pos = ctrl_pts_t[0] - ctrl_pts_t[1]
-
-#     # somehow antspy sporadically yields different results in ~1/10 times
-#     if pairwise_reg_func != registration.registration_ANTsPy:
-#         # assert offset
-#         assert np.allclose(
-#             rel_pos,
-#             # np.array([2.5, 7.5]),
-#             gt_shift,
-#             atol=1.5,
-#         )
+            assert np.allclose(
+                param_displacements[0], param_displacements[1], atol=tolerance
+            ), f"dataset {dataset}, pair {ipair}, t={t}, {param_displacements[0]} != {param_displacements[1]}"
