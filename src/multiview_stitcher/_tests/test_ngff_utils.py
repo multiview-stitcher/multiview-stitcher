@@ -3,6 +3,7 @@ import os
 import tempfile
 
 import ngff_zarr
+import numpy as np
 import pytest
 
 from multiview_stitcher import (
@@ -26,23 +27,35 @@ def test_round_trip(ndim):
         N_t=1,
         tile_size=30,
         tiles_x=1,
-        tiles_y=1,
+        tiles_y=2,
         tiles_z=1,
         spacing_x=1,
         spacing_y=1,
         spacing_z=1,
-    )[0]
+    )[1]
 
-    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[2, 4])
+    scale_factors = [2, 4]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
 
     with tempfile.TemporaryDirectory() as zarr_path:
         ngff_multiscales = ngff_utils.msim_to_ngff_multiscales(
             msim, transform_key=io.METADATA_TRANSFORM_KEY
         )
         ngff_zarr.to_ngff_zarr(zarr_path, ngff_multiscales)
+
         msim_read = ngff_utils.ngff_multiscales_to_msim(
             ngff_zarr.from_ngff_zarr(zarr_path),
             transform_key=io.METADATA_TRANSFORM_KEY,
+        )
+
+    for ires in range(len(scale_factors) + 1):
+        assert np.allclose(
+            msi_utils.get_sim_from_msim(msim_read, scale=f"scale{ires}")
+            .coords["y"]
+            .values,
+            msi_utils.get_sim_from_msim(msim, scale=f"scale{ires}")
+            .coords["y"]
+            .values,
         )
 
     assert len(msi_utils.get_sorted_scale_keys(msim)) == len(

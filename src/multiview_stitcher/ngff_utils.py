@@ -79,10 +79,10 @@ def msim_to_ngff_multiscales(msim, transform_key):
 
     ngff_multiscales = ngff_zarr.Multiscales(
         ngff_ims,
-        metadata=ngff_zarr.zarr_metadata.Metadata(
+        metadata=ngff_zarr.Metadata(
             axes=ngff_multiscales_scales[0].metadata.axes,
             datasets=[
-                ngff_zarr.zarr_metadata.Dataset(
+                ngff_zarr.Dataset(
                     path="scale%s/image" % iscale,
                     coordinateTransformations=ngff_multiscales_scale.metadata.datasets[
                         0
@@ -92,6 +92,7 @@ def msim_to_ngff_multiscales(msim, transform_key):
                     ngff_multiscales_scales
                 )
             ],
+            coordinateTransformations=None,
         ),
         scale_factors=[
             {
