@@ -374,3 +374,17 @@ def write_sim_to_ome_zarr(
         }
 
     return sim
+
+
+def read_sim_from_ome_zarr(
+    zarr_path,
+    resolution_level=0,
+    transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+):
+    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+
+    sim = ngff_image_to_sim(
+        ngff_multiscales.images[resolution_level], transform_key=transform_key
+    )
+
+    return sim

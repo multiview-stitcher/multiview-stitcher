@@ -13,6 +13,7 @@ from multiview_stitcher import (
     sample_data,
     vis_utils,
 )
+from multiview_stitcher import spatial_image_utils as si_utils
 
 
 @pytest.mark.parametrize(
@@ -34,9 +35,23 @@ def test_round_trip(ndim):
         spacing_z=1,
     )[1]
 
+    # sim
+    sdims = si_utils.get_spatial_dims_from_sim(sim)
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+        sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path)
+
+        for dim in sdims:
+            assert np.allclose(
+                sim.coords[dim].values, sim_read.coords[dim].values
+            )
+
+        assert np.allclose(sim.data, sim_read.data)
+
+    # msim
     scale_factors = [2, 4]
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
-
     with tempfile.TemporaryDirectory() as zarr_path:
         ngff_multiscales = ngff_utils.msim_to_ngff_multiscales(
             msim, transform_key=io.METADATA_TRANSFORM_KEY
@@ -60,6 +75,11 @@ def test_round_trip(ndim):
 
     assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
         msi_utils.get_sorted_scale_keys(msim_read)
+    )
+
+    assert np.allclose(
+        msim[f"scale{len(scale_factors)}/image"].data,
+        msim_read[f"scale{len(scale_factors)}/image"].data,
     )
 
 
