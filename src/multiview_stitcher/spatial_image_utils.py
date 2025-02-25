@@ -9,7 +9,7 @@ from numpy._typing import ArrayLike
 
 from multiview_stitcher import param_utils
 
-DEFAULT_TRANSFORM_KEY = "affine_manual"
+DEFAULT_TRANSFORM_KEY = "affine_metadata"
 
 SPATIAL_DIMS = ["z", "y", "x"]
 SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS

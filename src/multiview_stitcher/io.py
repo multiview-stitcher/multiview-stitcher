@@ -23,7 +23,7 @@ import contextlib
 
 from multiview_stitcher import spatial_image_utils as si_utils
 
-METADATA_TRANSFORM_KEY = "affine_metadata"
+METADATA_TRANSFORM_KEY = si_utils.DEFAULT_TRANSFORM_KEY
 
 
 def read_tiff_into_spatial_xarray(
