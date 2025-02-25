@@ -381,7 +381,32 @@ def read_sim_from_ome_zarr(
     resolution_level=0,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
 ):
+    """
+    Read a multiscale NGFF zarr file (v0.4) into a spatial_image
+    (multiview-stitcher flavor) at a given resolution level.
+
+    NGFF zarr files v0.4 cannot contain affine transformations, so
+    an identity transform will be set for the given transform_key.
+
+    Parameters
+    ----------
+    zarr_path : str or Path
+        Path to the zarr file
+    resolution_level : int, optional
+        Resolution level to read, by default 0 (highest resolution)
+    transform_key : str, optional
+        By default si_utils.DEFAULT_TRANSFORM_KEY
+
+    Returns
+    -------
+    spatial_image with transform_key set
+    """
     ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+
+    if resolution_level >= len(ngff_multiscales.images):
+        raise ValueError(
+            f"Resolution level {resolution_level} not found in {zarr_path}"
+        )
 
     sim = ngff_image_to_sim(
         ngff_multiscales.images[resolution_level], transform_key=transform_key
