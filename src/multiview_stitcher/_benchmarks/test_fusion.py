@@ -24,14 +24,15 @@ def create_input(
 
     # create minimal example grid with overlap
     if test_params is None:
-        test_params = {"t": 1, "c": 1, "ndim": 3, "input_chunking": 10}
+        test_params = {"t": 1, "c": 1, "ndim": 3, "input_chunking": 50}
+
     ndim = test_params["ndim"]
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
-        overlap=50,
+        overlap=100,
         N_c=test_params["c"],
         N_t=test_params["t"],
-        tile_size=300,
+        tile_size=100,
         tiles_x=3,
         tiles_y=3,
         tiles_z=1,
@@ -40,7 +41,7 @@ def create_input(
         spacing_z=1,
     )
 
-    # rechunk input data
+    # rechunk and jiggle input data
     for sim in sims:
         sim.data = sim.data.rechunk(test_params["input_chunking"])
         p = param_utils.affine_to_xaffine(
@@ -63,7 +64,7 @@ def create_input(
 
 
 def fuse_zarr_to_zarr(
-    tmp_dir="/tmp/test_benchmarking",
+    tmp_dir,
 ):
     msims = [
         msi_utils.multiscale_spatial_image_from_zarr(
@@ -80,7 +81,7 @@ def fuse_zarr_to_zarr(
         sims,
         # transform_key=METADATA_TRANSFORM_KEY,
         transform_key="random",
-        output_chunksize={dim: 8 for dim in sdims},
+        output_chunksize={dim: 100 for dim in sdims},
     )
 
     fused_sim.data.to_zarr(
@@ -95,7 +96,6 @@ def fuse_zarr_to_zarr(
 
 def test_fusion(
     benchmark,
-    # testdata_dir_path=None,
 ):
     with tempfile.TemporaryDirectory() as tmpdir:
         testdata_dir_path = Path(tmpdir)
@@ -108,7 +108,6 @@ def test_fusion(
         benchmark.pedantic(
             fuse_zarr_to_zarr,
             args=(testdata_dir_path,),
-            # setup=create_input,
             iterations=1,
             rounds=3,
         )
