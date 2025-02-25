@@ -167,6 +167,9 @@ def write_sim_to_ome_zarr(
     Write (and compute) a spatial_image (multiview-stitcher flavor)
     to a multiscale NGFF zarr file (v0.4).
     Returns a sim backed by the newly created zarr file.
+
+    Note that any transform_key will not be stored in the zarr file.
+    However, the returned sim will have the transform_key set.
     """
 
     if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
