@@ -56,3 +56,9 @@ exclude = [
 
 target-version = "py39"
 fix = true
+
+[tool.pytest.ini_options]
+
+markers = [ # https://docs.pytest.org/en/stable/how-to/mark.html
+    "private_data: marks tests as requiring private data (deselect with '-m \"not private_data\"')",
+]
