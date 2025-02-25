@@ -91,7 +91,7 @@ datasets = [
         ],
         "parameter_path": test_bench_data_dir / "em_yx_3x2_0/em_yx_3x2_0.zarr",
         "dims": ["y", "x"],
-        "tolerance": 1000000,  # pixel spacing is 0.02 (um)
+        "tolerance": 1000000,  # pixel spacing is 0.02 (um). this dataset is currently not performing well
         "visibility": "private",
     },
 ]
