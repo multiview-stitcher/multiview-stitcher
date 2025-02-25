@@ -3,7 +3,13 @@ import tempfile
 from pathlib import Path
 
 import multiview_stitcher.spatial_image_utils as si_utils
-from multiview_stitcher import fusion, msi_utils, param_utils, sample_data
+from multiview_stitcher import (
+    fusion,
+    msi_utils,
+    param_utils,
+    registration,
+    sample_data,
+)
 
 # to be used in the future when we have test data to be cached
 # @pytest.fixture(scope="session")
@@ -24,17 +30,26 @@ def create_input(
 
     # create minimal example grid with overlap
     if test_params is None:
-        test_params = {"t": 1, "c": 1, "ndim": 3, "input_chunking": 50}
+        test_params = {
+            "t": 1,
+            "c": 1,
+            "ndim": 3,
+            "input_chunking": 50,
+            "tiles_x": 3,
+            "tiles_y": 3,
+            "tile_size": 100,
+            "overlap": 20,
+        }
 
     ndim = test_params["ndim"]
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
-        overlap=100,
+        overlap=test_params["overlap"],
         N_c=test_params["c"],
         N_t=test_params["t"],
-        tile_size=100,
-        tiles_x=3,
-        tiles_y=3,
+        tile_size=test_params["tile_size"],
+        tiles_x=test_params["tiles_x"],
+        tiles_y=test_params["tiles_y"],
         tiles_z=1,
         spacing_x=1,
         spacing_y=1,
@@ -60,17 +75,24 @@ def create_input(
             msi_utils.get_msim_from_sim(sims[iview], scale_factors=[]),
             os.path.join(tmp_dir, f"msim_view_{iview}.zarr"),
         )
+
     return
 
 
 def fuse_zarr_to_zarr(
     tmp_dir,
 ):
+    input_filepaths = sorted(
+        [
+            os.path.join(tmp_dir, f)
+            for f in os.listdir(tmp_dir)
+            if "fused" not in f
+        ]
+    )
+
     msims = [
-        msi_utils.multiscale_spatial_image_from_zarr(
-            os.path.join(tmp_dir, f"msim_view_{iview}.zarr")
-        )
-        for iview in range(2)
+        msi_utils.multiscale_spatial_image_from_zarr(fp)
+        for fp in input_filepaths
     ]
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
@@ -79,7 +101,6 @@ def fuse_zarr_to_zarr(
 
     fused_sim = fusion.fuse(
         sims,
-        # transform_key=METADATA_TRANSFORM_KEY,
         transform_key="random",
         output_chunksize={dim: 100 for dim in sdims},
     )
@@ -91,22 +112,86 @@ def fuse_zarr_to_zarr(
         compute=True,
     )
 
-    return fused_sim
+    return
 
 
 def test_fusion(
     benchmark,
 ):
+    test_params = {
+        "t": 1,
+        "c": 1,
+        "ndim": 3,
+        "input_chunking": 50,
+        "tiles_x": 3,
+        "tiles_y": 3,
+        "tile_size": 100,
+        "overlap": 20,
+    }
+
     with tempfile.TemporaryDirectory() as tmpdir:
         testdata_dir_path = Path(tmpdir)
 
         create_input(
             tmp_dir=testdata_dir_path,
+            test_params=test_params,
         )
 
         # benchmark something
         benchmark.pedantic(
             fuse_zarr_to_zarr,
+            args=(testdata_dir_path,),
+            iterations=1,
+            rounds=3,
+        )
+
+
+def register_zarrs(
+    tmp_dir,
+):
+    input_filepaths = sorted(
+        [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir)]
+    )
+
+    msims = [
+        msi_utils.multiscale_spatial_image_from_zarr(fp)
+        for fp in input_filepaths
+    ]
+
+    registration.register(
+        msims,
+        transform_key="random",
+        reg_channel_index=0,
+    )
+
+    return
+
+
+def test_registration(
+    benchmark,
+):
+    test_params = {
+        "t": 1,
+        "c": 1,
+        "ndim": 2,
+        "input_chunking": 50,
+        "tiles_x": 2,
+        "tiles_y": 2,
+        "tile_size": 100,
+        "overlap": 20,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        testdata_dir_path = Path(tmpdir)
+
+        create_input(
+            tmp_dir=testdata_dir_path,
+            test_params=test_params,
+        )
+
+        # benchmark something
+        benchmark.pedantic(
+            register_zarrs,
             args=(testdata_dir_path,),
             iterations=1,
             rounds=3,
