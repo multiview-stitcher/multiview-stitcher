@@ -91,4 +91,6 @@ site/
 
 notebooks/data
 notebooks/Grid*
-src/multiview_stitcher/_benchmarks
+notebooks/*.zarr
+
+src/multiview_stitcher/_benchmarks/data
