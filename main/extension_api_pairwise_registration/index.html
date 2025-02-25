@@ -1057,7 +1057,7 @@
 <p>This API is for adding registration functions that operate on pixel data without any knowledge of the physical space.</p>
 <div class="admonition note">
 <p class="admonition-title">Initial transformation</p>
-<p>The moving data array is pre-transformed to match the pixel coordinate space of the fixed data array, using the affine matrices of the <code>transform_key</code> passed to <code>registration.register</code>.</p>
+<p>The moving data array is pre-transformed to match the pixel coordinate space of the fixed data array, using the affine matrices of the <code>transform_key</code> passed to <code>registration.register</code>. Image data is passed as float dtype and NaN values mark pixels that map outside the image domains after transformation.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Expected output transformation</p>
