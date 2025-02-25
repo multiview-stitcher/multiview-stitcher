@@ -561,3 +561,77 @@ def test_constant_pairwise_reg():
             transform_key=METADATA_TRANSFORM_KEY,
             pairwise_reg_func=registration.phase_correlation_registration,
         )
+
+
+@pytest.mark.parametrize(
+    "ndim",
+    [2, 3],
+)
+def test_overlap_tolerance(ndim):
+    """
+    Check that overlap_tolerance works as expected by recovering
+    non overlapping images with a known shift.
+    """
+
+    overlap_x = 10
+    shift_x = overlap_x
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        N_c=1,
+        N_t=1,
+        tile_size=30,
+        overlap=overlap_x,
+        tiles_x=2,
+        tiles_y=1,
+    )
+    sim0, sim1 = sims
+
+    sim1_shifted = sims[1].assign_coords(
+        {"x": sims[1].coords["x"].data + shift_x}
+    )
+
+    # from multiview_stitcher import vis_utils
+    # vis_utils.plot_positions([msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    #         for sim in
+    #         [sim0, sim1_shifted]
+    #         # [sim0, sim1]
+    #         ],
+    #     transform_key=METADATA_TRANSFORM_KEY,
+    #     use_positional_colors=False,
+    #     )
+
+    params_orig = registration.register(
+        [
+            msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            for sim in [sim0, sim1]
+        ],
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="registered_orig",
+        reg_channel_index=0,
+        scheduler="single-threaded",
+    )
+
+    params_shifted = registration.register(
+        [
+            msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            for sim in [sim0, sim1_shifted]
+        ],
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="registered_shifted",
+        overlap_tolerance={"x": overlap_x},
+        reg_channel_index=0,
+        scheduler="single-threaded",
+    )
+
+    params_diff = param_utils.translation_from_affine(
+        (
+            params_shifted[1]
+            - params_shifted[0]
+            - (params_orig[1] - params_orig[0])
+        )
+        .sel(t=0)
+        .data
+    )
+
+    np.allclose(params_diff, [0] * (ndim - 1) + [shift_x], atol=1.5)
