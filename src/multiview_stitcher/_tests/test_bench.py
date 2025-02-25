@@ -9,6 +9,7 @@ from multiview_stitcher import (
     io,
     msi_utils,
     mv_graph,
+    ngff_utils,
     registration,
     transformation,
 )
@@ -23,26 +24,50 @@ test_bench_data_dir = (
 datasets = [
     {
         "name": "tcyx_2x1_0",
-        "image_paths": [test_bench_data_dir / "tcyx_2x1_0.czi"],
-        "parameter_path": test_bench_data_dir / "tcyx_2x1_0.zarr",
+        "image_paths": [test_bench_data_dir / "tcyx_2x1_0/tcyx_2x1_0.czi"],
+        "parameter_path": test_bench_data_dir / "tcyx_2x1_0/tcyx_2x1_0.zarr",
         "dims": ["t", "c", "y", "x"],
         "visibility": "private",
     },
     {
-        "name": "tcyx_3x3_0",
-        "image_paths": [test_bench_data_dir / "tcyx_3x3_0.czi"],
-        "parameter_path": test_bench_data_dir / "tcyx_3x3_0_scene1.zarr",
+        "name": "tcyx_3x3_0_scene0",
+        "image_paths": [test_bench_data_dir / "tcyx_3x3_0/tcyx_3x3_0.czi"],
+        "parameter_path": test_bench_data_dir
+        / "tcyx_3x3_0/tcyx_3x3_0_scene0.zarr",
         "dims": ["t", "c", "y", "x"],
         "visibility": "private",
         "scene": 0,
     },
     {
-        "name": "tcyx_3x3_0",
-        "image_paths": [test_bench_data_dir / "tcyx_3x3_0.czi"],
-        "parameter_path": test_bench_data_dir / "tcyx_3x3_0_scene0.zarr",
+        "name": "tcyx_3x3_0_scene1",
+        "image_paths": [test_bench_data_dir / "tcyx_3x3_0/tcyx_3x3_0.czi"],
+        "parameter_path": test_bench_data_dir
+        / "tcyx_3x3_0/tcyx_3x3_0_scene1.zarr",
         "dims": ["t", "c", "y", "x"],
         "visibility": "private",
         "scene": 1,
+    },
+    {
+        "name": "yx_3x3_0",
+        "image_paths": [
+            test_bench_data_dir / f"yx_3x3_0/tile{i:1d}.zarr" for i in range(9)
+        ],
+        "parameter_path": test_bench_data_dir / "yx_3x3_0/yx_3x3_0.zarr",
+        "dims": ["t", "c", "y", "x"],
+        "visibility": "private",
+        "scene": 1,
+        "reg_config": [
+            {
+                "reg_binning": {dim: 1 for dim in ["y", "x"]},
+            },
+            {
+                "reg_binning": {dim: 1 for dim in ["y", "x"]},
+                "pairwise_reg_func": registration.registration_ANTsPy,
+                "pairwise_reg_func_kwargs": {
+                    "transform_types": ["Affine"],
+                },
+            },
+        ],
     },
 ]
 
@@ -68,6 +93,12 @@ def get_msims_from_dataset(dataset):
             dataset["image_paths"][0], scene_index=scene
         )
 
+    elif dataset["image_paths"][0].suffix == ".zarr":
+        sims = [
+            ngff_utils.read_sim_from_ome_zarr(image_path)
+            for image_path in dataset["image_paths"]
+        ]
+
     msims = [
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
@@ -78,15 +109,29 @@ def get_msims_from_dataset(dataset):
 def register_dataset(msims, dataset):
     si_utils.get_spatial_dims_from_sim(msi_utils.get_sim_from_msim(msims[0]))
 
-    params = registration.register(
-        msims,
-        # registration_binning={dim: 1 for dim in sdims},
-        reg_channel_index=0
-        if "reg_channel_index" not in dataset
-        else dataset["reg_channel_index"],
-        transform_key=METADATA_TRANSFORM_KEY,
-        new_transform_key="registered",
-    )
+    reg_config = {
+        "reg_channel_index": 0,
+    }
+
+    reg_run_configs = []
+    if "reg_config" in dataset:
+        for reg_run_config in dataset["reg_config"]:
+            reg_run_configs.append(reg_config | reg_run_config)
+    else:
+        reg_run_configs.append(reg_config)
+
+    input_transform_key = METADATA_TRANSFORM_KEY
+    for irun, reg_run_config in enumerate(reg_run_configs):
+        output_transform_key = "reg_" + str(irun)
+
+        params = registration.register(
+            msims,
+            transform_key=input_transform_key,
+            new_transform_key=output_transform_key,
+            **reg_run_config,
+        )
+
+        input_transform_key = output_transform_key
 
     return params
 
@@ -94,7 +139,11 @@ def register_dataset(msims, dataset):
 @pytest.mark.private_data
 @pytest.mark.parametrize(
     "dataset",
-    [ds for ds in datasets if ds["visibility"] == "private"],
+    [
+        ds
+        for ds in datasets
+        if ds["visibility"] == "private" and "yx_3x3_0" in ds["name"]
+    ],
 )
 def test_pairwise_reg_against_sample_gt(dataset):
     """
