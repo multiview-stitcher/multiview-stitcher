@@ -1743,7 +1743,7 @@ def register(
     scheduler : str, optional
         Dask scheduler to use for parallel computation, by default None
     return_metrics : bool, optional
-        If True, return registration metrics as second return value, by default False
+        If True, return a dict containing params, registration metrics and more, by default False
 
     Returns
     -------
@@ -1850,7 +1850,16 @@ def register(
             )
 
     if return_metrics:
-        return params, groupwise_opt_info
+        return (
+            {
+                "params": params,
+                "pairwise_reg_graph": g_reg_computed,
+                "groupwise_resolution_metrics": groupwise_opt_info,
+            }
+            | {"summary_plot": (_fig, _ax)}
+            if plot_summary
+            else {}
+        )
     else:
         return params
 
