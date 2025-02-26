@@ -31,6 +31,7 @@ def plot_positions(
     view_labels=None,
     view_labels_size=10,
     show_plot=True,
+    plot_title=None,
     spacing=None,
     output_filename=None,
 ):
@@ -211,6 +212,9 @@ def plot_positions(
 
     # invert y-axis to match imshow and napari view
     ax.invert_zaxis()
+
+    if plot_title is not None:
+        plt.title(plot_title)
 
     plt.tight_layout()
     if output_filename is not None:

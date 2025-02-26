@@ -1646,7 +1646,13 @@ def optimize_bead_subgraph(
 
     if total_iterations:
         for n in all_nodes:
+            # assign new affines to nodes
             g_beads_subgraph.nodes[n]["affine"] = new_affines[n]
+
+        # assign residuals to edges
+        # for n, edge_residual in iter_all_residuals[-1].items():
+        for e, residual in edge_residuals.items():
+            g_beads_subgraph.edges[e]["residual"] = np.mean(residual)
 
     # undo node relabeling
     # skip bead dict unrelabeling, as it is not needed
@@ -1856,7 +1862,7 @@ def register(
             edges = list(g_reg_computed.edges())
             _fig, _ax = vis_utils.plot_positions(
                 msims,
-                transform_key=new_transform_key,
+                transform_key=transform_key,
                 edges=edges,
                 edge_color_vals=np.array(
                     [
@@ -1864,10 +1870,42 @@ def register(
                         for e in edges
                     ]
                 ),
-                edge_label="pairwise view correlation",
+                edge_label="Pairwise view correlation",
                 display_view_indices=True,
                 use_positional_colors=False,
+                plot_title="Pairwise registration summary",
             )
+
+            if groupwise_resolution_info_dict is not None:
+                remaining_edges = list(
+                    groupwise_resolution_info_dict[
+                        "optimized_graph_t0"
+                    ].edges()
+                )
+                edge_residuals = np.array(
+                    [
+                        groupwise_resolution_info_dict[
+                            "optimized_graph_t0"
+                        ].get_edge_data(*e)["residual"]
+                        if e in remaining_edges
+                        else np.nan
+                        for e in edges
+                    ]
+                )
+                _fig2, _ax2 = vis_utils.plot_positions(
+                    msims,
+                    transform_key=new_transform_key,
+                    edges=edges,
+                    edge_color_vals=edge_residuals,
+                    edge_clims=[
+                        np.nanmin(edge_residuals),
+                        np.nanmax(edge_residuals),
+                    ],
+                    edge_label="Pairwise registration edge residuals [distance units]",
+                    display_view_indices=True,
+                    use_positional_colors=False,
+                    plot_title="Global parameter resolution summary",
+                )
 
     if return_metrics:
         return (

@@ -219,7 +219,7 @@ def test_pairwise_reg_against_artificial_gt(
         )
 
 
-def test_iterative_registration_and_transform_key_setting():
+def test_iterative_registration_and_transform_key_setting(monkeypatch):
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
 
@@ -227,11 +227,18 @@ def test_iterative_registration_and_transform_key_setting():
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
 
+    # test plot_summary=True without plots showing up
+    # https://docs.pytest.org/en/latest/how-to/monkeypatch.html
+    import matplotlib.pyplot
+
+    monkeypatch.setattr(matplotlib.pyplot, "show", lambda: None)
+
     registration.register(
         msims,
         transform_key=METADATA_TRANSFORM_KEY,
         new_transform_key="affine_registered",
         reg_channel_index=0,
+        plot_summary=True,
     )
 
     registration.register(
@@ -239,6 +246,7 @@ def test_iterative_registration_and_transform_key_setting():
         transform_key="affine_registered",
         new_transform_key="affine_registered_2",
         reg_channel_index=0,
+        plot_summary=True,
     )
 
 
