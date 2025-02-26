@@ -1166,6 +1166,7 @@ def groupwise_resolution_global_optimization(
     params = {nodes: [] for nodes in g_reg.nodes}
     all_dfs = []
     ccs = list(nx.connected_components(g_reg))
+    cc_g_opt_t0s = []
     for icc, cc in enumerate(ccs):
         g_reg_subgraph = g_reg.subgraph(list(cc))
 
@@ -1191,7 +1192,7 @@ def groupwise_resolution_global_optimization(
             for g_reg_subgraph_t in g_reg_subgraph_ts
         ]
 
-        cc_params, cc_dfs = list(
+        cc_params, cc_dfs, cc_g_opt_ts = list(
             zip(
                 *tuple(
                     [
@@ -1209,6 +1210,8 @@ def groupwise_resolution_global_optimization(
             )
         )
 
+        cc_g_opt_t0s.append(cc_g_opt_ts[0])
+
         for node in cc:
             for cc_param in cc_params:
                 params[node].append(cc_param[node])
@@ -1220,6 +1223,10 @@ def groupwise_resolution_global_optimization(
                     cc_dfs[it]["icc"] = [icc] * len(cc_dfs[it])
                     all_dfs.append(cc_dfs[it])
 
+    # join optimized graphs for first timepoint
+
+    g_opt_t0 = nx.compose_all(cc_g_opt_t0s)
+
     all_dfs = [df for df in all_dfs if df is not None]
     df = pd.concat(all_dfs) if len(all_dfs) else None
 
@@ -1228,7 +1235,12 @@ def groupwise_resolution_global_optimization(
             {"t": t_coords}
         )
 
-    return params, df
+    info_dict = {
+        "metrics": df,
+        "optimized_graph_t0": g_opt_t0,
+    }
+
+    return params, info_dict
 
 
 def get_reg_graph_with_single_tp_transforms(g_reg, t):
@@ -1654,7 +1666,7 @@ def optimize_bead_subgraph(
         )
         for node in g_beads_subgraph.nodes
     }
-    return params, df
+    return params, df, g_beads_subgraph
 
 
 def register(
@@ -1823,7 +1835,7 @@ def register(
             weight_key="quality",
         )
 
-    params, groupwise_opt_info = groupwise_resolution(
+    params, groupwise_resolution_info_dict = groupwise_resolution(
         g_reg_computed,
         method=groupwise_resolution_method,
         **groupwise_resolution_kwargs,
@@ -1862,7 +1874,11 @@ def register(
             {
                 "params": params,
                 "pairwise_reg_graph": g_reg_computed,
-                "groupwise_resolution_metrics": groupwise_opt_info,
+                "groupwise_resolution_metrics": groupwise_resolution_info_dict[
+                    "metrics"
+                ]
+                if groupwise_resolution_info_dict is not None
+                else None,
             }
             | {"summary_plot": (_fig, _ax)}
             if plot_summary
