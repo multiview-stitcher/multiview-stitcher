@@ -1075,28 +1075,27 @@ def groupwise_resolution_global_optimization(
 
     Strategy:
     - iterate over timepoints
+    - iterate over connected components of the registration graph
     - for each pairwise registration, compute virtual pairs of beads
         - fixed view: take bounding box corners
         - moving view: transform fixed view corners using inverse of pairwise transform
-    - for each view, compute the transform that minimizes the distance between
-        its virtual beads and associated virtual beads in overlapping views
-    - assign the computed transform to the view
-    - perform this process global_optimizationly until convergence
-        (transforming each view's beads by the view's current transformation)
-    - potentially: filter out bad links looking at residual distances
+    - determine optimal transformations in an iterative manner
 
-    Data structure:
-    - graph or table?
-    - start with graph
+    Two loops:
+    - outer loop: loop over different sets of edges (start with all edges):
+        - set transforms of all nodes to identity
+        - perform inner loop
+        - determine whether result is good enough
+        - if not, remove edges based on criterion
+        - repeat
+    - inner loop: given a set of edges, optimise the transformations of each node
+        - for each node, compute the transform that minimizes the distance between
+            its virtual beads and associated virtual beads in overlapping views
+        - assign the computed transform to the view
 
-    Algorithm:
-    - initialise view transforms with identity transforms
-    - build graph with pairwise transforms as edges
-        - this is an undirected graph
-    - calculate an order of views by descending connectivity / number of links
-    - for each view, compute the transform that minimizes the distance between
-        its virtual beads and associated virtual beads in overlapping views
-    - assign the computed transform to the view
+    Terms:
+    - "edge residual": distance between virtual beads of two views
+    - "node residual": distance between virtual beads of a view and associated virtual beads in overlapping views
 
     References:
     - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
@@ -1105,18 +1104,23 @@ def groupwise_resolution_global_optimization(
 
     Parameters
     ----------
-    g_reg : nx.Graph
-        Registration graph with pairwise transforms as edges
-    transform : str, optional
+    g_beads_subgraph : nx.Graph
+        Virtual bead graph
+    transform : str
         Transformation type ('translation', 'rigid' or 'affine')
+    ref_node : int
+        Reference node which keeps its transformation fixed
     max_iter : int, optional
-        Maximum number of iterations
+        Maximum number of iterations of inner loop
     rel_tol : float, optional
-        Relative tolerance for convergence
+        Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
+        By default 1e-4.
     abs_tol : float, optional
-        Absolute tolerance for convergence
+        Convergence criterion for outer loop: absolute value of max node residual below which loop stops.
+        By default the diagonal of the voxel size (max over nodes).
     max_residual_max_mean_ratio : float, optional
-        Maximum ratio of the maximum residual to the mean residual
+        Convergence criterion for outer loop: maximum ratio of max node residual to mean node residual below which loop stops
+        By default 3.0.
 
     Returns
     -------
@@ -1124,13 +1128,35 @@ def groupwise_resolution_global_optimization(
         Dictionary containing the final transform parameters for each view
     """
 
+    if max_iter is None:
+        max_iter = 500
+        logger.info("Global optimization: setting max_iter to %s", abs_tol)
+    if max_residual_max_mean_ratio is None:
+        max_residual_max_mean_ratio = 3.0
+        logger.info(
+            "Global optimization: setting max_residual_max_mean_ratio to %s",
+            max_residual_max_mean_ratio,
+        )
+    if rel_tol is None:
+        rel_tol = 1e-4
+        logger.info("Global optimization: setting rel_tol to %s", abs_tol)
+
     ndim = g_reg.edges[list(g_reg.edges)[0]]["transform"].shape[-1] - 1
 
-    # if abs_tol is None, assign multiple of max spacing
+    # if abs_tol is None, assign multiple of voxel diagonal
     if abs_tol is None:
-        abs_tol = 0.5 * np.max(
+        abs_tol = np.max(
             [
-                np.max(list(g_reg.nodes[n]["stack_props"]["spacing"].values()))
+                1.0
+                * np.sum(
+                    [
+                        v**2
+                        for v in g_reg.nodes[n]["stack_props"][
+                            "spacing"
+                        ].values()
+                    ]
+                )
+                ** 0.5
                 for n in g_reg.nodes
             ]
         )
@@ -1284,22 +1310,36 @@ def optimize_bead_subgraph(
     Optimize the virtual bead graph.
 
     Two loops:
-    - first loop: iterate until max / mean residual ratio is below threshold
-    - second loop: optimise transformations of each node
 
-    TODO: improve efficiency
+    - outer loop: loop over different sets of edges:
+        - start with all edges
+        - determine whether result is good enough
+        - if not, remove edges based on criterion
+    - inner loop: given a set of edges, optimise the transformations of each node
+        - for each node, compute the transform that minimizes the distance between
+            its virtual beads and associated virtual beads in overlapping views
+        - assign the computed transform to the view
+
+    Terms:
+    - "edge residual": distance between virtual beads of two views
+    - "node residual": distance between virtual beads of a view and associated virtual beads in overlapping views
 
     Parameters
     ----------
     g_beads_subgraph : nx.Graph
         Virtual bead graph
     transform : str
-        Transformation type ('rigid' or 'affine')
+        Transformation type ('translation', 'rigid' or 'affine')
     ref_node : int
+        Reference node which keeps its transformation fixed
     max_iter : int, optional
+        Maximum number of iterations of inner loop
     rel_tol : float, optional
+        Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
     abs_tol : float, optional
+        Convergence criterion for outer loop: absolute value of max node residual below which loop stops.
     max_residual_max_mean_ratio : float, optional
+        Convergence criterion for outer loop: maximum ratio of max node residual to mean node residual below which loop stops
 
     Returns
     -------
@@ -1322,15 +1362,6 @@ def optimize_bead_subgraph(
             mapping[k]: v
             for k, v in g_beads_subgraph.edges[e]["beads"].items()
         }
-
-    if max_iter is None:
-        max_iter = 500
-    if rel_tol is None:
-        rel_tol = 1e-4
-    if abs_tol is None:
-        abs_tol = 1e-7
-    if max_residual_max_mean_ratio is None:
-        max_residual_max_mean_ratio = 3.0
 
     # calculate an order of views by descending connectivity / number of links
     centralities = nx.degree_centrality(g_beads_subgraph)
@@ -1530,10 +1561,6 @@ def optimize_bead_subgraph(
 
             # check for convergence
             if iteration > 5:
-                # check if mean residual is below abs_tol
-                # if mean_residuals[-1] < abs_tol:
-                #     break
-
                 max_rel_change = np.max(
                     [
                         np.abs(
