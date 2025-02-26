@@ -1584,8 +1584,8 @@ def optimize_bead_subgraph(
             edge_to_remove = None
         else:
             edge_residual_values = [
-                (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
-                * (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
+                # (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
+                (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
                 * np.sqrt(np.max(edge_residuals[e]))
                 * np.log10(
                     np.max(
