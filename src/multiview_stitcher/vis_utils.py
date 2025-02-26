@@ -64,6 +64,8 @@ def plot_positions(
         Overwrite the msims' spacing for plotting. Useful in the case of images with single
         coordinates for which the spacing is not defined in the metadata.
         By default None
+    plot_title : str, optional
+        Title of the plot, by default no title
     output_filename : str, optional
         Filename where to save the plot if not None, by default None
 
@@ -176,6 +178,8 @@ def plot_positions(
                 edge_cmap = colormaps.get_cmap(
                     "Spectral",
                 )
+            elif isinstance(edge_cmap, str):
+                edge_cmap = colormaps.get_cmap(edge_cmap)
 
             edge_cmap.set_bad(color="gray")
 

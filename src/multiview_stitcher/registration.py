@@ -1761,8 +1761,13 @@ def register(
         Threshold used to filter edges by quality after registration,
         by default None (no filtering)
     plot_summary : bool, optional
-        If True, plot a graph showing registered stack boundaries and
-        performed pairwise registrations including correlations, by default False
+        If True (and `new_transform_key` is set), plot graphs summarising the registration process and results:
+        1) Cross correlation values of pairwise registrations
+           (stack boundaries shown as before registration)
+        2) Residual distances between registration edges after global parameter resolution.
+           Grey edges have been removed during glob param res (stack boundaries shown as after registration).
+        Stack boundary positions reflect the registration result.
+        By default False
     pairs : list of tuples, optional
         If set, initialises the view adjacency graph using the indicates
         pairs of view/tile indices, by default None
@@ -1892,16 +1897,20 @@ def register(
                         for e in edges
                     ]
                 )
+                edge_clims = [
+                    np.nanmin(edge_residuals),
+                    np.nanmax(edge_residuals),
+                ]
+                if edge_clims[0] == edge_clims[1]:
+                    edge_clims = [0, 1]
                 _fig2, _ax2 = vis_utils.plot_positions(
                     msims,
                     transform_key=new_transform_key,
                     edges=edges,
                     edge_color_vals=edge_residuals,
-                    edge_clims=[
-                        np.nanmin(edge_residuals),
-                        np.nanmax(edge_residuals),
-                    ],
-                    edge_label="Pairwise registration edge residuals [distance units]",
+                    edge_cmap="Spectral_r",
+                    edge_clims=edge_clims,
+                    edge_label="Remaining edge residuals [distance units]",
                     display_view_indices=True,
                     use_positional_colors=False,
                     plot_title="Global parameter resolution summary",
