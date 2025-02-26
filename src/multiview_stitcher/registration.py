@@ -1065,7 +1065,6 @@ def groupwise_resolution_global_optimization(
     max_iter=None,
     rel_tol=None,
     abs_tol=None,
-    max_residual_max_mean_ratio=None,
 ):
     """
     Get final transform parameters by global optimization.
@@ -1128,12 +1127,6 @@ def groupwise_resolution_global_optimization(
     if max_iter is None:
         max_iter = 500
         logger.info("Global optimization: setting max_iter to %s", abs_tol)
-    if max_residual_max_mean_ratio is None:
-        max_residual_max_mean_ratio = 3.0
-        logger.info(
-            "Global optimization: setting max_residual_max_mean_ratio to %s",
-            max_residual_max_mean_ratio,
-        )
     if rel_tol is None:
         rel_tol = 1e-4
         logger.info("Global optimization: setting rel_tol to %s", abs_tol)
@@ -1209,7 +1202,6 @@ def groupwise_resolution_global_optimization(
                             max_iter,
                             rel_tol,
                             abs_tol,
-                            max_residual_max_mean_ratio,
                         )
                         for g_beads_subgraph in g_beads_subgraph_ts
                     ]
@@ -1301,7 +1293,6 @@ def optimize_bead_subgraph(
     max_iter,
     rel_tol,
     abs_tol,
-    max_residual_max_mean_ratio,
 ):
     """
     Optimize the virtual bead graph.
