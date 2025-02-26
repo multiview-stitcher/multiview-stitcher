@@ -39,9 +39,12 @@ def test_max_project():
 
     assert dim not in sim_proj.dims
 
-    affine = si_utils.get_affine_from_sim(sim, transform_key)
+    affine_sim = si_utils.get_affine_from_sim(sim, transform_key)
 
     for pdim in ["x_in", "x_out"]:
-        assert dim not in affine.coords[pdim].values
-        assert "x" in affine.coords[pdim].values
-        assert "1" in affine.coords[pdim].values
+        assert dim in affine_sim.coords[pdim].values
+
+    affine_sim_proj = si_utils.get_affine_from_sim(sim_proj, transform_key)
+
+    for pdim in ["x_in", "x_out"]:
+        assert dim not in affine_sim_proj.coords[pdim].values

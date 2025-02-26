@@ -426,7 +426,7 @@ def max_project_sim(sim, dim="z"):
         maximum projected spatial image
     """
 
-    sim = sim.max(dim=dim, keep_attrs=True)
+    sim = sim.max(dim=dim, keep_attrs=True).copy(deep=True)
 
     # project transforms
     for transform_key in sim.attrs["transforms"]:
