@@ -34,6 +34,7 @@ def plot_positions(
     view_labels=None,
     view_labels_size=10,
     show_plot=True,
+    spacing=None,
     output_filename=None,
 ):
     """
@@ -61,6 +62,10 @@ def plot_positions(
         Size of the view labels, by default 10
     show_plot : bool, optional
         Whether to show the plot, by default True
+    spacing : dict, optional
+        Overwrite the msims' spacing for plotting. Useful in the case of images with single
+        coordinates for which the spacing is not defined in the metadata.
+        By default None
     output_filename : str, optional
         Filename where to save the plot if not None, by default None
 
@@ -73,6 +78,9 @@ def plot_positions(
         nscoord = {}
 
     ndim = msi_utils.get_ndim(msims[0])
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(
+        msi_utils.get_sim_from_msim(msims[0])
+    )
 
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
@@ -105,11 +113,20 @@ def plot_positions(
     v = Visualizer(backend="matplotlib")
 
     for iview, sim in enumerate(sims):
-        view_domain = mv_graph.get_poly_from_stack_props(
-            spatial_image_utils.get_stack_properties_from_sim(
-                sim, transform_key=transform_key
-            )
+        sp = spatial_image_utils.get_stack_properties_from_sim(
+            sim, transform_key=transform_key
         )
+
+        if spacing is not None:
+            sp["spacing"] = spacing
+
+        # if single coordinate, enlargen the domain
+        for dim in sdims:
+            if sp["shape"][dim] == 1:
+                sp["shape"][dim] = 2
+                sp["origin"][dim] = sp["origin"][dim] - sp["spacing"][dim] / 2
+
+        view_domain = mv_graph.get_poly_from_stack_props(sp)
 
         v.add((view_domain, pos_colors[iview], 1))
 
