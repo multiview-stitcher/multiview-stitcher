@@ -1094,8 +1094,8 @@ def groupwise_resolution_global_optimization(
         - assign the computed transform to the view
 
     Terms:
-    - "edge residual": distance between virtual beads of two views
-    - "node residual": distance between virtual beads of a view and associated virtual beads in overlapping views
+    - "edge residual": mean distance between pair of virtual beads
+        associated with a registration edge
 
     References:
     - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
@@ -1116,11 +1116,8 @@ def groupwise_resolution_global_optimization(
         Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
         By default 1e-4.
     abs_tol : float, optional
-        Convergence criterion for outer loop: absolute value of max node residual below which loop stops.
-        By default the diagonal of the voxel size (max over nodes).
-    max_residual_max_mean_ratio : float, optional
-        Convergence criterion for outer loop: maximum ratio of max node residual to mean node residual below which loop stops
-        By default 3.0.
+        Convergence criterion for outer loop: absolute value of max edge residual below which loop stops.
+        By default the diagonal of the voxel size (max over tiles).
 
     Returns
     -------
@@ -1321,8 +1318,8 @@ def optimize_bead_subgraph(
         - assign the computed transform to the view
 
     Terms:
-    - "edge residual": distance between virtual beads of two views
-    - "node residual": distance between virtual beads of a view and associated virtual beads in overlapping views
+    - "edge residual": mean distance between pair of virtual beads
+        associated with a registration edge
 
     Parameters
     ----------
@@ -1337,10 +1334,7 @@ def optimize_bead_subgraph(
     rel_tol : float, optional
         Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
     abs_tol : float, optional
-        Convergence criterion for outer loop: absolute value of max node residual below which loop stops.
-    max_residual_max_mean_ratio : float, optional
-        Convergence criterion for outer loop: maximum ratio of max node residual to mean node residual below which loop stops
-
+        Convergence criterion for outer loop: absolute value of max edge residual below which loop stops.
     Returns
     -------
     nx.Graph
