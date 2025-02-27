@@ -28,8 +28,8 @@ This API is for adding registration functions that operate on pixel data without
 
 ```python
 def pairwise_registration(
-    fixed_data: Array-like,
-    moving_data: Array-like,
+    fixed_data: Array-like[np.float32],
+    moving_data: Array-like[np.float32],
     **kwargs, # additional keyword arguments passed `pairwise_reg_func_kwargs`
     ) -> dict:
 
@@ -40,6 +40,8 @@ def pairwise_registration(
         "quality": , # float between 0 and 1 (if not available, set to 1.0)
     }
 ```
+
+Note that in the case of pixel space registration, the input data is passed as `np.float32` arrays (as opposed to registration in physical coordinate space, during which the dtype remains unaltered). Invalid pixel values, i.e. those that map outside of the input data, are marked with NaNs.
 
 Example implementation: `multiview_stitcher.registration.phase_correlation_registration` (default pairwise registration function).
 
