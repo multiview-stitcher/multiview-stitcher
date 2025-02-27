@@ -1921,6 +1921,11 @@ def register(
             {
                 "params": params,
                 "pairwise_reg_graph": g_reg_computed,
+                "groupwise_res_graph": groupwise_resolution_info_dict[
+                    "optimized_graph_t0"
+                ]
+                if groupwise_resolution_info_dict is not None
+                else None,
                 "groupwise_resolution_metrics": groupwise_resolution_info_dict[
                     "metrics"
                 ]
