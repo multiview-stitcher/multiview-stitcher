@@ -250,7 +250,7 @@ def sims_to_intrinsic_coord_system(
 
     reg_sims_b_t = [
         transformation.transform_sim(
-            sim.astype(float),
+            sim.astype(np.float32),
             [None, transf_affine][isim],
             output_stack_properties={
                 "origin": {
