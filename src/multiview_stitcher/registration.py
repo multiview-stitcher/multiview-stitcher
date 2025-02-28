@@ -1693,7 +1693,7 @@ def register(
     plot_summary=False,
     pairs=None,
     scheduler=None,
-    return_metrics=False,
+    return_dict=False,
 ):
     """
 
@@ -1773,15 +1773,27 @@ def register(
         pairs of view/tile indices, by default None
     scheduler : str, optional
         Dask scheduler to use for parallel computation, by default None
-    return_metrics : bool, optional
+    return_dict : bool, optional
         If True, return a dict containing params, registration metrics and more, by default False
 
     Returns
     -------
     list of xr.DataArray
         Parameters mapping each view into a new extrinsic coordinate system
-    pd.DataFrame (optional)
-        Registration metrics
+    or
+    dict
+        Dictionary containing the following keys:
+        - 'params': Parameters mapping each view into a new extrinsic coordinate system
+        - 'pairwise_registration': Dictionary containing the following
+            - 'summary_plot': Tuple containing the figure and axis of the summary plot
+            - 'graph': networkx graph of pairwise registrations
+            - 'metrics': Dictionary containing the following metrics:
+                - 'qualities': Edge registration qualities
+        - 'groupwise_resolution': Dictionary containing the following
+            - 'summary_plot': Tuple containing the figure and axis of the summary plot
+            - 'graph': networkx graph of groupwise resolution
+            - 'metrics': Dictionary containing the following metrics:
+                - 'residuals': Edge residuals after groupwise resolution
     """
 
     if pairwise_reg_func_kwargs is None:
@@ -1863,9 +1875,9 @@ def register(
                 base_transform_key=transform_key,
             )
 
-        if plot_summary:
+        if plot_summary or return_dict:
             edges = list(g_reg_computed.edges())
-            _fig, _ax = vis_utils.plot_positions(
+            fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
                 msims,
                 transform_key=transform_key,
                 edges=edges,
@@ -1879,6 +1891,7 @@ def register(
                 display_view_indices=True,
                 use_positional_colors=False,
                 plot_title="Pairwise registration summary",
+                show_plot=plot_summary,
             )
 
             if groupwise_resolution_info_dict is not None:
@@ -1903,7 +1916,7 @@ def register(
                 ]
                 if edge_clims[0] == edge_clims[1]:
                     edge_clims = [0, 1]
-                _fig2, _ax2 = vis_utils.plot_positions(
+                fig_group_res, ax_group_res = vis_utils.plot_positions(
                     msims,
                     transform_key=new_transform_key,
                     edges=edges,
@@ -1914,28 +1927,41 @@ def register(
                     display_view_indices=True,
                     use_positional_colors=False,
                     plot_title="Global parameter resolution summary",
+                    show_plot=plot_summary,
                 )
+            else:
+                fig_group_res, ax_group_res = None, None
+    else:
+        fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res = [
+            None,
+            None,
+            None,
+            None,
+        ]
 
-    if return_metrics:
-        return (
-            {
-                "params": params,
-                "pairwise_reg_graph": g_reg_computed,
-                "groupwise_res_graph": groupwise_resolution_info_dict[
-                    "optimized_graph_t0"
-                ]
-                if groupwise_resolution_info_dict is not None
-                else None,
-                "groupwise_resolution_metrics": groupwise_resolution_info_dict[
-                    "metrics"
-                ]
-                if groupwise_resolution_info_dict is not None
-                else None,
-            }
-            | {"summary_plot": (_fig, _ax)}
-            if plot_summary
-            else {}
-        )
+    if return_dict:
+        return {
+            "params": params,
+            "pairwise_registration": {
+                "summary_plot": (fig_pair_reg, ax_pair_reg),
+                "graph": g_reg_computed,
+                "metrics": {
+                    "qualities": nx.get_edge_attributes(
+                        g_reg_computed, "quality"
+                    ),
+                },
+            },
+            "groupwise_resolution": {
+                "summary_plot": (fig_group_res, ax_group_res),
+                "graph": groupwise_resolution_info_dict["optimized_graph_t0"],
+                "metrics": {
+                    "residuals": nx.get_edge_attributes(
+                        groupwise_resolution_info_dict["optimized_graph_t0"],
+                        "residual",
+                    ),
+                },
+            },
+        }
     else:
         return params
 
