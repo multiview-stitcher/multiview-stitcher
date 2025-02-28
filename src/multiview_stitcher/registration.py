@@ -1940,6 +1940,15 @@ def register(
         ]
 
     if return_dict:
+        # limit output graphs to first timepoint (for now)
+        g_reg_computed = g_reg_computed.copy()
+        for e in g_reg_computed.edges:
+            for k, v in g_reg_computed.edges[e].items():
+                if isinstance(v, xr.DataArray) and "t" in v.coords:
+                    g_reg_computed.edges[e][k] = g_reg_computed.edges[e][
+                        k
+                    ].sel({"t": g_reg_computed.edges[e][k].coords["t"][0]})
+
         return {
             "params": params,
             "pairwise_registration": {
