@@ -10,23 +10,17 @@ import networkx as nx
 import numpy as np
 import xarray as xr
 from dask import compute, delayed
-from scipy.spatial import cKDTree
+from scipy.optimize import linprog
+from scipy.spatial import (
+    ConvexHull,
+    HalfspaceIntersection,
+    QhullError,
+    cKDTree,
+)
 from skimage.filters import threshold_otsu
 
 from multiview_stitcher import msi_utils, transformation
 from multiview_stitcher import spatial_image_utils as si_utils
-from multiview_stitcher.misc_utils import DisableLogger
-
-with DisableLogger():
-    from Geometry3D import (
-        ConvexPolygon,
-        ConvexPolyhedron,
-        Point,
-        Segment,
-    )
-
-# patch Geometry3D.ConvexPolyhedron._euler_check to always return True
-ConvexPolyhedron._euler_check = lambda self: True
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
@@ -152,12 +146,11 @@ def build_view_adjacency_graph_from_msims(
         overlap_result = delayed(get_overlap_between_pair_of_stack_props)(
             stack_propss[pair[0]],
             stack_propss[pair[1]],
-            expand=expand,
         )
         overlap_results.append(overlap_result)
 
-    # multithreading doesn't improve performance here, probably because the GIL is
-    # not released by pure python Geometry3D code. Using multiprocessing instead.
+    # multithreading doesn't improve performance here (need to check whether
+    # this is still true after removing Geometry3D). Using multiprocessing instead.
     # Probably need to confirm here that local dask scheduler doesn't conflict
     # with dask distributed scheduler
     try:
@@ -176,76 +169,82 @@ def build_view_adjacency_graph_from_msims(
     return g
 
 
-def get_overlap_between_pair_of_stack_props(
-    stack_props_1,
-    stack_props_2,
-    expand=False,
-):
+def get_halfspace_equations_from_stack_props(stack_props):
     """
-    - if there is no overlap, return overlap area of -1
-    - if there's a one pixel wide overlap, overlap_area is 0
-    - assumes spacing is the same for sim1 and sim2
-    - expand: if True, overlap is expanded by a small amount
+    Get the halfspace equations from the stack properties.
+
+    Convention:
+    x are inside stack_props if for all i:
+        ni * x + ci <= 0
     """
 
-    ndim = len(stack_props_1["origin"])
+    ndim = get_ndim_from_stack_props(stack_props)
+    faces = get_faces_from_stack_props(stack_props)
+    center = get_center_from_stack_props(stack_props)
 
-    intersection_poly_structure = (
-        get_intersection_poly_from_pair_of_stack_props(
-            stack_props_1, stack_props_2
-        )
-    )
-
-    spacing = np.array(
-        [stack_props_1["spacing"][dim] for dim in ["z", "y", "x"][-ndim:]]
-    )
-    small_length = np.min(spacing) / 10.0
-
-    if intersection_poly_structure is None:
-        overlap = -1
-        intersection_poly_structure = None
-        intersection_poly_structure_points = None
-    elif isinstance(intersection_poly_structure, Point):
-        overlap = small_length**ndim if expand else 0
-        p = intersection_poly_structure
-        intersection_poly_structure_points = {"z": p.z, "y": p.y, "x": p.x}
-    elif isinstance(intersection_poly_structure, Segment):
-        if expand:
-            overlap = intersection_poly_structure.length() * small_length ** (
-                ndim - 1
+    normals = []
+    if ndim == 2:
+        for face in faces:
+            normals.append(
+                np.array([-(face[1][1] - face[0][1]), face[1][0] - face[0][0]])
             )
-        else:
-            overlap = 0
-        intersection_poly_structure_points = [
-            {"z": p.z, "y": p.y, "x": p.x}
-            for p in [
-                intersection_poly_structure.start_point,
-                intersection_poly_structure.end_point,
-            ]
-        ]
-    elif isinstance(intersection_poly_structure, ConvexPolygon):
-        if ndim == 2:
-            overlap = intersection_poly_structure.area()
-        elif ndim == 3:
-            if expand:
-                overlap = (
-                    intersection_poly_structure.area()
-                    * small_length ** (ndim - 2)
-                )
-            else:
-                overlap = 0
-        intersection_poly_structure_points = [
-            {"z": p.z, "y": p.y, "x": p.x}
-            for p in intersection_poly_structure.points
-        ]
-    elif isinstance(intersection_poly_structure, ConvexPolyhedron):
-        overlap = intersection_poly_structure.volume()
-        intersection_poly_structure_points = [
-            {"z": p.z, "y": p.y, "x": p.x}
-            for p in list(intersection_poly_structure.point_set)
-        ]
 
-    return overlap, intersection_poly_structure_points
+    elif ndim == 3:
+        for face in faces:
+            normals.append(np.cross(face[1] - face[0], face[2] - face[0]))
+
+    equations = []
+    for iface, normal in enumerate(normals):
+        normal = normal / np.linalg.norm(normal)
+        c = -np.dot(normal, faces[iface][0])
+        if np.dot(normal, center) + c > 0:
+            # normal = -normal
+            normal = -normal
+        c = -np.dot(normal, faces[iface][0])
+        # print(np.dot(normal, center) + c)
+        equations.append(np.concatenate([normal, [c]]))
+
+    return np.array(equations)
+
+
+def get_overlap_between_pair_of_stack_props(stack_props1, stack_props2):
+    """
+    Get the overlap between two stack properties.
+    """
+
+    halfspace_eq1 = get_halfspace_equations_from_stack_props(stack_props1)
+    halfspace_eq2 = get_halfspace_equations_from_stack_props(stack_props2)
+
+    halfspace_eq_combined = np.concatenate([halfspace_eq1, halfspace_eq2])
+
+    # find the feasible point
+    # https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.HalfspaceIntersection.html
+    norm_vector = np.reshape(
+        np.linalg.norm(halfspace_eq_combined[:, :-1], axis=1),
+        (halfspace_eq_combined.shape[0], 1),
+    )
+
+    c = np.zeros((halfspace_eq_combined.shape[1],))
+    c[-1] = -1
+    A = np.hstack((halfspace_eq_combined[:, :-1], norm_vector))
+    b = -halfspace_eq_combined[:, -1:]
+    res = linprog(c, A_ub=A, b_ub=b, bounds=(None, None))
+    feasible_point = res.x[:-1]
+
+    try:
+        halfspace_intersection = HalfspaceIntersection(
+            halfspace_eq_combined, feasible_point
+        )
+    except QhullError:
+        return -1, None
+
+    intersection_vertices = halfspace_intersection.intersections
+
+    # get the volume of the intersection
+    # in 2D this is the area
+    volume = ConvexHull(intersection_vertices).volume
+
+    return volume, None
 
 
 def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
@@ -375,6 +374,37 @@ def sims_are_far_apart(sim1, sim2, transform_key):
     ]
 
 
+def get_spatial_dims_from_stack_properties(stack_props):
+    return [
+        dim for dim in si_utils.SPATIAL_DIMS if dim in stack_props["origin"]
+    ]
+
+
+def get_center_from_stack_props(stack_props):
+    sdims = get_spatial_dims_from_stack_properties(stack_props)
+    ndim = len(sdims)
+
+    center = np.array(
+        [
+            stack_props["origin"][dim]
+            + stack_props["spacing"][dim] * (stack_props["shape"][dim] - 1) / 2
+            for dim in sdims
+        ]
+    )
+
+    if "transform" in stack_props:
+        affine = stack_props["transform"]
+        affine = np.array(affine)
+        center = np.concatenate([center, np.ones(1)])
+        center = np.matmul(affine, center)[:ndim]
+
+    return center
+
+
+def get_ndim_from_stack_props(stack_props):
+    return len(stack_props["origin"])
+
+
 def strack_props_are_far_apart(stack_props_1, stack_props_2):
     """ """
 
@@ -399,84 +429,22 @@ def strack_props_are_far_apart(stack_props_1, stack_props_2):
     ]
 
 
-def get_intersection_poly_from_pair_of_stack_props(
-    stack_props_1,
-    stack_props_2,
-):
-    """
-    3D intersection is a polyhedron.
-    """
-
-    # perform basic check to see if there can be overlap
-
-    if strack_props_are_far_apart(stack_props_1, stack_props_2):
-        return None
-
-    ndim = len(stack_props_1["origin"])
-
-    cphs = []
-    facess = []
-    for stack_props in [stack_props_1, stack_props_2]:
-        # faces = get_vertices_from_stack_props(stack_props)
-        faces = get_faces_from_stack_props(stack_props)
-        cps = get_poly_from_stack_props(stack_props)
-
-        facess.append(faces.reshape((-1, ndim)))
-        cphs.append(cps)
-
-    if ndim == 3 and (
-        min([any((f == facess[0]).all(1)) for f in facess[1]])
-        and min([any((f == facess[1]).all(1)) for f in facess[0]])
-    ):
-        return cphs[0]
-    else:
-        return cphs[0].intersection(cphs[1])
-
-
 def points_inside_sim(pts, sim, transform_key):
     """
     Check whether points lie inside of the image domain of sim.
-
-    Performance could be improved by adding sth similar to `sims_far_apart`.
     """
 
-    ndim = si_utils.get_ndim_from_sim(sim)
-    assert len(pts[0]) == ndim
-
-    sim_domain = get_poly_from_stack_props(
-        si_utils.get_stack_properties_from_sim(
-            sim, transform_key=transform_key
-        )
+    stack_props = si_utils.get_stack_properties_from_sim(
+        sim, transform_key=transform_key
     )
 
-    return np.array(
-        [sim_domain.intersection(Point(pt)) is not None for pt in pts]
-    )
+    halfspace_eqs = get_halfspace_equations_from_stack_props(stack_props)
 
+    inside = np.ones(len(pts), dtype=bool)
+    for eq in halfspace_eqs:
+        inside = inside & (np.dot(pts, eq[:-1]) + eq[-1] <= 0)
 
-def get_poly_from_stack_props(stack_props):
-    """
-    Get Geometry3D.ConvexPolygon or Geometry3D.ConvexPolyhedron
-    representing the image domain of sim.
-    """
-
-    ndim = len(stack_props["origin"])
-
-    if ndim == 2:
-        corners = np.unique(
-            get_vertices_from_stack_props(stack_props).reshape((-1, 2)),
-            axis=0,
-        )
-        sim_domain = ConvexPolygon([Point([0] + list(c)) for c in corners])
-
-    elif ndim == 3:
-        # faces = get_vertices_from_stack_props(stack_props)
-        faces = get_faces_from_stack_props(stack_props)
-        sim_domain = ConvexPolyhedron(
-            [ConvexPolygon([Point(c) for c in face]) for face in faces]
-        )
-
-    return sim_domain
+    return inside
 
 
 # def get_greedy_colors(sims, n_colors=2, transform_key=None):
@@ -536,9 +504,11 @@ def get_greedy_colors(sims, n_colors=2, transform_key=None):
     Get colors (indices) from view adjacency graph analysis
     """
 
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+
     view_adj_graph = build_view_adjacency_graph_from_msims(
         [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims],
-        expand=True,
+        overlap_tolerance={dim: 1e-5 for dim in sdims},
         transform_key=transform_key,
     )
 

@@ -82,25 +82,23 @@ def test_overlap(ndim, overlap):
     unique_overlap_areas_filtered = np.array(unique_overlap_areas_filtered)
 
     if overlap == 0:
-        assert len(unique_overlap_areas) == 1 + 1
+        assert len(unique_overlap_areas_filtered) == 1 + 1
         assert overlap_areas[0][1] == -1
 
     else:
         if ndim == 2:
             if overlap == 1:
-                assert len(unique_overlap_areas_filtered) == 3
+                assert len(unique_overlap_areas_filtered) == 2
             else:
                 assert len(unique_overlap_areas_filtered) == 4
         elif ndim == 3:
             if overlap == 1:
-                assert len(unique_overlap_areas_filtered) == 3
+                assert len(unique_overlap_areas_filtered) == 2
             else:
                 assert len(unique_overlap_areas_filtered) == 5
 
         assert np.min(overlap_areas) == -1
         assert np.max(overlap_areas) > 0
-        if overlap == 1:
-            assert 0 in overlap_areas
 
     return
 
@@ -124,20 +122,41 @@ def test_mv_graph_creation():
     return
 
 
-def test_get_intersection_polygon_from_pair_of_stack_props():
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
+@pytest.mark.parametrize(
+    "ndim",
+    [2, 3],
+)
+def test_points_inside_sim(ndim):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=5,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+
+    stack_props = spatial_image_utils.get_stack_properties_from_sim(
+        sim, transform_key=METADATA_TRANSFORM_KEY
     )
 
-    intersection_polygon = (
-        mv_graph.get_intersection_poly_from_pair_of_stack_props(
-            spatial_image_utils.get_stack_properties_from_sim(
-                sims[0], transform_key=METADATA_TRANSFORM_KEY
-            ),
-            spatial_image_utils.get_stack_properties_from_sim(
-                sims[1], transform_key=METADATA_TRANSFORM_KEY
-            ),
-        )
+    center = mv_graph.get_center_from_stack_props(stack_props)
+    below_origin = np.array(
+        [
+            stack_props["origin"][dim] - stack_props["spacing"][dim]
+            for dim in sdims
+        ]
     )
 
-    assert intersection_polygon.area() > 0
+    pts = np.array([center, below_origin])
+
+    assert np.array_equal(
+        mv_graph.points_inside_sim(
+            pts, sim, transform_key=METADATA_TRANSFORM_KEY
+        ),
+        [True, False],
+    )

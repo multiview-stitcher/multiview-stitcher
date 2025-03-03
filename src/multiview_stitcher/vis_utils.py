@@ -1,13 +1,3 @@
-import numpy as np
-from matplotlib import colormaps, colors
-from matplotlib import pyplot as plt
-
-from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
-from multiview_stitcher.misc_utils import DisableLogger
-
-with DisableLogger():
-    from Geometry3D import Visualizer
-
 import json
 import os
 import urllib
@@ -17,6 +7,13 @@ from http.server import (
     SimpleHTTPRequestHandler,
     test,
 )
+
+import numpy as np
+from matplotlib import colormaps, colors
+from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
+
+from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
 
 
 def plot_positions(
@@ -110,7 +107,9 @@ def plot_positions(
     else:
         pos_colors = ["black"] * len(msims)
 
-    v = Visualizer(backend="matplotlib")
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d")
+    ax.set_aspect("equal")
 
     for iview, sim in enumerate(sims):
         sp = spatial_image_utils.get_stack_properties_from_sim(
@@ -126,11 +125,7 @@ def plot_positions(
                 sp["shape"][dim] = 2
                 sp["origin"][dim] = sp["origin"][dim] - sp["spacing"][dim] / 2
 
-        view_domain = mv_graph.get_poly_from_stack_props(sp)
-
-        v.add((view_domain, pos_colors[iview], 1))
-
-    fig, ax = show_geometry3d_visualizer(v)
+        plot_stack_props(sp, ax, color=pos_colors[iview])
 
     if display_view_indices:
         for iview, sim in enumerate(sims):
@@ -202,7 +197,8 @@ def plot_positions(
             )
             plt.colorbar(sm, label=edge_label, ax=ax)
 
-    ax.set_xlabel("z [μm]")
+    if ndim == 3:
+        ax.set_xlabel("z [μm]")
     ax.set_ylabel("x [μm]")
     ax.set_zlabel("y [μm]")
 
@@ -225,33 +221,48 @@ def plot_positions(
     return fig, ax
 
 
-def show_geometry3d_visualizer(self):
-    """
-    This method replaces the show method of the Geometry3D Visualizer class
-    and
-    - uses `ax = Axes3D(fig)` instead of `ax = fig.add_subplot(projection='3d')`
-    - sets the aspect ratio to 'equal'
-    """
+def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
+    ndim = mv_graph.get_ndim_from_stack_props(stack_props)
+    faces = mv_graph.get_faces_from_stack_props(stack_props)
+    mv_graph.get_vertices_from_stack_props(stack_props)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(projection="3d")
-    ax.set_aspect("equal")
-    for point_tuple in self.point_set:
-        point = point_tuple[0]
-        color = point_tuple[1]
-        size = point_tuple[2]
-        ax.scatter(point.x, point.z, point.y, c=color, s=size)
+    # get line segments
+    line_segments = []
 
-    for segment_tuple in self.segment_set:
-        segment = segment_tuple[0]
-        color = segment_tuple[1]
-        size = segment_tuple[2]
-        x = [segment.start_point.x, segment.end_point.x]
-        y = [segment.start_point.y, segment.end_point.y]
-        z = [segment.start_point.z, segment.end_point.z]
-        ax.plot(x, z, y, color=color, linewidth=size)
+    if ndim == 3:
+        for face in faces:
+            inds = np.argsort(np.linalg.norm(face[1:] - face[0], axis=-1))
+            line_segments.append([face[0], face[inds[0] + 1]])
+            line_segments.append([face[0], face[inds[1] + 1]])
+            line_segments.append(
+                [
+                    face[inds[0] + 1],
+                    face[inds[0] + 1] + face[inds[1] + 1] - face[0],
+                ]
+            )
+            line_segments.append(
+                [
+                    face[inds[1] + 1],
+                    face[inds[1] + 1] + face[inds[0] + 1] - face[0],
+                ]
+            )
 
-    return fig, ax
+    elif ndim == 2:
+        for face in faces:
+            line_segments.append([face[0], face[1]])
+
+    line_segments = np.array(line_segments)
+
+    if ndim == 2:
+        line_segments = np.concatenate(
+            [np.zeros((line_segments.shape[0], 2, 1)), line_segments], axis=-1
+        )
+
+    line_collection = Line3DCollection(
+        line_segments[:, :, [0, 2, 1]], colors=color, linewidths=linewidth
+    )
+
+    ax.add_collection3d(line_collection)
 
 
 def serve_dir(dir_path, port=8000):
