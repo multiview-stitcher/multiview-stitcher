@@ -375,6 +375,37 @@ def sims_are_far_apart(sim1, sim2, transform_key):
     ]
 
 
+def get_spatial_dims_from_stack_properties(stack_props):
+    return [
+        dim for dim in si_utils.SPATIAL_DIMS if dim in stack_props["origin"]
+    ]
+
+
+def get_center_from_stack_props(stack_props):
+    sdims = get_spatial_dims_from_stack_properties(stack_props)
+    ndim = len(sdims)
+
+    center = np.array(
+        [
+            stack_props["origin"][dim]
+            + stack_props["spacing"][dim] * (stack_props["shape"][dim] - 1) / 2
+            for dim in sdims
+        ]
+    )
+
+    if "transform" in stack_props:
+        affine = stack_props["transform"]
+        affine = np.array(affine)
+        center = np.concatenate([center, np.ones(1)])
+        center = np.matmul(affine, center)[:ndim]
+
+    return center
+
+
+def get_ndim_from_stack_props(stack_props):
+    return len(stack_props["origin"])
+
+
 def strack_props_are_far_apart(stack_props_1, stack_props_2):
     """ """
 
