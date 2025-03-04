@@ -302,6 +302,7 @@ def fuse(
         fused_output_chunks = np.empty(
             np.max(block_indices, 0) + 1, dtype=object
         )
+
         for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
             output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
         ):

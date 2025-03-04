@@ -1,4 +1,5 @@
 import dask.array as da
+import matplotlib.pyplot
 import numpy as np
 import pytest
 import xarray as xr
@@ -219,7 +220,7 @@ def test_pairwise_reg_against_artificial_gt(
         )
 
 
-def test_iterative_registration_and_transform_key_setting():
+def test_iterative_registration_and_transform_key_setting(monkeypatch):
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_image_into_list_of_spatial_xarrays(example_data_path)
 
@@ -234,12 +235,56 @@ def test_iterative_registration_and_transform_key_setting():
         reg_channel_index=0,
     )
 
+    # test return_dict=True
     registration.register(
         msims,
         transform_key="affine_registered",
         new_transform_key="affine_registered_2",
         reg_channel_index=0,
     )
+
+
+@pytest.mark.parametrize(
+    "plot_summary, return_dict",
+    [
+        (True, False),
+        (True, True),
+        (False, False),
+        (False, True),
+    ],
+)
+def test_plot_and_return_dict(plot_summary, return_dict, monkeypatch):
+    # test plot_summary=True without plots showing up
+    # https://docs.pytest.org/en/latest/how-to/monkeypatch.html
+    monkeypatch.setattr(matplotlib.pyplot, "show", lambda: None)
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=2,
+        N_c=1,
+        N_t=2,
+        tile_size=5,
+        tiles_x=1,
+        tiles_y=2,
+        tiles_z=1,
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    out = registration.register(
+        msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        reg_channel_index=0,
+        plot_summary=plot_summary,
+        return_dict=return_dict,
+    )
+
+    if return_dict:
+        assert isinstance(out, dict)
+    else:
+        assert isinstance(out, list)
 
 
 @pytest.mark.parametrize("ndim", [2, 3])
@@ -374,17 +419,15 @@ def test_register(
 @pytest.mark.parametrize(
     """
     groupwise_resolution_method,
-    type_of_residual,
     """,
     [
-        ("shortest_paths", None),
-        ("global_optimization", "edge"),
-        ("global_optimization", "node"),
+        "shortest_paths",
+        "global_optimization",
+        "global_optimization",
     ],
 )
 def test_cc_registration(
     groupwise_resolution_method,
-    type_of_residual,
 ):
     # Generate a cc
     sims = sample_data.generate_tiled_dataset(
@@ -415,14 +458,55 @@ def test_cc_registration(
         pairwise_reg_func=registration.phase_correlation_registration,
         new_transform_key="affine_registered",
         groupwise_resolution_method=groupwise_resolution_method,
-        groupwise_resolution_kwargs={
-            "type_of_residual": type_of_residual,
-        }
-        if type_of_residual is not None
-        else {},
     )
 
     assert len(params) == 3
+
+
+@pytest.mark.parametrize(
+    """
+    groupwise_resolution_method,
+    """,
+    [
+        "shortest_paths",
+        "global_optimization",
+        "global_optimization",
+    ],
+)
+def test_manual_pair_registration(
+    groupwise_resolution_method,
+):
+    # Generate a cc
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_t=2,
+        N_c=2,
+        tile_size=15,
+        tiles_x=2,
+        tiles_y=3,
+        tiles_z=1,
+        overlap=5,
+    )
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # choose pairs which do not represent continuous indices
+    pairs = [(1, 3), (3, 2), (2, 5)]
+
+    # Run registration
+    params = registration.register(
+        msims,
+        reg_channel_index=0,
+        transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=registration.phase_correlation_registration,
+        new_transform_key="affine_registered",
+        groupwise_resolution_method=groupwise_resolution_method,
+        pairs=pairs,
+    )
+
+    assert len(params) == 6
 
 
 @pytest.mark.parametrize(
