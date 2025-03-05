@@ -91,7 +91,7 @@ datasets = [
         ],
         "parameter_path": test_bench_data_dir / "em_yx_3x2_0/em_yx_3x2_0.zarr",
         "dims": ["y", "x"],
-        "tolerance": 1000000,  # pixel spacing is 0.02 (um). this dataset is currently not performing well
+        "tolerance": 0.04,  # pixel spacing is 0.02 (um). this dataset is currently not performing well
         "visibility": "private",
     },
 ]
@@ -181,6 +181,7 @@ def register_dataset(msims, dataset):
 @pytest.mark.parametrize(
     "dataset",
     list(datasets),
+    # list([d for d in datasets if d["name"] == "em_yx_3x2_0"]),
 )
 def test_reg_against_reference_params(dataset):
     """
