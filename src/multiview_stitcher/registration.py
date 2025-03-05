@@ -1895,17 +1895,15 @@ def register(
             )
 
             if groupwise_resolution_info_dict is not None:
-                remaining_edges = list(
-                    groupwise_resolution_info_dict[
-                        "optimized_graph_t0"
-                    ].edges()
-                )
                 edge_residuals = np.array(
                     [
                         groupwise_resolution_info_dict[
                             "optimized_graph_t0"
                         ].get_edge_data(*e)["residual"]
-                        if e in remaining_edges
+                        if e
+                        in groupwise_resolution_info_dict[
+                            "optimized_graph_t0"
+                        ].edges
                         else np.nan
                         for e in edges
                     ]
