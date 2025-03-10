@@ -1126,10 +1126,10 @@ def groupwise_resolution_global_optimization(
 
     if max_iter is None:
         max_iter = 500
-        logger.info("Global optimization: setting max_iter to %s", abs_tol)
+        logger.info("Global optimization: setting max_iter to %s", max_iter)
     if rel_tol is None:
         rel_tol = 1e-4
-        logger.info("Global optimization: setting rel_tol to %s", abs_tol)
+        logger.info("Global optimization: setting rel_tol to %s", rel_tol)
 
     ndim = g_reg.edges[list(g_reg.edges)[0]]["transform"].shape[-1] - 1
 
