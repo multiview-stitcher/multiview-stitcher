@@ -551,6 +551,12 @@ def prune_graph_to_alternating_colors(g, n_colors=2, return_colors=True):
     # strategy: add a small amount to edge overlap depending on how many edges the nodes it connects have (betweenness?)
     # TODO: check in which cases this is necessary
 
+    if not len(g.edges):
+        if return_colors:
+            return g, {n: 0 for n in g.nodes}
+        else:
+            return g
+
     g_pruned = copy.deepcopy(g)
 
     centrality = nx.edge_betweenness_centrality(g)
