@@ -9,11 +9,18 @@ from http.server import (
 )
 
 import numpy as np
+import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from ome_zarr.io import parse_url
 
-from multiview_stitcher import msi_utils, mv_graph, spatial_image_utils
+from multiview_stitcher import (
+    msi_utils,
+    mv_graph,
+    ngff_utils,
+    spatial_image_utils,
+)
 
 
 def plot_positions(
@@ -306,80 +313,104 @@ def serve_dir(dir_path, port=8000):
 
 
 def get_contrast_min_max_from_ome_zarr_omero_metadata(
-    zarr_path, channel_label
+    ome_zarr_path, channel_label
 ):
-    with open(os.path.join(zarr_path, ".zattrs")) as f:
-        metadata = json.load(f)
+    store = parse_url(ome_zarr_path, mode="r").store
+    root = zarr.group(store=store)
+
+    if "omero" not in root.attrs:
+        return None
+
+    omero = root.attrs["omero"]
 
     channel_matches = [
         ic
-        for ic, c in enumerate(metadata["omero"]["channels"])
+        for ic, c in enumerate(omero["channels"])
         if str(c["label"]) == str(channel_label)
     ]
 
     if not len(channel_matches) == 1:
         raise ValueError(
-            f"Channel {channel_label} not found in metadata in {zarr_path}"
+            f"Channel {channel_label} not found in metadata in {ome_zarr_path}"
         )
     else:
         channel_index = channel_matches[0]
-    window = metadata["omero"]["channels"][channel_index]["window"]
+
+    window = omero["channels"][channel_index]["window"]
 
     return np.array([window["start"], window["end"]])
 
 
 def generate_neuroglancer_json(
-    sims,
-    zarr_paths,
-    zarr_urls,
-    transform_key,
+    ome_zarr_paths,
+    ome_zarr_urls,
+    sims=None,
+    transform_key=None,
     channel_coord=None,
     single_layer=False,
 ):
-    dims = sims[0].dims
-    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    # read the first multiscales
+    sim = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[0])
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     ndim = len(sdims)
-    spacing = spatial_image_utils.get_spacing_from_sim(sims[0])
+    dims = sim.dims
+    spacing = spatial_image_utils.get_spacing_from_sim(sim)
 
-    full_affines = [np.eye(len(dims) + 1) for _ in sims]
-    for isim, sim in enumerate(sims):
-        affine = spatial_image_utils.get_affine_from_sim(
-            sim, transform_key=transform_key
-        )
-        if "t" in affine.dims:
-            affine = affine.sel(t=0)
-        affine = np.array(affine)
-        affine_ndim = affine.shape[-1] - 1
-        # https://github.com/google/neuroglancer/issues/538
-        affine[:-1, -1] = affine[:-1, -1] / np.array(
-            [spacing[dim] for dim in sdims]
-        )
-        full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
+    if sims is not None:
+        if transform_key is None:
+            raise ValueError(
+                "transform_key must be provided if sims are given"
+            )
+
+        full_affines = [np.eye(len(dims) + 1) for _ in sims]
+        for isim, sim in enumerate(sims):
+            sim_spacing = spatial_image_utils.get_spacing_from_sim(sim)
+            affine = spatial_image_utils.get_affine_from_sim(
+                sim, transform_key=transform_key
+            )
+            if "t" in affine.dims:
+                affine = affine.sel(t=0)
+            affine = np.array(affine)
+            affine_ndim = affine.shape[-1] - 1
+            # https://github.com/google/neuroglancer/issues/538
+            affine[:-1, -1] = affine[:-1, -1] / np.array(
+                [sim_spacing[dim] for dim in sdims]
+            )
+            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
+    else:
+        full_affines = [None for _ in ome_zarr_paths]
 
     # get contrast limits from first image
     if "c" in dims:
         if channel_coord is None:
-            channel_coord = str(sims[0].coords["c"].values[0])
+            channel_coord = str(sim.coords["c"].values[0])
         else:
             channel_coord = str(channel_coord)
-        channel_index = [str(c) for c in sims[0].coords["c"].values].index(
+        channel_index = [str(c) for c in sim.coords["c"].values].index(
             channel_coord
         )
         limits = np.array(
             [
-                get_contrast_min_max_from_ome_zarr_omero_metadata(
-                    zarr_path, str(channel_coord)
-                )
-                for zarr_path in zarr_paths
+                sim_lims
+                for sim_lims in [
+                    get_contrast_min_max_from_ome_zarr_omero_metadata(
+                        path, str(channel_coord)
+                    )
+                    for path in ome_zarr_paths
+                ]
+                if sim_lims is not None
             ]
         )
-        vmin, vmax = (float(v) for v in [np.min(limits), np.max(limits)])
-        window = {
-            "min": vmin,
-            "max": vmax,
-            "start": vmin,
-            "end": vmax,
-        }
+        if len(limits) == 0:
+            window = None
+        else:
+            vmin, vmax = (float(v) for v in [np.min(limits), np.max(limits)])
+            window = {
+                "min": vmin,
+                "max": vmax,
+                "start": vmin,
+                "end": vmax,
+            }
     else:
         channel_index = 0
         window = None
@@ -412,7 +443,9 @@ def generate_neuroglancer_json(
                             (dim if dim != "c" else "c'"): d
                             for dim, d in output_dimensions.items()
                         },
-                    },
+                    }
+                    if full_affines[iview] is not None
+                    else {},
                 },
                 "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
                 "localPosition": [channel_index] if "c" in dims else [],
@@ -434,7 +467,7 @@ def generate_neuroglancer_json(
                 if window is not None
                 else {}
             )
-            for iview, url in enumerate(zarr_urls)
+            for iview, url in enumerate(ome_zarr_urls)
         ]
 
     else:
@@ -455,7 +488,7 @@ def generate_neuroglancer_json(
                             },
                         },
                     }
-                    for iview, url in enumerate(zarr_urls)
+                    for iview, url in enumerate(ome_zarr_urls)
                 ],
                 "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
                 "localPosition": [channel_index] if "c" in dims else [],
@@ -491,27 +524,30 @@ def get_neuroglancer_url(ng_json):
 
 
 def view_neuroglancer(
-    sims,
-    zarr_paths,
-    transform_key,
+    ome_zarr_paths,
+    sims=None,
+    transform_key=None,
     port=8000,
     channel_coord=None,
     single_layer=False,
 ):
     """
-    Visualize a list of spatial_images together with their OME-Zarrs on disk
-    in Neuroglancer. No installation of Neuroglancer is required.
+    Visualize a list of OME-zarrs in Neuroglancer
+    (browser-based, no installation required).
 
-    TODO:
-    - check 2D
-    - check transforms for full affine
+    If sims and transform_key are provided, the affine transformations saved
+    in the sims are used for visualization.
+
+    Confirmed to work with:
+    - 2D and 3D
+    - With affine transformations
 
     Parameters
     ----------
-    sims : list of spatial_images
-    zarr_paths : list of str
-        path to OME-Zarrs that have previously been saved from the sims
-    transform_key : str
+    ome_zarr_paths : list of str
+        path to OME-Zarrs
+    sims : list of spatial_images, optional
+    transform_key : str, optional
         transform_key to use for visualization
     port : int, optional
         Port to serve OME-Zarrs. By default 8000
@@ -519,17 +555,20 @@ def view_neuroglancer(
         Which channel to use for initializing contrast limits, by default None
     """
 
-    zarr_urls = [
-        f"http://localhost:{port}/{os.path.basename(zarr_path)}"
-        for zarr_path in zarr_paths
+    # generate urls for the ome zarr files
+    ome_zarr_urls = [
+        f"http://localhost:{port}/{os.path.basename(path)}"
+        if not path.startswith("http")
+        else path
+        for path in ome_zarr_paths
     ]
 
     ng_json = generate_neuroglancer_json(
-        sims,
-        zarr_paths,
-        zarr_urls,
-        channel_coord=channel_coord,
+        ome_zarr_paths=ome_zarr_paths,
+        ome_zarr_urls=ome_zarr_urls,
+        sims=sims,
         transform_key=transform_key,
+        channel_coord=channel_coord,
         single_layer=single_layer,
     )
     ng_url = get_neuroglancer_url(ng_json)
@@ -548,8 +587,13 @@ def view_neuroglancer(
 
     webbrowser.open(ng_url)
 
-    parent_dir, image_name = os.path.split(zarr_paths[0])
-    parent_dir = str(parent_dir)
+    # serve the local ome-zarr files
+    local = False
+    for path in ome_zarr_paths:
+        if not path.startswith("http"):
+            dir_to_serve = os.path.dirname(path)
+            local = True
+            break
 
-    # serve the zarr files
-    serve_dir(parent_dir, port=port)
+    if local:
+        serve_dir(dir_to_serve, port=port)
