@@ -133,7 +133,9 @@ def ngff_image_to_sim(ngff_im, transform_key):
 
     si_utils.set_sim_affine(
         sim,
-        param_utils.affine_to_xaffine(np.eye(len(sdims) + 1), t_coords=[0]),
+        param_utils.affine_to_xaffine(
+            np.eye(len(sdims) + 1), t_coords=sim.coords["t"].values
+        ),
         transform_key=transform_key,
     )
 
