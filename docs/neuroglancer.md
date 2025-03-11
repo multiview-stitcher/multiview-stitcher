@@ -5,12 +5,13 @@
 
 ## Neuroglancer support in `multiview-stitcher`
 
-Neuroglancer supports visualizing multiple OME-Zarr files and reads their corresponding scale and translation metadata. Additionally, neuroglancer supports attaching affine transformations to each image. This allows visualizing spatial images (`sims`) together with the transforms attached in a given `transform_keys`.
+Neuroglancer supports visualizing multiple OME-Zarr files and reads their corresponding scale and translation metadata. Additionally, neuroglancer supports attaching affine transformations to each image. This allows visualizing spatial images (`sims`) together with the transforms attached in a given `transform_key`.
 
-multiview-stitcher provides the utility function `vis_utils.view_neuroglancer` to:
-- create a neuroglancer link given a list of OME-Zarr paths
-- serve the OME-Zarrs over http in case they represent local files
-- optionally include transforms from a given `transform_key` in the `sims` in the neuroglancer link
+multiview-stitcher provides the utility function `vis_utils.view_neuroglancer` that:
+- creates a neuroglancer link given a list of OME-Zarr paths
+- serves the OME-Zarrs over http in case they represent local files
+- optionally includes transforms from a given `transform_key` in the `sims` in the neuroglancer link
+- opens the neuroglancer link in the browser
 
 ## Examples
 
