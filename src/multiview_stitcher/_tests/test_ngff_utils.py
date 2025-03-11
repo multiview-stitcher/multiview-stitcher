@@ -121,14 +121,24 @@ def test_ome_zarr_ng(ndim, N_t, N_c):
 
         for single_layer in [True, False]:
             ng_json = vis_utils.generate_neuroglancer_json(
-                [sim],
-                [zarr_path],
-                [
+                ome_zarr_paths=[zarr_path],
+                ome_zarr_urls=[
                     f"https://localhost:8000/{os.path.basename(zp)}"
                     for zp in [zarr_path]
                 ],
+                sims=[sim],
                 # channel_coord=sim.coords["c"].values[0],
                 transform_key=io.METADATA_TRANSFORM_KEY,
                 single_layer=single_layer,
             )
             assert len(ng_json.keys())
+
+        # without sims
+        ng_json = vis_utils.generate_neuroglancer_json(
+            ome_zarr_paths=[zarr_path],
+            ome_zarr_urls=[
+                f"https://localhost:8000/{os.path.basename(zp)}"
+                for zp in [zarr_path]
+            ],
+        )
+        assert len(ng_json.keys())

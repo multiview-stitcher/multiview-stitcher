@@ -133,7 +133,9 @@ def ngff_image_to_sim(ngff_im, transform_key):
 
     si_utils.set_sim_affine(
         sim,
-        param_utils.affine_to_xaffine(np.eye(len(sdims) + 1), t_coords=[0]),
+        param_utils.affine_to_xaffine(
+            np.eye(len(sdims) + 1), t_coords=sim.coords["t"].values
+        ),
         transform_key=transform_key,
     )
 
@@ -411,5 +413,14 @@ def read_sim_from_ome_zarr(
     sim = ngff_image_to_sim(
         ngff_multiscales.images[resolution_level], transform_key=transform_key
     )
+
+    # get channel names from omero metadata if available
+    store = parse_url(zarr_path, mode="r").store
+    root = zarr.group(store=store)
+
+    if "omero" in root.attrs:
+        omero = root.attrs["omero"]
+        ch_coords = [ch["label"] for ch in omero["channels"]]
+        sim = sim.assign_coords(c=ch_coords)
 
     return sim
