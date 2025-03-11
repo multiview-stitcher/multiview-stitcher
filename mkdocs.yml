@@ -60,7 +60,9 @@ nav:
     - extension_api_pairwise_registration.md
     - extension_api_fusion.md
     - extension_api_global_param_resolution.md
-  - napari_stitcher.md
+  - Visualization:
+    - napari_stitcher.md
+    - neuroglancer.md
   - stitching_in_the_browser.md
   - related_projects.md
   - contributing.md
