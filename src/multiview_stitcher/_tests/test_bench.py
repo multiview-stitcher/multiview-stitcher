@@ -169,7 +169,7 @@ def register_dataset(msims, dataset):
     # from multiview_stitcher import vis_utils
     # vis_utils.view_neuroglancer(
     #     sims=[msi_utils.get_sim_from_msim(msim) for msim in msims],
-    #     zarr_paths=dataset["image_paths"],
+    #     ome_zarr_paths=dataset["image_paths"],
     #     channel_coord=0,
     #     transform_key=output_transform_key,
     # )
