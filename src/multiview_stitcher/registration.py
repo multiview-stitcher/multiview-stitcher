@@ -19,6 +19,7 @@ from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 from skimage.transform import (
     EuclideanTransform,
+    SimilarityTransform,
 )
 
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
@@ -1106,7 +1107,7 @@ def groupwise_resolution_global_optimization(
     g_beads_subgraph : nx.Graph
         Virtual bead graph
     transform : str
-        Transformation type ('translation', 'rigid' or 'affine')
+        Transformation type ('translation', 'rigid', 'similarity' or 'affine')
     ref_node : int
         Reference node which keeps its transformation fixed
     max_iter : int, optional
@@ -1329,7 +1330,7 @@ def optimize_bead_subgraph(
     g_beads_subgraph : nx.Graph
         Virtual bead graph
     transform : str
-        Transformation type ('translation', 'rigid' or 'affine')
+        Transformation type ('translation', 'rigid', 'similarity' or 'affine')
     ref_node : int
         Reference node which keeps its transformation fixed
     max_iter : int, optional
@@ -1375,6 +1376,8 @@ def optimize_bead_subgraph(
         transform_generator = TranslationTransform(dimensionality=ndim)
     elif transform.lower() == "rigid":
         transform_generator = EuclideanTransform(dimensionality=ndim)
+    elif transform.lower() == "similarity":
+        transform_generator = SimilarityTransform(dimensionality=ndim)
     elif transform.lower() == "affine":
         transform_generator = AffineTransform(dimensionality=ndim)
     else:

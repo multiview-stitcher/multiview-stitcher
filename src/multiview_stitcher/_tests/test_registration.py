@@ -513,7 +513,7 @@ def test_manual_pair_registration(
     """
     transform,
     """,
-    ["translation", "rigid", "affine"],
+    ["translation", "rigid", "similarity", "affine"],
 )
 def test_global_optimization(transform):
     """
