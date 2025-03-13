@@ -313,8 +313,13 @@ def serve_dir(dir_path, port=8000):
 
 
 def get_contrast_min_max_from_ome_zarr_omero_metadata(
-    ome_zarr_path, channel_label
+    ome_zarr_path, channel_label=None
 ):
+    """
+    Get contrast limits from the OME-Zarr omero metadata key
+    for a specific channel. If channel_label is None, the
+    first channel is used.
+    """
     store = parse_url(ome_zarr_path, mode="r").store
     root = zarr.group(store=store)
 
@@ -323,18 +328,21 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
 
     omero = root.attrs["omero"]
 
-    channel_matches = [
-        ic
-        for ic, c in enumerate(omero["channels"])
-        if str(c["label"]) == str(channel_label)
-    ]
-
-    if not len(channel_matches) == 1:
-        raise ValueError(
-            f"Channel {channel_label} not found in metadata in {ome_zarr_path}"
-        )
+    if channel_label is None:
+        channel_index = 0
     else:
-        channel_index = channel_matches[0]
+        channel_matches = [
+            ic
+            for ic, c in enumerate(omero["channels"])
+            if str(c["label"]) == str(channel_label)
+        ]
+
+        if not len(channel_matches) == 1:
+            raise ValueError(
+                f"Channel {channel_label} not found in metadata in {ome_zarr_path}"
+            )
+        else:
+            channel_index = channel_matches[0]
 
     window = omero["channels"][channel_index]["window"]
 
@@ -383,18 +391,20 @@ def generate_neuroglancer_json(
     # get contrast limits from first image
     if "c" in dims:
         if channel_coord is None:
-            channel_coord = str(sim.coords["c"].values[0])
+            channel_index = 0
         else:
+            # this currently assumes that channel_coord
+            # is present in all sims and at the same index
             channel_coord = str(channel_coord)
-        channel_index = [str(c) for c in sim.coords["c"].values].index(
-            channel_coord
-        )
+            channel_index = [str(c) for c in sim.coords["c"].values].index(
+                channel_coord
+            )
         limits = np.array(
             [
                 sim_lims
                 for sim_lims in [
                     get_contrast_min_max_from_ome_zarr_omero_metadata(
-                        path, str(channel_coord)
+                        path, channel_coord
                     )
                     for path in ome_zarr_paths
                 ]

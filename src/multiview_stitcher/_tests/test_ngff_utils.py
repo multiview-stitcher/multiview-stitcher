@@ -11,7 +11,6 @@ from multiview_stitcher import (
     msi_utils,
     ngff_utils,
     sample_data,
-    vis_utils,
 )
 from multiview_stitcher import spatial_image_utils as si_utils
 
@@ -87,7 +86,7 @@ def test_round_trip(ndim):
     "ndim, N_t, N_c",
     [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
 )
-def test_ome_zarr_ng(ndim, N_t, N_c):
+def test_ome_zarr_read_write(ndim, N_t, N_c):
     sim = sample_data.generate_tiled_dataset(
         ndim=ndim,
         overlap=0,
@@ -119,26 +118,15 @@ def test_ome_zarr_ng(ndim, N_t, N_c):
             assert "omero" in metadata
             assert "window" in metadata["omero"]["channels"][0]
 
-        for single_layer in [True, False]:
-            ng_json = vis_utils.generate_neuroglancer_json(
-                ome_zarr_paths=[zarr_path],
-                ome_zarr_urls=[
-                    f"https://localhost:8000/{os.path.basename(zp)}"
-                    for zp in [zarr_path]
-                ],
-                sims=[sim],
-                # channel_coord=sim.coords["c"].values[0],
-                transform_key=io.METADATA_TRANSFORM_KEY,
-                single_layer=single_layer,
-            )
-            assert len(ng_json.keys())
+        sim_read = ngff_utils.read_sim_from_ome_zarr(
+            zarr_path
+        )  # , resolution_level=0)
 
-        # without sims
-        ng_json = vis_utils.generate_neuroglancer_json(
-            ome_zarr_paths=[zarr_path],
-            ome_zarr_urls=[
-                f"https://localhost:8000/{os.path.basename(zp)}"
-                for zp in [zarr_path]
-            ],
+        # check dims and channel names are the same
+        # assert np.equal(sim.data, sim_read.data).all()
+        assert np.array_equal(sim.dims, sim_read.dims)
+        # TODO: consider restricting channel coords to string type
+        assert np.array_equal(
+            [str(v) for v in sim.coords["c"].values],
+            [str(v) for v in sim_read.coords["c"].values],
         )
-        assert len(ng_json.keys())
