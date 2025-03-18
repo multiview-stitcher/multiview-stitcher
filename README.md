@@ -131,6 +131,10 @@ or from the source code in this github repository:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
 
+## Citing multiview-stitcher
+
+If you find multiview-stitcher useful please cite this repository using the following DOI (all versions): https://doi.org/10.5281/zenodo.13151252.
+
 ## Stitching in the browser
 
 `multiview-stitcher` can run without installation in your browser.
