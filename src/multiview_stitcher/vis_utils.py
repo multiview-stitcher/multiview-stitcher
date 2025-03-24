@@ -13,8 +13,8 @@ import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from multiscale_spatial_image import MultiscaleSpatialImage
 from ome_zarr.io import parse_url
+from xarray import DataTree
 
 from multiview_stitcher import (
     msi_utils,
@@ -85,7 +85,7 @@ def plot_positions(
     if nscoord is None:
         nscoord = {}
 
-    if isinstance(sims[0], MultiscaleSpatialImage):
+    if isinstance(sims[0], DataTree):
         # convert msims to sims for backward compatibility
         sims = [msi_utils.get_sim_from_msim(sim) for sim in sims]
 
