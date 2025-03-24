@@ -48,8 +48,8 @@ def plot_positions(
 
     Parameters
     ----------
-    sims : list of (multiscale_)spatial_image (multiview-stitcher flavor)
-        _description_
+    sims : list of spatial-image (or multiscale-spatial-image), multiview-stitcher flavor
+        The views / tiles to plot
     transform_key : str
         Which transform_key to use for visualization
     use_positional_colors : bool, optional
