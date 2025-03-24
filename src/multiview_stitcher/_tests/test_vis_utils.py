@@ -38,6 +38,10 @@ def test_plot_positions(ndim, N_t, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda: None)
 
     fig, ax = vis_utils.plot_positions(
+        sims, transform_key=METADATA_TRANSFORM_KEY
+    )
+
+    fig, ax = vis_utils.plot_positions(
         msims, transform_key=METADATA_TRANSFORM_KEY
     )
 

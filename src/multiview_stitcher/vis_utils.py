@@ -14,6 +14,7 @@ from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from ome_zarr.io import parse_url
+from xarray import DataTree
 
 from multiview_stitcher import (
     msi_utils,
@@ -24,7 +25,7 @@ from multiview_stitcher import (
 
 
 def plot_positions(
-    msims,
+    sims,
     transform_key,
     edges=None,
     edge_color_vals=None,
@@ -47,8 +48,8 @@ def plot_positions(
 
     Parameters
     ----------
-    msims : list of multiscale_spatial_image (multiview-stitcher flavor)
-        _description_
+    sims : list of spatial-image (or multiscale-spatial-image), multiview-stitcher flavor
+        The views / tiles to plot
     transform_key : str
         Which transform_key to use for visualization
     use_positional_colors : bool, optional
@@ -68,7 +69,7 @@ def plot_positions(
     show_plot : bool, optional
         Whether to show the plot, by default True
     spacing : dict, optional
-        Overwrite the msims' spacing for plotting. Useful in the case of images with single
+        Overwrite the sims' spacing for plotting. Useful in the case of images with single
         coordinates for which the spacing is not defined in the metadata.
         By default None
     plot_title : str, optional
@@ -84,12 +85,12 @@ def plot_positions(
     if nscoord is None:
         nscoord = {}
 
-    ndim = msi_utils.get_ndim(msims[0])
-    sdims = spatial_image_utils.get_spatial_dims_from_sim(
-        msi_utils.get_sim_from_msim(msims[0])
-    )
+    if isinstance(sims[0], DataTree):
+        # convert msims to sims for backward compatibility
+        sims = [msi_utils.get_sim_from_msim(sim) for sim in sims]
 
-    sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
+    ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
     # select a single position for non-spatial dimensions
     for isim, sim in enumerate(sims):
@@ -111,11 +112,11 @@ def plot_positions(
         )
         pos_colors = [
             pos_colors[greedy_colors[iview] % len(pos_colors)]
-            for iview in range(len(msims))
+            for iview in range(len(sims))
         ]
 
     else:
-        pos_colors = ["black"] * len(msims)
+        pos_colors = ["black"] * len(sims)
 
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
