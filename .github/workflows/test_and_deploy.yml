@@ -43,9 +43,7 @@ jobs:
 
       # this runs the platform-specific tests declared in tox.ini
       - name: Test with tox
-        uses: aganders3/headless-gui@v1
-        with:
-          run: python -m tox
+        run: python -m tox
         env:
           PLATFORM: ${{ matrix.platform }}
 
