@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=42.0.0", "wheel", "setuptools_scm"]
+requires = ["setuptools>=42.0.0,<78.0.0", "wheel", "setuptools_scm"] # upper bound for setuptools until https://github.com/soft-matter/pims/pull/463 is released
 build-backend = "setuptools.build_meta"
 
 
