@@ -190,6 +190,11 @@ def rebase_affine(xaffine, base_affine):
         xaffines_aligned_filled[0], xaffines_aligned_filled[1]
     )
 
+    # coordinate order can change during alignment
+    rebased = rebased.sel(
+        x_in=xaffine.coords["x_in"], x_out=xaffine.coords["x_out"]
+    )
+
     return rebased
 
 
