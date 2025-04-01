@@ -15,7 +15,7 @@ SPATIAL_DIMS = ["z", "y", "x"]
 SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
 DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
-DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 512, "x": 512}
+DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 2048, "x": 2048}
 
 
 def get_default_spatial_chunksizes(ndim: int):
