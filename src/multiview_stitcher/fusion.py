@@ -170,7 +170,9 @@ def fuse(
         'spacing', 'origin', 'shape'. Other output_* are ignored
         if this argument is present.
     output_chunksize : int or dict, optional
-        Chunksize of the dask data array of the fused image, by default 512
+        Chunksize of the dask data array of the fused image. If the first tile is a chunked dask array,
+        its chunksize is used as the default. If the first tile is not a chunked dask array,
+        the default chunksize defined in spatial_image_utils.py is used.
 
     Returns
     -------
@@ -183,18 +185,20 @@ def fuse(
     nsdims = [dim for dim in sims[0].dims if dim not in sdims]
 
     if output_chunksize is None:
-        output_chunksize = si_utils.get_default_spatial_chunksizes(ndim)
+        if isinstance(sims[0].data, da.Array):
+            # if first tile is a chunked dask array, use its chunksize
+            output_chunksize = dict(zip(sdims, sims[0].data.chunksize[-ndim:]))
+        else:
+            # if first tile is not a chunked dask array, use default chunksize
+            # defined in spatial_image_utils.py
+            output_chunksize = si_utils.get_default_spatial_chunksizes(ndim)
+    elif isinstance(output_chunksize, int):
+        output_chunksize = {dim: output_chunksize for dim in sdims}
 
     params = [
         si_utils.get_affine_from_sim(sim, transform_key=transform_key)
         for sim in sims
     ]
-
-    if output_chunksize is None:
-        output_chunksize = si_utils.get_default_spatial_chunksizes(ndim)
-        # output_chunksize = tuple([default_chunksizes[dim] for dim in sdims])
-    elif isinstance(output_chunksize, int):
-        output_chunksize = {dim: output_chunksize for dim in sdims}
 
     if output_stack_properties is None:
         if output_spacing is None:

@@ -280,3 +280,60 @@ def test_large_shape_fusion():
     )
 
     assert fused.data.shape[-1] > 60000
+
+
+@pytest.mark.parametrize(
+    "input_chunksize",
+    [
+        {"y": 5, "x": 5},
+        {"z": 4, "y": 5, "x": 5},
+        {"z": 1, "y": 5, "x": 5},
+        {"y": None, "x": None},  # numpy input
+    ],
+)
+def test_fusion_chunksizes(input_chunksize):
+    ndim = len(input_chunksize)
+    output_chunksize = {
+        dim: cs * 2 if cs is not None else 5
+        for dim, cs in input_chunksize.items()
+    }
+
+    sims = [
+        si_utils.get_sim_from_array(
+            da.zeros(
+                [2] + [10] * len(input_chunksize),
+                chunks=[1] + list(input_chunksize.values()),
+            )
+            if input_chunksize["x"] is not None
+            else np.zeros([2] + [10] * ndim),
+            dims=["c"] + list(input_chunksize.keys()),
+        )
+        for _ in range(2)
+    ]
+
+    for set_output_chunksize in [True, False]:
+        fused = fusion.fuse(
+            sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            output_chunksize=output_chunksize
+            if set_output_chunksize
+            else None,
+        )
+
+        if set_output_chunksize:
+            expected_chunksize = output_chunksize
+        else:
+            if input_chunksize["x"] is not None:
+                expected_chunksize = input_chunksize
+            else:
+                expected_chunksize = {
+                    dim: min(
+                        fused.shape[-ndim + idim],
+                        si_utils.get_default_spatial_chunksizes(ndim)[dim],
+                    )
+                    for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
+                }
+        assert all(
+            fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
+            for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
+        )
