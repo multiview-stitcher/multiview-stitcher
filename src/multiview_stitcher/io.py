@@ -19,67 +19,76 @@ try:
 except ImportError:
     czifile = None
 
-import contextlib
 
+from multiview_stitcher import czi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = si_utils.DEFAULT_TRANSFORM_KEY
 
 
-def read_tiff_into_spatial_xarray(
-    filename: Union[str, Path],
-    scale: Optional[dict] = None,
-    translation: Optional[dict] = None,
-    affine_transform: Optional[Union[np.ndarray, list]] = None,
-    dims: Optional[Union[list, tuple]] = None,
-    channel_names: Optional[Union[list, tuple]] = None,
-):
+def read_mosaic_into_sims(filepath, scene_index=0):
     """
-    Read tiff file into spatial image.
+    Read the tiles of a mosaic dataset into a list of spatial images (sims).
+    The function reads the data lazily and sets the tile positions from the metadata.
+
+    If the file is a CZI file, czifile.py is used to read the data.
+    Otherwise, aicsimageio is used.
 
     Parameters
     ----------
-    filename : str or Path
-    scale : dict, optional
-        Pixel spacing
-    translation : dict, optional
-        Image offset in physical coordinates
-    affine_transform : array (ndim+1, ndim+1)
-        Affine transform given as homogeneous transformation
-        matrix, by default None
-    dims : tuple, optional
-        Axes dimensions, e.g. ('t', 'c', 'z', 'y', 'x').
-        If None, will try to be inferred from metadata.
-    channel_names : tuple of str, optional
-        Channel names
+    filepath : str or Path
+        Path to the mosaic dataset.
+    scene_index : int, optional
+        Index of the scene to read. Default is 0.
 
     Returns
     -------
-    SpatialImage (multiview-stitcher flavor)
+    list
+        List of spatial images (sims) for each view / tile.
     """
 
-    with TiffFile(filename) as tif:
-        data = tif.asarray()
-        axes = tif.series[0].axes
+    filepath = Path(filepath)
 
-    if dims is None:
-        # infer from metadata
-        dims = [dim.lower() for dim in axes]
+    if filepath.suffix == ".czi":
+        return read_mosaic_into_sims_czifile(filepath, scene_index=scene_index)
 
-    sim = si_utils.get_sim_from_array(
-        data,
-        dims=dims,
-        scale=scale,
-        translation=translation,
-        affine=affine_transform,
-        transform_key=METADATA_TRANSFORM_KEY,
-        c_coords=channel_names,
-    )
-
-    return sim
+    else:
+        return read_mosaic_into_sims_aicsimageio(
+            filepath, scene_index=scene_index
+        )
 
 
-def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
+def get_number_of_scenes_in_mosaic(filepath):
+    """
+    Get the number of scenes in a mosaic dataset.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the mosaic dataset.
+
+    Returns
+    -------
+    int
+        Number of scenes in the dataset.
+    """
+
+    filepath = Path(filepath)
+
+    if filepath.suffix == ".czi":
+        return czi_utils.get_czi_shape(filepath)["S"]
+
+    else:
+        if AICSImage is None:
+            raise ImportError(
+                "aicsimageio is required to read mosaic files other than CZI. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+            )
+
+        aicsim = AICSImage(filepath)
+        return len(aicsim.scenes)
+
+
+def read_mosaic_into_sims_aicsimageio(path, scene_index=0):
     """
     Read CZI mosaic dataset into xarray containing all information needed for stitching.
     Could eventually be based on https://github.com/spatial-image/spatial-image.
@@ -94,24 +103,11 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
     """
     if AICSImage is None:
         raise ImportError(
-            "aicsimageio is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+            "aicsimageio is required to read mosaic files other than CZI. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
         )
 
     aicsim = AICSImage(path, reconstruct_mosaic=False)
-
-    if len(aicsim.scenes) > 1 and scene_index is None:
-        from magicgui.widgets import request_values
-
-        scene_index = request_values(
-            scene_index={
-                "annotation": int,
-                "label": "Which scene should be loaded?",
-                "options": {"min": 0, "max": len(aicsim.scenes) - 1},
-            },
-        )["scene_index"]
-        aicsim.set_scene(scene_index)
-    else:
-        scene_index = 0
+    aicsim.set_scene(scene_index)
 
     xim = aicsim.get_xarray_dask_stack()
 
@@ -165,6 +161,141 @@ def read_mosaic_image_into_list_of_spatial_xarrays(path, scene_index=None):
         view_sims.append(view_sim)
 
     return view_sims
+
+
+def read_mosaic_into_sims_czifile(filename, scene_index=0):
+    """
+    Read the tiles of a CZI mosaic dataset into a list of sims.
+    This function uses czifile.py (instead of aicsimageio) to read the CZI file.
+    """
+
+    xims = czi_utils.read_czi_into_xims(filename, scene_index=scene_index)
+
+    dims_to_drop = [
+        dim
+        for idim, dim in enumerate(xims[0].dims)
+        if xims[0].shape[idim] == 1 and dim not in ["C"]
+    ]
+
+    xims = [xim.squeeze(dims_to_drop, drop=True) for xim in xims]
+
+    spatial_dims = [
+        dim.lower()
+        for dim in xims[0].dims
+        if dim.lower() in si_utils.SPATIAL_DIMS
+    ]
+
+    intervals = czi_utils.get_czi_mosaic_intervals(filename)
+
+    sims = []
+    for ixim, xim in enumerate(xims):
+        xim = xim.rename({dim: dim.lower() for dim in xim.dims})
+
+        spacing = si_utils.get_spacing_from_sim(xim)
+
+        sim = si_utils.get_sim_from_array(
+            xim.data,
+            dims=xim.dims,
+            scale=spacing,
+            translation=si_utils.get_origin_from_sim(xim),
+            transform_key=METADATA_TRANSFORM_KEY,
+            c_coords=xim.coords["c"].values if "c" in xim.dims else None,
+            t_coords=xim.coords["t"].values if "t" in xim.dims else None,
+        )
+
+        # set tile positions
+        sim = sim.assign_coords(
+            {
+                sdim: sim.coords[sdim].values
+                + intervals[ixim][sdim.upper()][0]
+                for sdim in spatial_dims
+            }
+        )
+
+        sims.append(sim)
+
+    return sims
+
+
+def read_mosaic_image_into_list_of_spatial_xarrays(filepath, scene_index=0):
+    """
+    (Deprecated) Read the tiles of a mosaic dataset into a list of spatial images (sims).
+    The function reads the data lazily and sets the tile positions from the metadata.
+
+    If the file is a CZI file, czifile.py is used to read the data.
+    Otherwise, aicsimageio is used.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the mosaic dataset.
+    scene_index : int, optional
+        Index of the scene to read. Default is 0.
+
+    Returns
+    -------
+    list
+        List of spatial images (sims) for each view / tile.
+    """
+    warnings.warn(
+        "read_mosaic_image_into_list_of_spatial_xarrays is deprecated. Use read_mosaic_into_sims instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return read_mosaic_into_sims(filepath, scene_index=scene_index)
+
+
+def read_tiff_into_spatial_xarray(
+    filename: Union[str, Path],
+    scale: Optional[dict] = None,
+    translation: Optional[dict] = None,
+    affine_transform: Optional[Union[np.ndarray, list]] = None,
+    dims: Optional[Union[list, tuple]] = None,
+    channel_names: Optional[Union[list, tuple]] = None,
+):
+    """
+    Read tiff file into spatial image.
+
+    Parameters
+    ----------
+    filename : str or Path
+    scale : dict, optional
+        Pixel spacing
+    translation : dict, optional
+        Image offset in physical coordinates
+    affine_transform : array (ndim+1, ndim+1)
+        Affine transform given as homogeneous transformation
+        matrix, by default None
+    dims : tuple, optional
+        Axes dimensions, e.g. ('t', 'c', 'z', 'y', 'x').
+        If None, will try to be inferred from metadata.
+    channel_names : tuple of str, optional
+        Channel names
+
+    Returns
+    -------
+    SpatialImage (multiview-stitcher flavor)
+    """
+
+    with TiffFile(filename) as tif:
+        data = tif.asarray()
+        axes = tif.series[0].axes
+
+    if dims is None:
+        # infer from metadata
+        dims = [dim.lower() for dim in axes]
+
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=dims,
+        scale=scale,
+        translation=translation,
+        affine=affine_transform,
+        transform_key=METADATA_TRANSFORM_KEY,
+        c_coords=channel_names,
+    )
+
+    return sim
 
 
 def save_sim_as_tif(path, sim):
@@ -239,232 +370,3 @@ def save_sim_as_tif(path, sim):
     store.close()
 
     return
-
-
-def get_info_from_multiview_czi(filename):
-    """
-    Get information from multiview CZI dataset using czifile.
-
-    This code has been taken from MVRegFus and needs to be improved in terms of
-    readability and generalizability.
-
-    Small changes wrt to original code:
-     - return n_illuminations and n_views.
-     - definition of 'origins'
-    """
-
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
-        )
-
-    from xml.etree import ElementTree as etree
-
-    pathToImage = filename
-
-    infoDict = {}
-
-    imageFile = czifile.CziFile(pathToImage)
-    originalShape = imageFile.shape
-    metadata = imageFile.metadata()
-    imageFile.close()
-
-    metadata = etree.fromstring(metadata)
-
-    e_chs = metadata.findall(
-        ".//Dimensions/Channels/Channel/DetectionWavelength"
-    )
-    channels = list(range(len(e_chs)))
-    # wavelengths = [int(float(ch.text)) for ch in e_chs]
-
-    # hopefully more general
-    nViews = metadata.findall(".//MultiView")
-    multiView = True
-    if len(nViews):
-        nViews = len(metadata.findall(".//MultiView/View"))
-    else:
-        nViews = 1
-        multiView = False
-
-    nX = int(metadata.findall(".//SizeX")[0].text)
-    nY = int(metadata.findall(".//SizeY")[0].text)
-
-    spacing = np.array(
-        [
-            float(i.text)
-            for i in metadata.findall(".//Scaling")[0].findall(".//Value")
-        ]
-    ) * np.power(10, 6)
-    spacing = spacing.astype(np.float64)
-
-    if multiView:
-
-        def count_planes_of_view_in_czifile(self, view):
-            """
-            get number of zplanes of a given view independently of number of channels and illuminations
-            """
-
-            curr_ch = 0
-            curr_ill = 0
-            i = 0
-            for directory_entry in self.filtered_subblock_directory:
-                plane_is_wanted = True
-                ch_or_ill_changed = False
-                for dim in directory_entry.dimension_entries:
-                    if (
-                        dim.dimension == "V"
-                        and view is not None
-                        and dim.start != view
-                    ):
-                        plane_is_wanted = False
-                        break
-
-                    if dim.dimension == "C" and curr_ch != dim.start:
-                        ch_or_ill_changed = True
-                        break
-
-                    if dim.dimension == "I" and curr_ill != dim.start:
-                        ch_or_ill_changed = True
-                        break
-
-                if plane_is_wanted and not ch_or_ill_changed:
-                    i += 1
-
-            return i
-
-        axisOfRotation = np.array(
-            [
-                float(i)
-                for i in metadata.findall(".//AxisOfRotation")[0].text.split(
-                    " "
-                )
-            ]
-        )
-        axisOfRotation = np.where(axisOfRotation)[0][0]
-        centerOfRotation = np.array(
-            [
-                -float(i)
-                for i in metadata.findall(".//CenterPosition")[0].text.split(
-                    " "
-                )
-            ]
-        )
-
-        rPositions, xPositions, yPositions, zPositions = [], [], [], []
-        nZs = []
-        for i in range(nViews):
-            baseNode = metadata.findall(".//View[@V='%s']" % i)
-            baseNode = baseNode[1] if len(baseNode) == 2 else baseNode[0]
-            xPositions.append(float(baseNode.findall(".//PositionX")[0].text))
-            yPositions.append(float(baseNode.findall(".//PositionY")[0].text))
-            zPositions.append(float(baseNode.findall(".//PositionZ")[0].text))
-            rPositions.append(
-                float(baseNode.findall(".//Offset")[0].text) / 180.0 * np.pi
-            )
-            nZs.append(count_planes_of_view_in_czifile(imageFile, i))
-
-        sizes = np.array([[nX, nY, nZs[i]] for i in range(nViews)])
-        positions = np.array(
-            [xPositions, yPositions, zPositions, rPositions]
-        ).swapaxes(0, 1)
-        origins = np.array(
-            [
-                positions[i][:3]
-                # - np.array([sizes[i][0] / 2, sizes[i][1] / 2, 0]) * spacing
-                - np.array([sizes[i][0] / 2, sizes[i][1] / 2, sizes[i][2] / 2])
-                * spacing
-                for i in range(len(positions))
-            ]
-        )
-
-        # infoDict['angles'] = np.array(rPositions)
-        infoDict["origins"] = origins
-        infoDict["positions"] = positions
-        infoDict["centerOfRotation"] = centerOfRotation
-        infoDict["axisOfRotation"] = axisOfRotation
-        infoDict["sizes"] = sizes
-    else:
-        nZ = int(metadata.findall(".//SizeZ")[0].text)
-        size = np.array([nX, nY, nZ])
-
-        # position = metadata.findall('.//Positions')[3].findall('Position')[0].values()
-        position = (
-            metadata.findall(".//Positions")[3]
-            .findall("Position")[0]
-            .attrib.values()
-        )
-        position = np.array([float(i) for i in position])
-        origin = np.array(
-            # position[:3] - np.array([size[0] / 2, size[1] / 2, 0]) * spacing
-            position[:3]
-            - np.array([size[0] / 2, size[1] / 2, size[2] / 2]) * spacing
-        )
-
-        infoDict["sizes"] = np.array([size])
-        infoDict["positions"] = np.array([position])
-        infoDict["origins"] = np.array([origin])
-
-    infoDict["spacing"] = spacing
-    infoDict["originalShape"] = np.array(originalShape)
-    infoDict["channels"] = channels
-    infoDict["n_illuminations"] = infoDict["originalShape"][1]
-    infoDict["n_views"] = nViews
-
-    with contextlib.suppress(Exception):
-        infoDict["dT"] = float(
-            int(metadata.findall("//TimeSpan/Value")[0].text) / 1000
-        )
-
-    return infoDict
-
-
-def read_view_from_multiview_czi(
-    input_file, view=None, ch=None, ill=None, z=None, resize=True, order=1
-):
-    """
-    Use czifile to read images (as there's a bug in aicspylibczi20221013, namely that
-    neighboring tiles are included (prestitching?) in a given read out tile).
-    """
-
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
-        )
-
-    if isinstance(input_file, (str, Path)):
-        czifile_file = czifile.CziFile(input_file)
-    else:
-        czifile_file = input_file
-
-    image = []
-    for directory_entry in czifile_file.filtered_subblock_directory:
-        plane_is_wanted = True
-        for dim in directory_entry.dimension_entries:
-            if dim.dimension == "V" and view is not None and dim.start != view:
-                plane_is_wanted = False
-                break
-
-            if dim.dimension == "C" and ch is not None and dim.start != ch:
-                plane_is_wanted = False
-                break
-
-            if dim.dimension == "I" and ill is not None and dim.start != ill:
-                plane_is_wanted = False
-                break
-
-            if dim.dimension == "Z" and z is not None and dim.start != z:
-                plane_is_wanted = False
-                break
-
-        if not plane_is_wanted:
-            continue
-
-        subblock = directory_entry.data_segment()
-        tile = subblock.data(resize=resize, order=order)
-
-        try:
-            image.append(tile)
-        except ValueError as e:
-            warnings.warn(str(e), UserWarning, stacklevel=1)
-
-    return np.array(image).squeeze()
