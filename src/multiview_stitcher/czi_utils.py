@@ -264,7 +264,7 @@ def read_view_from_multiview_czi(
 
     if czifile is None:
         raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
+            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
         )
 
     if isinstance(input_file, (str, Path)):
@@ -320,7 +320,7 @@ def get_info_from_multiview_czi(filename):
 
     if czifile is None:
         raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[multiview-czi]` or `pip install czifile`."
+            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
         )
 
     from xml.etree import ElementTree as etree
