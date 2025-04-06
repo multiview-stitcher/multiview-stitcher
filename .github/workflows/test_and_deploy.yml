@@ -52,7 +52,7 @@ jobs:
         with:
           fail_ci_if_error: false # optional (default = false)
           token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: false # optional (default = false)
+          verbose: true # optional (default = false)
 
   deploy:
     # this will run when you have tagged a commit, starting with "v*"
