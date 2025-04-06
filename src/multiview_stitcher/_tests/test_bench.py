@@ -108,13 +108,13 @@ def write_params(params, filename):
         {str(ind): param for ind, param in enumerate(params)},
     )
 
-    xparams.to_zarr(filename)
+    xparams.to_zarr(filename, mode="w")
 
 
 def get_msims_from_dataset(dataset):
     if dataset["image_paths"][0].suffix == ".czi":
         scene = 0 if "scene" not in dataset else dataset["scene"]
-        sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
+        sims = io.read_mosaic_into_sims(
             dataset["image_paths"][0], scene_index=scene
         )
 

@@ -104,9 +104,7 @@ def test_overlap(ndim, overlap):
 
 
 def test_mv_graph_creation():
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
-    )
+    sims = io.read_mosaic_into_sims(sample_data.get_mosaic_sample_data_path())
 
     msims = [
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
