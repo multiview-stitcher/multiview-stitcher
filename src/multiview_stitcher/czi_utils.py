@@ -16,7 +16,7 @@ except ImportError:
 
 def get_czi_shape(filepath):
     """
-    Get the shape of the CZI file.
+    Get the shape of a CZI file.
     """
 
     if czifile is None:
@@ -71,7 +71,7 @@ def get_spacing_from_czi(filepath):
 
 def get_czi_mosaic_intervals(filepath, scene_index=0):
     """
-    Get the mosaic intervals of a CZI file.
+    Get the mosaic position intervals of a CZI file.
     """
 
     if czifile is None:

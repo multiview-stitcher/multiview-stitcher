@@ -90,10 +90,17 @@ def get_number_of_scenes_in_mosaic(filepath):
 
 def read_mosaic_into_sims_aicsimageio(path, scene_index=0):
     """
-    Read CZI mosaic dataset into xarray containing all information needed for stitching.
-    Could eventually be based on https://github.com/spatial-image/spatial-image.
-    Use list instead of dict to make sure xarray metadata (coordinates + perhaps attrs)
-    are self explanatory for downstream code (and don't depend e.g. on view/tile numbering).
+    Read the tiles of a mosaic dataset into a list of spatial images (sims).
+    The function reads the data lazily and sets the tile positions from the metadata.
+
+    Requires aicsimageio to be installed.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the mosaic dataset.
+    scene_index : int, optional
+        Index of the scene to read. Default is 0.
 
     Comment 202304
     # acisimageio can have problems, namely shape of sim is different from shape of computed sim.data
