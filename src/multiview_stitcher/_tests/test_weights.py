@@ -17,9 +17,7 @@ def test_blending_weights():
     Test blending weights calculation.
     """
 
-    sims = io.read_mosaic_image_into_list_of_spatial_xarrays(
-        sample_data.get_mosaic_sample_data_path()
-    )
+    sims = io.read_mosaic_into_sims(sample_data.get_mosaic_sample_data_path())
 
     ndim = si_utils.get_ndim_from_sim(sims[0])
 
