@@ -178,3 +178,35 @@ def test_multiscales_completion():
             [str(v) for v in sim.coords["c"].values],
             [str(v) for v in sim_read.coords["c"].values],
         )
+
+
+def test_multiscales_overwrite():
+    sim1 = si_utils.get_sim_from_array(
+        np.zeros((40, 40)),
+        translation={"y": 0, "x": 0},
+    )
+    sim2 = si_utils.get_sim_from_array(
+        np.ones((40, 40)),
+        translation={"y": 1, "x": 1},
+    )
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        # write sim to ome zarr
+        ngff_utils.write_sim_to_ome_zarr(sim1, zarr_path)
+
+        # write again
+        ngff_utils.write_sim_to_ome_zarr(sim2, zarr_path, overwrite=True)
+
+        # check that read sim is equal to sim2 at
+        # all resolution levels
+        for res_level in range(2):
+            sim_read = ngff_utils.read_sim_from_ome_zarr(
+                zarr_path, resolution_level=res_level
+            )
+            assert np.min(sim_read.data) == 1
+            assert np.max(sim_read.data) == 1
+
+            for dim in sim_read.dims:
+                if dim not in si_utils.SPATIAL_DIMS:
+                    continue
+                assert sim_read.coords[dim].values[0] > 0
