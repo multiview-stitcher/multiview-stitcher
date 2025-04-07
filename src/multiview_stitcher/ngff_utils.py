@@ -1,5 +1,4 @@
 import os
-import warnings
 
 import ngff_zarr
 import numpy as np
@@ -170,22 +169,26 @@ def write_sim_to_ome_zarr(
     to a multiscale NGFF zarr file (v0.4).
     Returns a sim backed by the newly created zarr file.
 
+    If overwrite is False, image data will be read from the zarr file
+    and missing pyramid levels will be completed. OME-Zarr metadata
+    will be overwritten in any case.
+
     Note that any transform_key will not be stored in the zarr file.
     However, the returned sim will have the transform_key set.
     """
 
-    if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
-        # warn that the file already exists
+    # if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
+    #     # warn that the file already exists
 
-        warnings.warn(
-            f"File {output_zarr_url}/0 already exists. "
-            "Use overwrite=True to overwrite it.",
-            UserWarning,
-            stacklevel=1,
-        )
+    #     warnings.warn(
+    #         f"File {output_zarr_url}/0 already exists. "
+    #         "Use overwrite=True to overwrite it.",
+    #         UserWarning,
+    #         stacklevel=1,
+    #     )
 
-        sim.data = da.from_zarr(f"{output_zarr_url}/0")
-        return sim
+    #     sim.data = da.from_zarr(f"{output_zarr_url}/0")
+    #     return sim
 
     ndim = sim.data.ndim
     dims = sim.dims
@@ -233,27 +236,35 @@ def write_sim_to_ome_zarr(
 
     n_resolutions = len(res_shapes)
 
-    # Open output array. This allows setting `write_empty_chunks=True`,
-    # which cannot be passed to dask.array.to_zarr below.
-    output_zarr_arr = zarr.open(
-        f"{output_zarr_url}/0",
-        shape=sim.data.shape,
-        chunks=sim.data.chunksize,
-        dtype=sim.data.dtype,
-        write_empty_chunks=False,
-        dimension_separator="/",
-        fill_value=0,
-        mode="w",
-    )
+    if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
+        sim.data = da.from_zarr(
+            f"{output_zarr_url}/0",
+            dimension_separator="/",
+        )
+        top_level_exists = True
+    else:
+        # Open output array. This allows setting `write_empty_chunks=True`,
+        # which cannot be passed to dask.array.to_zarr below.
+        output_zarr_arr = zarr.open(
+            f"{output_zarr_url}/0",
+            shape=sim.data.shape,
+            chunks=sim.data.chunksize,
+            dtype=sim.data.dtype,
+            write_empty_chunks=False,
+            dimension_separator="/",
+            fill_value=0,
+            mode="w",
+        )
 
-    # Write the lowest resolution
-    sim.data = sim.data.to_zarr(
-        output_zarr_arr,
-        overwrite=True,
-        dimension_separator="/",
-        return_stored=True,
-        compute=True,
-    )
+        # Write the lowest resolution
+        sim.data = sim.data.to_zarr(
+            output_zarr_arr,
+            overwrite=True,
+            dimension_separator="/",
+            return_stored=True,
+            compute=True,
+        )
+        top_level_exists = False
 
     coordtfs = [
         [
@@ -297,83 +308,94 @@ def write_sim_to_ome_zarr(
     parent_res_array = sim.data
     curr_res_array = sim.data  # in case of only one resolution level
     for res_level in range(1, n_resolutions):
-        curr_res_array = da.coarsen(
-            mean_dtype,
-            parent_res_array,
-            axes={
-                idim: res_rel_factors[res_level][dim]
-                for idim, dim in enumerate(dims)
-            },
-            trim_excess=True,
-        )
+        if not overwrite and os.path.exists(f"{output_zarr_url}/{res_level}"):
+            curr_res_array = da.from_zarr(
+                f"{output_zarr_url}/{res_level}",
+                dimension_separator="/",
+            )
+        else:
+            curr_res_array = da.coarsen(
+                mean_dtype,
+                parent_res_array,
+                axes={
+                    idim: res_rel_factors[res_level][dim]
+                    for idim, dim in enumerate(dims)
+                },
+                trim_excess=True,
+            )
 
-        curr_res_array = curr_res_array.rechunk(parent_res_array.chunksize)
+            curr_res_array = curr_res_array.rechunk(parent_res_array.chunksize)
 
-        # Open output array. This allows setting `write_empty_chunks=True`,
-        # which cannot be passed to dask.array.to_zarr below.
-        res_level_zarr_arr = zarr.open(
-            f"{output_zarr_url}/{res_level}",
-            shape=curr_res_array.shape,
-            chunks=curr_res_array.chunksize,
-            dtype=curr_res_array.dtype,
-            write_empty_chunks=False,
-            dimension_separator="/",
-            fill_value=0,
-            mode="w",
-        )
+            # Open output array. This allows setting `write_empty_chunks=True`,
+            # which cannot be passed to dask.array.to_zarr below.
+            res_level_zarr_arr = zarr.open(
+                f"{output_zarr_url}/{res_level}",
+                shape=curr_res_array.shape,
+                chunks=curr_res_array.chunksize,
+                dtype=curr_res_array.dtype,
+                write_empty_chunks=False,
+                dimension_separator="/",
+                fill_value=0,
+                mode="w",
+            )
 
-        curr_res_array = curr_res_array.to_zarr(
-            res_level_zarr_arr,
-            overwrite=True,
-            dimension_separator="/",
-            return_stored=True,
-            compute=True,
-        )
+            curr_res_array = curr_res_array.to_zarr(
+                res_level_zarr_arr,
+                overwrite=True,
+                dimension_separator="/",
+                return_stored=True,
+                compute=True,
+            )
 
         parent_res_array = curr_res_array
 
-    store = parse_url(output_zarr_url, mode="w").store
-    output_group = zarr.group(store=store)
-    writer.write_multiscales_metadata(
-        group=output_group,
-        axes=axes,
-        datasets=[
-            {
-                "path": f"{res_level}",
-                "coordinateTransformations": coordtfs[res_level],
-            }
-            for res_level in range(n_resolutions)
-        ],
-    )
-
-    if "c" in sim.dims:
-        contrast_min = np.array(
-            curr_res_array.min(
-                axis=[idim for idim, dim in enumerate(sim.dims) if dim != "c"]
-            )
-        )
-        contrast_max = np.array(
-            curr_res_array.max(
-                axis=[idim for idim, dim in enumerate(sim.dims) if dim != "c"]
-            )
-        )
-
-        output_group.attrs["omero"] = {
-            "channels": [
+    if not top_level_exists or overwrite:
+        store = parse_url(output_zarr_url, mode="w").store
+        output_group = zarr.group(store=store)
+        writer.write_multiscales_metadata(
+            group=output_group,
+            axes=axes,
+            datasets=[
                 {
-                    "color": "ffffff",
-                    "label": f"{ch}",
-                    "active": True,
-                    "window": {
-                        "end": int(contrast_max[ich]),
-                        "max": int(contrast_max[ich]),
-                        "min": 0,
-                        "start": int(contrast_min[ich]),
-                    },
+                    "path": f"{res_level}",
+                    "coordinateTransformations": coordtfs[res_level],
                 }
-                for ich, ch in enumerate(sim.coords["c"].values)
+                for res_level in range(n_resolutions)
             ],
-        }
+        )
+
+        if "c" in sim.dims:
+            contrast_min = np.array(
+                curr_res_array.min(
+                    axis=[
+                        idim for idim, dim in enumerate(sim.dims) if dim != "c"
+                    ]
+                )
+            )
+            contrast_max = np.array(
+                curr_res_array.max(
+                    axis=[
+                        idim for idim, dim in enumerate(sim.dims) if dim != "c"
+                    ]
+                )
+            )
+
+            output_group.attrs["omero"] = {
+                "channels": [
+                    {
+                        "color": "ffffff",
+                        "label": f"{ch}",
+                        "active": True,
+                        "window": {
+                            "end": int(contrast_max[ich]),
+                            "max": int(contrast_max[ich]),
+                            "min": 0,
+                            "start": int(contrast_min[ich]),
+                        },
+                    }
+                    for ich, ch in enumerate(sim.coords["c"].values)
+                ],
+            }
 
     return sim
 

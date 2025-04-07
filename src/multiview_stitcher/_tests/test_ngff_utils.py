@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 
 import ngff_zarr
@@ -38,7 +39,8 @@ def test_round_trip(ndim):
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
     with tempfile.TemporaryDirectory() as zarr_path:
-        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path, overwrite=False)
+
         sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path)
 
         for dim in sdims:
@@ -130,3 +132,81 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
             [str(v) for v in sim.coords["c"].values],
             [str(v) for v in sim_read.coords["c"].values],
         )
+
+
+def test_multiscales_completion():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=30,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.1,
+        spacing_y=0.1,
+        spacing_z=2,
+    )[1]
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        # write sim to ome zarr
+        sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        # remove level 1 on disk
+        shutil.rmtree(
+            os.path.join(zarr_path, "1"),
+            # ignore_errors=True,
+        )
+
+        # write again
+        sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        with open(os.path.join(zarr_path, ".zattrs")) as f:
+            json.load(f)
+
+        # check that level 1 is now present
+        sim_read = ngff_utils.read_sim_from_ome_zarr(
+            zarr_path, resolution_level=1
+        )
+
+        # check dims and channel names are the same
+        # assert np.equal(sim.data, sim_read.data).all()
+        assert np.array_equal(sim.dims, sim_read.dims)
+        # TODO: consider restricting channel coords to string type
+        assert np.array_equal(
+            [str(v) for v in sim.coords["c"].values],
+            [str(v) for v in sim_read.coords["c"].values],
+        )
+
+
+def test_multiscales_overwrite():
+    sim1 = si_utils.get_sim_from_array(
+        np.zeros((40, 40)),
+        translation={"y": 0, "x": 0},
+    )
+    sim2 = si_utils.get_sim_from_array(
+        np.ones((40, 40)),
+        translation={"y": 1, "x": 1},
+    )
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        # write sim to ome zarr
+        ngff_utils.write_sim_to_ome_zarr(sim1, zarr_path)
+
+        # write again
+        ngff_utils.write_sim_to_ome_zarr(sim2, zarr_path, overwrite=True)
+
+        # check that read sim is equal to sim2 at
+        # all resolution levels
+        for res_level in range(2):
+            sim_read = ngff_utils.read_sim_from_ome_zarr(
+                zarr_path, resolution_level=res_level
+            )
+            assert np.min(sim_read.data) == 1
+            assert np.max(sim_read.data) == 1
+
+            for dim in sim_read.dims:
+                if dim not in si_utils.SPATIAL_DIMS:
+                    continue
+                assert sim_read.coords[dim].values[0] > 0
