@@ -216,7 +216,7 @@ def read_czi_into_xims(filename, scene_index=0):
             )
             for dim in directory_entry.dimension_entries
         }
-        if pos["S"] != scene_index:
+        if "S" in pos and pos["S"] != scene_index:
             continue
         data = da.from_delayed(
             delayed(read_czi_plane)(filename, ide, slices),
