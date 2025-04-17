@@ -233,7 +233,7 @@ def read_czi_into_xims(filename, scene_index=0):
 
         coords = {
             k: [v]
-            if k not in spacing
+            if k not in ["Y", "X"]
             else np.linspace(
                 v,
                 v + shape[k] - 1,
