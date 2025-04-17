@@ -91,7 +91,8 @@ def get_czi_mosaic_intervals(filepath, scene_index=0):
 
     # index of M in shape
     M_index = list(shape.keys()).index("M")
-    S_index = list(shape.keys()).index("S")
+
+    S_index = list(shape.keys()).index("S") if "S" in shape else None
 
     intervals = {
         m: {sdim_czi: [np.inf, -np.inf] for sdim_czi in spatial_dims_czi}
@@ -99,8 +100,10 @@ def get_czi_mosaic_intervals(filepath, scene_index=0):
     }
 
     for directory_entry in czifile_file.filtered_subblock_directory:
-        s = directory_entry.dimension_entries[S_index].start
-        if s != scene_index:
+        if (
+            S_index is not None
+            and directory_entry.dimension_entries[S_index].start != scene_index
+        ):
             continue
         m = directory_entry.dimension_entries[M_index].start
         for _idim, dim in enumerate(directory_entry.dimension_entries):
