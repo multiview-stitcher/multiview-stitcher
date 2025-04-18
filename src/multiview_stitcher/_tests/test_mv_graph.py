@@ -6,6 +6,7 @@ from multiview_stitcher import (
     io,
     msi_utils,
     mv_graph,
+    param_utils,
     sample_data,
     spatial_image_utils,
 )
@@ -158,3 +159,29 @@ def test_points_inside_sim(ndim):
         ),
         [True, False],
     )
+
+
+def test_get_vertices_from_stack_props():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=5,
+        tiles_x=1,
+        tiles_y=1,
+    )[0]
+
+    spatial_image_utils.set_sim_affine(
+        sim,
+        param_utils.identity_transform(2, t_coords=[0]),
+        transform_key="affine_t",
+    )
+
+    stack_props = spatial_image_utils.get_stack_properties_from_sim(
+        sim, transform_key="affine_t"
+    )
+
+    vertices = mv_graph.get_vertices_from_stack_props(stack_props)
+
+    assert vertices.shape == (4, 2)

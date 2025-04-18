@@ -345,9 +345,10 @@ def get_vertices_from_stack_props(stack_props):
     )
 
     if "transform" in stack_props:
-        vertices = transformation.transform_pts(
-            vertices, stack_props["transform"]
-        )
+        affine = stack_props["transform"]
+        if "t" in affine.dims:
+            affine = affine.isel(t=0)
+        vertices = transformation.transform_pts(vertices, affine)
 
     return vertices
 

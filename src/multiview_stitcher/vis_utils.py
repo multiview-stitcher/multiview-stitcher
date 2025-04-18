@@ -240,7 +240,6 @@ def plot_positions(
 def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
     ndim = mv_graph.get_ndim_from_stack_props(stack_props)
     faces = mv_graph.get_faces_from_stack_props(stack_props)
-    mv_graph.get_vertices_from_stack_props(stack_props)
 
     # get line segments
     line_segments = []
