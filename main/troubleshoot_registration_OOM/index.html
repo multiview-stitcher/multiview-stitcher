@@ -1034,19 +1034,11 @@
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  <span class="p">)</span>
 </span></code></pre></div>
 <h2 id="decrease-computation-parallelism">Decrease computation parallelism</h2>
-<p>By default, the registration of all the pairs to be registered is run in parallel. Therefore reducing the parallelism can help. This can be done in different ways:</p>
-<ol>
-<li>
-<p>Setting <code>register(..., scheduler='single-threaded')</code> will perform one pairwise registration at a time (simplest).</p>
-</li>
-<li>
-<p>Explicitly setting the amount of threads using a dask distributed cluster. How does this work? Once a dask distributed client object exists, dask will use it as a computational backend, even if the client object is not passed to the <code>register</code> function. In the context of multiview-stitcher, we recommend to create a cluster with one worker and multiple threads per worker. This can be done as follows:</p>
-</li>
-</ol>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span> <span class="nn">distributed</span> <span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">LocalCluster</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">local_cluster</span> <span class="o">=</span> <span class="n">LocalCluster</span><span class="p">(</span><span class="n">n_workers</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">threads_per_worker</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">Client</span><span class="p">(</span><span class="n">local_cluster</span><span class="p">)</span>
-</span></code></pre></div>
+<p>By default, the registration of all the pairs to be registered is run in parallel. Therefore reducing the parallelism can help. This can be done by setting <code>register(..., n_parallel_pairwise_regs=4)</code>, which in this example will limit the pairwise registrations that are run in parallel to four.</p>
+<div class="admonition note">
+<p class="admonition-title">Estimating memory requirements</p>
+<p>The memory required for each pairwise registration can be estimated by considering that the overlapping image regions need to be loaded in memory (taking into consideration the binning factors), multiplied by a factor of approx. 2-4 for the registration process (depending on the registration function used).</p>
+</div>
 
 
 
