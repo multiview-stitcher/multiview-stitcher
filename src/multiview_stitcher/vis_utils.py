@@ -89,7 +89,8 @@ def plot_positions(
         # convert msims to sims for backward compatibility
         sims = [msi_utils.get_sim_from_msim(sim) for sim in sims]
     else:
-        sims = sims.copy()
+        # make shallow copy of sim list, which fill be modified further down
+        sims = list(sims)
 
     ndim = spatial_image_utils.get_ndim_from_sim(sims[0])
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
