@@ -37,6 +37,8 @@ def test_plot_positions(ndim, N_t, monkeypatch):
 
     monkeypatch.setattr(plt, "show", lambda: None)
 
+    indexed_sims1 = set(sims[0].coords.xindexes.dims)
+
     fig, ax = vis_utils.plot_positions(
         sims, transform_key=METADATA_TRANSFORM_KEY
     )
@@ -46,6 +48,10 @@ def test_plot_positions(ndim, N_t, monkeypatch):
     )
 
     assert len(ax.collections) == len(msims)
+
+    indexed_sims2 = set(sims[0].coords.xindexes.dims)
+
+    assert indexed_sims1 == indexed_sims2
 
 
 def test_plot_positions_single_coord(monkeypatch):
