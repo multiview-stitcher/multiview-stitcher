@@ -1,3 +1,5 @@
+import logging
+
 import dask.array as da
 import matplotlib.pyplot
 import numpy as np
@@ -385,7 +387,10 @@ def test_register(
     pre_registration_pruning_method,
     post_registration_do_quality_filter,
     groupwise_resolution_method,
+    caplog,
 ):
+    caplog.set_level(logging.DEBUG)
+
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
         N_t=N_t,
@@ -414,6 +419,15 @@ def test_register(
     )
 
     assert len(params) == 2 ** (ndim - 1)
+
+    if ndim == 3:
+        assert (
+            "Setting n_parallel_pairwise_regs to 1 for 3D data" in caplog.text
+        )
+    else:
+        assert (
+            "Computing all pairwise registrations in parallel" in caplog.text
+        )
 
 
 @pytest.mark.parametrize(

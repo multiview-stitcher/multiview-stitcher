@@ -1680,23 +1680,24 @@ def optimize_bead_subgraph(
 
 def register(
     msims: list[MultiscaleSpatialImage],
-    transform_key,
-    reg_channel_index=None,
-    reg_channel=None,
-    new_transform_key=None,
-    registration_binning=None,
+    transform_key: str = None,
+    reg_channel_index: int = None,
+    reg_channel: str = None,
+    new_transform_key: str = None,
+    registration_binning: dict[str, int] = None,
     overlap_tolerance: Union[int, dict[str, int]] = 0.0,
     pairwise_reg_func=phase_correlation_registration,
-    pairwise_reg_func_kwargs=None,
+    pairwise_reg_func_kwargs: dict = None,
     groupwise_resolution_method="global_optimization",
-    groupwise_resolution_kwargs=None,
+    groupwise_resolution_kwargs: dict = None,
     pre_registration_pruning_method="alternating_pattern",
-    post_registration_do_quality_filter=False,
-    post_registration_quality_threshold=0.2,
-    plot_summary=False,
-    pairs=None,
+    post_registration_do_quality_filter: bool = False,
+    post_registration_quality_threshold: float = 0.2,
+    plot_summary: bool = False,
+    pairs: list[tuple[int, int]] = None,
     scheduler=None,
-    return_dict=False,
+    n_parallel_pairwise_regs: int = None,
+    return_dict: bool = False,
 ):
     """
 
@@ -1776,6 +1777,10 @@ def register(
         pairs of view/tile indices, by default None
     scheduler : str, optional
         Dask scheduler to use for parallel computation, by default None
+    n_parallel_pairwise_regs : int, optional
+        Number of parallel pairwise registrations to run. Setting this is specifically
+        useful for limiting memory usage.
+        By default None (all pairwise registrations are run in parallel)
     return_dict : bool, optional
         If True, return a dict containing params, registration metrics and more, by default False
 
@@ -1851,6 +1856,7 @@ def register(
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         scheduler=scheduler,
+        n_parallel_pairwise_regs=n_parallel_pairwise_regs,
     )
 
     if post_registration_do_quality_filter:
@@ -1980,6 +1986,7 @@ def compute_pairwise_registrations(
     msims,
     g_reg,
     scheduler=None,
+    n_parallel_pairwise_regs=None,
     **register_kwargs,
 ):
     g_reg_computed = g_reg.copy()
@@ -2000,16 +2007,28 @@ def compute_pairwise_registrations(
     # memory management is implemented. Ideally, registration methods
     # should report their memory usage and we can use this information
     # to annotate the dask graph.
-    if scheduler is None:
+
+    if n_parallel_pairwise_regs is None:
         ndim = msi_utils.get_ndim(msims[0])
         if ndim == 3:
-            logger.info("Computing pairwise registrations sequentially")
-            params = [compute(p, scheduler=scheduler)[0] for p in params_xds]
-        else:
-            logger.info("Computing pairwise registrations in parallel")
-            params = compute(params_xds, scheduler=scheduler)[0]
-    else:
+            n_parallel_pairwise_regs = 1
+            logger.info("Setting n_parallel_pairwise_regs to 1 for 3D data")
+
+    # report on how many pairwise registrations are computed in parallel
+    if n_parallel_pairwise_regs is None:
+        logger.info("Computing all pairwise registrations in parallel")
         params = compute(params_xds, scheduler=scheduler)[0]
+    elif n_parallel_pairwise_regs > 0:
+        logger.info(
+            "Pairwise registration(s) run in parallel: %s",
+            n_parallel_pairwise_regs,
+        )
+        params = []
+        for i in range(0, len(params_xds), n_parallel_pairwise_regs):
+            params += compute(
+                params_xds[i : i + n_parallel_pairwise_regs],
+                scheduler=scheduler,
+            )[0]
 
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
