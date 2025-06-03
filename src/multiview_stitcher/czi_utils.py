@@ -209,7 +209,7 @@ def read_czi_into_xims(filename, scene_index=0):
 
     de_axes_valid = [dim for dim in de_axes if dim not in ["0", "M"]]
 
-    m_planes = {m: [] for m in range(shape["M"])}
+    m_planes = {}
     for ide, directory_entry in enumerate(
         czifile_file.filtered_subblock_directory
     ):
@@ -245,6 +245,10 @@ def read_czi_into_xims(filename, scene_index=0):
         }
 
         xim_plane = xr.DataArray(data, dims=de_axes_valid, coords=coords)
+
+        if pos["M"] not in m_planes:
+            m_planes[pos["M"]] = []
+
         m_planes[pos["M"]].append(xim_plane)
 
     for m in m_planes:
