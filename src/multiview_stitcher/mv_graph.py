@@ -672,7 +672,7 @@ def prune_to_shortest_weighted_paths(g):
     return g_reg
 
 
-def prune_to_axis_aligned_edges(g, max_angle=0.2):
+def prune_to_axis_aligned_edges(g, max_angle=0.05):
     """
     Prune away edges that are not orthogonal to image axes.
     This is specifically useful for filtering out diagonal edges on a regular grid of views.
@@ -1002,3 +1002,54 @@ def project_bb_along_dim(
     }
 
     return bb
+
+
+def prune_view_adjacency_graph(
+    g,
+    method=None,
+    pruning_method_kwargs=None,
+):
+    """
+    Prune the view adjacency graph
+    (i.e. to edges that will be used for registration).
+
+    Available methods:
+    - 'shortest_paths_overlap_weighted':
+        Prune to shortest paths in overlap graph
+        (weighted by overlap).
+    - 'otsu_threshold_on_overlap':
+        Prune to edges with overlap above Otsu threshold.
+        This works well for regular grid arrangements, as
+        diagonal edges will be pruned.
+    - 'keep_axis_aligned':
+        Keep only edges that align with the axes of the
+        tiles. This is useful for regular grid arrangements,
+        in which case it excludes 'diagonal' edges.
+    """
+    if not len(g.edges):
+        raise (
+            NotEnoughOverlapError(
+                "Not enough overlap between views\
+        for stitching."
+            )
+        )
+
+    if pruning_method_kwargs is None:
+        pruning_method_kwargs = {}
+    else:
+        logging.info("Using pruning method kwargs: %s", pruning_method_kwargs)
+
+    if method is None:
+        return g
+    elif method == "alternating_pattern":
+        return prune_graph_to_alternating_colors(
+            g, return_colors=False, **pruning_method_kwargs
+        )
+    elif method == "shortest_paths_overlap_weighted":
+        return prune_to_shortest_weighted_paths(g, **pruning_method_kwargs)
+    elif method == "otsu_threshold_on_overlap":
+        return filter_edges(g, **pruning_method_kwargs)
+    elif method == "keep_axis_aligned":
+        return prune_to_axis_aligned_edges(g, **pruning_method_kwargs)
+    else:
+        raise ValueError(f"Unknown graph pruning method: {method}")
