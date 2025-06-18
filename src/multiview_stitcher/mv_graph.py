@@ -672,7 +672,7 @@ def prune_to_shortest_weighted_paths(g):
     return g_reg
 
 
-def prune_to_axis_aligned_edges(g, max_angle=0.2):
+def prune_to_axis_aligned_edges(g, max_angle=0.05):
     """
     Prune away edges that are not orthogonal to image axes.
     This is specifically useful for filtering out diagonal edges on a regular grid of views.
