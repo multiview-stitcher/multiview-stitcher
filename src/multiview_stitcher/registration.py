@@ -908,51 +908,6 @@ def register_pair_of_msims_over_time(
     return xp
 
 
-def prune_view_adjacency_graph(
-    g,
-    method=None,
-):
-    """
-    Prune the view adjacency graph
-    (i.e. to edges that will be used for registration).
-
-    Available methods:
-    - 'shortest_paths_overlap_weighted':
-        Prune to shortest paths in overlap graph
-        (weighted by overlap).
-    - 'otsu_threshold_on_overlap':
-        Prune to edges with overlap above Otsu threshold.
-        This works well for regular grid arrangements, as
-        diagonal edges will be pruned.
-    - 'keep_axis_aligned':
-        Keep only edges that align with the axes of the
-        tiles. This is useful for regular grid arrangements,
-        in which case it excludes 'diagonal' edges.
-    """
-    if not len(g.edges):
-        raise (
-            mv_graph.NotEnoughOverlapError(
-                "Not enough overlap between views\
-        for stitching."
-            )
-        )
-
-    if method is None:
-        return g
-    elif method == "alternating_pattern":
-        return mv_graph.prune_graph_to_alternating_colors(
-            g, return_colors=False
-        )
-    elif method == "shortest_paths_overlap_weighted":
-        return mv_graph.prune_to_shortest_weighted_paths(g)
-    elif method == "otsu_threshold_on_overlap":
-        return mv_graph.filter_edges(g)
-    elif method == "keep_axis_aligned":
-        return mv_graph.prune_to_axis_aligned_edges(g)
-    else:
-        raise ValueError(f"Unknown graph pruning method: {method}")
-
-
 def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     if not len(g_reg.edges):
         raise (
@@ -1691,6 +1646,7 @@ def register(
     groupwise_resolution_method="global_optimization",
     groupwise_resolution_kwargs: dict = None,
     pre_registration_pruning_method="alternating_pattern",
+    pre_reg_pruning_method_kwargs: dict = None,
     post_registration_do_quality_filter: bool = False,
     post_registration_quality_threshold: float = 0.2,
     plot_summary: bool = False,
@@ -1760,6 +1716,9 @@ def register(
             This is useful for regular 2D or 3D grid arrangements, as diagonal edges will be pruned.
         - 'keep_axis_aligned': Keep only edges that align with tile axes. This is useful for regular grid
             arrangements and to explicitely prune diagonals, e.g. when other methods fail.
+    pre_reg_pruning_method_kwargs : dict, optional
+        Additional keyword arguments passed to the pre-registration pruning method, e.g.
+        - 'keep_axis_aligned': 'max_angle' (larger angles between stack axis and pair edge are discarded, default 0.2)
     post_registration_do_quality_filter : bool, optional
     post_registration_quality_threshold : float, optional
         Threshold used to filter edges by quality after registration,
@@ -1810,6 +1769,9 @@ def register(
     if groupwise_resolution_kwargs is None:
         groupwise_resolution_kwargs = {}
 
+    if pre_reg_pruning_method_kwargs is None:
+        pre_reg_pruning_method_kwargs = {}
+
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if "c" in msi_utils.get_dims(msims[0]):
@@ -1840,9 +1802,10 @@ def register(
     )
 
     if pre_registration_pruning_method is not None:
-        g_reg = prune_view_adjacency_graph(
+        g_reg = mv_graph.prune_view_adjacency_graph(
             g,
             method=pre_registration_pruning_method,
+            pruning_method_kwargs=pre_reg_pruning_method_kwargs,
         )
     else:
         g_reg = g
