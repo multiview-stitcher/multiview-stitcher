@@ -406,6 +406,15 @@ def test_register(
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
 
+    # test pre_reg_pruning_method_kwargs
+    # (only whether it runs without error)
+    if pre_registration_pruning_method == "keep_axis_aligned" and ndim == 2:
+        pre_reg_pruning_method_kwargs = {
+            "max_angle": 0.1,
+        }
+    else:
+        pre_reg_pruning_method_kwargs = None
+
     # Run registration
     params = registration.register(
         msims,
@@ -414,6 +423,7 @@ def test_register(
         pairwise_reg_func=pairwise_reg_func,
         new_transform_key="affine_registered",
         pre_registration_pruning_method=pre_registration_pruning_method,
+        pre_reg_pruning_method_kwargs=pre_reg_pruning_method_kwargs,
         post_registration_do_quality_filter=post_registration_do_quality_filter,
         post_registration_quality_threshold=-1,
     )
