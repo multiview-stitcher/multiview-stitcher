@@ -58,7 +58,6 @@ def data(self, raw=False, resize=True, order=0):
     de = self.directory_entry
     fh = self._fh
 
-    print('patched data')
     if raw:
         with fh.lock:
             fh.seek(self.data_offset)
