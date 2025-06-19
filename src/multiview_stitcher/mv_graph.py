@@ -6,6 +6,7 @@ from itertools import chain, product
 from typing import Union
 
 import dask.array as da
+import dask.config
 import networkx as nx
 import numpy as np
 import xarray as xr
@@ -151,13 +152,16 @@ def build_view_adjacency_graph_from_msims(
 
     # multithreading doesn't improve performance here (need to check whether
     # this is still true after removing Geometry3D). Using multiprocessing instead.
-    # Probably need to confirm here that local dask scheduler doesn't conflict
-    # with dask distributed scheduler
-    try:
-        overlap_results = compute(overlap_results, scheduler="processes")[0]
-    except ValueError:
-        # if multiprocessing fails, try default scheduler
-        # (e.g. when running in JupyterLite)
+    if "scheduler" not in dask.config.config:
+        try:
+            overlap_results = compute(overlap_results, scheduler="processes")[
+                0
+            ]
+        except ValueError:
+            # if multiprocessing fails, try default scheduler
+            # (e.g. when running in JupyterLite)
+            overlap_results = compute(overlap_results)[0]
+    else:
         overlap_results = compute(overlap_results)[0]
 
     for pair, overlap_result in zip(pairs, overlap_results):
@@ -261,7 +265,7 @@ def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
     return ref_node
 
 
-def compute_graph_edges(input_g, weight_name="transform", scheduler=None):
+def compute_graph_edges(input_g, weight_name="transform"):
     """
     Perform simultaneous compute on all edge attributes with given name
     """
@@ -274,7 +278,7 @@ def compute_graph_edges(input_g, weight_name="transform", scheduler=None):
         if weight_name in g.edges[e]
     }
 
-    edge_weight_dict = compute(edge_weight_dict, scheduler=scheduler)[0]
+    edge_weight_dict = compute(edge_weight_dict)[0]
 
     for e, w in edge_weight_dict.items():
         g.edges[e][weight_name] = w

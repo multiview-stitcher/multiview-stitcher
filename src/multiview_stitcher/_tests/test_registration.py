@@ -1,6 +1,7 @@
 import logging
 
 import dask.array as da
+import dask.config
 import matplotlib.pyplot
 import numpy as np
 import pytest
@@ -664,28 +665,27 @@ def test_overlap_tolerance(ndim):
     #     use_positional_colors=False,
     #     )
 
-    params_orig = registration.register(
-        [
-            msi_utils.get_msim_from_sim(sim, scale_factors=[])
-            for sim in [sim0, sim1]
-        ],
-        transform_key=METADATA_TRANSFORM_KEY,
-        new_transform_key="registered_orig",
-        reg_channel_index=0,
-        scheduler="single-threaded",
-    )
+    with dask.config.set(scheduler="single-threaded"):
+        params_orig = registration.register(
+            [
+                msi_utils.get_msim_from_sim(sim, scale_factors=[])
+                for sim in [sim0, sim1]
+            ],
+            transform_key=METADATA_TRANSFORM_KEY,
+            new_transform_key="registered_orig",
+            reg_channel_index=0,
+        )
 
-    params_shifted = registration.register(
-        [
-            msi_utils.get_msim_from_sim(sim, scale_factors=[])
-            for sim in [sim0, sim1_shifted]
-        ],
-        transform_key=METADATA_TRANSFORM_KEY,
-        new_transform_key="registered_shifted",
-        overlap_tolerance={"x": overlap_x},
-        reg_channel_index=0,
-        scheduler="single-threaded",
-    )
+        params_shifted = registration.register(
+            [
+                msi_utils.get_msim_from_sim(sim, scale_factors=[])
+                for sim in [sim0, sim1_shifted]
+            ],
+            transform_key=METADATA_TRANSFORM_KEY,
+            new_transform_key="registered_shifted",
+            overlap_tolerance={"x": overlap_x},
+            reg_channel_index=0,
+        )
 
     params_diff = param_utils.translation_from_affine(
         (

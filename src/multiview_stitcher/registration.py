@@ -1651,7 +1651,7 @@ def register(
     post_registration_quality_threshold: float = 0.2,
     plot_summary: bool = False,
     pairs: list[tuple[int, int]] = None,
-    scheduler=None,
+    scheduler=None,  # deprecated, see docstring
     n_parallel_pairwise_regs: int = None,
     return_dict: bool = False,
 ):
@@ -1735,7 +1735,10 @@ def register(
         If set, initialises the view adjacency graph using the indicates
         pairs of view/tile indices, by default None
     scheduler : str, optional
-        Dask scheduler to use for parallel computation, by default None
+        (Deprecated since >0.1.28) Dask scheduler to use for parallel computation, by default None
+        This parameter is deprecated and no longer used.
+        Use a context manager instead to set the dask scheduler used within register(), e.g.
+        `with dask.config.set(scheduler='threads'): register(...)`
     n_parallel_pairwise_regs : int, optional
         Number of parallel pairwise registrations to run. Setting this is specifically
         useful for limiting memory usage.
@@ -1762,6 +1765,17 @@ def register(
             - 'metrics': Dictionary containing the following metrics:
                 - 'residuals': Edge residuals after groupwise resolution
     """
+
+    # warn about deprecated parameter
+    if scheduler is not None:
+        warnings.warn(
+            "The register(..., scheduler=) parameter is deprecated, no longer used "
+            "and will be removed in a future version. "
+            "Use a context manager to set the dask scheduler used within register(), e.g. "
+            "`with dask.config.set(scheduler='threads'): register(...)`",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     if pairwise_reg_func_kwargs is None:
         pairwise_reg_func_kwargs = {}
@@ -1818,7 +1832,6 @@ def register(
         overlap_tolerance=overlap_tolerance,
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
-        scheduler=scheduler,
         n_parallel_pairwise_regs=n_parallel_pairwise_regs,
     )
 
@@ -1948,7 +1961,6 @@ def register(
 def compute_pairwise_registrations(
     msims,
     g_reg,
-    scheduler=None,
     n_parallel_pairwise_regs=None,
     **register_kwargs,
 ):
@@ -1980,7 +1992,7 @@ def compute_pairwise_registrations(
     # report on how many pairwise registrations are computed in parallel
     if n_parallel_pairwise_regs is None:
         logger.info("Computing all pairwise registrations in parallel")
-        params = compute(params_xds, scheduler=scheduler)[0]
+        params = compute(params_xds)[0]
     elif n_parallel_pairwise_regs > 0:
         logger.info(
             "Pairwise registration(s) run in parallel: %s",
@@ -1990,7 +2002,6 @@ def compute_pairwise_registrations(
         for i in range(0, len(params_xds), n_parallel_pairwise_regs):
             params += compute(
                 params_xds[i : i + n_parallel_pairwise_regs],
-                scheduler=scheduler,
             )[0]
 
     for i, pair in enumerate(edges):
