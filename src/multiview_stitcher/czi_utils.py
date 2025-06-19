@@ -10,6 +10,8 @@ from dask import delayed
 
 try:
     import czifile
+
+    from . import czifile_patch  # noqa: F401
 except ImportError:
     czifile = None
 
