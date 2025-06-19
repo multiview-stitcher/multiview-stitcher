@@ -14,11 +14,6 @@ try:
 except ImportError:
     AICSImage = None
 
-try:
-    import czifile
-except ImportError:
-    czifile = None
-
 
 from multiview_stitcher import czi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
