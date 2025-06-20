@@ -210,9 +210,6 @@ def test_prune_view_adjacency_graph():
         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
     ]
 
-    # from multiview_stitcher import vis_utils
-    # vis_utils.plot_positions(msims, transform_key=METADATA_TRANSFORM_KEY)
-
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims,
         transform_key=METADATA_TRANSFORM_KEY,
