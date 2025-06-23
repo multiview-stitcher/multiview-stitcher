@@ -1694,16 +1694,34 @@ def register(
             extended by this value in all spatial dimensions.
         - if None, the full images are used for registration
     pairwise_reg_func : Callable, optional
-        Function used for registration.
+        Function used for registration. See the docs for the function API.
+        By default, phase_correlation_registration is used. Another useful built-in
+        registration function is `pairwise_reg_func=registration.registration_ANTsPy`
+        for translation, rigid, similarity or affine registration using ANTsPy.
     pairwise_reg_func_kwargs : dict, optional
-        Additional keyword arguments passed to the registration function
+        Additional keyword arguments passed to the registration function.
+        In the case of `pairwise_reg_func=registration_ANTsPy`, this can include e.g:
+        - 'transform_type': ['Translation', 'Rigid' 'Affine'] or ['Similarity']
+        For further parameters, see the docstring of the registration function.
     groupwise_resolution_method : str, optional
         Method used to determine the final transform parameters
         from pairwise registrations:
         - 'global_optimization': global optimization considering all pairwise transforms
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
     groupwise_resolution_kwargs : dict, optional
-        Additional keyword arguments passed to the groupwise optimization function
+        Additional keyword arguments passed to the groupwise optimization function.
+        Most important parameters:
+        - 'transform': str
+            Type of transformation to use for groupwise resolution.
+            Available types:
+            - 'translation': translation
+            - 'rigid': rigid body transformation
+            - 'similarity': similarity transformation
+            - 'affine': affine transformation
+        - 'abs_tol': float, optional
+            Absolute value of max edge residual below which the groupwise resolution stops.
+        - 'reference_view': int, optional
+            Reference view which keeps its transformation fixed.
     pre_registration_pruning_method : str, optional
         Method used to eliminate registration edges (e.g. diagonals) from the view adjacency
         graph before registration. Available methods:
