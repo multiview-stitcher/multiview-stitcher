@@ -2,7 +2,6 @@
 
 Here are some things to do if you encounter issues with the accuracy of the registration.
 
-
 ## Determining which pairs of tiles/views are registered
 
 Do you have a regular grid of input tiles? In that case it's recommended to use `register(..., pre_registration_pruning="keep_axis_aligned")` available in multiview-stitcher version>=0.18, which disregards diagonal overlaps during pairwise registration.
