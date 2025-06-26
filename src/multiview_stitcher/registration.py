@@ -1710,11 +1710,17 @@ def register(
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
     groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function.
+        IMPORTANT: The "transform" key here determines the final types of transformations.
+        By default this is {'transform': 'translation'}. Even if the pairwise registration
+        function returns a rigid (rotation) or affine transformation, the groupwise resolution
+        will restrict the final transformations to the indicated type (i.e. for a pairwise
+        registration function that returns a rigid transformation, it most cases it makes sense
+        to use 'rigid' as the groupwise resolution transform type).
         Most important parameters:
         - 'transform': str
             Type of transformation to use for groupwise resolution.
             Available types:
-            - 'translation': translation
+            - 'translation': translation (default)
             - 'rigid': rigid body transformation
             - 'similarity': similarity transformation
             - 'affine': affine transformation
