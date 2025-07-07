@@ -138,8 +138,9 @@ def Affine_Fit(from_pts, to_pts):
     # Augement Q with c and solve Q * a' = c by Gauss-Jordan
     M = [Q[i] + c[i] for i in range(dim + 1)]
     if not gauss_jordan(M):
-        # print "Error: singular matrix. Points are probably coplanar."
-        return False
+        raise ValueError(
+            "Error: singular matrix. Points are probably coplanar."
+        )
 
     # Make a result object
     class Transformation:
