@@ -84,13 +84,11 @@ def Affine_Fit(from_pts, to_pts):
     q = from_pts
     p = to_pts
     if len(q) != len(p) or len(q) < 1:
-        print("from_pts and to_pts must be of same size.")
-        return False
+        raise ValueError("from_pts and to_pts must be of same size.")
 
     dim = len(q[0])  # num of dimensions
     if len(q) < dim:
-        print("Too few points => under-determined system.")
-        return False
+        raise ValueError("Too few points => under-determined system.")
 
     # Make an empty (dim) x (dim+1) matrix and fill it
     c = [[0.0 for a in range(dim)] for i in range(dim + 1)]
@@ -140,8 +138,9 @@ def Affine_Fit(from_pts, to_pts):
     # Augement Q with c and solve Q * a' = c by Gauss-Jordan
     M = [Q[i] + c[i] for i in range(dim + 1)]
     if not gauss_jordan(M):
-        # print "Error: singular matrix. Points are probably coplanar."
-        return False
+        raise ValueError(
+            "Error: singular matrix. Points are probably coplanar."
+        )
 
     # Make a result object
     class Transformation:
