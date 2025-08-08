@@ -617,7 +617,7 @@ def dispatch_pairwise_reg_func(
             reg_result["affine_matrix"] = param_utils.identity_transform(
                 fixed_data.ndim
             )
-            reg_result["quality"] = np.nan
+            reg_result["quality"] = np.array(np.nan) # xarray-dask error if not set as array (?)
             return reg_result
 
     return pairwise_reg_func(
