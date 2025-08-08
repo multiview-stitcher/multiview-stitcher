@@ -617,7 +617,7 @@ def dispatch_pairwise_reg_func(
             reg_result["affine_matrix"] = param_utils.identity_transform(
                 fixed_data.ndim
             )
-            reg_result["quality"] = np.array(np.nan) # xarray-dask error if not set as array (?)
+            reg_result["quality"] = np.nan
             return reg_result
 
     return pairwise_reg_func(
@@ -849,7 +849,14 @@ def register_pair_of_msims(
     param_ds = xr.Dataset(
         data_vars={
             "transform": param_utils.affine_to_xaffine(affine_phys),
-            "quality": xr.DataArray(quality),
+            "quality": xr.DataArray(
+                da.from_delayed(
+                    # xarray-dask error if not set as array
+                    delayed(lambda x: np.array(x))(quality),
+                    shape=(),
+                    dtype=float,
+                )
+            )
         }
     )
 
