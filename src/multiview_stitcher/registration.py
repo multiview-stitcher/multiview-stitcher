@@ -849,7 +849,14 @@ def register_pair_of_msims(
     param_ds = xr.Dataset(
         data_vars={
             "transform": param_utils.affine_to_xaffine(affine_phys),
-            "quality": xr.DataArray(quality),
+            "quality": xr.DataArray(
+                da.from_delayed(
+                    # xarray-dask error if not set as array
+                    delayed(lambda x: np.array(x))(quality),
+                    shape=(),
+                    dtype=float,
+                )
+            )
         }
     )
 
@@ -2153,12 +2160,12 @@ E.g. using pip:
 
     # convert input images to ants images
     fixed_ants = ants.from_numpy(
-        fixed_data.astype(np.float32),
+        fixed_data.data.astype(np.float32),
         origin=[fixed_origin[dim] for dim in spatial_dims][::-1],
         spacing=[fixed_spacing[dim] for dim in spatial_dims][::-1],
     )
     moving_ants = ants.from_numpy(
-        moving_data.astype(np.float32),
+        moving_data.data.astype(np.float32),
         origin=[moving_origin[dim] for dim in spatial_dims][::-1],
         spacing=[moving_spacing[dim] for dim in spatial_dims][::-1],
     )
