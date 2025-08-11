@@ -2160,12 +2160,12 @@ E.g. using pip:
 
     # convert input images to ants images
     fixed_ants = ants.from_numpy(
-        fixed_data.astype(np.float32),
+        fixed_data.data.astype(np.float32),
         origin=[fixed_origin[dim] for dim in spatial_dims][::-1],
         spacing=[fixed_spacing[dim] for dim in spatial_dims][::-1],
     )
     moving_ants = ants.from_numpy(
-        moving_data.astype(np.float32),
+        moving_data.data.astype(np.float32),
         origin=[moving_origin[dim] for dim in spatial_dims][::-1],
         spacing=[moving_spacing[dim] for dim in spatial_dims][::-1],
     )
