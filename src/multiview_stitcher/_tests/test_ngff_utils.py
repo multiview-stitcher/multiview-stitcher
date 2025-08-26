@@ -1,4 +1,3 @@
-import json
 import os
 import shutil
 import tempfile
@@ -6,6 +5,7 @@ import tempfile
 import ngff_zarr
 import numpy as np
 import pytest
+import zarr
 
 from multiview_stitcher import (
     io,
@@ -113,8 +113,7 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
     with tempfile.TemporaryDirectory() as zarr_path:
         sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
 
-        with open(os.path.join(zarr_path, ".zattrs")) as f:
-            metadata = json.load(f)
+        metadata = zarr.open_group(zarr_path).attrs.asdict()
 
         if N_c is not None:
             assert "omero" in metadata
@@ -156,14 +155,13 @@ def test_multiscales_completion():
         # remove level 1 on disk
         shutil.rmtree(
             os.path.join(zarr_path, "1"),
-            # ignore_errors=True,
         )
 
         # write again
         sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
 
-        with open(os.path.join(zarr_path, ".zattrs")) as f:
-            json.load(f)
+        # check that metadata is present
+        zarr.open_group(zarr_path, mode="r").attrs.asdict()
 
         # check that level 1 is now present
         sim_read = ngff_utils.read_sim_from_ome_zarr(

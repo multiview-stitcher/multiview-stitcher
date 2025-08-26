@@ -6,7 +6,6 @@ import spatial_image as si
 import zarr
 from dask import array as da
 from ome_zarr import writer
-from ome_zarr.io import parse_url
 from xarray import DataTree
 
 from multiview_stitcher import msi_utils, param_utils
@@ -239,7 +238,6 @@ def write_sim_to_ome_zarr(
     if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
         sim.data = da.from_zarr(
             f"{output_zarr_url}/0",
-            dimension_separator="/",
         )
         top_level_exists = True
     else:
@@ -251,7 +249,6 @@ def write_sim_to_ome_zarr(
             chunks=sim.data.chunksize,
             dtype=sim.data.dtype,
             write_empty_chunks=False,
-            dimension_separator="/",
             fill_value=0,
             mode="w",
         )
@@ -260,7 +257,6 @@ def write_sim_to_ome_zarr(
         sim.data = sim.data.to_zarr(
             output_zarr_arr,
             overwrite=True,
-            dimension_separator="/",
             return_stored=True,
             compute=True,
         )
@@ -311,7 +307,6 @@ def write_sim_to_ome_zarr(
         if not overwrite and os.path.exists(f"{output_zarr_url}/{res_level}"):
             curr_res_array = da.from_zarr(
                 f"{output_zarr_url}/{res_level}",
-                dimension_separator="/",
             )
         else:
             curr_res_array = da.coarsen(
@@ -334,7 +329,6 @@ def write_sim_to_ome_zarr(
                 chunks=curr_res_array.chunksize,
                 dtype=curr_res_array.dtype,
                 write_empty_chunks=False,
-                dimension_separator="/",
                 fill_value=0,
                 mode="w",
             )
@@ -342,7 +336,6 @@ def write_sim_to_ome_zarr(
             curr_res_array = curr_res_array.to_zarr(
                 res_level_zarr_arr,
                 overwrite=True,
-                dimension_separator="/",
                 return_stored=True,
                 compute=True,
             )
@@ -350,8 +343,7 @@ def write_sim_to_ome_zarr(
         parent_res_array = curr_res_array
 
     if not top_level_exists or overwrite:
-        store = parse_url(output_zarr_url, mode="w").store
-        output_group = zarr.group(store=store)
+        output_group = zarr.open_group(output_zarr_url, mode="a")
         writer.write_multiscales_metadata(
             group=output_group,
             axes=axes,
@@ -437,8 +429,7 @@ def read_sim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    store = parse_url(zarr_path, mode="r").store
-    root = zarr.group(store=store)
+    root = zarr.open_group(zarr_path, mode="r")
 
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
