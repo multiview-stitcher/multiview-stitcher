@@ -13,7 +13,6 @@ import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from ome_zarr.io import parse_url
 from xarray import DataTree
 
 from multiview_stitcher import (
@@ -323,8 +322,7 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
     for a specific channel. If channel_label is None, the
     first channel is used.
     """
-    store = parse_url(ome_zarr_path, mode="r").store
-    root = zarr.group(store=store)
+    root = zarr.open_group(ome_zarr_path, mode="r")
 
     if "omero" not in root.attrs:
         return None
