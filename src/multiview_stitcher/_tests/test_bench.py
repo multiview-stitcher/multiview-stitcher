@@ -227,7 +227,7 @@ def test_reg_against_reference_params(dataset):
     )
 
     if "test_edge_pruning_method" in dataset:
-        g_adj = registration.prune_view_adjacency_graph(
+        g_adj = mv_graph.prune_view_adjacency_graph(
             g_adj,
             method=dataset["test_edge_pruning_method"],
         )
