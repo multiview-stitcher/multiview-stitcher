@@ -50,7 +50,7 @@ Below is a list of features which are either already implemented or are on the r
 ## Supported data formats
 
 - [x] OME-Zarr
-- [x] Zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: [multiscale-spatial-data](https://github.com/spatial-image/multiscale-spatial-image)
+- [x] Zarr based intermediate file format for reading and writing, compatible with parallel dask workflows: [multiscale-spatial-image](https://github.com/spatial-image/multiscale-spatial-image)
 - CZI input
   - [x] Multi-positioning
   - [ ] Light-sheet

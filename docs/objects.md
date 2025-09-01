@@ -6,7 +6,7 @@ _Modified_ instances of `multiscaleimage.MultiscaleImage`.
 
 Modification: Each scale has at least one _named_ [affine transform parameter](#affine-transformation-parameters) attached to it as further data variables next to `scale<scale>/image`.
 
-While instances of [`multiscale-spatial-image`](https://github.com/multiscale-spatial-data) can be serialized to and from NGFF, modified instances of `multiscaleimage.MultiscaleImage` as used by `multiview-stitcher` cannot (yet) be serialized to and from NGFF (see [here](https://github.com/ome/ngff/issues/94)), as the support for affine transforms is missing.
+While instances of [`multiscale-spatial-image`](https://github.com/spatial-image/multiscale-spatial-image) can be serialized to and from NGFF, modified instances of `multiscaleimage.MultiscaleImage` as used by `multiview-stitcher` cannot (yet) be serialized to and from NGFF (see [here](https://github.com/ome/ngff/issues/94)), as the support for affine transforms is missing.
 
 Example string representation:
 
