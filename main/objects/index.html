@@ -1056,7 +1056,7 @@
 <h2 id="image">Image</h2>
 <p><em>Modified</em> instances of <code>multiscaleimage.MultiscaleImage</code>.</p>
 <p>Modification: Each scale has at least one <em>named</em> <a href="#affine-transformation-parameters">affine transform parameter</a> attached to it as further data variables next to <code>scale&lt;scale&gt;/image</code>.</p>
-<p>While instances of <a href="https://github.com/multiscale-spatial-data"><code>multiscale-spatial-image</code></a> can be serialized to and from NGFF, modified instances of <code>multiscaleimage.MultiscaleImage</code> as used by <code>multiview-stitcher</code> cannot (yet) be serialized to and from NGFF (see <a href="https://github.com/ome/ngff/issues/94">here</a>), as the support for affine transforms is missing.</p>
+<p>While instances of <a href="https://github.com/spatial-image/multiscale-spatial-image"><code>multiscale-spatial-image</code></a> can be serialized to and from NGFF, modified instances of <code>multiscaleimage.MultiscaleImage</code> as used by <code>multiview-stitcher</code> cannot (yet) be serialized to and from NGFF (see <a href="https://github.com/ome/ngff/issues/94">here</a>), as the support for affine transforms is missing.</p>
 <p>Example string representation:</p>
 <p><code>print(msims[0])</code>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>DataTree(&#39;None&#39;, parent=None)
