@@ -29,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Information Analysis",
@@ -119,7 +120,7 @@ namespaces = false
 
 [tool.black]
 line-length = 79
-target-version = ['py39', 'py310', 'py311']
+target-version = ['py310', 'py311', 'py312', 'py313']
 force-exclude = '''
     src/multiview_stitcher/czifile_patch.py
     '''
