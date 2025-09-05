@@ -1,14 +1,126 @@
 [build-system]
-requires = ["setuptools>=42.0.0,<78.0.0", "wheel", "setuptools_scm"] # upper bound for setuptools until https://github.com/soft-matter/pims/pull/463 is released
+requires = [
+    "setuptools>=42.0.0",
+    "wheel",
+    "setuptools_scm"
+]
 build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools_scm]
 write_to = "src/multiview_stitcher/_version.py"
 
+
+[project]
+name = "multiview-stitcher"
+description = "Registration and fusion of large imaging datasets in 2D and 3D."
+authors = [
+    { name = "Marvin Albert", email = "marvin.albert@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Utilities",
+    "Operating System :: OS Independent",
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "numpy >=1.18",
+    "dask",
+    "dask_image",
+    "zarr",
+    "xarray >=2024.10.0",
+    "tifffile >=2022.7.28",
+    "networkx",
+    "tqdm",
+    "matplotlib",
+    "scikit-image >=0.21.0",
+    "spatial_image ==1.2.3",
+    "multiscale_spatial_image ==2.0.3",
+    "ngff-zarr >=0.12.2",
+    "ome-zarr >=0.10.2"
+]
+dynamic = [
+    "version",
+]
+
+[project.license]
+text = "BSD 3-Clause"
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.urls]
+"Bug Tracker" = "https://github.com/multiview-stitcher/multiview-stitcher/issues"
+Documentation = "https://multiview-stitcher.github.io/multiview-stitcher/"
+"Source Code" = "https://github.com/multiview-stitcher/multiview-stitcher"
+"User Support" = "https://github.com/multiview-stitcher/multiview-stitcher/issues"
+
+
+[project.optional-dependencies]
+ants = [
+    "antspyx >=0.6.0",
+]
+aicsimageio = [
+    "aicsimageio ==4.14.0",
+    "aicspylibczi",
+]
+czi = [
+    "czifile ==2019.7.2.1",
+    "imagecodecs >=2023.7.10",
+]
+dev = [
+    "tox",
+    "jupyter",
+    "pytest <8.0.0",  # https://github.com/pytest-dev/pytest/issues/11779
+    "pytest-cov",  # https://pytest-cov.readthedocs.io/en/latest/
+    "pytest-benchmark >5",
+    "nbmake",  # notebook testing
+    "antspyx >=0.6.0",
+    "czifile ==2019.7.2.1",
+    "imagecodecs >=2023.7.10",
+    "pre-commit",
+]
+
+
+[tool.setuptools]
+license-files = [
+    "LICENSE",
+]
+
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]
+namespaces = false
+
+[tool.setuptools.package-data]
+"*" = [
+    "*.md",
+    "*.yaml",
+    "test-datasets/*"
+]
+
+
 [tool.black]
 line-length = 79
-target-version = ['py39', 'py310', 'py311']
+target-version = ['py310', 'py311', 'py312', 'py313']
 force-exclude = '''
     src/multiview_stitcher/czifile_patch.py
     '''
