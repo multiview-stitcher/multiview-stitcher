@@ -1471,12 +1471,10 @@ def optimize_bead_subgraph(
                     transform_generator.estimate(node_pts, adj_pts)
                     transform_generator.residuals(node_pts, adj_pts)
 
-                    new_affines[curr_node] = param_utils.matmul_xparams(
-                        param_utils.affine_to_xaffine(
-                            transform_generator.params
-                        ),
+                    new_affines[curr_node] = np.matmul(
+                        transform_generator.params,
                         new_affines[curr_node],
-                    ).data
+                    )
 
                 total_iterations += 1
 
