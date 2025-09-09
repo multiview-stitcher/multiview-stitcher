@@ -1,0 +1,68 @@
+# This workflow will run tests periodically so that issues arising
+# from interactions with the ecosystem are caught early.
+
+name: Cron Job Test
+
+# +-------------------------------------------+
+# |          GitHub Actions Cron Job          |
+# |                                           |
+# |    Schedule: 0 0 * * * (Every midnight)   |
+# |                                           |
+# |       ┌───────────── Minute (0 - 59)      |
+# |       │ ┌───────────── Hour (0 - 23)      |
+# |       │ │ ┌───────────── Day of month     |
+# |       │ │ │ ┌───────────── Month (1-12)   |
+# |       │ │ │ │ ┌───────────── Day of week  |
+# |       │ │ │ │ │                           |
+# |       │ │ │ │ │                           |
+# |       0 0 * * *                           |
+# +-------------------------------------------+
+
+on:
+  schedule:
+    # Example cron expressions:
+    # - '0 0 * * *'   # Run every day at midnight UTC
+    # - '15 3 * * *'  # Run every day at 3:15 AM UTC
+    # - '0 */6 * * *' # Run every 6 hours
+    - cron: '0 12 * * *'  # Run every day at noon UTC
+
+
+# same job as defined in test_and_deploy.yml
+jobs:
+  test:
+    name: ${{ matrix.platform }} py${{ matrix.python-version }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # note: if you need dependencies from conda, considering using
+      # setup-miniconda: https://github.com/conda-incubator/setup-miniconda
+      # and
+      # tox-conda: https://github.com/tox-dev/tox-conda
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install setuptools tox tox-gh-actions
+
+      # this runs the platform-specific tests declared in tox.ini
+      - name: Test with tox
+        run: python -m tox
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      # - name: Coverage
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     fail_ci_if_error: false # optional (default = false)
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     verbose: false # optional (default = false)

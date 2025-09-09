@@ -10,7 +10,7 @@ For visualization, the associated [`napari-stitcher`](https://github.com/multivi
 
 With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
 
-It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-data) classes for image metadata handling and [`dask`](https://github.com/dask) (and [`dask-image`](https://github.com/dask-image)) for chunked and distributed image processing.
+It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-image/spatial-image) classes for image metadata handling and [`dask`](https://github.com/dask) (and [`dask-image`](https://github.com/dask-image)) for chunked and distributed image processing.
 
 !!! note "`multiview-stitcher` as a modular framework for registration and fusion"
     While `multiview-stitcher` contains a set of built-in functions for stitching, it is also possible to extend the package with custom functions. This can be useful for adding new registration algorithms, fusion methods, or other functionality. Have a look at the extension API documentation for more information.

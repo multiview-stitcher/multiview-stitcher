@@ -91,6 +91,6 @@ site/
 
 notebooks/data
 notebooks/Grid*
-notebooks/Stitching_TIFF/*
+notebooks/Stitching_TIFF*
 notebooks/IP_TIFF/*
 src/multiview_stitcher/_benchmarks/data
