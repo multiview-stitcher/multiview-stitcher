@@ -53,14 +53,15 @@ from multiview_stitcher import spatial_image_utils as si_utils
 bioio_xr = BioImage("my_file.tiff").get_xarray_dask_stack().squeeze()
 
 # ensure that dimension names are lowercase (expected by the get_sim_from_array function)
-dimension_names_dict = {dim: dim.lower() for dim in bioio_xr.dims}
-bioio_xr = bioio_xr.rename(dimension_names_dict)
+bioio_xr = bioio_xr.rename(
+    {dim: dim.lower() for dim in bioio_xr.dims}
+    )
 
 sim = si_utils.get_sim_from_array(
     bioio_xr.data,
     dims=bioio_xr.dims,
-    scale=si_utils.get_spacing_from_sim(bioio_xr),          # dictionary of voxel sizes
-    translation=si_utils.get_origin_from_sim(bioio_xr),     # dictionary of origin coordinates
+    scale=si_utils.get_spacing_from_sim(bioio_xr),      # dict of voxel sizes for each dim
+    translation=si_utils.get_origin_from_sim(bioio_xr), # dict of origin coordinates for each dim
     c_coords=bioio_xr.coords["c"].values,
     transform_key="stage_metadata",
 )
