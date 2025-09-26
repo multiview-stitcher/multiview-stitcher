@@ -46,17 +46,21 @@ Further, `multiview_stitcher.ngff_utils` provides some convenience functions for
 [`bioio`](https://github.com/bioio-devs/bioio) is a very convenient library for reading a large variety of image files and it includes support for lazy loading. Here's example code of how to use `bioio` to load an image file into a tile compatible with `multiview-stitcher`:
 
 ```python
-import bioio
+from bioio import BioImage
 from multiview_stitcher import spatial_image_utils as si_utils
 
 # use bioio to load the image as a xarray.DataArray
 bioio_xr = BioImage("my_file.tiff").get_xarray_dask_stack().squeeze()
 
+# ensure that dimension names are lowercase (expected by the get_sim_from_array function)
+dimension_names_dict = {dim: dim.lower() for dim in bioio_xr.dims}
+bioio_xr = bioio_xr.rename(dimension_names_dict)
+
 sim = si_utils.get_sim_from_array(
     bioio_xr.data,
     dims=bioio_xr.dims,
-    scale=si_utils.get_spatial_dims_from_sim(bioio_xr),
-    translation=si_utils.get_origin_from_sim(bioio_xr),
+    scale=si_utils.get_spacing_from_sim(bioio_xr),          # dictionary of voxel sizes
+    translation=si_utils.get_origin_from_sim(bioio_xr),     # dictionary of origin coordinates
     c_coords=bioio_xr.coords["c"].values,
     transform_key="stage_metadata",
 )
