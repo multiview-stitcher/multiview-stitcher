@@ -744,8 +744,18 @@ def register_pair_of_msims(
         sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
         sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
         registration_binning = {dim: 1 for dim in spatial_dims}
-        
-    elif registration_binning is not None:
+
+    else:
+        if registration_binning is None:
+            logger.info("Determining optimal registration binning")
+            sim1_0 = msi_utils.get_sim_from_msim(msim1, scale="scale0")
+            sim2_0 = msi_utils.get_sim_from_msim(msim2, scale="scale0")
+            registration_binning = get_optimal_registration_binning(
+                sim1_0, sim2_0
+            )
+            logger.info("Determined optimal registration binning to be %s",
+                registration_binning)
+
         # Only registration_binning specified: find optimal resolution level
         scale_key, remaining_binning = msi_utils.get_res_level_from_binning_factors(
             msim1, registration_binning
@@ -757,16 +767,8 @@ def register_pair_of_msims(
         sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
         sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
         registration_binning = remaining_binning
-        
-    else:
-        # Neither specified: determine optimal binning and use scale0
-        sim1 = msi_utils.get_sim_from_msim(msim1)
-        sim2 = msi_utils.get_sim_from_msim(msim2)
-        
-        logger.info("Determining optimal registration binning")
-        registration_binning = get_optimal_registration_binning(
-            sim1, sim2
-        )
+        logger.info('Determined reg_res_level=%s from registration_binning',
+            scale_key)
 
     reg_sims = [sim1, sim2]
 

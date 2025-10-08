@@ -744,6 +744,13 @@ def test_registration_with_reg_res_level():
         transform_key=METADATA_TRANSFORM_KEY,
         new_transform_key=None,
     )
+
+    # Test 4: Don't specify either (should auto-determine)
+    params_none = registration.register(
+        [msims[0], msims[1]],
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key=None,
+    )
     
     # Test 4: Verify error is raised for incompatible reg_res_level and binning
     try:
@@ -767,7 +774,7 @@ def test_registration_with_reg_res_level():
     )
     tolerance = 2.0
     
-    for params in [params_level1, params_binning, params_both]:
+    for params in [params_level1, params_binning, params_both, params_none]:
         ctrl_pt = np.zeros((2,))
         ctrl_pts_t = [
             transformation.transform_pts([ctrl_pt], affine.squeeze())[0]
