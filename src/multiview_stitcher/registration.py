@@ -630,6 +630,7 @@ def register_pair_of_msims(
     msim2,
     transform_key,
     registration_binning=None,
+    reg_res_level=None,
     overlap_tolerance: Union[int, dict[str, int]] = None,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
@@ -650,6 +651,11 @@ def register_pair_of_msims(
         This affects the calculation of the overlap region and is passed on to the
         registration func, by default None
     registration_binning : dict, optional
+        Binning factors to apply for registration. If reg_res_level is also provided,
+        the binning factors must be compatible with the resolution level.
+    reg_res_level : int, optional
+        Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).
+        If None, resolution level is automatically determined from registration_binning.
     overlap_tolerance : float, optional
         Extend overlap regions considered for pairwise registration.
         - if 0, the overlap region is the intersection of the bounding boxes.
@@ -690,16 +696,81 @@ def register_pair_of_msims(
             for dim in spatial_dims
         }
 
-    sim1 = msi_utils.get_sim_from_msim(msim1)
-    sim2 = msi_utils.get_sim_from_msim(msim2)
+    # Determine which resolution level to use
+    if reg_res_level is not None and registration_binning is not None:
+        # Both specified: validate compatibility
+        scale_key = f"scale{reg_res_level}"
+        # Validate that the scale exists
+        if scale_key not in msi_utils.get_sorted_scale_keys(msim1):
+            raise ValueError(
+                f"Resolution level {reg_res_level} (scale{reg_res_level}) "
+                f"does not exist in the multiscale image"
+            )
+        
+        # Get sims at the specified resolution level
+        sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
+        sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
+        
+        # Check if binning is compatible with this resolution level
+        sim0_1 = msi_utils.get_sim_from_msim(msim1, scale="scale0")
+        shape0 = {dim: len(sim0_1.coords[dim]) for dim in spatial_dims}
+        shape_level = {dim: len(sim1.coords[dim]) for dim in spatial_dims}
+        
+        actual_factors = {
+            dim: shape0[dim] / shape_level[dim] for dim in spatial_dims
+        }
+        
+        for dim in spatial_dims:
+            if dim in registration_binning:
+                actual_factor = int(round(actual_factors[dim]))
+                if registration_binning[dim] % actual_factor != 0:
+                    raise ValueError(
+                        f"Resolution level {reg_res_level} has downsampling "
+                        f"factor {actual_factor} for dimension {dim}, which is "
+                        f"not a divisor of registration_binning[{dim}]="
+                        f"{registration_binning[dim]}"
+                    )
+        
+        # registration_binning will be applied below
+        
+    elif reg_res_level is not None:
+        # Only reg_res_level specified: use that level directly
+        scale_key = f"scale{reg_res_level}"
+        if scale_key not in msi_utils.get_sorted_scale_keys(msim1):
+            raise ValueError(
+                f"Resolution level {reg_res_level} (scale{reg_res_level}) "
+                f"does not exist in the multiscale image"
+            )
+        sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
+        sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
+        registration_binning = {dim: 1 for dim in spatial_dims}
+
+    else:
+        if registration_binning is None:
+            logger.info("Determining optimal registration binning")
+            sim1_0 = msi_utils.get_sim_from_msim(msim1, scale="scale0")
+            sim2_0 = msi_utils.get_sim_from_msim(msim2, scale="scale0")
+            registration_binning = get_optimal_registration_binning(
+                sim1_0, sim2_0
+            )
+            logger.info("Determined optimal registration binning to be %s",
+                registration_binning)
+
+        # Only registration_binning specified: find optimal resolution level
+        scale_key, remaining_binning = msi_utils.get_res_level_from_binning_factors(
+            msim1, registration_binning
+        )
+        logger.info(
+            "Using resolution level %s for registration with remaining binning %s",
+            scale_key, remaining_binning
+        )
+        sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
+        sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
+        registration_binning = remaining_binning
+        logger.info('Determined reg_res_level=%s from registration_binning',
+            scale_key)
 
     reg_sims = [sim1, sim2]
-
-    if registration_binning is None:
-        logger.info("Determining optimal registration binning")
-        registration_binning = get_optimal_registration_binning(
-            reg_sims[0], reg_sims[1]
-        )
 
     # logging without use of %s
     logger.info("Registration binning: %s", registration_binning)
@@ -1645,6 +1716,7 @@ def register(
     reg_channel: str = None,
     new_transform_key: str = None,
     registration_binning: dict[str, int] = None,
+    reg_res_level: int = None,
     overlap_tolerance: Union[int, dict[str, int]] = 0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs: dict = None,
@@ -1691,7 +1763,13 @@ def register(
         If set, the registration result will be registered as a new extrinsic
         coordinate system in the input views (with the given name), by default None
     registration_binning : dict, optional
-        Binning applied to each dimensionn during registration, by default None
+        Binning applied to each dimension during registration, by default None.
+        If reg_res_level is also provided, the binning factors must be compatible 
+        with the resolution level.
+    reg_res_level : int, optional
+        Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).
+        If None and registration_binning is provided, the optimal resolution level 
+        is automatically determined. By default None.
     overlap_tolerance : float, optional
         Extend overlap regions considered for pairwise registration.
         - if 0, the overlap region is the intersection of the bounding boxes.
@@ -1858,6 +1936,7 @@ def register(
         g_reg,
         transform_key=transform_key,
         registration_binning=registration_binning,
+        reg_res_level=reg_res_level,
         overlap_tolerance=overlap_tolerance,
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
