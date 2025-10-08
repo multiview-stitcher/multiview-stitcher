@@ -350,6 +350,7 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
     return np.array([window["start"], window["end"]])
 
 
+import ngff_zarr
 def generate_neuroglancer_json(
     ome_zarr_paths,
     ome_zarr_urls,
@@ -427,7 +428,7 @@ def generate_neuroglancer_json(
         window = None
 
     output_dimensions = {
-        dim: [spacing[dim] * 1e-6 if dim in sdims else 1.0, ""] for dim in dims
+        dim: [spacing[dim] * 1e-6 if dim in sdims else 1e-6, ""] for dim in dims
     }
 
     ng_config = {
@@ -442,9 +443,9 @@ def generate_neuroglancer_json(
     if not single_layer:
         ng_config["layers"] = [
             {
-                "type": "image",
+                # "type": "image",
                 "source": {
-                    "url": f"zarr://{url}",
+                    "url": f"{url}",
                     "transform": {
                         # neuroglancer drops last row of homogeneous matrix
                         "matrix": [
@@ -484,10 +485,10 @@ def generate_neuroglancer_json(
     else:
         ng_config["layers"] = [
             {
-                "type": "image",
+                # "type": "image",
                 "source": [
                     {
-                        "url": f"zarr://{url}",
+                        "url": f"{url}",
                         "transform": {
                             # neuroglancer drops last row of homogeneous matrix
                             "matrix": [
