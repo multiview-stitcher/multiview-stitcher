@@ -321,7 +321,7 @@ def get_res_level_from_binning_factors(msim, binning_factors):
     spatial_dims = si_utils.get_spatial_dims_from_sim(sim0)
     shape0 = {dim: len(sim0.coords[dim]) for dim in spatial_dims}
     
-    # Iterate through scales to find the best match
+    # Start with scale0 as the default
     best_scale = "scale0"
     best_remaining_binning = binning_factors.copy()
     
@@ -334,14 +334,11 @@ def get_res_level_from_binning_factors(msim, binning_factors):
             dim: shape0[dim] / shape[dim] for dim in spatial_dims
         }
         
-        # Check if all scale factors are >= binning factors
-        # and are integer multiples of binning factors
+        # Check if this scale is suitable for all dimensions
         valid = True
-        remaining_binning = {}
         
         for dim in spatial_dims:
             if dim not in binning_factors:
-                remaining_binning[dim] = 1
                 continue
                 
             target_factor = binning_factors[dim]
@@ -354,26 +351,30 @@ def get_res_level_from_binning_factors(msim, binning_factors):
             
             actual_factor_int = int(round(actual_factor))
             
-            # If scale factor is less than target, this scale is too high resolution
-            if actual_factor_int < target_factor:
+            # Scale factor must be <= target (we can't use a lower resolution than requested)
+            if actual_factor_int > target_factor:
                 valid = False
                 break
                 
-            # Check if it's an integer multiple of target
-            if actual_factor_int % target_factor != 0:
+            # Target must be an integer multiple of scale factor
+            if target_factor % actual_factor_int != 0:
                 valid = False
                 break
-            
-            # Calculate remaining binning needed
-            remaining_binning[dim] = target_factor // actual_factor_int if actual_factor_int > 0 else target_factor
         
         if valid:
+            # This scale is usable, calculate remaining binning needed
+            remaining_binning = {}
+            for dim in spatial_dims:
+                if dim not in binning_factors:
+                    remaining_binning[dim] = 1
+                else:
+                    actual_factor_int = int(round(scale_factors[dim]))
+                    # Remaining binning = target / actual
+                    remaining_binning[dim] = binning_factors[dim] // actual_factor_int
+            
             best_scale = scale_key
             best_remaining_binning = remaining_binning
-        else:
-            # Once we hit an invalid scale, we can stop
-            # (scales are ordered from high to low resolution)
-            break
+            # Continue to check if there's an even better (lower resolution) scale
     
     return best_scale, best_remaining_binning
 

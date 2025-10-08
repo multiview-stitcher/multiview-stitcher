@@ -698,3 +698,82 @@ def test_overlap_tolerance(ndim):
     )
 
     np.allclose(params_diff, [0] * (ndim - 1) + [shift_x], atol=1.5)
+
+
+def test_registration_with_reg_res_level():
+    """Test that registration can use precomputed resolution levels."""
+    # Create test data with multiscale structure
+    example_data_path = sample_data.get_mosaic_sample_data_path()
+    sims = io.read_mosaic_into_sims(example_data_path)
+    
+    sims = [
+        spatial_image_utils.sim_sel_coords(sim, {"c": sim.coords["c"][0]})
+        for sim in sims
+    ]
+    
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    
+    # Create multiscale images with multiple resolution levels
+    scale_factors = [{"y": 2, "x": 2}, {"y": 2, "x": 2}]  # scale1: 2x, scale2: 4x
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
+        for sim in sims
+    ]
+    
+    # Test 1: Use reg_res_level=1 directly
+    params_level1 = registration.register(
+        [msims[0], msims[1]],
+        reg_res_level=1,
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key=None,
+    )
+    
+    # Test 2: Use registration_binning that matches scale1
+    params_binning = registration.register(
+        [msims[0], msims[1]],
+        registration_binning={"y": 2, "x": 2},
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key=None,
+    )
+    
+    # Test 3: Use both reg_res_level and registration_binning (compatible)
+    params_both = registration.register(
+        [msims[0], msims[1]],
+        reg_res_level=1,
+        registration_binning={"y": 2, "x": 2},
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key=None,
+    )
+    
+    # Test 4: Verify error is raised for incompatible reg_res_level and binning
+    try:
+        registration.register(
+            [msims[0], msims[1]],
+            reg_res_level=1,  # scale1 has factor 2
+            registration_binning={"y": 3, "x": 3},  # not compatible with factor 2
+            transform_key=METADATA_TRANSFORM_KEY,
+            new_transform_key=None,
+        )
+        assert False, "Should have raised ValueError for incompatible parameters"
+    except ValueError as e:
+        assert "not an integer multiple" in str(e)
+    
+    # Verify that all valid registrations produce similar results
+    # (should be within tolerance since they use the same or similar data)
+    gt_shift = xr.DataArray(
+        [2.5, 7.5],
+        dims=["x_in"],
+        coords={"x_in": ["y", "x"]},
+    )
+    tolerance = 2.0
+    
+    for params in [params_level1, params_binning, params_both]:
+        ctrl_pt = np.zeros((2,))
+        ctrl_pts_t = [
+            transformation.transform_pts([ctrl_pt], affine.squeeze())[0]
+            for affine in params
+        ]
+        rel_pos = ctrl_pts_t[0] - ctrl_pts_t[1]
+        
+        # Check that the relative position is close to ground truth
+        assert np.allclose(rel_pos, gt_shift, atol=tolerance)

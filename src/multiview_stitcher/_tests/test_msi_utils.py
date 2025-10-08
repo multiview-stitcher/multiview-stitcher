@@ -81,3 +81,53 @@ def test_update_msim_transforms_zarr():
     )
     assert "test_key" in keys
     assert "image" in after_update["scale0"].data_vars
+
+
+def test_get_res_level_from_binning_factors():
+    """Test that get_res_level_from_binning_factors returns correct resolution level."""
+    # Create a test image with known multiscale structure
+    # scale0: 100x100, scale1: 50x50 (factor 2), scale2: 25x25 (factor 4)
+    sim = si_utils.get_sim_from_array(
+        np.ones((100, 100)),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    
+    # Create multiscale with specific factors
+    scale_factors = [
+        {"y": 2, "x": 2},  # scale1: 50x50
+        {"y": 2, "x": 2},  # scale2: 25x25
+    ]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
+    
+    # Test case 1: binning factors match scale1 exactly
+    scale_key, remaining = msi_utils.get_res_level_from_binning_factors(
+        msim, {"y": 2, "x": 2}
+    )
+    assert scale_key == "scale1"
+    assert remaining == {"y": 1, "x": 1}
+    
+    # Test case 2: binning factors match scale2 exactly
+    scale_key, remaining = msi_utils.get_res_level_from_binning_factors(
+        msim, {"y": 4, "x": 4}
+    )
+    assert scale_key == "scale2"
+    assert remaining == {"y": 1, "x": 1}
+    
+    # Test case 3: binning factors less than any scale (use scale0)
+    scale_key, remaining = msi_utils.get_res_level_from_binning_factors(
+        msim, {"y": 1, "x": 1}
+    )
+    assert scale_key == "scale0"
+    assert remaining == {"y": 1, "x": 1}
+    
+    # Test case 4: binning factors require additional binning on top of scale1
+    # We want binning of 4, and scale1 provides 2, so we need remaining 2
+    scale_key, remaining = msi_utils.get_res_level_from_binning_factors(
+        msim, {"y": 2, "x": 2}
+    )
+    assert scale_key == "scale1"
+    # Remaining should be 1 since scale1 already gives us factor 2
+    assert remaining == {"y": 1, "x": 1}
+
