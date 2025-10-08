@@ -723,11 +723,11 @@ def register_pair_of_msims(
         for dim in spatial_dims:
             if dim in registration_binning:
                 actual_factor = int(round(actual_factors[dim]))
-                if actual_factor % registration_binning[dim] != 0:
+                if registration_binning[dim] % actual_factor != 0:
                     raise ValueError(
                         f"Resolution level {reg_res_level} has downsampling "
                         f"factor {actual_factor} for dimension {dim}, which is "
-                        f"not an integer multiple of registration_binning[{dim}]="
+                        f"not a divisor of registration_binning[{dim}]="
                         f"{registration_binning[dim]}"
                     )
         

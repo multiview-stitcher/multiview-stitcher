@@ -750,13 +750,13 @@ def test_registration_with_reg_res_level():
         registration.register(
             [msims[0], msims[1]],
             reg_res_level=1,  # scale1 has factor 2
-            registration_binning={"y": 3, "x": 3},  # not compatible with factor 2
+            registration_binning={"y": 3, "x": 3},  # not compatible with factor 2 (3 % 2 != 0)
             transform_key=METADATA_TRANSFORM_KEY,
             new_transform_key=None,
         )
         assert False, "Should have raised ValueError for incompatible parameters"
     except ValueError as e:
-        assert "not an integer multiple" in str(e)
+        assert "not a divisor" in str(e)
     
     # Verify that all valid registrations produce similar results
     # (should be within tolerance since they use the same or similar data)
