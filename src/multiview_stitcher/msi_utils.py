@@ -4,6 +4,7 @@ from pathlib import Path
 
 import dask.array as da
 import multiscale_spatial_image as msi
+import numpy as np
 import xarray as xr
 
 from multiview_stitcher import param_utils
@@ -289,6 +290,92 @@ def get_first_scale_above_target_spacing(msim, target_spacing, dim="y"):
             break
 
     return scale
+
+
+def get_res_level_from_binning_factors(msim, binning_factors):
+    """
+    Find the optimal resolution level for the given binning factors.
+    
+    Returns the lowest resolution level such that the downsampling factors 
+    for all dimensions are >= the requested binning factors and are integer 
+    multiples of the binning factors.
+    
+    Parameters
+    ----------
+    msim : MultiscaleSpatialImage
+        Multiscale spatial image
+    binning_factors : dict[str, int]
+        Target binning factors for each spatial dimension
+        
+    Returns
+    -------
+    str
+        Scale key (e.g., 'scale0', 'scale1', etc.)
+    dict[str, int]
+        Remaining binning factors to apply after selecting the resolution level
+    """
+    sorted_scale_keys = get_sorted_scale_keys(msim)
+    
+    # Get the shape at scale0
+    sim0 = get_sim_from_msim(msim, scale="scale0")
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sim0)
+    shape0 = {dim: len(sim0.coords[dim]) for dim in spatial_dims}
+    
+    # Iterate through scales to find the best match
+    best_scale = "scale0"
+    best_remaining_binning = binning_factors.copy()
+    
+    for scale_key in sorted_scale_keys:
+        sim = get_sim_from_msim(msim, scale=scale_key)
+        shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
+        
+        # Calculate the downsampling factor for this scale
+        scale_factors = {
+            dim: shape0[dim] / shape[dim] for dim in spatial_dims
+        }
+        
+        # Check if all scale factors are >= binning factors
+        # and are integer multiples of binning factors
+        valid = True
+        remaining_binning = {}
+        
+        for dim in spatial_dims:
+            if dim not in binning_factors:
+                remaining_binning[dim] = 1
+                continue
+                
+            target_factor = binning_factors[dim]
+            actual_factor = scale_factors[dim]
+            
+            # Check if actual_factor is close to an integer
+            if not np.isclose(actual_factor, round(actual_factor), rtol=1e-6):
+                valid = False
+                break
+            
+            actual_factor_int = int(round(actual_factor))
+            
+            # If scale factor is less than target, this scale is too high resolution
+            if actual_factor_int < target_factor:
+                valid = False
+                break
+                
+            # Check if it's an integer multiple of target
+            if actual_factor_int % target_factor != 0:
+                valid = False
+                break
+            
+            # Calculate remaining binning needed
+            remaining_binning[dim] = target_factor // actual_factor_int if actual_factor_int > 0 else target_factor
+        
+        if valid:
+            best_scale = scale_key
+            best_remaining_binning = remaining_binning
+        else:
+            # Once we hit an invalid scale, we can stop
+            # (scales are ordered from high to low resolution)
+            break
+    
+    return best_scale, best_remaining_binning
 
 
 def get_ndim(msim):
