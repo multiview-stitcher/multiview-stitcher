@@ -1133,7 +1133,7 @@ reg_res_level : int, optional
     Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).
     If None and registration_binning is provided, the optimal resolution level 
     is automatically determined. By default None.
-overlap_tolerance : float, optional
+overlap_tolerance : float or dict, optional
     Extend overlap regions considered for pairwise registration.
     - if 0, the overlap region is the intersection of the bounding boxes.
     - if &gt; 0, the overlap region is the intersection of the bounding boxes
@@ -1597,7 +1597,7 @@ dict
 </span><span id="__span-0-1717"><a id="__codelineno-0-1717" name="__codelineno-0-1717"></a>    <span class="n">new_transform_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-1718"><a id="__codelineno-0-1718" name="__codelineno-0-1718"></a>    <span class="n">registration_binning</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-1719"><a id="__codelineno-0-1719" name="__codelineno-0-1719"></a>    <span class="n">reg_res_level</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-1720"><a id="__codelineno-0-1720" name="__codelineno-0-1720"></a>    <span class="n">overlap_tolerance</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+</span><span id="__span-0-1720"><a id="__codelineno-0-1720" name="__codelineno-0-1720"></a>    <span class="n">overlap_tolerance</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
 </span><span id="__span-0-1721"><a id="__codelineno-0-1721" name="__codelineno-0-1721"></a>    <span class="n">pairwise_reg_func</span><span class="o">=</span><span class="n">phase_correlation_registration</span><span class="p">,</span>
 </span><span id="__span-0-1722"><a id="__codelineno-0-1722" name="__codelineno-0-1722"></a>    <span class="n">pairwise_reg_func_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-1723"><a id="__codelineno-0-1723" name="__codelineno-0-1723"></a>    <span class="n">groupwise_resolution_method</span><span class="o">=</span><span class="s2">&quot;global_optimization&quot;</span><span class="p">,</span>
@@ -1650,7 +1650,7 @@ dict
 </span><span id="__span-0-1770"><a id="__codelineno-0-1770" name="__codelineno-0-1770"></a><span class="sd">        Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).</span>
 </span><span id="__span-0-1771"><a id="__codelineno-0-1771" name="__codelineno-0-1771"></a><span class="sd">        If None and registration_binning is provided, the optimal resolution level </span>
 </span><span id="__span-0-1772"><a id="__codelineno-0-1772" name="__codelineno-0-1772"></a><span class="sd">        is automatically determined. By default None.</span>
-</span><span id="__span-0-1773"><a id="__codelineno-0-1773" name="__codelineno-0-1773"></a><span class="sd">    overlap_tolerance : float, optional</span>
+</span><span id="__span-0-1773"><a id="__codelineno-0-1773" name="__codelineno-0-1773"></a><span class="sd">    overlap_tolerance : float or dict, optional</span>
 </span><span id="__span-0-1774"><a id="__codelineno-0-1774" name="__codelineno-0-1774"></a><span class="sd">        Extend overlap regions considered for pairwise registration.</span>
 </span><span id="__span-0-1775"><a id="__codelineno-0-1775" name="__codelineno-0-1775"></a><span class="sd">        - if 0, the overlap region is the intersection of the bounding boxes.</span>
 </span><span id="__span-0-1776"><a id="__codelineno-0-1776" name="__codelineno-0-1776"></a><span class="sd">        - if &gt; 0, the overlap region is the intersection of the bounding boxes</span>
