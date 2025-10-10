@@ -1717,7 +1717,7 @@ def register(
     new_transform_key: str = None,
     registration_binning: dict[str, int] = None,
     reg_res_level: int = None,
-    overlap_tolerance: Union[int, dict[str, int]] = 0.0,
+    overlap_tolerance: Union[float, dict[str, float]] = 0.0,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs: dict = None,
     groupwise_resolution_method="global_optimization",
@@ -1770,7 +1770,7 @@ def register(
         Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).
         If None and registration_binning is provided, the optimal resolution level 
         is automatically determined. By default None.
-    overlap_tolerance : float, optional
+    overlap_tolerance : float or dict, optional
         Extend overlap regions considered for pairwise registration.
         - if 0, the overlap region is the intersection of the bounding boxes.
         - if > 0, the overlap region is the intersection of the bounding boxes
