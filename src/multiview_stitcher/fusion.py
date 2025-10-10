@@ -953,6 +953,10 @@ def get_block_fusion_func_and_nblocks(
     output_zarr_url: str,
     **fuse_kwargs,
 ):
+    """
+    Prepare chunkwise fusion function and number of blocks
+    for embarrassingly parallel fusion
+    """
 
     sims = fuse_kwargs.pop("sims")
 
@@ -1012,9 +1016,7 @@ def get_block_fusion_func_and_nblocks(
             output_zarr_array=output_zarr_array,
             ):
         """
-        block: the NumPy view of this chunk
-        block_info: dict with metadata (like in Dask)
-        block_id: tuple giving the chunk index (i, j, ...)
+        Fuse a single chunk and write to zarr array.
         """
 
         normalized_chunks = normalize_chunks(
@@ -1065,6 +1067,10 @@ def fuse_to_zarr_using_ray(
     ray_context=None,
     **fusion_kwargs,
 ):
+    """
+    Fuse directly into a zarr array using ray for parallelization.
+    Works well for very large datasets (successfully tested ~0.5PB on macbook).
+    """
     
     try:
         import ray
