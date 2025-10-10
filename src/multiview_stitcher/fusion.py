@@ -114,6 +114,60 @@ def simple_average_fusion(
     ).astype(transformed_views[0].dtype)
 
 
+def process_output_chunksize(sims, output_chunksize):
+
+    ndim = si_utils.get_ndim_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+
+    if output_chunksize is None:
+        if isinstance(sims[0].data, da.Array):
+            # if first tile is a chunked dask array, use its chunksize
+            output_chunksize = dict(zip(sdims, sims[0].data.chunksize[-ndim:]))
+        else:
+            # if first tile is not a chunked dask array, use default chunksize
+            # defined in spatial_image_utils.py
+            output_chunksize = si_utils.get_default_spatial_chunksizes(ndim)
+    elif isinstance(output_chunksize, int):
+        output_chunksize = {dim: output_chunksize for dim in sdims}
+
+    return output_chunksize
+
+
+def process_output_stack_properties(
+    sims,
+    output_spacing,
+    output_origin,
+    output_shape,
+    output_stack_properties,
+    output_stack_mode,
+    transform_key,
+):
+    
+    params = [
+        si_utils.get_affine_from_sim(sim, transform_key=transform_key)
+        for sim in sims
+    ]
+
+    if output_stack_properties is None:
+        if output_spacing is None:
+            output_spacing = si_utils.get_spacing_from_sim(sims[0])
+
+        output_stack_properties = calc_fusion_stack_properties(
+            sims,
+            params=params,
+            spacing=output_spacing,
+            mode=output_stack_mode,
+        )
+
+        if output_origin is not None:
+            output_stack_properties["origin"] = output_origin
+
+        if output_shape is not None:
+            output_stack_properties["shape"] = output_shape
+
+    return output_stack_properties
+
+
 def fuse(
     sims: list,
     transform_key: str = None,
@@ -180,42 +234,25 @@ def fuse(
         Fused image.
     """
 
-    ndim = si_utils.get_ndim_from_sim(sims[0])
-    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
-    nsdims = [dim for dim in sims[0].dims if dim not in sdims]
+    output_chunksize = process_output_chunksize(sims, output_chunksize)
 
-    if output_chunksize is None:
-        if isinstance(sims[0].data, da.Array):
-            # if first tile is a chunked dask array, use its chunksize
-            output_chunksize = dict(zip(sdims, sims[0].data.chunksize[-ndim:]))
-        else:
-            # if first tile is not a chunked dask array, use default chunksize
-            # defined in spatial_image_utils.py
-            output_chunksize = si_utils.get_default_spatial_chunksizes(ndim)
-    elif isinstance(output_chunksize, int):
-        output_chunksize = {dim: output_chunksize for dim in sdims}
+    output_stack_properties = process_output_stack_properties(
+        sims=sims,
+        output_spacing=output_spacing,
+        output_origin=output_origin,
+        output_shape=output_shape,
+        output_stack_properties=output_stack_properties,
+        output_stack_mode=output_stack_mode,
+        transform_key=transform_key,
+    )
+
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sims[0])
 
     params = [
         si_utils.get_affine_from_sim(sim, transform_key=transform_key)
         for sim in sims
     ]
-
-    if output_stack_properties is None:
-        if output_spacing is None:
-            output_spacing = si_utils.get_spacing_from_sim(sims[0])
-
-        output_stack_properties = calc_fusion_stack_properties(
-            sims,
-            params=params,
-            spacing=output_spacing,
-            mode=output_stack_mode,
-        )
-
-        if output_origin is not None:
-            output_stack_properties["origin"] = output_origin
-
-        if output_shape is not None:
-            output_stack_properties["shape"] = output_shape
 
     # determine overlap from weights method
     # (soon: fusion methods will also require overlap)
@@ -907,3 +944,158 @@ def get_interpolated_image(
     interp_image[missing_y, missing_x] = interp_values
 
     return interp_image
+
+
+from dask.array.core import normalize_chunks
+from dask import config as dask_config
+import zarr
+def get_block_fusion_func_and_nblocks(
+    output_zarr_url: str,
+    **fuse_kwargs,
+):
+
+    sims = fuse_kwargs.pop("sims")
+
+    output_stack_properties = process_output_stack_properties(
+        sims=sims,
+        output_stack_properties=fuse_kwargs.pop("output_stack_properties", None),
+        output_spacing=fuse_kwargs.pop("output_spacing", None),
+        output_origin=fuse_kwargs.pop("output_origin", None),
+        output_shape=fuse_kwargs.pop("output_shape", None),
+        output_stack_mode=fuse_kwargs.pop("output_stack_mode", "union"),
+        transform_key=fuse_kwargs.get("transform_key", None)
+    )
+
+    output_chunksize = process_output_chunksize(
+        sims, fuse_kwargs.get("output_chunksize", None)
+    )
+
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+    ns_shape = {dim: len(sims[0].coords[dim]) for dim in nsdims}
+
+
+    full_output_shape = [ns_shape[dim] for dim in nsdims]\
+         + [output_stack_properties['shape'][dim] for dim in sdims]
+    full_output_chunksize = [1,] * len(nsdims)\
+         + [int(output_chunksize[dim]) for dim in sdims]
+    
+    normalized_chunks = normalize_chunks(
+        shape=full_output_shape,
+        chunks=full_output_chunksize)
+
+    # Create the Zarr array store on disk
+    output_zarr_array = zarr.create(
+        shape=[int(i) for i in full_output_shape],
+        chunks=[int(i) for i in full_output_chunksize],
+        dtype=sims[0].data.dtype,
+        store=output_zarr_url,  # The path to the directory where the store will be created
+        overwrite=True      # Allows overwriting if the path exists
+    )
+
+    # fusion_kwargs={
+    #     'output_chunksize': output_chunksize,
+    #     'output_spacing': output_spacing,
+    #     'blending_widths': {"z": 100, "y": 100, "x": 100},
+    #     'transform_key': fusion_transform_key,
+    #     }
+
+    def fuse_chunk(
+            block_id,
+            ns_shape=ns_shape,
+            sims=sims,
+            osp=output_stack_properties,
+            sdims=sdims,
+            nsdims=nsdims,
+            fusion_kwargs=fuse_kwargs,
+            output_chunksize=output_chunksize,
+            output_zarr_array=output_zarr_array,
+            ):
+        """
+        block: the NumPy view of this chunk
+        block_info: dict with metadata (like in Dask)
+        block_id: tuple giving the chunk index (i, j, ...)
+        """
+
+        normalized_chunks = normalize_chunks(
+            shape=[ns_shape[dim] for dim in nsdims] + [osp['shape'][dim] for dim in sdims],
+            chunks=(1,) * len(nsdims) +tuple(output_chunksize[dim] for dim in sdims))
+
+        ns_coord = {dim: block_id[idim] for idim, dim in enumerate(nsdims)}
+
+        spatial_chunk_ind = block_id[len(nsdims):]
+
+        chunk_offset = {sdims[idim]: int(np.sum(normalized_chunks[len(nsdims) + idim][:b])) if b > 0 else 0
+                        for idim, b in enumerate(spatial_chunk_ind)}
+        chunk_offset_phys = {dim: chunk_offset[dim] * osp['spacing'][dim] + osp['origin'][dim]
+                            for idim, dim in enumerate(sdims)}
+        chunk_shape = {sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
+                    for idim, b in enumerate(spatial_chunk_ind)}
+
+        fused = fuse(
+            sims,
+            output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
+            output_shape={dim: chunk_shape[dim] for dim in sdims},
+            **fusion_kwargs,
+            ).data
+
+        fused = fused[tuple(slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims)]
+
+        with dask_config.set(scheduler='single-threaded'):
+            da.to_zarr(
+                fused, output_zarr_array, path="im1",
+                region=tuple([slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims] +
+                            [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
+            )
+
+        return
+    
+    nblocks = [len(nc) for nc in normalized_chunks]
+    # block_ids = np.ndindex(*nblocks)
+    
+    return fuse_chunk, nblocks
+
+
+from itertools import islice
+from tqdm import tqdm
+def fuse_to_zarr_using_ray(
+    output_path: str,
+    n_tasks: int = 4,
+    n_batch: int = 1000,
+    ray_context=None,
+    **fusion_kwargs,
+):
+    
+    try:
+        import ray
+    except ImportError:
+        raise ImportError("Please install ray to use this function.")
+    
+    if ray_context is None:
+        if not ray.is_initialized():
+            ray_context = ray.init(
+                include_dashboard=True,  # make sure the dashboard starts
+                # dashboard_port=8265,      # optional: specify port
+                num_cpus=n_tasks
+            )
+            print("Dashboard URL:", ray_context.dashboard_url)
+
+    fuse_chunk, nblocks = get_block_fusion_func_and_nblocks(
+        output_path,
+        **fusion_kwargs,
+    )
+
+    def ndindex_batches(nblocks, batch_size):
+        it = np.ndindex(*nblocks)
+        while True:
+            batch = list(islice(it, batch_size))
+            if not batch:
+                break
+            yield batch
+
+    print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch} using {n_tasks} tasks...')
+    for batch in tqdm(ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
+        futures = [ray.remote(fuse_chunk).remote(block_id) for block_id in batch]
+        ray.get(futures)
+
+    return

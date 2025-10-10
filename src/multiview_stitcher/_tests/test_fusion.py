@@ -333,3 +333,36 @@ def test_fusion_chunksizes(input_chunksize):
             fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
             for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
         )
+
+
+def test_fuse_to_zarr_using_ray():
+
+    import ray
+    import zarr
+
+    sims = io.read_mosaic_into_sims(
+        sample_data.get_mosaic_sample_data_path()
+        )
+    
+    fuse_kwargs = {
+        "sims": sims,
+        "transform_key": METADATA_TRANSFORM_KEY,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+
+        output_path = os.path.join(tmpdir, "fused.zarr")
+
+        fusion.fuse_to_zarr_using_ray(
+            output_path,
+            n_tasks=2,
+            n_batch=2,
+            **fuse_kwargs,
+        )
+
+        fusedarr = zarr.open(output_path, mode="r")
+
+        assert fusedarr is not None
+
+    if ray.is_initialized():
+        ray.shutdown()
