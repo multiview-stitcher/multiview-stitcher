@@ -248,9 +248,11 @@ def write_sim_to_ome_zarr(
             shape=sim.data.shape,
             chunks=sim.data.chunksize,
             dtype=sim.data.dtype,
-            write_empty_chunks=False,
+            config={'write_empty_chunks': True},
             fill_value=0,
             mode="w",
+            zarr_format=2,
+            dimension_separator='/',
         )
 
         # Write the lowest resolution
@@ -328,9 +330,11 @@ def write_sim_to_ome_zarr(
                 shape=curr_res_array.shape,
                 chunks=curr_res_array.chunksize,
                 dtype=curr_res_array.dtype,
-                write_empty_chunks=False,
+                config={'write_empty_chunks': True},
                 fill_value=0,
                 mode="w",
+                zarr_format=2,
+                dimension_separator='/',
             )
 
             curr_res_array = curr_res_array.to_zarr(
@@ -342,52 +346,52 @@ def write_sim_to_ome_zarr(
 
         parent_res_array = curr_res_array
 
-    if not top_level_exists or overwrite:
-        output_group = zarr.open_group(output_zarr_url, mode="a")
-        writer.write_multiscales_metadata(
-            group=output_group,
-            axes=axes,
-            datasets=[
-                {
-                    "path": f"{res_level}",
-                    "coordinateTransformations": coordtfs[res_level],
-                }
-                for res_level in range(n_resolutions)
-            ],
+    # if not top_level_exists or overwrite:
+    output_group = zarr.open_group(output_zarr_url, mode="a")
+    writer.write_multiscales_metadata(
+        group=output_group,
+        axes=axes,
+        datasets=[
+            {
+                "path": f"{res_level}",
+                "coordinateTransformations": coordtfs[res_level],
+            }
+            for res_level in range(n_resolutions)
+        ],
+    )
+
+    if "c" in sim.dims:
+        contrast_min = np.array(
+            curr_res_array.min(
+                axis=[
+                    idim for idim, dim in enumerate(sim.dims) if dim != "c"
+                ]
+            )
+        )
+        contrast_max = np.array(
+            curr_res_array.max(
+                axis=[
+                    idim for idim, dim in enumerate(sim.dims) if dim != "c"
+                ]
+            )
         )
 
-        if "c" in sim.dims:
-            contrast_min = np.array(
-                curr_res_array.min(
-                    axis=[
-                        idim for idim, dim in enumerate(sim.dims) if dim != "c"
-                    ]
-                )
-            )
-            contrast_max = np.array(
-                curr_res_array.max(
-                    axis=[
-                        idim for idim, dim in enumerate(sim.dims) if dim != "c"
-                    ]
-                )
-            )
-
-            output_group.attrs["omero"] = {
-                "channels": [
-                    {
-                        "color": "ffffff",
-                        "label": f"{ch}",
-                        "active": True,
-                        "window": {
-                            "end": int(contrast_max[ich]),
-                            "max": int(contrast_max[ich]),
-                            "min": 0,
-                            "start": int(contrast_min[ich]),
-                        },
-                    }
-                    for ich, ch in enumerate(sim.coords["c"].values)
-                ],
-            }
+        output_group.attrs["omero"] = {
+            "channels": [
+                {
+                    "color": "ffffff",
+                    "label": f"{ch}",
+                    "active": True,
+                    "window": {
+                        "end": int(contrast_max[ich]),
+                        "max": int(contrast_max[ich]),
+                        "min": 0,
+                        "start": int(contrast_min[ich]),
+                    },
+                }
+                for ich, ch in enumerate(sim.coords["c"].values)
+            ],
+        }
 
     return sim
 
