@@ -12,6 +12,7 @@ from multiview_stitcher import (
     fusion,
     io,
     msi_utils,
+    ngff_utils,
     param_utils,
     sample_data,
     weights,
@@ -335,10 +336,7 @@ def test_fusion_chunksizes(input_chunksize):
         )
 
 
-def test_fuse_to_zarr_using_ray():
-
-    import ray
-    import zarr
+def test_fuse_to_zarr():
 
     sims = io.read_mosaic_into_sims(
         sample_data.get_mosaic_sample_data_path()
@@ -353,16 +351,37 @@ def test_fuse_to_zarr_using_ray():
 
         output_path = os.path.join(tmpdir, "fused.zarr")
 
-        fusion.fuse_to_zarr_using_ray(
+        for batch_func in [
+            None,
+            fusion.process_batch_using_ray,
+        ]:
+
+            fused = fusion.fuse_to_zarr(
+                output_path,
+                n_batch=2,
+                batch_func=batch_func,
+                **fuse_kwargs,
+            )
+
+            assert fused.max().compute() > 0
+        fused = fusion.fuse_to_zarr(
             output_path,
-            n_tasks=2,
             n_batch=2,
             **fuse_kwargs,
         )
 
-        fusedarr = zarr.open(output_path, mode="r")
+        assert fused.max().compute() > 0
 
-        assert fusedarr is not None
+        output_path = os.path.join(tmpdir, "fused.ome.zarr")
 
-    if ray.is_initialized():
-        ray.shutdown()
+        fused = fusion.fuse_to_multiscale_ome_zarr(
+            output_path,
+            n_batch=2,
+            **fuse_kwargs,
+        )
+
+        fused = ngff_utils.read_sim_from_ome_zarr(
+            output_path,
+        )
+
+        assert fused.max().compute() > 0

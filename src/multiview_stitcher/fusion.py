@@ -1,4 +1,5 @@
 import itertools
+import os
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -13,6 +14,7 @@ from dask.utils import has_keyword
 
 from multiview_stitcher import (
     mv_graph,
+    ngff_utils,
     param_utils,
     transformation,
     weights,
@@ -949,8 +951,9 @@ def get_interpolated_image(
 from dask.array.core import normalize_chunks
 from dask import config as dask_config
 import zarr
-def get_block_fusion_func_and_nblocks(
+def prepare_block_fusion(
     output_zarr_url: str,
+    zarr_creation_kwargs: dict = None,
     **fuse_kwargs,
 ):
     """
@@ -994,15 +997,9 @@ def get_block_fusion_func_and_nblocks(
         chunks=[int(i) for i in full_output_chunksize],
         dtype=sims[0].data.dtype,
         store=output_zarr_url,  # The path to the directory where the store will be created
-        overwrite=True      # Allows overwriting if the path exists
+        overwrite=True,      # Allows overwriting if the path exists
+        **zarr_creation_kwargs if zarr_creation_kwargs is not None else {},
     )
-
-    # fusion_kwargs={
-    #     'output_chunksize': output_chunksize,
-    #     'output_spacing': output_spacing,
-    #     'blending_widths': {"z": 100, "y": 100, "x": 100},
-    #     'transform_key': fusion_transform_key,
-    #     }
 
     def fuse_chunk(
             block_id,
@@ -1045,51 +1042,60 @@ def get_block_fusion_func_and_nblocks(
 
         with dask_config.set(scheduler='single-threaded'):
             da.to_zarr(
-                fused, output_zarr_array, path="im1",
-                region=tuple([slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims] +
-                            [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
+                fused, output_zarr_array,
+                region=tuple(
+                    [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims] +
+                    [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
             )
 
         return
     
     nblocks = [len(nc) for nc in normalized_chunks]
-    # block_ids = np.ndindex(*nblocks)
     
-    return fuse_chunk, nblocks
+    return {
+        "func": fuse_chunk,
+        "nblocks": nblocks,
+        "output_stack_properties": output_stack_properties,
+    }
 
 
 from itertools import islice
 from tqdm import tqdm
-def fuse_to_zarr_using_ray(
-    output_path: str,
-    n_tasks: int = 4,
-    n_batch: int = 1000,
-    ray_context=None,
+def fuse_to_zarr(
+    output_zarr_url: str,
+    batch_func: Callable = None,
+    n_batch: int = 100,
+    batch_func_kwargs: dict = None,
     **fusion_kwargs,
 ):
     """
-    Fuse directly into a zarr array using ray for parallelization.
+    Fuse directly into a zarr array in batches.
     Works well for very large datasets (successfully tested ~0.5PB on macbook).
-    """
-    
-    try:
-        import ray
-    except ImportError:
-        raise ImportError("Please install ray to use this function.")
-    
-    if ray_context is None:
-        if not ray.is_initialized():
-            ray_context = ray.init(
-                include_dashboard=True,  # make sure the dashboard starts
-                # dashboard_port=8265,      # optional: specify port
-                num_cpus=n_tasks
-            )
-            print("Dashboard URL:", ray_context.dashboard_url)
 
-    fuse_chunk, nblocks = get_block_fusion_func_and_nblocks(
-        output_path,
+    This function is eager (i.e. completes the fusion before returning).
+
+    Parameters
+    ----------
+    output_path : str
+        Path to output zarr array.
+    batch_func : Callable, optional
+        Function to process each batch of fused chunks.
+        The function receives the function that processes a given block_id and
+        a list of block_id(s) as input.
+        By default None, in which case the function simply processes
+        each block_id sequentially.
+    n_batch : int, optional
+        Number of blocks to process in each batch, by default 100
+    """
+
+    block_fusion_info = prepare_block_fusion(
+        output_zarr_url,
         **fusion_kwargs,
     )
+
+    fuse_chunk = block_fusion_info['func']
+    nblocks = block_fusion_info['nblocks']
+    output_stack_properties = block_fusion_info['output_stack_properties']
 
     def ndindex_batches(nblocks, batch_size):
         it = np.ndindex(*nblocks)
@@ -1099,9 +1105,88 @@ def fuse_to_zarr_using_ray(
                 break
             yield batch
 
-    print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch} using {n_tasks} tasks...')
+    print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
     for batch in tqdm(ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
-        futures = [ray.remote(fuse_chunk).remote(block_id) for block_id in batch]
-        ray.get(futures)
+        
+        if batch_func is None:
+            for block_id in batch:
+                fuse_chunk(block_id)
+        else:
+            batch_func(fuse_chunk, batch, **(batch_func_kwargs or {}))
+
+    z = zarr.open(output_zarr_url, mode='r')
+    fusion_transform_key = fusion_kwargs.get("transform_key", None)
+
+    sims = fusion_kwargs.get("sims", None)
+
+    fused = si_utils.get_sim_from_array(
+        array=z,
+        dims=list(sims[0].dims),
+        transform_key=fusion_transform_key,
+        scale=output_stack_properties['spacing'],
+        translation=output_stack_properties['origin'],
+        c_coords=sims[0].coords['c'].values,
+        t_coords=sims[0].coords['t'].values,
+    )
+
+    return fused
+
+
+def process_batch_using_ray(func, block_ids, n_tasks=4):
+    """
+    Process a batch of block_ids using ray for parallelization.
+    """
+
+    try:
+        import ray
+    except ImportError:
+        raise ImportError("Please install ray to use this function.")
+
+    if not ray.is_initialized():
+        ray.init(
+            include_dashboard=True,  # make sure the dashboard starts
+            # dashboard_port=8265,      # optional: specify port
+            num_cpus=n_tasks
+        )
+
+    futures = [ray.remote(func).remote(block_id) for block_id in block_ids]
+    ray.get(futures)
 
     return
+
+
+def fuse_to_multiscale_ome_zarr(
+    output_zarr_url: str,
+    batch_func: Callable = None,
+    n_batch: int = 100,
+    batch_func_kwargs: dict = None,
+    **fusion_kwargs,
+):
+    """
+    Fuse directly into a multiscale OME-Zarr array in batches.
+
+    OME-Zarr version 0.4 is used.
+
+    This function is eager (i.e. completes the fusion before returning).
+    """
+
+    fused = fuse_to_zarr(
+        output_zarr_url=os.path.join(output_zarr_url, "0"),
+        batch_func=batch_func,
+        n_batch=n_batch,
+        batch_func_kwargs=batch_func_kwargs,
+        zarr_creation_kwargs={
+            "dimension_separator": "/",
+            # zarr version 2 for ome-zarr v0.4
+            "zarr_version": 2,
+        },
+        **fusion_kwargs,
+    )
+
+    ngff_utils.write_sim_to_ome_zarr(
+        fused,
+        output_zarr_url=output_zarr_url,
+        overwrite=False,
+    )
+
+    return fused
