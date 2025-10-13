@@ -30,3 +30,26 @@ def temporary_log_level(logger, level):
     logger.setLevel(level)
     yield
     logger.setLevel(old_level)
+
+
+def process_batch_using_ray(func, block_ids, num_cpus=4):
+    """
+    Process a batch of block_ids using ray for parallelization.
+    """
+
+    try:
+        import ray
+    except ImportError:
+        raise ImportError("Please install ray to use this function.")
+
+    if not ray.is_initialized():
+        ray.init(
+            include_dashboard=True,  # make sure the dashboard starts
+            # dashboard_port=8265,      # optional: specify port
+            num_cpus=num_cpus
+        )
+
+    futures = [ray.remote(func).remote(block_id) for block_id in block_ids]
+    ray.get(futures)
+
+    return

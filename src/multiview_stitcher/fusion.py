@@ -1137,29 +1137,6 @@ def fuse_to_zarr(
     return fused
 
 
-def process_batch_using_ray(func, block_ids, n_tasks=4):
-    """
-    Process a batch of block_ids using ray for parallelization.
-    """
-
-    try:
-        import ray
-    except ImportError:
-        raise ImportError("Please install ray to use this function.")
-
-    if not ray.is_initialized():
-        ray.init(
-            include_dashboard=True,  # make sure the dashboard starts
-            # dashboard_port=8265,      # optional: specify port
-            num_cpus=n_tasks
-        )
-
-    futures = [ray.remote(func).remote(block_id) for block_id in block_ids]
-    ray.get(futures)
-
-    return
-
-
 def fuse_to_multiscale_ome_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
