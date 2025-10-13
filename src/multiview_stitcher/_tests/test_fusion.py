@@ -358,16 +358,16 @@ def test_fuse_to_zarr():
 
             fused = fusion.fuse_to_zarr(
                 output_path,
+                fuse_kwargs=fuse_kwargs,
                 n_batch=2,
                 batch_func=batch_func,
-                **fuse_kwargs,
             )
 
             assert fused.max().compute() > 0
         fused = fusion.fuse_to_zarr(
             output_path,
+            fuse_kwargs=fuse_kwargs,
             n_batch=2,
-            **fuse_kwargs,
         )
 
         assert fused.max().compute() > 0
@@ -376,8 +376,8 @@ def test_fuse_to_zarr():
 
         fused = fusion.fuse_to_multiscale_ome_zarr(
             output_path,
+            fuse_kwargs=fuse_kwargs,
             n_batch=2,
-            **fuse_kwargs,
         )
 
         fused = ngff_utils.read_sim_from_ome_zarr(

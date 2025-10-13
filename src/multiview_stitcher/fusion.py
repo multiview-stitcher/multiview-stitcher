@@ -953,15 +953,15 @@ from dask import config as dask_config
 import zarr
 def prepare_block_fusion(
     output_zarr_url: str,
-    zarr_creation_kwargs: dict = None,
-    **fuse_kwargs,
+    fuse_kwargs: dict,
+    zarr_array_creation_kwargs: dict = None,
 ):
     """
     Prepare chunkwise fusion function and number of blocks
     for embarrassingly parallel fusion
     """
 
-    sims = fuse_kwargs.pop("sims")
+    sims = fuse_kwargs.get("sims")
 
     output_stack_properties = process_output_stack_properties(
         sims=sims,
@@ -981,7 +981,6 @@ def prepare_block_fusion(
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     ns_shape = {dim: len(sims[0].coords[dim]) for dim in nsdims}
 
-
     full_output_shape = [ns_shape[dim] for dim in nsdims]\
          + [output_stack_properties['shape'][dim] for dim in sdims]
     full_output_chunksize = [1,] * len(nsdims)\
@@ -998,23 +997,24 @@ def prepare_block_fusion(
         dtype=sims[0].data.dtype,
         store=output_zarr_url,  # The path to the directory where the store will be created
         overwrite=True,      # Allows overwriting if the path exists
-        **zarr_creation_kwargs if zarr_creation_kwargs is not None else {},
+        **zarr_array_creation_kwargs
+        if zarr_array_creation_kwargs is not None else {},
     )
 
     def fuse_chunk(
             block_id,
-            ns_shape=ns_shape,
-            sims=sims,
             osp=output_stack_properties,
-            sdims=sdims,
+            ns_shape=ns_shape,
             nsdims=nsdims,
-            fusion_kwargs=fuse_kwargs,
+            fuse_kwargs=fuse_kwargs,
             output_chunksize=output_chunksize,
             output_zarr_array=output_zarr_array,
             ):
         """
         Fuse a single chunk and write to zarr array.
         """
+
+        sdims = list(osp['shape'].keys())
 
         normalized_chunks = normalize_chunks(
             shape=[ns_shape[dim] for dim in nsdims] + [osp['shape'][dim] for dim in sdims],
@@ -1032,10 +1032,10 @@ def prepare_block_fusion(
                     for idim, b in enumerate(spatial_chunk_ind)}
 
         fused = fuse(
-            sims,
+            sims=fuse_kwargs.get("sims"),
+            **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
-            **fusion_kwargs,
             ).data
 
         fused = fused[tuple(slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims)]
@@ -1063,10 +1063,11 @@ from itertools import islice
 from tqdm import tqdm
 def fuse_to_zarr(
     output_zarr_url: str,
+    fuse_kwargs: dict,
     batch_func: Callable = None,
     n_batch: int = 100,
     batch_func_kwargs: dict = None,
-    **fusion_kwargs,
+    zarr_array_creation_kwargs: dict = None,
 ):
     """
     Fuse directly into a zarr array in batches.
@@ -1088,9 +1089,13 @@ def fuse_to_zarr(
         Number of blocks to process in each batch, by default 100
     """
 
+    if zarr_array_creation_kwargs is None:
+        zarr_array_creation_kwargs = {}
+
     block_fusion_info = prepare_block_fusion(
         output_zarr_url,
-        **fusion_kwargs,
+        fuse_kwargs=fuse_kwargs,
+        zarr_array_creation_kwargs=zarr_array_creation_kwargs,
     )
 
     fuse_chunk = block_fusion_info['func']
@@ -1115,9 +1120,9 @@ def fuse_to_zarr(
             batch_func(fuse_chunk, batch, **(batch_func_kwargs or {}))
 
     z = zarr.open(output_zarr_url, mode='r')
-    fusion_transform_key = fusion_kwargs.get("transform_key", None)
+    fusion_transform_key = fuse_kwargs.get("transform_key", None)
 
-    sims = fusion_kwargs.get("sims", None)
+    sims = fuse_kwargs.get("sims", None)
 
     fused = si_utils.get_sim_from_array(
         array=z,
@@ -1157,10 +1162,12 @@ def process_batch_using_ray(func, block_ids, n_tasks=4):
 
 def fuse_to_multiscale_ome_zarr(
     output_zarr_url: str,
+    fuse_kwargs: dict,
     batch_func: Callable = None,
     n_batch: int = 100,
     batch_func_kwargs: dict = None,
-    **fusion_kwargs,
+    ngff_version: str = "0.4",
+    zarr_array_creation_kwargs: dict = None,
 ):
     """
     Fuse directly into a multiscale OME-Zarr array in batches.
@@ -1170,17 +1177,18 @@ def fuse_to_multiscale_ome_zarr(
     This function is eager (i.e. completes the fusion before returning).
     """
 
+    zarr_array_creation_kwargs = \
+        ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
+            ngff_version, zarr_array_creation_kwargs
+        )
+
     fused = fuse_to_zarr(
         output_zarr_url=os.path.join(output_zarr_url, "0"),
+        fuse_kwargs=fuse_kwargs,
         batch_func=batch_func,
         n_batch=n_batch,
         batch_func_kwargs=batch_func_kwargs,
-        zarr_creation_kwargs={
-            "dimension_separator": "/",
-            # zarr version 2 for ome-zarr v0.4
-            "zarr_version": 2,
-        },
-        **fusion_kwargs,
+        zarr_array_creation_kwargs=zarr_array_creation_kwargs,
     )
 
     ngff_utils.write_sim_to_ome_zarr(
