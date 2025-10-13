@@ -164,11 +164,15 @@ def update_zarr_array_creation_kwargs_for_ngff_version(
         zarr_array_creation_kwargs = {}
     if ngff_version == "0.4":
         zarr_array_creation_kwargs.update({
-                "zarr_version" if zarr.__version__ < "3"
-                else "zarr_format": 2,
                 "dimension_separator": '/',
         })
+        if zarr.__version__ >= "3":
+            zarr_array_creation_kwargs.update({
+                "zarr_format": 2,
+            })
     elif ngff_version == "0.5":
+        if zarr.__version__ < "3":
+            raise ValueError("zarr>=3 required for ngff_version 0.5")
         zarr_array_creation_kwargs.update({
                 "zarr_version" if zarr.__version__ < "3"
                 else "zarr_format": 3,
@@ -210,10 +214,12 @@ def write_sim_to_ome_zarr(
         update_zarr_array_creation_kwargs_for_ngff_version(
             ngff_version, zarr_array_creation_kwargs)
 
+    zarr_group_creation_kwargs = {}
     if ngff_version == "0.4":
-        zarr_group_creation_kwargs = {
-            "zarr_format": 2,
-        }
+        if zarr.__version__ >= "3":
+            zarr_group_creation_kwargs = {
+                "zarr_format": 2,
+            }
     elif ngff_version == "0.5":
         zarr_group_creation_kwargs = {
             "zarr_format": 3,

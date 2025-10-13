@@ -37,6 +37,9 @@ def test_round_trip(ndim, ngff_version):
         spacing_z=1,
     )[1]
 
+    if zarr.__version__ < "3" and ngff_version >= "0.5":
+        pytest.skip("zarr>=3 required for ngff_version 0.5")
+
     # sim
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
