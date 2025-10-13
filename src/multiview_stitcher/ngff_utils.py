@@ -164,12 +164,14 @@ def update_zarr_array_creation_kwargs_for_ngff_version(
         zarr_array_creation_kwargs = {}
     if ngff_version == "0.4":
         zarr_array_creation_kwargs.update({
-                "zarr_format": 2,
+                "zarr_version" if zarr.__version__ < "3"
+                else "zarr_format": 2,
                 "dimension_separator": '/',
         })
     elif ngff_version == "0.5":
         zarr_array_creation_kwargs.update({
-                "zarr_format": 3,
+                "zarr_version" if zarr.__version__ < "3"
+                else "zarr_format": 3,
         })
     else:
         raise ValueError(f"ngff_version {ngff_version} not supported")
