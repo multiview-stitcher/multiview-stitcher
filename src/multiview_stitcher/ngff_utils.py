@@ -157,11 +157,32 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key):
     return msim
 
 
+def update_zarr_array_creation_kwargs_for_ngff_version(
+    ngff_version, zarr_array_creation_kwargs):
+
+    if zarr_array_creation_kwargs is None:
+        zarr_array_creation_kwargs = {}
+    if ngff_version == "0.4":
+        zarr_array_creation_kwargs.update({
+                "zarr_format": 2,
+                "dimension_separator": '/',
+        })
+    elif ngff_version == "0.5":
+        zarr_array_creation_kwargs.update({
+                "zarr_format": 3,
+        })
+    else:
+        raise ValueError(f"ngff_version {ngff_version} not supported")
+    return zarr_array_creation_kwargs
+
+
 def write_sim_to_ome_zarr(
     sim,
-    output_zarr_url,
-    downscale_factors_per_spatial_dim=None,
-    overwrite=False,
+    output_zarr_url: str,
+    downscale_factors_per_spatial_dim: dict[str, int] = None,
+    overwrite: bool = False,
+    ngff_version: str = "0.4",
+    zarr_array_creation_kwargs: dict = None,
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
@@ -176,18 +197,27 @@ def write_sim_to_ome_zarr(
     However, the returned sim will have the transform_key set.
     """
 
-    # if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
-    #     # warn that the file already exists
+    if zarr_array_creation_kwargs is None:
+        zarr_array_creation_kwargs = {}
 
-    #     warnings.warn(
-    #         f"File {output_zarr_url}/0 already exists. "
-    #         "Use overwrite=True to overwrite it.",
-    #         UserWarning,
-    #         stacklevel=1,
-    #     )
+    # basic handling of OME-Zarr v0.4 and v0.5
+    #  - not fully tested for v0.5
+    #  - TODO: more relevant differences in v0.5 compared to v0.4?
 
-    #     sim.data = da.from_zarr(f"{output_zarr_url}/0")
-    #     return sim
+    zarr_array_creation_kwargs = \
+        update_zarr_array_creation_kwargs_for_ngff_version(
+            ngff_version, zarr_array_creation_kwargs)
+
+    if ngff_version == "0.4":
+        zarr_group_creation_kwargs = {
+            "zarr_format": 2,
+        }
+    elif ngff_version == "0.5":
+        zarr_group_creation_kwargs = {
+            "zarr_format": 3,
+        }
+    else:
+        raise ValueError(f"ngff_version {ngff_version} not supported")
 
     ndim = sim.data.ndim
     dims = sim.dims
@@ -239,7 +269,6 @@ def write_sim_to_ome_zarr(
         sim.data = da.from_zarr(
             f"{output_zarr_url}/0",
         )
-        top_level_exists = True
     else:
         # Open output array. This allows setting `write_empty_chunks=True`,
         # which cannot be passed to dask.array.to_zarr below.
@@ -251,8 +280,7 @@ def write_sim_to_ome_zarr(
             config={'write_empty_chunks': True},
             fill_value=0,
             mode="w",
-            zarr_format=2,
-            dimension_separator='/',
+            **zarr_array_creation_kwargs,
         )
 
         # Write the lowest resolution
@@ -262,7 +290,6 @@ def write_sim_to_ome_zarr(
             return_stored=True,
             compute=True,
         )
-        top_level_exists = False
 
     coordtfs = [
         [
@@ -333,8 +360,7 @@ def write_sim_to_ome_zarr(
                 config={'write_empty_chunks': True},
                 fill_value=0,
                 mode="w",
-                zarr_format=2,
-                dimension_separator='/',
+                **zarr_array_creation_kwargs,
             )
 
             curr_res_array = curr_res_array.to_zarr(
@@ -346,8 +372,9 @@ def write_sim_to_ome_zarr(
 
         parent_res_array = curr_res_array
 
-    # if not top_level_exists or overwrite:
-    output_group = zarr.open_group(output_zarr_url, mode="a")
+    output_group = zarr.open_group(
+        output_zarr_url, mode="a", **zarr_group_creation_kwargs
+    )
     writer.write_multiscales_metadata(
         group=output_group,
         axes=axes,
