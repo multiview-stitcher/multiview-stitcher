@@ -350,14 +350,16 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
     return np.array([window["start"], window["end"]])
 
 
-import ngff_zarr
 def generate_neuroglancer_json(
-    ome_zarr_paths,
-    ome_zarr_urls,
-    sims=None,
-    transform_key=None,
-    channel_coord=None,
-    single_layer=False,
+    ome_zarr_paths: list[str],
+    ome_zarr_urls: list[str],
+    sims: list = None,
+    transform_key: str = None,
+    channel_coord: str = None,
+    single_layer: bool = False,
+    contrast_limits: tuple = None,
+    layer_dicts: list[dict] = None,
+    global_dict: dict = None,
 ):
     # read the first multiscales
     sim = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[0])
@@ -390,8 +392,16 @@ def generate_neuroglancer_json(
     else:
         full_affines = [None for _ in ome_zarr_paths]
 
+    if contrast_limits is not None:
+        window = {
+            "min": contrast_limits[0],
+            "max": contrast_limits[1],
+            "start": contrast_limits[0],
+            "end": contrast_limits[1],
+        }
+        channel_index = 0
     # get contrast limits from first image
-    if "c" in dims:
+    elif "c" in dims:
         if channel_coord is None:
             channel_index = 0
         else:
@@ -523,6 +533,18 @@ def generate_neuroglancer_json(
             )
         ]
 
+    # allow to overwrite / add settings for each layer
+    if layer_dicts is not None:
+        for il, layer_dict in enumerate(layer_dicts):
+            ng_config["layers"][il] = {
+                **ng_config["layers"][il],
+                **layer_dict,
+            }
+
+    # allow to overwrite / add global settings
+    if global_dict is not None:
+        ng_config = {**ng_config, **global_dict}
+
     # import pprint
     # pprint.pprint(ng_config)
     return ng_config
@@ -542,6 +564,9 @@ def view_neuroglancer(
     port=8000,
     channel_coord=None,
     single_layer=False,
+    contrast_limits=None,
+    layer_dicts: list[dict] = None,
+    global_dict: dict = None,
 ):
     """
     Visualize a list of OME-zarrs in Neuroglancer
@@ -565,6 +590,11 @@ def view_neuroglancer(
         Port to serve OME-Zarrs. By default 8000
     channel_coord : str, optional
         Which channel to use for initializing contrast limits, by default None
+    single_layer : bool, optional
+        Whether to show all images in a single layer (True) or in separate layers (False, default).
+    contrast_limits : tuple, optional
+        Contrast limits (min, max) to use for visualization. If None, contrast limits are read
+        from the OME-Zarr omero metadata if available, by default None
     """
 
     # generate urls for the ome zarr files
@@ -582,6 +612,9 @@ def view_neuroglancer(
         transform_key=transform_key,
         channel_coord=channel_coord,
         single_layer=single_layer,
+        contrast_limits=contrast_limits,
+        layer_dicts=layer_dicts,
+        global_dict=global_dict,
     )
     ng_url = get_neuroglancer_url(ng_json)
 

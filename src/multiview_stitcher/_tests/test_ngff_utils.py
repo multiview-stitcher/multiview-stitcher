@@ -17,10 +17,12 @@ from multiview_stitcher import spatial_image_utils as si_utils
 
 
 @pytest.mark.parametrize(
-    "ndim",
-    [2, 3],
+    "ndim, ngff_version",
+    [(ndim, ngff_version)
+    for ndim in (2, 3)
+    for ngff_version in ("0.4", "0.5")],
 )
-def test_round_trip(ndim):
+def test_round_trip(ndim, ngff_version):
     sim = sample_data.generate_tiled_dataset(
         ndim=ndim,
         overlap=0,
@@ -35,11 +37,15 @@ def test_round_trip(ndim):
         spacing_z=1,
     )[1]
 
+    if zarr.__version__ < "3" and ngff_version >= "0.5":
+        pytest.skip("zarr>=3 required for ngff_version 0.5")
+
     # sim
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
     with tempfile.TemporaryDirectory() as zarr_path:
-        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path, overwrite=False)
+        ngff_utils.write_sim_to_ome_zarr(
+            sim, zarr_path, overwrite=False, ngff_version=ngff_version)
 
         sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path)
 

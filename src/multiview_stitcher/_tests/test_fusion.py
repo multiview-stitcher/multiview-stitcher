@@ -12,6 +12,7 @@ from multiview_stitcher import (
     fusion,
     io,
     msi_utils,
+    ngff_utils,
     param_utils,
     sample_data,
     weights,
@@ -333,3 +334,54 @@ def test_fusion_chunksizes(input_chunksize):
             fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
             for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
         )
+
+
+def test_fuse_to_zarr():
+
+    sims = io.read_mosaic_into_sims(
+        sample_data.get_mosaic_sample_data_path()
+        )
+    
+    fuse_kwargs = {
+        "sims": sims,
+        "transform_key": METADATA_TRANSFORM_KEY,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+
+        output_path = os.path.join(tmpdir, "fused.zarr")
+
+        for batch_func in [
+            None,
+            # fusion.process_batch_using_ray, # leads to obscure error in CI, probably https://github.com/ray-project/ray/issues/55255
+        ]:
+
+            fused = fusion.fuse_to_zarr(
+                output_path,
+                fuse_kwargs=fuse_kwargs,
+                n_batch=2,
+                batch_func=batch_func,
+            )
+
+            assert fused.max().compute() > 0
+        fused = fusion.fuse_to_zarr(
+            output_path,
+            fuse_kwargs=fuse_kwargs,
+            n_batch=2,
+        )
+
+        assert fused.max().compute() > 0
+
+        output_path = os.path.join(tmpdir, "fused.ome.zarr")
+
+        fused = fusion.fuse_to_multiscale_ome_zarr(
+            output_path,
+            fuse_kwargs=fuse_kwargs,
+            n_batch=2,
+        )
+
+        fused = ngff_utils.read_sim_from_ome_zarr(
+            output_path,
+        )
+
+        assert fused.max().compute() > 0
