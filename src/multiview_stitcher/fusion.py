@@ -1101,6 +1101,11 @@ def fuse_to_zarr(
     fuse_chunk = block_fusion_info['func']
     nblocks = block_fusion_info['nblocks']
     output_stack_properties = block_fusion_info['output_stack_properties']
+    output_stack_properties['shape'] = {dim: int(v)
+        for dim, v in output_stack_properties['shape'].items()}
+
+    print(f"Fusing into a stack with the following properties:")
+    print(output_stack_properties)
 
     def ndindex_batches(nblocks, batch_size):
         it = np.ndindex(*nblocks)
