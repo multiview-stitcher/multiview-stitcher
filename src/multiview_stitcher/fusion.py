@@ -1153,7 +1153,7 @@ def fuse_to_multiscale_ome_zarr(
     fuse_kwargs: dict,
     overwrite: bool = True,
     batch_func: Callable = None,
-    n_batch: int = 100,
+    n_batch: int = 1,
     batch_func_kwargs: dict = None,
     ngff_version: str = "0.4",
     zarr_array_creation_kwargs: dict = None,
