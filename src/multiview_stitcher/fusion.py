@@ -1,5 +1,5 @@
 import itertools
-import os
+import os, shutil
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -1074,6 +1074,7 @@ from tqdm import tqdm
 def fuse_to_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
+    overwrite: bool = True,
     batch_func: Callable = None,
     n_batch: int = 1,
     batch_func_kwargs: dict = None,
@@ -1101,6 +1102,9 @@ def fuse_to_zarr(
     zarr_array_creation_kwargs : dict, optional
         Additional keyword arguments passed to zarr.open
     """
+
+    if overwrite and os.path.exists(output_zarr_url):
+        shutil.rmtree(output_zarr_url)
 
     if zarr_array_creation_kwargs is None:
         zarr_array_creation_kwargs = {}
@@ -1147,6 +1151,7 @@ def fuse_to_zarr(
 def fuse_to_multiscale_ome_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
+    overwrite: bool = True,
     batch_func: Callable = None,
     n_batch: int = 100,
     batch_func_kwargs: dict = None,
@@ -1160,6 +1165,9 @@ def fuse_to_multiscale_ome_zarr(
 
     This function is eager (i.e. completes the fusion before returning).
     """
+
+    if overwrite and os.path.exists(output_zarr_url):
+        shutil.rmtree(output_zarr_url)
 
     zarr_array_creation_kwargs = \
         ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
