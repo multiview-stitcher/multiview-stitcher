@@ -1075,7 +1075,7 @@ def fuse_to_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
     batch_func: Callable = None,
-    n_batch: int = 100,
+    n_batch: int = 1,
     batch_func_kwargs: dict = None,
     zarr_array_creation_kwargs: dict = None,
 ):
@@ -1093,10 +1093,13 @@ def fuse_to_zarr(
         Function to process each batch of fused chunks.
         The function receives the function that processes a given block_id and
         a list of block_id(s) as input.
-        By default None, in which case the function simply processes
-        each block_id sequentially.
+        By default None, in which case the each block is processed sequentially.
     n_batch : int, optional
-        Number of blocks to process in each batch, by default 100
+        Number of blocks to process in each batch, by default 1
+    batch_func_kwargs : dict, optional
+        Additional keyword arguments passed to batch_func
+    zarr_array_creation_kwargs : dict, optional
+        Additional keyword arguments passed to zarr.open
     """
 
     if zarr_array_creation_kwargs is None:
