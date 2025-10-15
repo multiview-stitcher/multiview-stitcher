@@ -1,12 +1,14 @@
 from functools import partial
-import os
+import os, shutil
 
+import dask
 import ngff_zarr
 import numpy as np
 import spatial_image as si
 import zarr
 from tqdm import tqdm
 from dask import array as da
+import dask.diagnostics
 from ome_zarr import writer
 from xarray import DataTree
 
@@ -197,6 +199,8 @@ def write_and_return_downsampled_sim(
     downscale_factors_per_spatial_dim: dict[str, int] = None,
     overwrite: bool = False,
     zarr_array_creation_kwargs: dict = None,
+    res_level: int = 0,
+    show_progressbar: bool = True,
     n_batch=1,
     batch_func=None,
     batch_func_kwargs=None,
@@ -205,9 +209,10 @@ def write_and_return_downsampled_sim(
     sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
 
     if not overwrite and os.path.exists(output_zarr_array_url):
+        print(f"Found existing resolution level {res_level}...")
         array = da.from_zarr(output_zarr_array_url)
     else:
-
+        print(f"Writing resolution level {res_level}...")
         # use pure dask
         if n_batch is None:
             #downscale
@@ -236,13 +241,24 @@ def write_and_return_downsampled_sim(
                 **zarr_array_creation_kwargs,
             )
 
-            # Write the array
-            array = array.to_zarr(
-                output_zarr_arr,
-                overwrite=True,
-                return_stored=True,
-                compute=True,
-            )
+            if show_progressbar:
+                with dask.diagnostics.ProgressBar(show_progressbar): 
+                    # Write the array
+                    array = array.to_zarr(
+                        output_zarr_arr,
+                        overwrite=True,
+                        return_stored=True,
+                        compute=True,
+                    )
+
+            else:
+                # Write the array
+                array = array.to_zarr(
+                    output_zarr_arr,
+                    overwrite=True,
+                    return_stored=True,
+                    compute=True,
+                )
         else:
             # use dask with batching to limit memory usage
 
@@ -269,7 +285,9 @@ def write_and_return_downsampled_sim(
 
             for batch in tqdm(
                 misc_utils.ndindex_batches(nblocks, n_batch),
-                total=int(np.ceil(np.prod(nblocks)/n_batch))):
+                total=int(np.ceil(np.prod(nblocks)/n_batch)))\
+            if show_progressbar else\
+                misc_utils.ndindex_batches(nblocks, n_batch):
                 
                 if batch_func is None:
                     for block_id in batch:
@@ -278,7 +296,8 @@ def write_and_return_downsampled_sim(
                     batch_func(
                         write_downsampled_chunk_p, batch,
                         **(batch_func_kwargs or {}))
-
+                    
+            array = da.from_zarr(output_zarr_array_url)
     return array
 
 
@@ -421,6 +440,7 @@ def write_sim_to_ome_zarr(
     overwrite: bool = False,
     ngff_version: str = "0.4",
     zarr_array_creation_kwargs: dict = None,
+    show_progressbar: bool = True,
     n_batch=1,
     batch_func=None,
     batch_func_kwargs=None,
@@ -455,6 +475,8 @@ def write_sim_to_ome_zarr(
     zarr_array_creation_kwargs : dict, optional
         Additional keyword arguments to pass to zarr.open
         when creating the zarr arrays, by default None
+    show_progressbar : bool, optional
+        Whether to show a progress bar (tqdm),
     n_batch : int, optional
         Number of chunks to process in batch when writing
         each resolution level, by default 1
@@ -467,6 +489,11 @@ def write_sim_to_ome_zarr(
         by default None
     
     """
+
+    # if exists and overwrite, remove existing zarr group
+    if overwrite and os.path.exists(output_zarr_url):
+        print(f"Removing existing {output_zarr_url}...")
+        shutil.rmtree(output_zarr_url)
 
     if zarr_array_creation_kwargs is None:
         zarr_array_creation_kwargs = {}
@@ -533,6 +560,8 @@ def write_sim_to_ome_zarr(
             downscale_factors_per_spatial_dim=res_rel_factors[res_level],
             overwrite=overwrite,
             zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+            res_level=res_level,
+            show_progressbar=show_progressbar,
             n_batch=n_batch,
             batch_func=batch_func,
             batch_func_kwargs=batch_func_kwargs,

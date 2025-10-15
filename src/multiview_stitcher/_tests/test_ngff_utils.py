@@ -64,7 +64,7 @@ def test_round_trip(ndim, ngff_version, n_batch):
         assert np.allclose(sim.data, sim_read.data)
 
     # msim
-    scale_factors = [2, 4]
+    scale_factors = [2, 2]
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
     with tempfile.TemporaryDirectory() as zarr_path:
         ngff_multiscales = ngff_utils.msim_to_ngff_multiscales(
@@ -91,6 +91,7 @@ def test_round_trip(ndim, ngff_version, n_batch):
                 .coords["y"]
                 .values,
             )
+            # import pdb; pdb.set_trace()
 
         assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
             msi_utils.get_sorted_scale_keys(msim_read)
