@@ -1,6 +1,8 @@
 import logging
 from contextlib import contextmanager
 
+import numpy as np
+
 
 class DisableLogger:
     def __enter__(self):
@@ -30,6 +32,16 @@ def temporary_log_level(logger, level):
     logger.setLevel(level)
     yield
     logger.setLevel(old_level)
+
+
+from itertools import islice
+def ndindex_batches(nblocks, batch_size):
+    it = np.ndindex(*nblocks)
+    while True:
+        batch = list(islice(it, batch_size))
+        if not batch:
+            break
+        yield batch
 
 
 def process_batch_using_ray(func, block_ids, num_cpus=4):

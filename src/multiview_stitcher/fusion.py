@@ -16,6 +16,7 @@ from multiview_stitcher import (
     mv_graph,
     ngff_utils,
     param_utils,
+    misc_utils,
     transformation,
     weights,
 )
@@ -977,6 +978,7 @@ def prepare_block_fusion(
         sims, fuse_kwargs.get("output_chunksize", None)
     )
 
+    dims = sims[0].dims
     nsdims = si_utils.get_nonspatial_dims_from_sim(sims[0])
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     ns_shape = {dim: len(sims[0].coords[dim]) for dim in nsdims}
@@ -989,6 +991,15 @@ def prepare_block_fusion(
     normalized_chunks = normalize_chunks(
         shape=full_output_shape,
         chunks=full_output_chunksize)
+    
+    print(f"Fusing into a an output stack:")
+    print("- shape: ", {dim: int(output_stack_properties['shape'][dim])
+        if dim in sdims else 1 for dim in dims})
+    print("- spacing: ", {k: float(v)
+        for k, v in output_stack_properties['spacing'].items()})
+    print("- origin: ", {k: float(v)
+        for k, v in output_stack_properties['origin'].items()})
+    # print(f"- chunksize: {fuse_kwargs.get('output_chunksize', None)}")
 
     # Create the Zarr array store on disk
     output_zarr_array = zarr.create(
@@ -1059,7 +1070,6 @@ def prepare_block_fusion(
     }
 
 
-from itertools import islice
 from tqdm import tqdm
 def fuse_to_zarr(
     output_zarr_url: str,
@@ -1104,19 +1114,8 @@ def fuse_to_zarr(
     output_stack_properties['shape'] = {dim: int(v)
         for dim, v in output_stack_properties['shape'].items()}
 
-    print(f"Fusing into a stack with the following properties:")
-    print(output_stack_properties)
-
-    def ndindex_batches(nblocks, batch_size):
-        it = np.ndindex(*nblocks)
-        while True:
-            batch = list(islice(it, batch_size))
-            if not batch:
-                break
-            yield batch
-
     print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
-    for batch in tqdm(ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
+    for batch in tqdm(misc_utils.ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
         
         if batch_func is None:
             for block_id in batch:
