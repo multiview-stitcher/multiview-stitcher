@@ -1047,6 +1047,7 @@ def prepare_block_fusion(
             **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
+            output_spacing={dim: osp['spacing'][dim] for dim in sdims},
             ).data
 
         fused = fused[tuple(slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims)]
