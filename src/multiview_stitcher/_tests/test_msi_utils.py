@@ -1,9 +1,27 @@
 import tempfile
 
 import numpy as np
+import pytest
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+
+
+@pytest.mark.parametrize(
+    "dims",
+    [
+        ["y", "x"],
+        ["z", "y", "x"],
+        ["c", "z", "y", "x"],
+        ["t", "c", "y", "x"],
+    ],
+)
+def test_calc_resolution_levels(dims):
+    sim = si_utils.get_sim_from_array(np.ones((100,) * len(dims)), dims=dims)
+    msim = msi_utils.get_msim_from_sim(sim)
+
+    scale_keys = msi_utils.get_sorted_scale_keys(msim)
+    assert len(scale_keys) > 1
 
 
 def test_update_msim_transforms_zarr():
