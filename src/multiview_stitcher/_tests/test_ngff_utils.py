@@ -17,12 +17,14 @@ from multiview_stitcher import spatial_image_utils as si_utils
 
 
 @pytest.mark.parametrize(
-    "ndim, ngff_version",
-    [(ndim, ngff_version)
+    "ndim, ngff_version, n_batch",
+    [(ndim, ngff_version, n_batch)
     for ndim in (2, 3)
-    for ngff_version in ("0.4", "0.5")],
+    for ngff_version in ("0.4", "0.5")
+    for n_batch in (None, 2)
+    ],
 )
-def test_round_trip(ndim, ngff_version):
+def test_round_trip(ndim, ngff_version, n_batch):
     sim = sample_data.generate_tiled_dataset(
         ndim=ndim,
         overlap=0,
@@ -45,7 +47,12 @@ def test_round_trip(ndim, ngff_version):
 
     with tempfile.TemporaryDirectory() as zarr_path:
         ngff_utils.write_sim_to_ome_zarr(
-            sim, zarr_path, overwrite=False, ngff_version=ngff_version)
+            sim,
+            zarr_path,
+            overwrite=False,
+            ngff_version=ngff_version,
+            n_batch=n_batch,
+            )
 
         sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path)
 
@@ -57,7 +64,7 @@ def test_round_trip(ndim, ngff_version):
         assert np.allclose(sim.data, sim_read.data)
 
     # msim
-    scale_factors = [2, 4]
+    scale_factors = [2, 2]
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
     with tempfile.TemporaryDirectory() as zarr_path:
         ngff_multiscales = ngff_utils.msim_to_ngff_multiscales(
@@ -70,24 +77,25 @@ def test_round_trip(ndim, ngff_version):
             transform_key=io.METADATA_TRANSFORM_KEY,
         )
 
-    for ires in range(len(scale_factors) + 1):
         assert np.allclose(
-            msi_utils.get_sim_from_msim(msim_read, scale=f"scale{ires}")
-            .coords["y"]
-            .values,
-            msi_utils.get_sim_from_msim(msim, scale=f"scale{ires}")
-            .coords["y"]
-            .values,
+            msim[f"scale{len(scale_factors)}/image"].data,
+            msim_read[f"scale{len(scale_factors)}/image"].data,
         )
 
-    assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
-        msi_utils.get_sorted_scale_keys(msim_read)
-    )
+        for ires in range(len(scale_factors) + 1):
+            assert np.allclose(
+                msi_utils.get_sim_from_msim(msim_read, scale=f"scale{ires}")
+                .coords["y"]
+                .values,
+                msi_utils.get_sim_from_msim(msim, scale=f"scale{ires}")
+                .coords["y"]
+                .values,
+            )
+            # import pdb; pdb.set_trace()
 
-    assert np.allclose(
-        msim[f"scale{len(scale_factors)}/image"].data,
-        msim_read[f"scale{len(scale_factors)}/image"].data,
-    )
+        assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
+            msi_utils.get_sorted_scale_keys(msim_read)
+        )
 
 
 @pytest.mark.parametrize(
@@ -204,9 +212,7 @@ def test_multiscales_overwrite():
         # check that read sim is equal to sim2 at
         # all resolution levels
         for res_level in range(2):
-            sim_read = ngff_utils.read_sim_from_ome_zarr(
-                zarr_path, resolution_level=res_level
-            )
+            sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path, resolution_level=res_level)
             assert np.min(sim_read.data) == 1
             assert np.max(sim_read.data) == 1
 

@@ -1,14 +1,18 @@
-import os
+from functools import partial
+import os, shutil
 
+import dask
 import ngff_zarr
 import numpy as np
 import spatial_image as si
 import zarr
+from tqdm import tqdm
 from dask import array as da
+import dask.diagnostics
 from ome_zarr import writer
 from xarray import DataTree
 
-from multiview_stitcher import msi_utils, param_utils
+from multiview_stitcher import msi_utils, param_utils, misc_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 
@@ -182,6 +186,253 @@ def update_zarr_array_creation_kwargs_for_ngff_version(
     return zarr_array_creation_kwargs
 
 
+# thanks to https://github.com/CamachoDejay/teaching-bioimage-analysis-python/blob/6076e00e392075ba9c07e67e868a39d4889e6298/short_examples/zarr-from-tiles/zarr-minimal-example-tiles.ipynb
+def mean_dtype(arr, **kwargs):
+    return np.mean(arr, **kwargs).astype(arr.dtype)
+
+
+def write_and_return_downsampled_sim(
+    array,
+    dims: list[str],
+    output_zarr_array_url: str,
+    chunksizes: list[int],
+    downscale_factors_per_spatial_dim: dict[str, int] = None,
+    overwrite: bool = False,
+    zarr_array_creation_kwargs: dict = None,
+    res_level: int = 0,
+    show_progressbar: bool = True,
+    n_batch=1,
+    batch_func=None,
+    batch_func_kwargs=None,
+):
+
+    sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
+
+    if not overwrite and os.path.exists(output_zarr_array_url):
+        print(f"Found existing resolution level {res_level}...")
+        array = da.from_zarr(output_zarr_array_url)
+    else:
+        print(f"Writing resolution level {res_level}...")
+        # use pure dask
+        if n_batch is None:
+            #downscale
+            if downscale_factors_per_spatial_dim is not None\
+                and np.max(list(downscale_factors_per_spatial_dim.values())) > 1:
+                array = da.coarsen(
+                    mean_dtype,
+                    array,
+                    axes={
+                        idim: downscale_factors_per_spatial_dim[dim] if dim in sdims else 1
+                        for idim, dim in enumerate(dims)
+                    },
+                    trim_excess=True,
+                )
+
+            # Open output array. This allows setting `write_empty_chunks=True`,
+            # which cannot be passed to dask.array.to_zarr below.
+            output_zarr_arr = zarr.open(
+                output_zarr_array_url,
+                shape=array.shape,
+                chunks=chunksizes,
+                dtype=array.dtype,
+                config={'write_empty_chunks': True},
+                fill_value=0,
+                mode="w",
+                **zarr_array_creation_kwargs,
+            )
+
+            if show_progressbar:
+                with dask.diagnostics.ProgressBar(show_progressbar): 
+                    # Write the array
+                    array = array.to_zarr(
+                        output_zarr_arr,
+                        overwrite=True,
+                        return_stored=True,
+                        compute=True,
+                    )
+
+            else:
+                # Write the array
+                array = array.to_zarr(
+                    output_zarr_arr,
+                    overwrite=True,
+                    return_stored=True,
+                    compute=True,
+                )
+        else:
+            # use dask with batching to limit memory usage
+
+            output_shape = [np.floor(s) // (downscale_factors_per_spatial_dim[sdim]
+                    if sdim in sdims else 1)
+                    for s, sdim in zip(array.shape, dims)]
+
+            write_downsampled_chunk_p = partial(write_downsampled_chunk, 
+                input_array=array,
+                output_shape=output_shape,
+                dims=dims,
+                output_zarr_array_url=output_zarr_array_url,
+                output_chunksizes=chunksizes,
+                downscale_factors_per_spatial_dim=downscale_factors_per_spatial_dim,
+                zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+            )
+
+            normalized_chunks = normalize_chunks(
+                shape=output_shape,
+                chunks=chunksizes,
+            )
+
+            nblocks = [len(nc) for nc in normalized_chunks]
+
+            for batch in tqdm(
+                misc_utils.ndindex_batches(nblocks, n_batch),
+                total=int(np.ceil(np.prod(nblocks)/n_batch)))\
+            if show_progressbar else\
+                misc_utils.ndindex_batches(nblocks, n_batch):
+                
+                if batch_func is None:
+                    for block_id in batch:
+                        write_downsampled_chunk_p(block_id)
+                else:
+                    batch_func(
+                        write_downsampled_chunk_p, batch,
+                        **(batch_func_kwargs or {}))
+                    
+            array = da.from_zarr(output_zarr_array_url)
+    return array
+
+
+from dask.array.core import normalize_chunks
+def write_downsampled_chunk(
+    block_id,
+    input_array,
+    output_shape,
+    output_chunksizes,
+    dims,
+    output_zarr_array_url,
+    downscale_factors_per_spatial_dim,
+    zarr_array_creation_kwargs,
+):
+
+    sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
+    nsdims = [dim for dim in dims if dim not in si_utils.SPATIAL_DIMS]
+
+    normalized_chunks = normalize_chunks(
+        shape=output_shape,
+        chunks=output_chunksizes,
+    )
+
+    ns_coord = {dim: block_id[idim] for idim, dim in enumerate(nsdims)}
+    spatial_chunk_ind = block_id[len(nsdims):]
+
+    chunk_offset = {
+        sdims[idim]: int(np.sum(normalized_chunks[len(nsdims) + idim][:b]))
+        if b > 0 else 0 for idim, b in enumerate(spatial_chunk_ind)}
+    chunk_shape = {
+        sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
+            for idim, b in enumerate(spatial_chunk_ind)}
+    
+    input_slices = tuple(
+        slice(
+            ns_coord[dim],
+            ns_coord[dim] + 1,
+        )
+        if dim in nsdims
+        else slice(
+            chunk_offset[dim] * (downscale_factors_per_spatial_dim[dim]
+                if dim in downscale_factors_per_spatial_dim else 1),
+            (chunk_offset[dim] + chunk_shape[dim])
+                * (downscale_factors_per_spatial_dim[dim]
+                if dim in downscale_factors_per_spatial_dim else 1),
+        )
+        for dim in dims
+    )
+
+    output_chunk = da.coarsen(
+        mean_dtype,
+        input_array[input_slices],
+        axes={
+            idim: downscale_factors_per_spatial_dim[dim] if dim in sdims else 1
+            for idim, dim in enumerate(dims)
+        },
+        trim_excess=True,
+    )
+
+    output_zarr_arr = zarr.open(
+        output_zarr_array_url,
+        shape=[int(s) for s in output_shape],
+        chunks=[int(cs) for cs in output_chunksizes],
+        dtype=input_array.dtype,
+        config={'write_empty_chunks': True},
+        fill_value=0,
+        mode="a",
+        **zarr_array_creation_kwargs,
+    )
+
+    output_zarr_arr[tuple(
+        slice(
+            ns_coord[dim],
+            ns_coord[dim] + 1,
+        )
+        if dim in nsdims
+        else slice(
+            chunk_offset[dim],
+            chunk_offset[dim] + chunk_shape[dim],
+        )
+        for dim in dims
+    )] = output_chunk.compute()
+
+    return
+
+
+def calc_ngff_coordinate_transformations_and_axes(
+    stack_properties_res0: dict,
+    res_abs_factors: list[dict],
+    nsdims: list = None,
+):
+    
+    spacing = stack_properties_res0['spacing']
+    origin = stack_properties_res0['origin']
+    sdims = list(spacing.keys())
+    n_resolutions = len(res_abs_factors)
+
+    coordtfs = [
+            [
+                {
+                    "type": "scale",
+                    "scale": [1.0] * len(nsdims)
+                    + [
+                        float(s * res_abs_factors[res_level][dim])
+                        for dim, s in spacing.items()
+                    ],
+                },
+                {
+                    "type": "translation",
+                    "translation": [0] * len(nsdims)
+                    + [
+                        origin[dim]
+                        + (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
+                        for dim in sdims
+                    ],
+                },
+            ]
+            # [0] * (ndim - len(sdims)) + [origin[dim] for dim in sdims]}]
+            for res_level in range(n_resolutions)
+        ]
+    
+    axes = [
+        {
+            "name": dim,
+            "type": "channel"
+            if dim == "c"
+            else ("time" if dim == "t" else "space"),
+        }
+        | ({"unit": "micrometer"} if dim in sdims else {})
+        for dim in nsdims + sdims
+    ]
+
+    return coordtfs, axes
+
+
 def write_sim_to_ome_zarr(
     sim,
     output_zarr_url: str,
@@ -189,10 +440,14 @@ def write_sim_to_ome_zarr(
     overwrite: bool = False,
     ngff_version: str = "0.4",
     zarr_array_creation_kwargs: dict = None,
+    show_progressbar: bool = True,
+    n_batch=1,
+    batch_func=None,
+    batch_func_kwargs=None,
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
-    to a multiscale NGFF zarr file (v0.4).
+    to a multiscale NGFF zarr file (v0.4 or v0.5).
     Returns a sim backed by the newly created zarr file.
 
     If overwrite is False, image data will be read from the zarr file
@@ -200,8 +455,45 @@ def write_sim_to_ome_zarr(
     will be overwritten in any case.
 
     Note that any transform_key will not be stored in the zarr file.
-    However, the returned sim will have the transform_key set.
+    However, the returned sim will have the transform_key set as
+    in the input sim.
+
+    Parameters
+    ----------
+    sim : spatial_image
+        spatial_image to write
+    output_zarr_url : str
+        Path to the output zarr file
+    downscale_factors_per_spatial_dim : dict, optional
+        Downscale factors per spatial dimension to use for
+        generating the resolution levels, by default None (no downscaling)
+    overwrite : bool, optional
+        Whether to overwrite existing data in the output zarr file,
+        by default False
+    ngff_version : str, optional
+        NGFF version to use, by default "0.4"
+    zarr_array_creation_kwargs : dict, optional
+        Additional keyword arguments to pass to zarr.open
+        when creating the zarr arrays, by default None
+    show_progressbar : bool, optional
+        Whether to show a progress bar (tqdm),
+    n_batch : int, optional
+        Number of chunks to process in batch when writing
+        each resolution level, by default 1
+    batch_func : callable, optional
+        Function to use for submitting the processing of a batch.
+        E.g. misc_utils.process_batch_using_ray, by default None
+        (no batch submission, process sequentially)
+    batch_func_kwargs : dict, optional
+        Additional keyword arguments to pass to batch_func,
+        by default None
+    
     """
+
+    # if exists and overwrite, remove existing zarr group
+    if overwrite and os.path.exists(output_zarr_url):
+        print(f"Removing existing {output_zarr_url}...")
+        shutil.rmtree(output_zarr_url)
 
     if zarr_array_creation_kwargs is None:
         zarr_array_creation_kwargs = {}
@@ -227,8 +519,8 @@ def write_sim_to_ome_zarr(
     else:
         raise ValueError(f"ngff_version {ngff_version} not supported")
 
-    ndim = sim.data.ndim
     dims = sim.dims
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sim)
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
     origin = si_utils.get_origin_from_sim(sim)
@@ -238,151 +530,47 @@ def write_sim_to_ome_zarr(
         if dim in sdims
     }
 
-    if downscale_factors_per_spatial_dim is None:
-        downscale_factors_per_spatial_dim = {dim: 2 for dim in sdims}
-
-    res_shapes = [spatial_shape]
-    res_rel_factors = [{dim: 1 for dim in sdims}]
-    res_abs_factors = [{dim: 1 for dim in sdims}]
-    while True:
-        new_rel_factors = {
-            dim: downscale_factors_per_spatial_dim[dim]
-            if res_shapes[-1][dim] // downscale_factors_per_spatial_dim[dim]
-            > 10
-            else 1
-            for dim in sdims
-        }
-
-        new_abs_factors = {
-            dim: res_abs_factors[-1][dim] * new_rel_factors[dim]
-            for dim in sdims
-        }
-        new_shape = {
-            dim: res_shapes[-1][dim] // new_rel_factors[dim] for dim in sdims
-        }
-        if not any(new_rel_factors[dim] > 1 for dim in sdims):
-            break
-
-        res_shapes.append(new_shape)
-        res_rel_factors.append(
-            new_rel_factors | {dim: 1 for dim in dims if dim not in sdims}
-        )
-        res_abs_factors.append(
-            new_abs_factors | {dim: 1 for dim in dims if dim not in sdims}
+    res_shapes, res_rel_factors, res_abs_factors = \
+        msi_utils.calc_resolution_levels(
+            spatial_shape,
+            downscale_factors_per_spatial_dim=downscale_factors_per_spatial_dim,
         )
 
     n_resolutions = len(res_shapes)
 
-    if not overwrite and os.path.exists(f"{output_zarr_url}/0"):
-        sim.data = da.from_zarr(
-            f"{output_zarr_url}/0",
-        )
-    else:
-        # Open output array. This allows setting `write_empty_chunks=True`,
-        # which cannot be passed to dask.array.to_zarr below.
-        output_zarr_arr = zarr.open(
-            f"{output_zarr_url}/0",
-            shape=sim.data.shape,
-            chunks=sim.data.chunksize,
-            dtype=sim.data.dtype,
-            config={'write_empty_chunks': True},
-            fill_value=0,
-            mode="w",
-            **zarr_array_creation_kwargs,
-        )
-
-        # Write the lowest resolution
-        sim.data = sim.data.to_zarr(
-            output_zarr_arr,
-            overwrite=True,
-            return_stored=True,
-            compute=True,
-        )
-
-    coordtfs = [
-        [
-            {
-                "type": "scale",
-                "scale": [1.0] * (ndim - len(sdims))
-                + [
-                    float(s * res_abs_factors[res_level][dim])
-                    for dim, s in spacing.items()
-                ],
-            },
-            {
-                "type": "translation",
-                "translation": [0] * (ndim - len(sdims))
-                + [
-                    origin[dim]
-                    + (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
-                    for dim in sdims
-                ],
-            },
-        ]
-        # [0] * (ndim - len(sdims)) + [origin[dim] for dim in sdims]}]
-        for res_level in range(n_resolutions)
-    ]
-    axes = [
+    coordtfs, axes = calc_ngff_coordinate_transformations_and_axes(
         {
-            "name": dim,
-            "type": "channel"
-            if dim == "c"
-            else ("time" if dim == "t" else "space"),
-        }
-        | ({"unit": "micrometer"} if dim in sdims else {})
-        for dim in sim.dims
-        if dim in dims
-    ]
+            'spacing': spacing,
+            'origin': origin,
+            'shape': spatial_shape
+        },
+        res_abs_factors,
+        nsdims=nsdims,
+    )
 
-    # thanks to https://github.com/CamachoDejay/teaching-bioimage-analysis-python/blob/6076e00e392075ba9c07e67e868a39d4889e6298/short_examples/zarr-from-tiles/zarr-minimal-example-tiles.ipynb
-    def mean_dtype(arr, **kwargs):
-        return np.mean(arr, **kwargs).astype(arr.dtype)
-
-    parent_res_array = sim.data
+    # parent_res_array = sim.data
     curr_res_array = sim.data  # in case of only one resolution level
-    for res_level in range(1, n_resolutions):
-        if not overwrite and os.path.exists(f"{output_zarr_url}/{res_level}"):
-            curr_res_array = da.from_zarr(
-                f"{output_zarr_url}/{res_level}",
-            )
-        else:
-            curr_res_array = da.coarsen(
-                mean_dtype,
-                parent_res_array,
-                axes={
-                    idim: res_rel_factors[res_level][dim]
-                    for idim, dim in enumerate(dims)
-                },
-                trim_excess=True,
-            )
+    for res_level in range(0, n_resolutions):
 
-            curr_res_array = curr_res_array.rechunk(parent_res_array.chunksize)
-
-            # Open output array. This allows setting `write_empty_chunks=True`,
-            # which cannot be passed to dask.array.to_zarr below.
-            res_level_zarr_arr = zarr.open(
-                f"{output_zarr_url}/{res_level}",
-                shape=curr_res_array.shape,
-                chunks=curr_res_array.chunksize,
-                dtype=curr_res_array.dtype,
-                config={'write_empty_chunks': True},
-                fill_value=0,
-                mode="w",
-                **zarr_array_creation_kwargs,
-            )
-
-            curr_res_array = curr_res_array.to_zarr(
-                res_level_zarr_arr,
-                overwrite=True,
-                return_stored=True,
-                compute=True,
-            )
-
-        parent_res_array = curr_res_array
+        curr_res_array = write_and_return_downsampled_sim(
+            curr_res_array,
+            dims=dims,
+            chunksizes=sim.data.chunksize,
+            output_zarr_array_url=f"{output_zarr_url}/{res_level}",
+            downscale_factors_per_spatial_dim=res_rel_factors[res_level],
+            overwrite=overwrite,
+            zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+            res_level=res_level,
+            show_progressbar=show_progressbar,
+            n_batch=n_batch,
+            batch_func=batch_func,
+            batch_func_kwargs=batch_func_kwargs,
+        )
 
     output_group = zarr.open_group(
         output_zarr_url, mode="a", **zarr_group_creation_kwargs
     )
+
     writer.write_multiscales_metadata(
         group=output_group,
         axes=axes,

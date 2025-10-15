@@ -144,29 +144,72 @@ def update_msim_transforms_zarr(msim, path, overwrite=False):
     return
 
 
-def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
-    """
-    This is currently simply downscaling z and xy until a minimum size is reached.
-    Probably it'd make more sense to downscale considering the dims spacing.
-    """
+def calc_resolution_levels(
+    spatial_shape,
+    downscale_factors_per_spatial_dim=None,
+    min_shape=10
+):
+    sdims = list(spatial_shape.keys())
 
-    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
-    current_shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
-    factors = []
-    while 1:
-        curr_factors = {
-            dim: 2 if current_shape[dim] >= min_size else 1
-            for dim in current_shape
+    if downscale_factors_per_spatial_dim is None:
+        downscale_factors_per_spatial_dim = {dim: 2 for dim in sdims}
+
+    res_shapes = [spatial_shape]
+    res_rel_factors = [{dim: 1 for dim in sdims}]
+    res_abs_factors = [{dim: 1 for dim in sdims}]
+    while True:
+        new_rel_factors = {
+            dim: downscale_factors_per_spatial_dim[dim]
+            if res_shapes[-1][dim] // downscale_factors_per_spatial_dim[dim]
+            > min_shape
+            else 1
+            for dim in sdims
         }
-        if max(curr_factors.values()) == 1:
+
+        new_abs_factors = {
+            dim: res_abs_factors[-1][dim] * new_rel_factors[dim]
+            for dim in sdims
+        }
+        new_shape = {
+            dim: res_shapes[-1][dim] // new_rel_factors[dim] for dim in sdims
+        }
+        if not any(new_rel_factors[dim] > 1 for dim in sdims):
             break
-        current_shape = {
-            dim: int(current_shape[dim] / curr_factors[dim])
-            for dim in current_shape
-        }
-        factors.append(curr_factors)
 
-    return factors
+        res_shapes.append(new_shape)
+        res_rel_factors.append(
+            new_rel_factors
+        )
+        res_abs_factors.append(
+            new_abs_factors
+        )
+
+    return res_shapes, res_rel_factors, res_abs_factors
+
+
+# def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
+#     """
+#     This is currently simply downscaling z and xy until a minimum size is reached.
+#     Probably it'd make more sense to downscale considering the dims spacing.
+#     """
+
+#     spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
+#     current_shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
+#     factors = []
+#     while 1:
+#         curr_factors = {
+#             dim: 2 if current_shape[dim] >= min_size else 1
+#             for dim in current_shape
+#         }
+#         if max(curr_factors.values()) == 1:
+#             break
+#         current_shape = {
+#             dim: int(current_shape[dim] / curr_factors[dim])
+#             for dim in current_shape
+#         }
+#         factors.append(curr_factors)
+
+#     return factors
 
 
 def get_transforms_from_dataset_as_dict(dataset):
@@ -200,8 +243,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
     sim_attrs = sim.attrs.copy()
 
+    spatial_shape = si_utils.get_shape_from_sim(sim)
+
     if scale_factors is None:
-        scale_factors = get_optimal_multi_scale_factors_from_sim(sim)
+        scale_factors = calc_resolution_levels(spatial_shape)[1]
 
     if chunks is None:
         if isinstance(sim.data, da.Array):

@@ -1,5 +1,5 @@
 import itertools
-import os
+import os, shutil
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import product
@@ -16,6 +16,7 @@ from multiview_stitcher import (
     mv_graph,
     ngff_utils,
     param_utils,
+    misc_utils,
     transformation,
     weights,
 )
@@ -977,6 +978,7 @@ def prepare_block_fusion(
         sims, fuse_kwargs.get("output_chunksize", None)
     )
 
+    dims = sims[0].dims
     nsdims = si_utils.get_nonspatial_dims_from_sim(sims[0])
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     ns_shape = {dim: len(sims[0].coords[dim]) for dim in nsdims}
@@ -989,6 +991,15 @@ def prepare_block_fusion(
     normalized_chunks = normalize_chunks(
         shape=full_output_shape,
         chunks=full_output_chunksize)
+    
+    print(f"Fusing into a an output stack:")
+    print("- shape: ", {dim: int(output_stack_properties['shape'][dim])
+        if dim in sdims else 1 for dim in dims})
+    print("- spacing: ", {k: float(v)
+        for k, v in output_stack_properties['spacing'].items()})
+    print("- origin: ", {k: float(v)
+        for k, v in output_stack_properties['origin'].items()})
+    # print(f"- chunksize: {fuse_kwargs.get('output_chunksize', None)}")
 
     # Create the Zarr array store on disk
     output_zarr_array = zarr.create(
@@ -1036,6 +1047,7 @@ def prepare_block_fusion(
             **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
+            output_spacing={dim: osp['spacing'][dim] for dim in sdims},
             ).data
 
         fused = fused[tuple(slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims)]
@@ -1059,13 +1071,13 @@ def prepare_block_fusion(
     }
 
 
-from itertools import islice
 from tqdm import tqdm
 def fuse_to_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
+    overwrite: bool = True,
     batch_func: Callable = None,
-    n_batch: int = 100,
+    n_batch: int = 1,
     batch_func_kwargs: dict = None,
     zarr_array_creation_kwargs: dict = None,
 ):
@@ -1083,11 +1095,17 @@ def fuse_to_zarr(
         Function to process each batch of fused chunks.
         The function receives the function that processes a given block_id and
         a list of block_id(s) as input.
-        By default None, in which case the function simply processes
-        each block_id sequentially.
+        By default None, in which case the each block is processed sequentially.
     n_batch : int, optional
-        Number of blocks to process in each batch, by default 100
+        Number of blocks to process in each batch, by default 1
+    batch_func_kwargs : dict, optional
+        Additional keyword arguments passed to batch_func
+    zarr_array_creation_kwargs : dict, optional
+        Additional keyword arguments passed to zarr.open
     """
+
+    if overwrite and os.path.exists(output_zarr_url):
+        shutil.rmtree(output_zarr_url)
 
     if zarr_array_creation_kwargs is None:
         zarr_array_creation_kwargs = {}
@@ -1104,19 +1122,8 @@ def fuse_to_zarr(
     output_stack_properties['shape'] = {dim: int(v)
         for dim, v in output_stack_properties['shape'].items()}
 
-    print(f"Fusing into a stack with the following properties:")
-    print(output_stack_properties)
-
-    def ndindex_batches(nblocks, batch_size):
-        it = np.ndindex(*nblocks)
-        while True:
-            batch = list(islice(it, batch_size))
-            if not batch:
-                break
-            yield batch
-
     print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
-    for batch in tqdm(ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
+    for batch in tqdm(misc_utils.ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
         
         if batch_func is None:
             for block_id in batch:
@@ -1145,8 +1152,9 @@ def fuse_to_zarr(
 def fuse_to_multiscale_ome_zarr(
     output_zarr_url: str,
     fuse_kwargs: dict,
+    overwrite: bool = True,
     batch_func: Callable = None,
-    n_batch: int = 100,
+    n_batch: int = 1,
     batch_func_kwargs: dict = None,
     ngff_version: str = "0.4",
     zarr_array_creation_kwargs: dict = None,
@@ -1158,6 +1166,9 @@ def fuse_to_multiscale_ome_zarr(
 
     This function is eager (i.e. completes the fusion before returning).
     """
+
+    if overwrite and os.path.exists(output_zarr_url):
+        shutil.rmtree(output_zarr_url)
 
     zarr_array_creation_kwargs = \
         ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
