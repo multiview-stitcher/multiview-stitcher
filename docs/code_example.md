@@ -81,3 +81,26 @@ fused_sim.data
 # get fused array as a numpy array
 fused_sim.data.compute()
 ```
+
+For large datasets (>50GB, potentially with benefits already at >5GB) consider using `fusion.fuse_to_zarr` of `fusion.fuse_to_multiscale_ome_zarr` to stream the fused result to disk in a large-data optimized manner. E.g. instead of the above you do:
+
+```python
+from multiview_stitcher import fusion
+
+output_zarr_url = "fused_output.ome.zarr"
+
+fused = fusion.fuse_to_multiscale_ome_zarr(
+    fuse_kwargs={
+        "sims": [msi_utils.get_sim_from_msim(msim) for msim in msims],
+        "transform_key": "translation_registered",
+        # ... further optional args for fusion.fuse
+    },
+    output_zarr_url=output_zarr_url,
+    # optionally, we can use ray for parallelization (`pip install "ray[default]"`)
+    # batch_func=misc_utils.process_batch_using_ray,
+    # n_batch=4, # number of chunk fusions to schedule / submit at a time
+    # batch_func_kwargs={
+    #     'num_cpus': 4 # number of processes for parallel processing to use with ray
+    #     },
+)
+```
