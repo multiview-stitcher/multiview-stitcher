@@ -1113,7 +1113,7 @@
 </span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">fused_sim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">compute</span><span class="p">()</span>
 </span></code></pre></div>
 <p>For large datasets (&gt;50GB, potentially with benefits already at &gt;5GB) consider using <code>fusion.fuse_to_zarr</code> of <code>fusion.fuse_to_multiscale_ome_zarr</code> to stream the fused result to disk in a large-data optimized manner. E.g. instead of the above you do:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">fusion</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">fusion</span><span class="p">,</span> <span class="n">misc_utils</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">output_zarr_url</span> <span class="o">=</span> <span class="s2">&quot;fused_output.ome.zarr&quot;</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
