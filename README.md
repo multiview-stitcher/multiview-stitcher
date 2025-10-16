@@ -14,6 +14,8 @@
 
 Documentation available [here](https://multiview-stitcher.github.io/multiview-stitcher). 📚
 
+**Contents:** [Intro](#multiview-stitcher) • [Quickstart](#quickstart) • [Napari plugin](#napari-plugin) • [Installation](#installation) • [Recent news](#recent-news) • [Browser usage](#stitching-in-the-browser) • [Limitations](#known-limitations) • [Roadmap](#roadmap--future-plans) • [Contributing](#contributing) • [Citing](#citing-multiview-stitcher) • [License](#license)
+
 # multiview-stitcher
 
 `multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets. As such, it shares considerable functionality with the Fiji plugin [BigStitcher](https://imagej.net/plugins/bigstitcher/), with the difference that it is designed for interoperability with the Python scientific ecosystem. This allows it to:
@@ -175,6 +177,18 @@ You can install `multiview-stitcher` via `pip` from PyPI:
 or from the source code in this github repository:
 
     pip install git+https://github.com/multiview-stitcher/multiview-stitcher.git
+
+## Recent news
+
+- Oct/25 (**v0.1.37**): Support for fusion of huge datasets using
+- Oct/25 (**v0.1.34**): `register(..., reg_res_level=1)` for registering directly on downsampled data
+- Aug/25 (**v0.1.30**): Multi-view fusion example [notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_bigstitcher_multiview.ipynb) available.
+- May/25 (**v0.1.26**): Introduced option to specify the number of parallel pairwise registrations for improved performance / memory tradeoff.
+- Mar/25 (**v0.1.23**): Support for neuroglancer visualization of
+  - input tiles together with their input transformations
+  - registered tiles together with their registration transformations
+  - fused output together with the transformations of all input tiles
+- Mar/25 (**v0.1.21**): Obtained completely stable numerics for n-dimensional stack intersection calculation using `scipy.spatial.HalfspaceIntersection`.
 
 ## Citing multiview-stitcher
 
