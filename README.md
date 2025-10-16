@@ -180,7 +180,7 @@ or from the source code in this github repository:
 
 ## Recent news
 
-- Oct/25 (**v0.1.37**): Support for fusion of huge datasets using
+- Oct/25 (**v0.1.37**): Support for fusing huge datasets using `fusion.fuse_to_multiscale_ome_zarr` that streams the fused result to disk in batches of chunks, using `fusion.fuse` under the hood while circumventing any dask graph induced overhead. [Tested](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb) on >100TB datasets!
 - Oct/25 (**v0.1.34**): `register(..., reg_res_level=1)` for registering directly on downsampled data
 - Aug/25 (**v0.1.30**): Multi-view fusion example [notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_bigstitcher_multiview.ipynb) available.
 - May/25 (**v0.1.26**): Introduced option to specify the number of parallel pairwise registrations for improved performance / memory tradeoff.
