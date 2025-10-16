@@ -4,10 +4,6 @@
 [![tests](https://github.com/multiview-stitcher/multiview-stitcher/actions/workflows/test_and_deploy.yml/badge.svg)](https://github.com/multiview-stitcher/multiview-stitcher/actions)
 [![DOI](https://zenodo.org/badge/697999800.svg)](https://zenodo.org/doi/10.5281/zenodo.13151252)
 
-Documentation available [here](https://multiview-stitcher.github.io/multiview-stitcher).
-
-# multiview-stitcher
-
 <!--
 [![License BSD-3](https://img.shields.io/pypi/l/multiview-stitcher.svg?color=green)](https://github.com/multiview-stitcher/multiview-stitcher/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/multiview-stitcher.svg?color=green)](https://pypi.org/project/multiview-stitcher)
@@ -16,13 +12,26 @@ Documentation available [here](https://multiview-stitcher.github.io/multiview-st
 [![codecov](https://codecov.io/gh/multiview-stitcher/multiview-stitcher/branch/main/graph/badge.svg)](https://codecov.io/gh/multiview-stitcher/multiview-stitcher)
 -->
 
-`multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms (under development) to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets.
+Documentation available [here](https://multiview-stitcher.github.io/multiview-stitcher).
 
-For visualization, the associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget.
+# multiview-stitcher
 
-With a focus on interoperability and integration with existing tools and the ecosystem, the package intends to integrate as tightly as possible with the [NGFF specification](https://github.com/ome/ngff).
+`multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets. As such, it shares considerable functionality with the Java software and Fiji plugin BigStitcher, with the difference that it is designed for interoperability with the Python scientific ecosystem. This allows it to:
 
-It leverages [`xarray`](https://github.com/xarray) in combination with [`spatial-image`](https://github.com/spatial-image/spatial-image) and [`multiscale-spatial-image`](https://github.com/spatial-image/multiscale-spatial-image) for image handling and [`dask`](https://github.com/dask) and [`dask-image`](https://github.com/dask-image) for chunked and distributed image processing.
+  - easily integrate into existing Python-based workflows (within Jupyter notebooks, scripts, etc.)
+  - scale to very large datasets using mature Python tooling (using `dask`, `zarr-python`, `ray`)
+  - make use of community-developed data representations (`xarray`, `spatial-image`, `multiscale-spatial-image`, `spatialdata`)
+  - ensure compatibility with and optimal usage of modern file formats and standards, e.g. [OME-Zarr](https://ome-ngff.readthedocs.io/en/latest/)
+  - swap in custom methods for registration and fusion that are readily available in the Python ecosystem (e.g. from `scikit-image`, `ANTs`, `elastix`, `SimpleITK`)
+
+
+**Visualization**: The associated [`napari-stitcher`](https://github.com/multiview-stitcher/napari-stitcher) provides visualization functionality using the Napari viewer, including a standalone widget for stitching vanilla napari image layers. Alternatively, web-based visualization of huge datasets  together with their associated transformations is supported using [neuroglancer](https://neuroglancer-docs.web.app/) (no additional installation required! See e.g. the exaSPIM example [notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb)).
+
+**Extensibility**: Next to the built-in functions for pairwise registration, fusion and view weighing, custom functions with a simple API can be provided by the user. Multiview-stitcher provides these functions with chunk-sized and pre-transformed image arrays, taking care of the overall stitching workflow and large data handling.
+
+**Scalability**: The package is designed to handle very large datasets that do not fit into memory. It leverages `zarr`, `dask` and `ray` for efficient data handling and processing. For example, `multiview-stitcher` can fuse cloud-hosted exaSPIM datasets of >100TB each (see [example notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb)).
+
+**Transformations**: multiview-stitcher supports up to affine transformations. This includes translation for simple stitching, as well as rotation and scaling for precise stitching or multi-view fusion. Non-rigid transformations are not supported at the moment.
 
 ## Quickstart
 
@@ -136,7 +145,7 @@ If you find multiview-stitcher useful please cite this repository using the foll
 
 ## Stitching in the browser
 
-`multiview-stitcher` can run without installation in your browser.
+`multiview-stitcher` can run without installation in your browser. Data is processed locally in the browser and not uploaded to any server.
 
 ### Try it out
 
@@ -145,13 +154,28 @@ If you find multiview-stitcher useful please cite this repository using the foll
 - upload files to stitch into a 'data' folder in the jupyter lab window
 - follow the notebook
 
-#### Limitations
-- stitching will run with a single thread
-- while the code runs locally, your local file system is not directly accessible from within the browser environment
+Limitations: stitching will run with a single thread and while the code runs locally, your local file system is not directly accessible from within the browser environment
+
+## Known limitations
+
+1. The current implementation focuses on rigid transformations (translation, rotation). Non-rigid transformations are not supported at the moment.
+1. In terms of data volumes, processing huge tiles is handled well. A large amount of tiles (e.g. more than hundreds) works but can be slow during registration, as the currently built-in global optimization method converges slowly for large numbers of tiles.
+1. Open an issue if you encounter any problems or have suggestions for improvements!
+
+## Roadmap / Future plans
+
+Some planned improvements for future releases:
+
+1. Implement a hierarchical and parallelised global registration optimization for faster registration of datasets with large numbers of tiles (>100s).
+1. Implement more built-in registration and fusion methods:
+    1. Feature-based registration
+    1. Multiview deconvolution-based fusion
+1. The built-in option to subdivide tiles / views for working with piecewise affine transformations that account for local distortions observed in e.g. large FOV light sheet data.
+1. Open an issue if you have suggestions for improvements!
 
 ## Work in progress
 
-WARNING: THIS IS WORK IN PROGRESS. `multiview-stitcher` is being developed in the open and has not reached a stable release yet. The API is subject to change.
+`multiview-stitcher` is being actively developed in the open and the API is subject to change.
 
 ## Previous work
 
