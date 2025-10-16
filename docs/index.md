@@ -18,7 +18,7 @@ title: Overview
 
 **🚀 Scalability**: The package is designed to handle very large datasets that do not fit into memory. It leverages `zarr`, `dask` and `ray` for efficient data handling and processing. For example, `multiview-stitcher` can fuse cloud-hosted exaSPIM datasets of >100TB each (see [example notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb)).
 
-**🔄 Transformations**: multiview-stitcher supports up to affine transformations. This includes translation for simple stitching, as well as rotation and scaling for precise stitching or multi-view fusion. Non-rigid transformations are not supported at the moment.
+**🔄 Transformations**: multiview-stitcher supports both input and output tile transformations, as well as registration results to be full affine transformations. This includes simple shifts / translations, as well as rotation and scaling for advanced stitching or multi-view fusion. Non-rigid transformations are not supported at the moment.
 
 
 ## Napari plugin
