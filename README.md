@@ -135,7 +135,7 @@ fused_sim.data.compute()
 For large datasets (>50GB, potentially with benefits already at >5GB) consider using `fusion.fuse_to_zarr` of `fusion.fuse_to_multiscale_ome_zarr` to stream the fused result to disk in a large-data optimized manner. E.g. instead of the above you do:
 
 ```python
-from multiview_stitcher import fusion
+from multiview_stitcher import fusion, misc_utils
 
 output_zarr_url = "fused_output.ome.zarr"
 
