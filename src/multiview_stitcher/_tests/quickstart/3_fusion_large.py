@@ -1,4 +1,4 @@
-from multiview_stitcher import misc_utils
+from multiview_stitcher import fusion, misc_utils
 
 output_zarr_url = "fused_output.ome.zarr"
 

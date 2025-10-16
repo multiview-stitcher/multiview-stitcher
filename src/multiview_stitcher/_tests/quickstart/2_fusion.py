@@ -1,4 +1,4 @@
-from multiview_stitcher import fusion, msi_utils
+from multiview_stitcher import fusion
 
 fused_sim = fusion.fuse(
     [msi_utils.get_sim_from_msim(msim) for msim in msims],

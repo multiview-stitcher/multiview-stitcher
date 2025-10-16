@@ -94,4 +94,5 @@ notebooks/Grid*
 notebooks/Stitching_TIFF*
 notebooks/IP_TIFF/*
 notebooks/*zarr
+*.zarr
 src/multiview_stitcher/_benchmarks/data
