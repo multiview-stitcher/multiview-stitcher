@@ -50,6 +50,8 @@ nav:
     - Registration:
       - troubleshoot_registration_accuracy.md
       - troubleshoot_registration_OOM.md
+    - Fusion:
+      - troubleshoot_fusion.md
   - chart.md
   - notebooks.md
   - features.md
