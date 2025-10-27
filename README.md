@@ -134,26 +134,28 @@ fused_sim.data
 fused_sim.data.compute()
 ```
 
-For large datasets (>50GB, potentially with benefits already at >5GB) consider using `fusion.fuse_to_zarr` of `fusion.fuse_to_multiscale_ome_zarr` to stream the fused result to disk in a large-data optimized manner. E.g. instead of the above you do:
+For large datasets (>50GB, potentially with benefits already at >5GB) consider streaming the fused result directly to a zarr file using the following way to call `fusion.fuse`:
 
 ```python
 from multiview_stitcher import fusion, misc_utils
 
-output_zarr_url = "fused_output.ome.zarr"
-
-fused = fusion.fuse_to_multiscale_ome_zarr(
-    fuse_kwargs={
-        "sims": [msi_utils.get_sim_from_msim(msim) for msim in msims],
-        "transform_key": "translation_registered",
-        # ... further optional args for fusion.fuse
+fused = fusion.fuse(
+    sims=[msi_utils.get_sim_from_msim(msim) for msim in msims],
+    transform_key="translation_registered",
+    # ... further optional args for fusion.fuse
+    output_zarr_url="fused_output.ome.zarr",
+    zarr_options={
+        "ome_zarr": True,
+        # "ngff_version": "0.4",  # optional
     },
-    output_zarr_url=output_zarr_url,
     # optionally, we can use ray for parallelization (`pip install "ray[default]"`)
-    # batch_func=misc_utils.process_batch_using_ray,
-    # n_batch=4, # number of chunk fusions to schedule / submit at a time
-    # batch_func_kwargs={
-    #     'num_cpus': 4 # number of processes for parallel processing to use with ray
+    # batch_options={
+    #     "batch_func": misc_utils.process_batch_using_ray,
+    #     "n_batch": 4,  # number of chunk fusions to schedule / submit at a time
+    #     "batch_func_kwargs": {
+    #         'num_cpus': 4  # number of processes for parallel processing to use with ray
     #     },
+    # },
 )
 ```
 
@@ -180,7 +182,7 @@ or from the source code in this github repository:
 
 ## Recent news
 
-- Oct/25 (**v0.1.37**): Support for fusing huge datasets using `fusion.fuse_to_multiscale_ome_zarr` that streams the fused result to disk in batches of chunks, using `fusion.fuse` under the hood while circumventing any dask graph induced overhead. [Tested](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb) on >100TB datasets!
+- Oct/25 (**v0.1.37**): Support for fusing huge datasets using `fusion.fuse(..., output_zarr_url=...)`, in which the fused result is streamed to disk in batches of independently processed chunks, circumventing any dask graph induced overhead. [Tested](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_exaspim.ipynb) on >100TB datasets!
 - Oct/25 (**v0.1.34**): `register(..., reg_res_level=1)` for registering directly on downsampled data
 - Aug/25 (**v0.1.30**): Multi-view fusion example [notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitching_bigstitcher_multiview.ipynb) available.
 - May/25 (**v0.1.26**): Introduced option to specify the number of parallel pairwise registrations for improved performance / memory tradeoff.

@@ -356,28 +356,45 @@ def test_fuse_to_zarr():
             # fusion.process_batch_using_ray, # leads to obscure error in CI, probably https://github.com/ray-project/ray/issues/55255
         ]:
 
-            fused = fusion.fuse_to_zarr(
-                output_path,
-                fuse_kwargs=fuse_kwargs,
-                n_batch=2,
-                batch_func=batch_func,
+            fused = fusion.fuse(
+                output_zarr_url=output_path,
+                zarr_options={
+                    "ome_zarr": False,
+                },
+                batch_options={
+                    "n_batch": 2,
+                    "batch_func": batch_func,
+                },
+                **fuse_kwargs,
             )
 
             assert fused.max().compute() > 0
-        fused = fusion.fuse_to_zarr(
-            output_path,
-            fuse_kwargs=fuse_kwargs,
-            n_batch=2,
+
+        fused = fusion.fuse(
+            output_zarr_url=output_path,
+            zarr_options={
+                "ome_zarr": False,
+            },
+            batch_options={
+                "n_batch": 2,
+            },
+            **fuse_kwargs,
         )
 
         assert fused.max().compute() > 0
 
         output_path = os.path.join(tmpdir, "fused.ome.zarr")
 
-        fused = fusion.fuse_to_multiscale_ome_zarr(
-            output_path,
-            fuse_kwargs=fuse_kwargs,
-            n_batch=2,
+        fused = fusion.fuse(
+            output_zarr_url=output_path,
+            zarr_options={
+                "ome_zarr": True,
+                # "ngff_version": "0.4",  # optional, defaults to 0.4
+            },
+            batch_options={
+                "n_batch": 2,
+            },
+            **fuse_kwargs,
         )
 
         fused = ngff_utils.read_sim_from_ome_zarr(

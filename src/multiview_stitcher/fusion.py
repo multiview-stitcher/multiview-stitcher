@@ -4,13 +4,17 @@ import warnings
 from collections.abc import Callable, Sequence
 from itertools import product
 from typing import Union
+from tqdm import tqdm
 
 import dask.array as da
 import numpy as np
+import zarr
 import spatial_image as si
 import xarray as xr
 from dask import delayed
 from dask.utils import has_keyword
+from dask.array.core import normalize_chunks
+from dask import config as dask_config
 
 from multiview_stitcher import (
     mv_graph,
@@ -187,6 +191,9 @@ def fuse(
     overlap_in_pixels: int = None,
     interpolation_order: int = 1,
     blending_widths: dict[str, float] = None,
+    output_zarr_url: str | None = None,
+    zarr_options: dict | None = None,
+    batch_options: dict | None = None,
 ):
     """
 
@@ -230,13 +237,129 @@ def fuse(
         Chunksize of the dask data array of the fused image. If the first tile is a chunked dask array,
         its chunksize is used as the default. If the first tile is not a chunked dask array,
         the default chunksize defined in spatial_image_utils.py is used.
-
+    output_zarr_url : str or None, optional
+        If not None, fuse directly into a Zarr store at this location and do so in batches of chunks,
+        with each chunk being processed independently. This allows for efficient memory usage and
+        works well for very large datasets (successfully tested ~0.5PB on a macbook).
+        When provided, fuse() performs eager fusion and returns a SpatialImage backed by the written store.
+    zarr_options: dict, optional
+        Additional (dict of) options to pass when creating the Zarr store. Keys:
+        - ome_zarr : bool, optional
+            If True and output_zarr_url is provided, write a NGFF/OME-Zarr multiscale image under
+            "<output_zarr_url>/". Otherwise, the fused array is written directly under output_zarr_url.
+        - ngff_version : str, optional
+            NGFF version used when ome_zarr=True. Default "0.4".
+        - zarr_array_creation_kwargs: dict = None, optional
+            Additional keyword arguments to pass when creating the Zarr array.
+        - overwrite: bool, by default True
+    batch_options : dict, optional
+        Options for chunked fusion when output_zarr_url is provided. Keys:
+        - batch_func: Callable, optional
+            Function to process each batch of fused chunks. Inputs:
+            1) a list of block_id(s)
+            2) function that performs fusion when passed a given block_id
+            By default None, in which case the each block is processed sequentially.
+        - n_batch: int
+            Number of blocks to process in each batch, by default 1
+        - batch_func_kwargs: dict, optional
+            Additional keyword arguments passed to batch_func.
     Returns
     -------
     SpatialImage
         Fused image.
     """
+    # If writing directly to Zarr/OME-Zarr, run chunked fusion path and return eagerly.
+    if output_zarr_url is not None:
+        # Collect batch options with defaults
+        batch_options = batch_options or {}
+        batch_func = batch_options.get("batch_func", None)
+        n_batch = batch_options.get("n_batch", 1)
+        batch_func_kwargs = batch_options.get("batch_func_kwargs", None)
+        zarr_array_creation_kwargs = batch_options.get("zarr_array_creation_kwargs", None)
 
+        # Collect zarr options with defaults
+        zarr_options = zarr_options or {}
+        ome_zarr = zarr_options.get("ome_zarr", False)
+        ngff_version = zarr_options.get("ngff_version", "0.4")
+        overwrite = zarr_options.get("overwrite", True)
+
+        # Resolve store path for data (OME-Zarr stores scale 0 under "<root>/0")
+        store_url = os.path.join(output_zarr_url, "0") if ome_zarr else output_zarr_url
+
+        if overwrite and os.path.exists(store_url):
+            shutil.rmtree(store_url)
+        if ome_zarr:
+            # Ensure creation kwargs reflect NGFF version when writing OME-Zarr
+            zarr_array_creation_kwargs = ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
+                ngff_version, zarr_array_creation_kwargs
+            )
+
+        # Build kwargs for per-chunk fuse() calls (exclude zarr-specific args to avoid recursion)
+        per_chunk_fuse_kwargs = {
+            "sims": sims,
+            "transform_key": transform_key,
+            "fusion_func": fusion_func,
+            "fusion_method_kwargs": fusion_method_kwargs,
+            "weights_func": weights_func,
+            "weights_func_kwargs": weights_func_kwargs,
+            "output_spacing": output_spacing,
+            "output_stack_mode": output_stack_mode,
+            "output_origin": output_origin,
+            "output_shape": output_shape,
+            "output_stack_properties": output_stack_properties,
+            "output_chunksize": output_chunksize,
+            "overlap_in_pixels": overlap_in_pixels,
+            "interpolation_order": interpolation_order,
+            "blending_widths": blending_widths,
+        }
+
+        # Prepare block fusion and process in batches
+        block_fusion_info = prepare_block_fusion(
+            store_url,
+            fuse_kwargs=per_chunk_fuse_kwargs,
+            zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+        )
+        fuse_chunk = block_fusion_info["func"]
+        nblocks = block_fusion_info["nblocks"]
+        osp = block_fusion_info["output_stack_properties"]
+        osp["shape"] = {dim: int(v) for dim, v in osp["shape"].items()}
+
+        print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
+        for batch in tqdm(
+            misc_utils.ndindex_batches(nblocks, n_batch),
+            total=int(np.ceil(np.prod(nblocks) / n_batch)),
+        ):
+            if batch_func is None:
+                for block_id in batch:
+                    fuse_chunk(block_id)
+            else:
+                batch_func(fuse_chunk, batch, **(batch_func_kwargs or {}))
+
+        # Build SpatialImage from zarr array
+        z = zarr.open(store_url, mode="r")
+        fusion_transform_key = transform_key
+        fused = si_utils.get_sim_from_array(
+            array=z,
+            dims=list(sims[0].dims),
+            transform_key=fusion_transform_key,
+            scale=osp["spacing"],
+            translation=osp["origin"],
+            c_coords=sims[0].coords["c"].values,
+            t_coords=sims[0].coords["t"].values,
+        )
+
+        # If requested, write OME-Zarr metadata
+        # and multiscale pyramid
+        if ome_zarr:
+            ngff_utils.write_sim_to_ome_zarr(
+                fused,
+                output_zarr_url=output_zarr_url,
+                overwrite=False,
+            )
+
+        return fused
+
+    # Default in-memory fusion path (unchanged)
     output_chunksize = process_output_chunksize(sims, output_chunksize)
 
     output_stack_properties = process_output_stack_properties(
@@ -949,9 +1072,6 @@ def get_interpolated_image(
     return interp_image
 
 
-from dask.array.core import normalize_chunks
-from dask import config as dask_config
-import zarr
 def prepare_block_fusion(
     output_zarr_url: str,
     fuse_kwargs: dict,
@@ -1071,123 +1191,29 @@ def prepare_block_fusion(
     }
 
 
-from tqdm import tqdm
-def fuse_to_zarr(
-    output_zarr_url: str,
-    fuse_kwargs: dict,
-    overwrite: bool = True,
-    batch_func: Callable = None,
-    n_batch: int = 1,
-    batch_func_kwargs: dict = None,
-    zarr_array_creation_kwargs: dict = None,
-):
+def fuse_to_zarr(*args, **kwargs):
     """
-    Fuse directly into a zarr array in batches.
-    Works well for very large datasets (successfully tested ~0.5PB on macbook).
-
-    This function is eager (i.e. completes the fusion before returning).
-
-    Parameters
-    ----------
-    output_path : str
-        Path to output zarr array.
-    batch_func : Callable, optional
-        Function to process each batch of fused chunks.
-        The function receives the function that processes a given block_id and
-        a list of block_id(s) as input.
-        By default None, in which case the each block is processed sequentially.
-    n_batch : int, optional
-        Number of blocks to process in each batch, by default 1
-    batch_func_kwargs : dict, optional
-        Additional keyword arguments passed to batch_func
-    zarr_array_creation_kwargs : dict, optional
-        Additional keyword arguments passed to zarr.open
+    Deprecated: use fuse(..., output_zarr_url=...) instead.
     """
-
-    if overwrite and os.path.exists(output_zarr_url):
-        shutil.rmtree(output_zarr_url)
-
-    if zarr_array_creation_kwargs is None:
-        zarr_array_creation_kwargs = {}
-
-    block_fusion_info = prepare_block_fusion(
-        output_zarr_url,
-        fuse_kwargs=fuse_kwargs,
-        zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+    warnings.warn(
+        "fuse_to_zarr() is deprecated. Use fuse(..., output_zarr_url=<path>) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    raise RuntimeError(
+        "fuse_to_zarr() is deprecated. Please call fuse(..., output_zarr_url=<path>) instead."
     )
 
-    fuse_chunk = block_fusion_info['func']
-    nblocks = block_fusion_info['nblocks']
-    output_stack_properties = block_fusion_info['output_stack_properties']
-    output_stack_properties['shape'] = {dim: int(v)
-        for dim, v in output_stack_properties['shape'].items()}
 
-    print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
-    for batch in tqdm(misc_utils.ndindex_batches(nblocks, n_batch), total=int(np.ceil(np.prod(nblocks)/n_batch))):
-        
-        if batch_func is None:
-            for block_id in batch:
-                fuse_chunk(block_id)
-        else:
-            batch_func(fuse_chunk, batch, **(batch_func_kwargs or {}))
-
-    z = zarr.open(output_zarr_url, mode='r')
-    fusion_transform_key = fuse_kwargs.get("transform_key", None)
-
-    sims = fuse_kwargs.get("sims", None)
-
-    fused = si_utils.get_sim_from_array(
-        array=z,
-        dims=list(sims[0].dims),
-        transform_key=fusion_transform_key,
-        scale=output_stack_properties['spacing'],
-        translation=output_stack_properties['origin'],
-        c_coords=sims[0].coords['c'].values,
-        t_coords=sims[0].coords['t'].values,
-    )
-
-    return fused
-
-
-def fuse_to_multiscale_ome_zarr(
-    output_zarr_url: str,
-    fuse_kwargs: dict,
-    overwrite: bool = True,
-    batch_func: Callable = None,
-    n_batch: int = 1,
-    batch_func_kwargs: dict = None,
-    ngff_version: str = "0.4",
-    zarr_array_creation_kwargs: dict = None,
-):
+def fuse_to_multiscale_ome_zarr(*args, **kwargs):
     """
-    Fuse directly into a multiscale OME-Zarr array in batches.
-
-    OME-Zarr version 0.4 is used.
-
-    This function is eager (i.e. completes the fusion before returning).
+    Deprecated: use fuse(..., output_zarr_url=..., zarr_options={'ome_zarr': True}) instead.
     """
-
-    if overwrite and os.path.exists(output_zarr_url):
-        shutil.rmtree(output_zarr_url)
-
-    zarr_array_creation_kwargs = \
-        ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
-            ngff_version, zarr_array_creation_kwargs
-        )
-
-    fused = fuse_to_zarr(
-        output_zarr_url=os.path.join(output_zarr_url, "0"),
-        fuse_kwargs=fuse_kwargs,
-        batch_func=batch_func,
-        n_batch=n_batch,
-        batch_func_kwargs=batch_func_kwargs,
-        zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+    warnings.warn(
+        "fuse_to_multiscale_ome_zarr() is deprecated. Use fuse(..., output_zarr_url=<path>, zarr_options={'ome_zarr': True}) instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-
-    ngff_utils.write_sim_to_ome_zarr(
-        fused,
-        output_zarr_url=output_zarr_url,
-        overwrite=False,
+    raise RuntimeError(
+        "fuse_to_multiscale_ome_zarr() is deprecated. Please call fuse(..., output_zarr_url=<path>, zarr_options={'ome_zarr': True}) instead."
     )
-
-    return fused
