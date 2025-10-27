@@ -1189,3 +1189,31 @@ def prepare_block_fusion(
         "nblocks": nblocks,
         "output_stack_properties": output_stack_properties,
     }
+
+
+def fuse_to_zarr(*args, **kwargs):
+    """
+    Deprecated: use fuse(..., output_zarr_url=...) instead.
+    """
+    warnings.warn(
+        "fuse_to_zarr() is deprecated. Use fuse(..., output_zarr_url=<path>) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    raise RuntimeError(
+        "fuse_to_zarr() is deprecated. Please call fuse(..., output_zarr_url=<path>) instead."
+    )
+
+
+def fuse_to_multiscale_ome_zarr(*args, **kwargs):
+    """
+    Deprecated: use fuse(..., output_zarr_url=..., zarr_options={'ome_zarr': True}) instead.
+    """
+    warnings.warn(
+        "fuse_to_multiscale_ome_zarr() is deprecated. Use fuse(..., output_zarr_url=<path>, zarr_options={'ome_zarr': True}) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    raise RuntimeError(
+        "fuse_to_multiscale_ome_zarr() is deprecated. Please call fuse(..., output_zarr_url=<path>, zarr_options={'ome_zarr': True}) instead."
+    )
