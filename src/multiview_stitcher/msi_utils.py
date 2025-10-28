@@ -149,6 +149,12 @@ def calc_resolution_levels(
     downscale_factors_per_spatial_dim=None,
     min_shape=10
 ):
+    """
+    Calculate resolution levels given spatial shape and downscale factors per spatial dimension.
+    Returns list of spatial shapes, relative downscale factors and absolute downscale factors.
+
+    Note that the highest resolution level (input spatial shape) is included in the output lists.
+    """
     sdims = list(spatial_shape.keys())
 
     if downscale_factors_per_spatial_dim is None:
@@ -246,7 +252,7 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
     spatial_shape = si_utils.get_shape_from_sim(sim)
 
     if scale_factors is None:
-        scale_factors = calc_resolution_levels(spatial_shape)[1]
+        scale_factors = calc_resolution_levels(spatial_shape)[1][1:]
 
     if chunks is None:
         if isinstance(sim.data, da.Array):
