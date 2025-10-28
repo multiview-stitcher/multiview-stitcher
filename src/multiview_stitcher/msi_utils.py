@@ -149,6 +149,12 @@ def calc_resolution_levels(
     downscale_factors_per_spatial_dim=None,
     min_shape=10
 ):
+    """
+    Calculate resolution levels given spatial shape and downscale factors per spatial dimension.
+    Returns list of spatial shapes, relative downscale factors and absolute downscale factors.
+
+    Note that the highest resolution level (input spatial shape) is included in the output lists.
+    """
     sdims = list(spatial_shape.keys())
 
     if downscale_factors_per_spatial_dim is None:
@@ -187,31 +193,6 @@ def calc_resolution_levels(
     return res_shapes, res_rel_factors, res_abs_factors
 
 
-# def get_optimal_multi_scale_factors_from_sim(sim, min_size=512):
-#     """
-#     This is currently simply downscaling z and xy until a minimum size is reached.
-#     Probably it'd make more sense to downscale considering the dims spacing.
-#     """
-
-#     spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
-#     current_shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
-#     factors = []
-#     while 1:
-#         curr_factors = {
-#             dim: 2 if current_shape[dim] >= min_size else 1
-#             for dim in current_shape
-#         }
-#         if max(curr_factors.values()) == 1:
-#             break
-#         current_shape = {
-#             dim: int(current_shape[dim] / curr_factors[dim])
-#             for dim in current_shape
-#         }
-#         factors.append(curr_factors)
-
-#     return factors
-
-
 def get_transforms_from_dataset_as_dict(dataset):
     transforms_dict = {}
     for data_var, transform in dataset.items():
@@ -247,6 +228,7 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
     if scale_factors is None:
         scale_factors = calc_resolution_levels(spatial_shape)[1]
+        scale_factors = scale_factors[1:]  # remove input scale
 
     if chunks is None:
         if isinstance(sim.data, da.Array):
