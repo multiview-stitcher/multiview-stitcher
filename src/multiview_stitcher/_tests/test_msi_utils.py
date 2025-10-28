@@ -20,6 +20,17 @@ def test_calc_resolution_levels(dims):
     sim = si_utils.get_sim_from_array(np.ones((100,) * len(dims)), dims=dims)
     msim = msi_utils.get_msim_from_sim(sim)
 
+    # assert that for each level at least one spatial dimension is downsampled
+    previous_shape = si_utils.get_shape_from_sim(sim)
+    for scale_key in msi_utils.get_sorted_scale_keys(msim)[1:]:
+        current_shape = si_utils.get_shape_from_sim(msim[scale_key])
+        downsampled = False
+        for dim in si_utils.get_spatial_dims_from_sim(sim):
+            if current_shape[dim] < previous_shape[dim]:
+                downsampled = True
+        assert downsampled
+        previous_shape = current_shape
+
     scale_keys = msi_utils.get_sorted_scale_keys(msim)
     assert len(scale_keys) > 1
 
