@@ -83,12 +83,12 @@ theme:
     - navigation.instant
     - navigation.instant.progress
     - navigation.expand
-  logo: images/logo.svg
+  logo: images/logo_color.svg
   icon:
     # logo: fontawesome/solid/clone
 
     repo: fontawesome/brands/github
-  favicon: images/logo.svg
+  favicon: images/logo_color.svg
   palette:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
