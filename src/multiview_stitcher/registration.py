@@ -920,7 +920,8 @@ def register_pair_of_msims(
     param_ds = xr.Dataset(
         data_vars={
             "transform": param_utils.affine_to_xaffine(affine_phys),
-            "quality": xr.DataArray(quality)
+            # xarray + dask fail if 'quality' is passed directly (?)
+            "quality": xr.DataArray((da.ones(1) * quality)[0])
         }
     )
 
