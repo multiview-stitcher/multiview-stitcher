@@ -441,9 +441,7 @@ def write_sim_to_ome_zarr(
     ngff_version: str = "0.4",
     zarr_array_creation_kwargs: dict = None,
     show_progressbar: bool = True,
-    n_batch=1,
-    batch_func=None,
-    batch_func_kwargs=None,
+    batch_options: dict | None = None,
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
@@ -477,18 +475,27 @@ def write_sim_to_ome_zarr(
         when creating the zarr arrays, by default None
     show_progressbar : bool, optional
         Whether to show a progress bar (tqdm),
-    n_batch : int, optional
-        Number of chunks to process in batch when writing
-        each resolution level, by default 1
-    batch_func : callable, optional
-        Function to use for submitting the processing of a batch.
-        E.g. misc_utils.process_batch_using_ray, by default None
-        (no batch submission, process sequentially)
-    batch_func_kwargs : dict, optional
-        Additional keyword arguments to pass to batch_func,
-        by default None
+    batch_options : dict, optional
+        Options for processing chunks in independent batches. Keys:
+        - batch_func: Callable, optional
+            Function to process each batch of chunks. Inputs:
+            1) a list of block_id(s)
+            2) function that performs fusion when passed a given block_id
+            By default None, in which case the each block is processed sequentially.
+        - n_batch: int
+            Number of blocks to process in each batch.
+            (n_batch>1 only compatible with a provided batch_func). By default 1.
+        - batch_func_kwargs: dict, optional
+            Additional keyword arguments passed to batch_func.
     
     """
+
+    if batch_options is None:
+        batch_options = {}
+
+    n_batch = batch_options.get("n_batch", 1)
+    batch_func = batch_options.get("batch_func", None)
+    batch_func_kwargs = batch_options.get("batch_func_kwargs", None)
 
     # if exists and overwrite, remove existing zarr group
     if overwrite and os.path.exists(output_zarr_url):

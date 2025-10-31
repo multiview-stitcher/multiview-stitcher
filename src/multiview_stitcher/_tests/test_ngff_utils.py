@@ -51,8 +51,10 @@ def test_round_trip(ndim, ngff_version, n_batch):
             zarr_path,
             overwrite=False,
             ngff_version=ngff_version,
-            n_batch=n_batch,
-            )
+            batch_options={
+                "n_batch": n_batch,
+            },
+        )
 
         sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path)
 

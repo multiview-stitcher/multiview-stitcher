@@ -260,7 +260,8 @@ def fuse(
             2) function that performs fusion when passed a given block_id
             By default None, in which case the each block is processed sequentially.
         - n_batch: int
-            Number of blocks to process in each batch, by default 1
+            Number of blocks to process in each batch
+            (n_batch>1 only compatible with a provided batch_func). By default 1.
         - batch_func_kwargs: dict, optional
             Additional keyword arguments passed to batch_func.
     Returns
@@ -355,6 +356,7 @@ def fuse(
                 fused,
                 output_zarr_url=output_zarr_url,
                 overwrite=False,
+                batch_options=batch_options,
             )
 
         return fused
