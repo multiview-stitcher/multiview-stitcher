@@ -920,14 +920,7 @@ def register_pair_of_msims(
     param_ds = xr.Dataset(
         data_vars={
             "transform": param_utils.affine_to_xaffine(affine_phys),
-            "quality": xr.DataArray(
-                da.from_delayed(
-                    # xarray-dask error if not set as array
-                    delayed(lambda x: np.array(x))(quality),
-                    shape=(),
-                    dtype=float,
-                )
-            )
+            "quality": xr.DataArray(quality)
         }
     )
 
