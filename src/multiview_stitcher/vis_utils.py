@@ -314,6 +314,72 @@ def serve_dir(dir_path, port=8000):
     test(CORSRequestHandler, HTTPServer, port=port)
 
 
+def serve_dir_https(dir_path, port=8000, host="0.0.0.0", certfile="cert.pem", keyfile="key.pem", quiet=False):
+    """
+    Serve a directory over HTTPS with a simple HTTP server.
+
+    Before serving, create a self-signed certificate (if not already available):
+
+    ```bash
+    # Linux / macOS (needs OpenSSL)
+    HOSTNAME="$(hostname -f)"                    # or put your DNS name
+    IP="10.0.12.34"                              # your machine's LAN IP
+
+    cat > san.cnf <<EOF
+    subjectAltName=DNS:${HOSTNAME},IP:${IP}
+    EOF
+
+    openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+    -keyout key.pem -out cert.pem \
+    -subj "/CN=${HOSTNAME}" \
+    -addext "$(cat san.cnf)"
+    ```
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to the directory to serve
+    port : int, optional
+        Port to use for the server (default 8443)
+    host : str, optional
+        Host/IP to bind (default "0.0.0.0" = all interfaces)
+    certfile : str, optional
+        Path to the TLS certificate (PEM)
+    keyfile : str, optional
+        Path to the TLS private key (PEM)
+    quiet : bool, optional
+        Suppress request logs if True
+    """
+
+    class CORSRequestHandler(SimpleHTTPRequestHandler):
+        def end_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            # (optional) add more CORS if you need:
+            # self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            # self.send_header("Access-Control-Allow-Headers", "*")
+            super().end_headers()
+
+        def translate_path(self, path: str) -> str:
+            # set directory dynamically (like your original)
+            self.directory = dir_path
+            return super().translate_path(path)
+
+        if quiet:
+            def log_message(self, fmt, *args):  # noqa: N802
+                pass
+
+    handler = partial(CORSRequestHandler, directory=dir_path)
+    httpd = HTTPServer((host, port), handler)
+
+    # Wrap the socket with TLS
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+
+    print(f"Serving {dir_path} over HTTPS at https://{host}:{port} (Ctrl+C to stop)")
+    httpd.serve_forever()
+
+
 def get_contrast_min_max_from_ome_zarr_omero_metadata(
     ome_zarr_path, channel_label=None
 ):
