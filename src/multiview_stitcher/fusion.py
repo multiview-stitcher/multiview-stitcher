@@ -336,10 +336,9 @@ def fuse(
                 batch_func(fuse_chunk, batch, **(batch_func_kwargs or {}))
 
         # Build SpatialImage from zarr array
-        z = zarr.open(store_url, mode="r")
         fusion_transform_key = transform_key
         fused = si_utils.get_sim_from_array(
-            array=z,
+            array=da.from_zarr(store_url),
             dims=list(sims[0].dims),
             transform_key=fusion_transform_key,
             scale=osp["spacing"],
