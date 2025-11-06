@@ -67,7 +67,7 @@ def process_batch_using_ray(func, block_ids, num_cpus=4):
     return
 
 
-def process_batch_using_joblib(func, block_ids, n_jobs):
+def process_batch_using_joblib(func, block_ids, n_jobs=4):
     """
     A batch function that uses joblib for parallel processing.
     1. func: function to apply to each block_id
