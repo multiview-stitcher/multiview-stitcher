@@ -17,7 +17,7 @@ from multiview_stitcher import spatial_image_utils as si_utils
     ],
 )
 def test_calc_resolution_levels(dims):
-    sim = si_utils.get_sim_from_array(np.ones((100,) * len(dims)), dims=dims)
+    sim = si_utils.get_sim_from_array(np.ones((202,) * len(dims)), dims=dims)
     msim = msi_utils.get_msim_from_sim(sim)
 
     # assert that for each level at least one spatial dimension is downsampled
