@@ -155,7 +155,7 @@ def test_multiscales_completion():
         overlap=0,
         N_c=1,
         N_t=1,
-        tile_size=30,
+        tile_size=202,
         tiles_x=2,
         tiles_y=1,
         tiles_z=1,
@@ -196,11 +196,11 @@ def test_multiscales_completion():
 
 def test_multiscales_overwrite():
     sim1 = si_utils.get_sim_from_array(
-        np.zeros((40, 40)),
+        np.zeros((202, 202)),
         translation={"y": 0, "x": 0},
     )
     sim2 = si_utils.get_sim_from_array(
-        np.ones((40, 40)),
+        np.ones((202, 202)),
         translation={"y": 1, "x": 1},
     )
 
@@ -214,7 +214,8 @@ def test_multiscales_overwrite():
         # check that read sim is equal to sim2 at
         # all resolution levels
         for res_level in range(2):
-            sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path, resolution_level=res_level)
+            sim_read = ngff_utils.read_sim_from_ome_zarr(
+                zarr_path, resolution_level=res_level)
             assert np.min(sim_read.data) == 1
             assert np.max(sim_read.data) == 1
 
