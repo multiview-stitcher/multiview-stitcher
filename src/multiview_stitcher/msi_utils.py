@@ -147,7 +147,7 @@ def update_msim_transforms_zarr(msim, path, overwrite=False):
 def calc_resolution_levels(
     spatial_shape,
     downscale_factors_per_spatial_dim=None,
-    min_shape=10
+    min_shape=100
 ):
     """
     Calculate resolution levels given spatial shape and downscale factors per spatial dimension.
