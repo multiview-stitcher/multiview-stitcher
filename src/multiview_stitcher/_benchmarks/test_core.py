@@ -80,12 +80,12 @@ def create_input(
 
 
 def fuse_zarr_to_zarr(
-    tmp_dir,
+    tmp_input_dir,
 ):
     input_filepaths = sorted(
         [
-            os.path.join(tmp_dir, f)
-            for f in os.listdir(tmp_dir)
+            os.path.join(tmp_input_dir, f)
+            for f in os.listdir(tmp_input_dir)
             if "fused" not in f
         ]
     )
@@ -105,12 +105,13 @@ def fuse_zarr_to_zarr(
         output_chunksize={dim: 100 for dim in sdims},
     )
 
-    fused_sim.data.to_zarr(
-        os.path.join(tmp_dir, "fused_sim.zarr"),
-        overwrite=True,
-        return_stored=True,
-        compute=True,
-    )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fused_sim.data.to_zarr(
+            os.path.join(tmp_dir, "fused_sim.zarr"),
+            overwrite=True,
+            return_stored=True,
+            compute=True,
+        )
 
     return
 

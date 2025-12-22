@@ -77,10 +77,6 @@ Documentation = "https://multiview-stitcher.github.io/multiview-stitcher/"
 ants = [
     "antspyx >=0.6.0",
 ]
-aicsimageio = [
-    "aicsimageio ==4.14.0",
-    "aicspylibczi",
-]
 czi = [
     "czifile ==2019.7.2.1",
     "imagecodecs >=2023.7.10",
