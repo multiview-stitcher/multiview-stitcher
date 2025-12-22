@@ -8,7 +8,7 @@ import zarr
 from tifffile import TiffFile, imread, imwrite
 from tqdm import tqdm
 
-# aicsimageio is an optional dependency
+# aicsimageio is optional
 try:
     from aicsimageio import AICSImage
 except ImportError:
@@ -76,7 +76,7 @@ def get_number_of_scenes_in_mosaic(filepath):
     else:
         if AICSImage is None:
             raise ImportError(
-                "aicsimageio is required to read mosaic files other than CZI. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+                "Having aicsimageio installed is required to read mosaic files other than CZI."
             )
 
         aicsim = AICSImage(filepath)
@@ -105,7 +105,7 @@ def read_mosaic_into_sims_aicsimageio(path, scene_index=0):
     """
     if AICSImage is None:
         raise ImportError(
-            "aicsimageio is required to read mosaic files other than CZI. Please install it using `pip install multiview-stitcher[aicsimageio]` or `pip install aicsimageio`."
+            "Having aicsimageio installed is required to read mosaic files other than CZI."
         )
 
     aicsim = AICSImage(path, reconstruct_mosaic=False)
