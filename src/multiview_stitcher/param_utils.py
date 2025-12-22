@@ -51,8 +51,10 @@ def random_translation(ndim=2, scale=10):
 
 def random_rotation(ndim=2, scale=0.1):
     rot = np.random.random(ndim - 1) * scale - scale / 2
-    if ndim == 2: return rot[0]
-    elif ndim == 3: return rot
+    if ndim == 2:
+        return rot[0]
+    elif ndim == 3:
+        return rot
 
 
 def random_affine(
