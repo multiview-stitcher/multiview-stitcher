@@ -14,7 +14,7 @@
 
 Documentation available [here](https://multiview-stitcher.github.io/multiview-stitcher). 📚
 
-**Contents:** [Intro](#multiview-stitcher) • [Quickstart](#quickstart) • [Napari plugin](#napari-plugin) • [Installation](#installation) • [Recent news](#recent-news) • [Browser usage](#stitching-in-the-browser) • [Limitations](#known-limitations) • [Roadmap](#roadmap--future-plans) • [Contributing](#contributing) • [Citing](#citing-multiview-stitcher) • [License](#license)
+**Contents:** [Intro](#multiview-stitcher) • [Quickstart](#quickstart) • [Napari plugin](#napari-plugin) • [Installation](#installation) • [Recent news](#recent-news) • [Browser usage](#stitching-in-the-browser) • [Limitations](#known-limitations) • [Roadmap](#roadmap--future-plans) • [Related tools](#related-stitching-tools) • [Contributing](#contributing) • [Citing](#citing-multiview-stitcher) • [License](#license)
 
 # multiview-stitcher
 
