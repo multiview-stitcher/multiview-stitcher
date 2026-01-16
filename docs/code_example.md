@@ -60,10 +60,9 @@ with ProgressBar():
         reg_channel="DAPI",  # channel to use for registration
         transform_key="stage_metadata",
         new_transform_key="translation_registered",
+        pre_registration_pruning_method=None,
+        plot_summary=True,
     )
-
-# plot the tile configuration after registration
-# vis_utils.plot_positions(msims, transform_key='translation_registered', use_positional_colors=False)
 ```
 
 #### 3) Stitch / fuse the tiles

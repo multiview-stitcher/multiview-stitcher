@@ -1,5 +1,7 @@
 # Test the quickstart code in the README
 
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 
 import os
 from pathlib import Path

@@ -53,9 +53,6 @@ These code snippets walk you through a small stitching workflow consisting of
 
 #### 1) Prepare data for stitching
 
-<details>
-  <summary>Code snippet</summary>
-
 ```python
 import numpy as np
 from multiview_stitcher import msi_utils
@@ -94,12 +91,7 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
 
 ![Visualization of input tile configuration](docs/images/tile_configuration.png)
 
-</details>
-
 #### 2) Register the tiles
-
-<details>
-  <summary>Code snippet</summary>
 
 ```python
 from dask.diagnostics import ProgressBar
@@ -111,18 +103,17 @@ with ProgressBar():
         reg_channel="DAPI",  # channel to use for registration
         transform_key="stage_metadata",
         new_transform_key="translation_registered",
+        pre_registration_pruning_method=None,
+        plot_summary=True,
     )
-
-# plot the tile configuration after registration
-# vis_utils.plot_positions(msims, transform_key='translation_registered', use_positional_colors=False)
 ```
 
-</details>
+![Pairwise registration summary](docs/images/pairwise_registration_summary_example.png)
+
+![Global parameter resolution summary](docs/images/global_registration_summary_example.png)
+
 
 #### 3) Stitch / fuse the tiles
-
-<details>
-  <summary>Code snippet</summary>
 
 ```python
 from multiview_stitcher import fusion
@@ -140,6 +131,10 @@ fused_sim.data.compute()
 ```
 
 For large datasets (>50GB, potentially with benefits already at >5GB) consider streaming the fused result directly to a zarr file using the following way to call `fusion.fuse`:
+
+<details>
+  <summary>Code snippet</summary>
+
 
 ```python
 from multiview_stitcher import fusion, misc_utils
