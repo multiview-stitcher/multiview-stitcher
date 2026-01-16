@@ -232,6 +232,33 @@ Some planned improvements for future releases:
 1. Make multiview-stitcher available via conda-forge.
 1. Open an issue if you have suggestions for improvements 🙋
 
+
+## Related stitching tools
+
+`multiview-stitcher` sits in a broader ecosystem of excellent open-source stitching software.  
+Rather than aiming to replace existing tools, it focuses on providing a **Python-native, modular API**
+that integrates well with the scientific Python ecosystem (dask/zarr/xarray, napari, etc.).
+
+The table below is a **high-level orientation** (features and workflows often overlap, and most tools can be combined in practice):
+
+| Tool | Ecosystem | Typical use case / focus | 2D | 3D | Transform model (typical) | Out-of-core / huge data* | Automation |
+| --- | --- | --- | :--: | :--: | --- | :--: | --- |
+| BigStitcher | Fiji | GUI-driven multi-view + tiled microscopy workflows | ✅ | ✅ | rigid + affine | ✅ | ImageJ macros / batch |
+| Ashlar | Python | multiplexed whole-slide 2D mosaics | ✅ | — | translation/rigid mosaics | limited* | CLI + Python |
+| TeraStitcher | C++ | very large tiled 3D volumes | ✅ | ✅ | translation/rigid | ✅ | CLI |
+| multiview-stitcher | Python | modular registration + fusion integrated into Python workflows | ✅ | ✅ | rigid + affine | ✅ | Jupyter notebooks / Python API + napari / neuroglancer |
+
+\* “Out-of-core / huge data” depends heavily on workflow, file formats, and output options. Several tools here can handle very large datasets; in practice, Python can make it particularly convenient to compose and distribute stitching workflows across compute resources.
+
+### Rule of thumb
+
+- If you want a mature **GUI-first** workflow with broad microscopy stitching functionality: **BigStitcher**
+- If you stitch **whole-slide multiplexed** 2D mosaics and want a **simple CLI**: **Ashlar**
+- If you stitch **very large 3D tiled volumes** with a dedicated toolchain: **TeraStitcher**
+- If you want stitching and fusion as a **Python building block** that plugs into existing analysis pipelines: **multiview-stitcher**
+
+If you spot inaccuracies or want to extend the comparison, please open an issue or PR 🙂
+
 ## Work in progress
 
 `multiview-stitcher` is being actively developed in the open and the API is subject to change.
