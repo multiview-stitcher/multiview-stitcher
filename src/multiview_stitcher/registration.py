@@ -980,7 +980,31 @@ def register_pair_of_msims_over_time(
     return xp
 
 
-def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
+_GROUPWISE_RESOLUTION_METHODS = {}
+
+
+def register_groupwise_resolution_method(name, resolver):
+    """
+    Register a groupwise resolution method.
+
+    The resolver is called once per connected component and must implement:
+    resolver(g_reg_component, **kwargs) -> (params, info_dict).
+    """
+
+    if not callable(resolver):
+        raise TypeError("Resolver must be callable.")
+    _GROUPWISE_RESOLUTION_METHODS[name] = resolver
+
+
+def _get_groupwise_resolution_method(method):
+    if callable(method):
+        return method
+    if method in _GROUPWISE_RESOLUTION_METHODS:
+        return _GROUPWISE_RESOLUTION_METHODS[method]
+    raise ValueError(f"Unknown groupwise optimization method: {method}")
+
+
+def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     if not len(g_reg.edges):
         raise (
             mv_graph.NotEnoughOverlapError(
@@ -994,15 +1018,84 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     if "reference_view" not in kwargs and len(g_reg.nodes) == 2:
         kwargs["reference_view"] = min(list(g_reg.nodes))
 
-    if method == "global_optimization":
-        return groupwise_resolution_global_optimization(g_reg, **kwargs)
-    elif method == "shortest_paths":
-        return groupwise_resolution_shortest_paths(g_reg, **kwargs)
-    else:
-        raise ValueError(f"Unknown groupwise optimization method: {method}")
+    params = {}
+    info_metrics = []
+    info_graphs = []
+    has_info = False
+
+    for icc, cc in enumerate(nx.connected_components(g_reg)):
+        g_reg_subgraph = g_reg.subgraph(list(cc))
+        cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
+        params.update(cc_params)
+
+        if cc_info is not None:
+            has_info = True
+            metrics = cc_info.get("metrics")
+            if metrics is not None:
+                metrics = metrics.copy()
+                if "icc" not in metrics.columns:
+                    metrics["icc"] = [icc] * len(metrics)
+                info_metrics.append(metrics)
+            graph = cc_info.get("optimized_graph_t0")
+            if graph is not None:
+                info_graphs.append(graph)
+
+    if not has_info:
+        return params, None
+
+    info_dict = {
+        "metrics": pd.concat(info_metrics) if info_metrics else None,
+        "optimized_graph_t0": (
+            nx.compose_all(info_graphs) if info_graphs else None
+        ),
+    }
+    return params, info_dict
+
+
+def _get_graph_ndim(g_reg):
+    if g_reg.number_of_edges():
+        return (
+            g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1]
+            - 1
+        )
+    if len(g_reg.nodes):
+        node = next(iter(g_reg.nodes))
+        stack_props = g_reg.nodes[node].get("stack_props", {})
+        if "spacing" in stack_props:
+            return len(stack_props["spacing"].values())
+    raise ValueError("Cannot determine dimensionality from graph.")
+
+
+def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
+    """
+    Resolve global parameters by running a method per connected component.
+
+    Parameters
+    ----------
+    method : str or Callable
+        Name of a registered method, or a callable implementing the
+        component-level resolver API.
+    """
+
+    resolver = _get_groupwise_resolution_method(method)
+    return _resolve_groupwise_components(g_reg, resolver, **kwargs)
 
 
 def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
+    """
+    Backwards compatible wrapper for shortest paths resolution.
+    """
+
+    return _resolve_groupwise_components(
+        g_reg,
+        groupwise_resolution_shortest_paths_component,
+        reference_view=reference_view,
+    )
+
+
+def groupwise_resolution_shortest_paths_component(
+    g_reg, reference_view=None
+):
     """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
@@ -1011,9 +1104,17 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     into the coordinates of a new coordinate system.
     """
 
-    ndim = (
-        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
-    )
+    if not g_reg.number_of_edges():
+        ndim = _get_graph_ndim(g_reg)
+        return (
+            {
+                node: param_utils.identity_transform(ndim)
+                for node in g_reg.nodes
+            },
+            None,
+        )
+
+    ndim = _get_graph_ndim(g_reg)
 
     # use quality as weight in shortest path (mean over tp currently)
     # make sure that quality is non-negative (shortest path algo requires this)
@@ -1033,47 +1134,42 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
             "transform"
         ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
 
-    ccs = list(nx.connected_components(g_reg))
-
     node_transforms = {}
 
-    for cc in ccs:
-        subgraph = g_reg_di.subgraph(list(cc))
+    subgraph = g_reg_di
 
-        if reference_view is not None and reference_view in cc:
-            ref_node = reference_view
-        else:
-            ref_node = (
-                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-                    subgraph, weight_key="quality"
-                )
+    if reference_view is not None and reference_view in subgraph.nodes:
+        ref_node = reference_view
+    else:
+        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+            subgraph, weight_key="quality"
+        )
+
+    # get shortest paths to ref_node
+    paths = {
+        n: nx.shortest_path(
+            subgraph, target=n, source=ref_node, weight="quality_mean_inv"
+        )
+        for n in subgraph.nodes
+    }
+
+    for n in subgraph.nodes:
+        reg_path = paths[n]
+
+        path_pairs = [
+            [reg_path[i], reg_path[i + 1]]
+            for i in range(len(reg_path) - 1)
+        ]
+
+        path_params = param_utils.identity_transform(ndim)
+
+        for pair in path_pairs:
+            path_params = param_utils.rebase_affine(
+                g_reg_di.edges[(pair[0], pair[1])]["transform"],
+                path_params,
             )
 
-        # get shortest paths to ref_node
-        paths = {
-            n: nx.shortest_path(
-                subgraph, target=n, source=ref_node, weight="quality_mean_inv"
-            )
-            for n in cc
-        }
-
-        for n in subgraph.nodes:
-            reg_path = paths[n]
-
-            path_pairs = [
-                [reg_path[i], reg_path[i + 1]]
-                for i in range(len(reg_path) - 1)
-            ]
-
-            path_params = param_utils.identity_transform(ndim)
-
-            for pair in path_pairs:
-                path_params = param_utils.rebase_affine(
-                    g_reg_di.edges[(pair[0], pair[1])]["transform"],
-                    path_params,
-                )
-
-            node_transforms[n] = param_utils.invert_xparams(path_params)
+        node_transforms[n] = param_utils.invert_xparams(path_params)
 
     # homogenize dims and coords in node_transforms
     # e.g. if some node's params are missing 't' dimension, add it
@@ -1087,6 +1183,29 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
 
 
 def groupwise_resolution_global_optimization(
+    g_reg,
+    reference_view=None,
+    transform="translation",
+    max_iter=None,
+    rel_tol=None,
+    abs_tol=None,
+):
+    """
+    Backwards compatible wrapper for global optimization resolution.
+    """
+
+    return _resolve_groupwise_components(
+        g_reg,
+        groupwise_resolution_global_optimization_component,
+        reference_view=reference_view,
+        transform=transform,
+        max_iter=max_iter,
+        rel_tol=rel_tol,
+        abs_tol=abs_tol,
+    )
+
+
+def groupwise_resolution_global_optimization_component(
     g_reg,
     reference_view=None,
     transform="translation",
@@ -1152,6 +1271,20 @@ def groupwise_resolution_global_optimization(
         Dictionary containing the final transform parameters for each view
     """
 
+    if not g_reg.number_of_edges():
+        ndim = _get_graph_ndim(g_reg)
+        params = {
+            node: param_utils.identity_transform(ndim)
+            for node in g_reg.nodes
+        }
+        g_opt_t0 = nx.Graph()
+        g_opt_t0.add_nodes_from(g_reg.nodes)
+        info_dict = {
+            "metrics": None,
+            "optimized_graph_t0": g_opt_t0,
+        }
+        return params, info_dict
+
     if max_iter is None:
         max_iter = 500
         logger.info("Global optimization: setting max_iter to %s", max_iter)
@@ -1193,72 +1326,64 @@ def groupwise_resolution_global_optimization(
 
     params = {nodes: [] for nodes in g_reg.nodes}
     all_dfs = []
-    ccs = list(nx.connected_components(g_reg))
-    cc_g_opt_t0s = []
-    for icc, cc in enumerate(ccs):
-        g_reg_subgraph = g_reg.subgraph(list(cc))
+    g_reg_subgraph = g_reg
 
-        if reference_view is not None and reference_view in cc:
-            ref_node = reference_view
-        else:
-            ref_node = (
-                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-                    g_reg_subgraph, weight_key="quality"
-                )
-            )
-
-        if len(t_coords):
-            g_reg_subgraph_ts = [
-                get_reg_graph_with_single_tp_transforms(g_reg_subgraph, t)
-                for t in t_coords
-            ]
-        else:
-            g_reg_subgraph_ts = [g_reg_subgraph]
-
-        g_beads_subgraph_ts = [
-            get_beads_graph_from_reg_graph(g_reg_subgraph_t, ndim=ndim)
-            for g_reg_subgraph_t in g_reg_subgraph_ts
-        ]
-
-        cc_params, cc_dfs, cc_g_opt_ts = list(
-            zip(
-                *tuple(
-                    [
-                        optimize_bead_subgraph(
-                            g_beads_subgraph,
-                            transform,
-                            ref_node,
-                            max_iter,
-                            rel_tol,
-                            abs_tol,
-                        )
-                        for g_beads_subgraph in g_beads_subgraph_ts
-                    ]
-                )
-            )
+    if reference_view is not None and reference_view in g_reg_subgraph.nodes:
+        ref_node = reference_view
+    else:
+        ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+            g_reg_subgraph, weight_key="quality"
         )
 
-        cc_g_opt_t0s.append(cc_g_opt_ts[0])
+    if len(t_coords):
+        g_reg_subgraph_ts = [
+            get_reg_graph_with_single_tp_transforms(g_reg_subgraph, t)
+            for t in t_coords
+        ]
+    else:
+        g_reg_subgraph_ts = [g_reg_subgraph]
 
-        for node in cc:
-            for cc_param in cc_params:
-                params[node].append(cc_param[node])
+    g_beads_subgraph_ts = [
+        get_beads_graph_from_reg_graph(g_reg_subgraph_t, ndim=ndim)
+        for g_reg_subgraph_t in g_reg_subgraph_ts
+    ]
 
-        if len(t_coords):
-            for it, t in enumerate(t_coords):
-                if cc_dfs[it] is not None:
-                    cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
-                    cc_dfs[it]["icc"] = [icc] * len(cc_dfs[it])
-                    all_dfs.append(cc_dfs[it])
+    cc_params, cc_dfs, cc_g_opt_ts = list(
+        zip(
+            *tuple(
+                [
+                    optimize_bead_subgraph(
+                        g_beads_subgraph,
+                        transform,
+                        ref_node,
+                        max_iter,
+                        rel_tol,
+                        abs_tol,
+                    )
+                    for g_beads_subgraph in g_beads_subgraph_ts
+                ]
+            )
+        )
+    )
 
     # join optimized graphs for first timepoint
 
-    g_opt_t0 = nx.compose_all(cc_g_opt_t0s)
+    g_opt_t0 = cc_g_opt_ts[0]
+
+    for node in g_reg_subgraph.nodes:
+        for cc_param in cc_params:
+            params[node].append(cc_param[node])
+
+    if len(t_coords):
+        for it, t in enumerate(t_coords):
+            if cc_dfs[it] is not None:
+                cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
+                all_dfs.append(cc_dfs[it])
 
     all_dfs = [df for df in all_dfs if df is not None]
     df = pd.concat(all_dfs) if len(all_dfs) else None
 
-    for node in g_reg.nodes:
+    for node in g_reg_subgraph.nodes:
         params[node] = xr.concat(params[node], dim="t").assign_coords(
             {"t": t_coords}
         )
@@ -1269,6 +1394,14 @@ def groupwise_resolution_global_optimization(
     }
 
     return params, info_dict
+
+
+register_groupwise_resolution_method(
+    "global_optimization", groupwise_resolution_global_optimization_component
+)
+register_groupwise_resolution_method(
+    "shortest_paths", groupwise_resolution_shortest_paths_component
+)
 
 
 def get_reg_graph_with_single_tp_transforms(g_reg, t):
@@ -1785,6 +1918,8 @@ def register(
         from pairwise registrations:
         - 'global_optimization': global optimization considering all pairwise transforms
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
+        Custom component-level methods can be registered via
+        register_groupwise_resolution_method(...) and referenced by name.
     groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function.
         IMPORTANT: The "transform" key here determines the final types of transformations.
