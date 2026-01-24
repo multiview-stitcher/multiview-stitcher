@@ -988,7 +988,8 @@ def register_groupwise_resolution_method(name, resolver):
     Register a groupwise resolution method.
 
     The resolver is called once per connected component and must implement:
-    resolver(g_reg_component, **kwargs) -> (params, info_dict).
+    resolver(g_reg_component_tp, **kwargs) -> (params, info_dict).
+    The input graph contains single-timepoint transforms.
     """
 
     if not callable(resolver):
@@ -1002,6 +1003,15 @@ def _get_groupwise_resolution_method(method):
     if method in _GROUPWISE_RESOLUTION_METHODS:
         return _GROUPWISE_RESOLUTION_METHODS[method]
     raise ValueError(f"Unknown groupwise optimization method: {method}")
+
+
+def _get_graph_timepoints(g_reg):
+    t_coords = []
+    for e in g_reg.edges:
+        transform = g_reg.edges[e].get("transform")
+        if isinstance(transform, xr.DataArray) and "t" in transform.coords:
+            t_coords.extend(list(transform.coords["t"].values))
+    return sorted(set(t_coords))
 
 
 def _resolve_groupwise_components(g_reg, resolver, **kwargs):
@@ -1018,30 +1028,59 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     if "reference_view" not in kwargs and len(g_reg.nodes) == 2:
         kwargs["reference_view"] = min(list(g_reg.nodes))
 
-    params = {}
+    t_coords = _get_graph_timepoints(g_reg)
+    params = {node: [] for node in g_reg.nodes}
     info_metrics = []
     info_graphs = []
     has_info = False
 
-    for icc, cc in enumerate(nx.connected_components(g_reg)):
-        g_reg_subgraph = g_reg.subgraph(list(cc))
-        cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
-        params.update(cc_params)
+    iter_t_coords = t_coords if t_coords else [None]
+    for it, t in enumerate(iter_t_coords):
+        g_reg_t = (
+            get_reg_graph_with_single_tp_transforms(g_reg, t)
+            if t is not None
+            else g_reg
+        )
+        for icc, cc in enumerate(nx.connected_components(g_reg_t)):
+            g_reg_subgraph = g_reg_t.subgraph(list(cc))
+            cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
+            for node in cc:
+                params[node].append(cc_params[node])
 
-        if cc_info is not None:
-            has_info = True
-            metrics = cc_info.get("metrics")
-            if metrics is not None:
-                metrics = metrics.copy()
-                if "icc" not in metrics.columns:
-                    metrics["icc"] = [icc] * len(metrics)
-                info_metrics.append(metrics)
-            graph = cc_info.get("optimized_graph_t0")
-            if graph is not None:
-                info_graphs.append(graph)
+            if cc_info is not None:
+                has_info = True
+                metrics = cc_info.get("metrics")
+                if metrics is not None:
+                    metrics = metrics.copy()
+                    if t is not None:
+                        metrics["t"] = [t] * len(metrics)
+                    if "icc" not in metrics.columns:
+                        metrics["icc"] = [icc] * len(metrics)
+                    info_metrics.append(metrics)
+                if it == 0:
+                    graph = cc_info.get("optimized_graph_t0")
+                    if graph is not None:
+                        info_graphs.append(graph)
 
     if not has_info:
-        return params, None
+        if not t_coords:
+            return {node: params[node][0] for node in params}, None
+        return {
+            node: xr.concat(params[node], dim="t").assign_coords(
+                {"t": t_coords}
+            )
+            for node in params
+        }, None
+
+    if t_coords:
+        params = {
+            node: xr.concat(params[node], dim="t").assign_coords(
+                {"t": t_coords}
+            )
+            for node in params
+        }
+    else:
+        params = {node: params[node][0] for node in params}
 
     info_dict = {
         "metrics": pd.concat(info_metrics) if info_metrics else None,
@@ -1068,13 +1107,14 @@ def _get_graph_ndim(g_reg):
 
 def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     """
-    Resolve global parameters by running a method per connected component.
+    Resolve global parameters by running a method per connected component
+    and timepoint.
 
     Parameters
     ----------
     method : str or Callable
         Name of a registered method, or a callable implementing the
-        component-level resolver API.
+        component-level, single-timepoint resolver API.
     """
 
     resolver = _get_groupwise_resolution_method(method)
@@ -1220,8 +1260,6 @@ def groupwise_resolution_global_optimization_component(
     into the coordinates of a new coordinate system.
 
     Strategy:
-    - iterate over timepoints
-    - iterate over connected components of the registration graph
     - for each pairwise registration, compute virtual pairs of beads
         - fixed view: take bounding box corners
         - moving view: transform fixed view corners using inverse of pairwise transform
@@ -1314,17 +1352,7 @@ def groupwise_resolution_global_optimization_component(
         # log without using f strings
         logger.info("Global optimization: setting abs_tol to %s", abs_tol)
 
-    # find timepoints
-    all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
-    t_coords = np.unique(
-        [
-            transform.coords["t"].data
-            for transform in all_transforms
-            if "t" in transform.coords
-        ]
-    )
-
-    params = {nodes: [] for nodes in g_reg.nodes}
+    params = {nodes: None for nodes in g_reg.nodes}
     all_dfs = []
     g_reg_subgraph = g_reg
 
@@ -1335,58 +1363,29 @@ def groupwise_resolution_global_optimization_component(
             g_reg_subgraph, weight_key="quality"
         )
 
-    if len(t_coords):
-        g_reg_subgraph_ts = [
-            get_reg_graph_with_single_tp_transforms(g_reg_subgraph, t)
-            for t in t_coords
-        ]
-    else:
-        g_reg_subgraph_ts = [g_reg_subgraph]
-
-    g_beads_subgraph_ts = [
-        get_beads_graph_from_reg_graph(g_reg_subgraph_t, ndim=ndim)
-        for g_reg_subgraph_t in g_reg_subgraph_ts
-    ]
-
-    cc_params, cc_dfs, cc_g_opt_ts = list(
-        zip(
-            *tuple(
-                [
-                    optimize_bead_subgraph(
-                        g_beads_subgraph,
-                        transform,
-                        ref_node,
-                        max_iter,
-                        rel_tol,
-                        abs_tol,
-                    )
-                    for g_beads_subgraph in g_beads_subgraph_ts
-                ]
-            )
-        )
+    g_beads_subgraph = get_beads_graph_from_reg_graph(
+        g_reg_subgraph, ndim=ndim
     )
 
-    # join optimized graphs for first timepoint
+    cc_params, cc_df, cc_g_opt = optimize_bead_subgraph(
+        g_beads_subgraph,
+        transform,
+        ref_node,
+        max_iter,
+        rel_tol,
+        abs_tol,
+    )
 
-    g_opt_t0 = cc_g_opt_ts[0]
+    g_opt_t0 = cc_g_opt
 
     for node in g_reg_subgraph.nodes:
-        for cc_param in cc_params:
-            params[node].append(cc_param[node])
+        params[node] = cc_params[node]
 
-    if len(t_coords):
-        for it, t in enumerate(t_coords):
-            if cc_dfs[it] is not None:
-                cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
-                all_dfs.append(cc_dfs[it])
+    if cc_df is not None:
+        all_dfs.append(cc_df)
 
     all_dfs = [df for df in all_dfs if df is not None]
     df = pd.concat(all_dfs) if len(all_dfs) else None
-
-    for node in g_reg_subgraph.nodes:
-        params[node] = xr.concat(params[node], dim="t").assign_coords(
-            {"t": t_coords}
-        )
 
     info_dict = {
         "metrics": df,
