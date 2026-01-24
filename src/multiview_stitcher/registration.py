@@ -1028,12 +1028,14 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     if "reference_view" not in kwargs and len(g_reg.nodes) == 2:
         kwargs["reference_view"] = min(list(g_reg.nodes))
 
+    # Resolve per timepoint and connected component, then stitch results.
     t_coords = _get_graph_timepoints(g_reg)
     params = {node: [] for node in g_reg.nodes}
     info_metrics = []
     used_edges_t0 = set()
     residuals_t0 = {}
 
+    # Normalize to a single-timepoint loop for uniform handling.
     iter_t_coords = t_coords if t_coords else [None]
     g_reg_t0 = None
     for it, t in enumerate(iter_t_coords):
@@ -1051,6 +1053,7 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
                 params[node].append(cc_params[node])
 
             if cc_info is not None:
+                # Accumulate metrics and edge usage from the resolver.
                 metrics = cc_info.get("metrics")
                 if metrics is not None:
                     metrics = metrics.copy()
@@ -1074,6 +1077,7 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
                             }
                         )
 
+    # Concatenate per-timepoint parameters.
     if t_coords:
         params = {
             node: xr.concat(params[node], dim="t").assign_coords(
@@ -1084,6 +1088,7 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     else:
         params = {node: params[node][0] for node in params}
 
+    # Build the optimized graph for the first timepoint.
     g_opt_t0 = g_reg_t0.copy()
     if used_edges_t0:
         edges_to_remove = [
@@ -1197,6 +1202,7 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
         for n in subgraph.nodes
     }
 
+    # Track edges that contribute to any shortest path.
     used_edges = set()
 
     for n in subgraph.nodes:
@@ -1351,6 +1357,7 @@ def groupwise_resolution_global_optimization(
             g_reg_subgraph, weight_key="quality"
         )
 
+    # Optimize on the virtual bead graph derived from the pairwise registrations.
     g_beads_subgraph = get_beads_graph_from_reg_graph(
         g_reg_subgraph, ndim=ndim
     )
