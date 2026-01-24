@@ -18,7 +18,7 @@ from scipy import ndimage, stats
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 
-from multiview_stitcher.resolution import (
+from multiview_stitcher.param_resolution import (
     groupwise_resolution,
     groupwise_resolution_global_optimization,
     groupwise_resolution_shortest_paths,
