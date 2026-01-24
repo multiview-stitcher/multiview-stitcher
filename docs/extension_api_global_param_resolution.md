@@ -41,7 +41,8 @@ def custom_groupwise_resolution(
     # Optional metadata for summary plots/metrics.
     info = {
         "metrics": metrics_df,  # pd.DataFrame or None
-        "optimized_graph_t0": g_opt,  # networkx.Graph or None
+        "used_edges": used_edges,  # list of (u, v) edges to keep
+        "edge_residuals": edge_residuals,  # dict[(u, v)] -> float
     }
     return params, info
 
@@ -58,3 +59,8 @@ params for each node are concatenated along `t` in the output of
 `reference_view` is passed to the resolver (via `groupwise_resolution_kwargs`
 in `registration.register`) and can be used to fix one node as a reference in
 the component.
+
+The framework creates `optimized_graph_t0` (the first-timepoint graph) by
+copying the input registration graph, pruning any edges not listed in
+`used_edges`, and storing per-node transforms and `edge_residuals` as node/edge
+attributes.

@@ -1031,16 +1031,19 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     t_coords = _get_graph_timepoints(g_reg)
     params = {node: [] for node in g_reg.nodes}
     info_metrics = []
-    info_graphs = []
-    has_info = False
+    used_edges_t0 = set()
+    residuals_t0 = {}
 
     iter_t_coords = t_coords if t_coords else [None]
+    g_reg_t0 = None
     for it, t in enumerate(iter_t_coords):
         g_reg_t = (
             get_reg_graph_with_single_tp_transforms(g_reg, t)
             if t is not None
             else g_reg
         )
+        if it == 0:
+            g_reg_t0 = g_reg_t
         for icc, cc in enumerate(nx.connected_components(g_reg_t)):
             g_reg_subgraph = g_reg_t.subgraph(list(cc))
             cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
@@ -1048,7 +1051,6 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
                 params[node].append(cc_params[node])
 
             if cc_info is not None:
-                has_info = True
                 metrics = cc_info.get("metrics")
                 if metrics is not None:
                     metrics = metrics.copy()
@@ -1058,19 +1060,19 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
                         metrics["icc"] = [icc] * len(metrics)
                     info_metrics.append(metrics)
                 if it == 0:
-                    graph = cc_info.get("optimized_graph_t0")
-                    if graph is not None:
-                        info_graphs.append(graph)
-
-    if not has_info:
-        if not t_coords:
-            return {node: params[node][0] for node in params}, None
-        return {
-            node: xr.concat(params[node], dim="t").assign_coords(
-                {"t": t_coords}
-            )
-            for node in params
-        }, None
+                    used_edges = cc_info.get("used_edges")
+                    if used_edges is not None:
+                        used_edges_t0.update(
+                            tuple(sorted(e)) for e in used_edges
+                        )
+                    edge_residuals = cc_info.get("edge_residuals")
+                    if edge_residuals is not None:
+                        residuals_t0.update(
+                            {
+                                tuple(sorted(e)): v
+                                for e, v in edge_residuals.items()
+                            }
+                        )
 
     if t_coords:
         params = {
@@ -1082,11 +1084,27 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
     else:
         params = {node: params[node][0] for node in params}
 
+    g_opt_t0 = g_reg_t0.copy()
+    if used_edges_t0:
+        edges_to_remove = [
+            e
+            for e in g_opt_t0.edges
+            if tuple(sorted(e)) not in used_edges_t0
+        ]
+        g_opt_t0.remove_edges_from(edges_to_remove)
+    for node in g_opt_t0.nodes:
+        node_params = params[node]
+        if isinstance(node_params, xr.DataArray) and "t" in node_params:
+            node_params = node_params.sel({"t": t_coords[0]})
+        g_opt_t0.nodes[node]["transform"] = node_params
+    for e in g_opt_t0.edges:
+        g_opt_t0.edges[e]["residual"] = residuals_t0.get(
+            tuple(sorted(e)), np.nan
+        )
+
     info_dict = {
         "metrics": pd.concat(info_metrics) if info_metrics else None,
-        "optimized_graph_t0": (
-            nx.compose_all(info_graphs) if info_graphs else None
-        ),
+        "optimized_graph_t0": g_opt_t0,
     }
     return params, info_dict
 
@@ -1135,13 +1153,10 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
 
     if not g_reg.number_of_edges():
         ndim = _get_graph_ndim(g_reg)
-        return (
-            {
-                node: param_utils.identity_transform(ndim)
-                for node in g_reg.nodes
-            },
-            None,
-        )
+        params = {
+            node: param_utils.identity_transform(ndim) for node in g_reg.nodes
+        }
+        return params, {"metrics": None, "used_edges": [], "edge_residuals": {}}
 
     ndim = _get_graph_ndim(g_reg)
 
@@ -1182,6 +1197,8 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
         for n in subgraph.nodes
     }
 
+    used_edges = set()
+
     for n in subgraph.nodes:
         reg_path = paths[n]
 
@@ -1189,6 +1206,8 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
             [reg_path[i], reg_path[i + 1]]
             for i in range(len(reg_path) - 1)
         ]
+        for pair in path_pairs:
+            used_edges.add(tuple(sorted(pair)))
 
         path_params = param_utils.identity_transform(ndim)
 
@@ -1208,7 +1227,11 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
         for node in node_transforms.coords["node"].values
     }
 
-    return node_transforms, None
+    return node_transforms, {
+        "metrics": None,
+        "used_edges": list(used_edges),
+        "edge_residuals": {},
+    }
 
 
 def groupwise_resolution_global_optimization(
@@ -1281,11 +1304,10 @@ def groupwise_resolution_global_optimization(
             node: param_utils.identity_transform(ndim)
             for node in g_reg.nodes
         }
-        g_opt_t0 = nx.Graph()
-        g_opt_t0.add_nodes_from(g_reg.nodes)
         info_dict = {
             "metrics": None,
-            "optimized_graph_t0": g_opt_t0,
+            "used_edges": [],
+            "edge_residuals": {},
         }
         return params, info_dict
 
@@ -1355,7 +1377,11 @@ def groupwise_resolution_global_optimization(
 
     info_dict = {
         "metrics": df,
-        "optimized_graph_t0": g_opt_t0,
+        "used_edges": [tuple(sorted(e)) for e in g_opt_t0.edges],
+        "edge_residuals": {
+            tuple(sorted(e)): g_opt_t0.edges[e].get("residual", np.nan)
+            for e in g_opt_t0.edges
+        },
     }
 
     return params, info_dict
