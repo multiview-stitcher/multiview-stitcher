@@ -1123,25 +1123,14 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
 
 def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     """
-    Backwards compatible wrapper for shortest paths resolution.
-    """
-
-    return _resolve_groupwise_components(
-        g_reg,
-        groupwise_resolution_shortest_paths_component,
-        reference_view=reference_view,
-    )
-
-
-def groupwise_resolution_shortest_paths_component(
-    g_reg, reference_view=None
-):
-    """
     Get final transform parameters by concatenating transforms
     along paths of pairwise affine transformations.
 
     Output parameters P for each view map coordinates in the view
     into the coordinates of a new coordinate system.
+
+    Note: This function operates on a single connected component
+    with single-timepoint transforms.
     """
 
     if not g_reg.number_of_edges():
@@ -1223,29 +1212,6 @@ def groupwise_resolution_shortest_paths_component(
 
 
 def groupwise_resolution_global_optimization(
-    g_reg,
-    reference_view=None,
-    transform="translation",
-    max_iter=None,
-    rel_tol=None,
-    abs_tol=None,
-):
-    """
-    Backwards compatible wrapper for global optimization resolution.
-    """
-
-    return _resolve_groupwise_components(
-        g_reg,
-        groupwise_resolution_global_optimization_component,
-        reference_view=reference_view,
-        transform=transform,
-        max_iter=max_iter,
-        rel_tol=rel_tol,
-        abs_tol=abs_tol,
-    )
-
-
-def groupwise_resolution_global_optimization_component(
     g_reg,
     reference_view=None,
     transform="translation",
@@ -1396,10 +1362,10 @@ def groupwise_resolution_global_optimization_component(
 
 
 register_groupwise_resolution_method(
-    "global_optimization", groupwise_resolution_global_optimization_component
+    "global_optimization", groupwise_resolution_global_optimization
 )
 register_groupwise_resolution_method(
-    "shortest_paths", groupwise_resolution_shortest_paths_component
+    "shortest_paths", groupwise_resolution_shortest_paths
 )
 
 
