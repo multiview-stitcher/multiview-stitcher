@@ -127,7 +127,3 @@ def custom_weight_function(
 ```
 
 Example implementation: `multiview_stitcher.weights.content_based`.
-
-## Global parameter resolution
-
-Custom function API to be added.
