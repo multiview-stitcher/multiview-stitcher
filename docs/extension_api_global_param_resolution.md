@@ -29,9 +29,10 @@ from multiview_stitcher import registration
 
 def custom_groupwise_resolution(
     g_reg_component_tp,  # networkx.Graph, single CC, single timepoint
-    reference_view,
+    reference_view, # a reference node is passed (either specified by the user or determined beforehand)
     **kwargs,
-):
+) -> tuple[dict, dict]:
+
     # Compute per-node transforms.
     params = {
         node: xparams,  # xr.DataArray, dims x_in/x_out
