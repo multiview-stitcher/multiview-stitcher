@@ -49,7 +49,19 @@ def _get_graph_timepoints(g_reg):
     return sorted(set(t_coords))
 
 
-def _resolve_groupwise_components(g_reg, resolver, **kwargs):
+def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
+    """
+    Resolve global parameters by running a method per connected component
+    and timepoint.
+
+    Parameters
+    ----------
+    method : str or Callable
+        Name of a registered method, or a callable implementing the
+        component-level, single-timepoint resolver API.
+    """
+
+    resolver = _get_groupwise_resolution_method(method)
     if not len(g_reg.edges):
         raise (
             mv_graph.NotEnoughOverlapError(
@@ -170,22 +182,6 @@ def _get_graph_ndim(g_reg):
         if "spacing" in stack_props:
             return len(stack_props["spacing"].values())
     raise ValueError("Cannot determine dimensionality from graph.")
-
-
-def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
-    """
-    Resolve global parameters by running a method per connected component
-    and timepoint.
-
-    Parameters
-    ----------
-    method : str or Callable
-        Name of a registered method, or a callable implementing the
-        component-level, single-timepoint resolver API.
-    """
-
-    resolver = _get_groupwise_resolution_method(method)
-    return _resolve_groupwise_components(g_reg, resolver, **kwargs)
 
 
 def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
