@@ -20,7 +20,7 @@ Documentation available [here](https://multiview-stitcher.github.io/multiview-st
 
 ![A mosaic of example applications](docs/images/applications_mosaic.png)
 
-`multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in python. It is a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets. As such, it shares considerable functionality with the Fiji plugin [BigStitcher](https://imagej.net/plugins/bigstitcher/), with the difference that it is designed for interoperability with the Python scientific ecosystem. This allows it to:
+`multiview-stitcher` is an open-source modular toolbox for distributed and tiled stitching of 2-3D image data in Python. It is a collection of algorithms to **register** and **fuse** small and large datasets from **multi-positioning** and **multi-view** light sheet microscopy, as well as **other modalities** such as correlative cryo-EM datasets. As such, it shares considerable functionality with the Fiji plugin [BigStitcher](https://imagej.net/plugins/bigstitcher/), with the difference that it is designed for interoperability with the Python scientific ecosystem. This allows it to:
 
   - easily integrate into existing Python-based workflows (within Jupyter notebooks, scripts, etc.) 🐍
   - scale to very large datasets using mature Python tooling (using `dask`, `zarr-python`, `ray`) 🚀
