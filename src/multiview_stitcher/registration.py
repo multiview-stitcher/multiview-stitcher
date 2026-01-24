@@ -18,12 +18,7 @@ from scipy import ndimage, stats
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 
-from multiview_stitcher.param_resolution import (
-    groupwise_resolution,
-    groupwise_resolution_global_optimization,
-    groupwise_resolution_shortest_paths,
-    register_groupwise_resolution_method,
-)
+from multiview_stitcher.param_resolution import groupwise_resolution
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
 
 try:
@@ -1065,7 +1060,8 @@ def register(
         - 'global_optimization': global optimization considering all pairwise transforms
         - 'shortest_paths': concatenation of pairwise transforms along shortest paths
         Custom component-level methods can be registered via
-        register_groupwise_resolution_method(...) and referenced by name.
+        `param_resolution.register_groupwise_resolution_method(...)` and
+        referenced by name.
     groupwise_resolution_kwargs : dict, optional
         Additional keyword arguments passed to the groupwise optimization function.
         IMPORTANT: The "transform" key here determines the final types of transformations.
