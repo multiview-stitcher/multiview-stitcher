@@ -1048,7 +1048,15 @@ def _resolve_groupwise_components(g_reg, resolver, **kwargs):
             g_reg_t0 = g_reg_t
         for icc, cc in enumerate(nx.connected_components(g_reg_t)):
             g_reg_subgraph = g_reg_t.subgraph(list(cc))
-            cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
+            if not g_reg_subgraph.number_of_edges():
+                ndim = _get_graph_ndim(g_reg_subgraph)
+                cc_params = {
+                    node: param_utils.identity_transform(ndim)
+                    for node in cc
+                }
+                cc_info = None
+            else:
+                cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
             for node in cc:
                 params[node].append(cc_params[node])
 
