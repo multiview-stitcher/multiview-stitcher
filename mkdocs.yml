@@ -64,8 +64,8 @@ nav:
     - Fusion: built_in_methods_fusion.md
   - Extension API:
     - extension_api_pairwise_registration.md
-    - extension_api_fusion.md
     - extension_api_global_param_resolution.md
+    - extension_api_fusion.md
   - Visualization:
     - napari_stitcher.md
     - neuroglancer.md
