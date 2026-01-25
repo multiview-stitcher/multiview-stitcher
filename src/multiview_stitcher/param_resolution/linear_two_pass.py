@@ -301,6 +301,34 @@ def groupwise_resolution_linear_two_pass(
     Residuals used for pruning are RMS distances between virtual beads
     in physical units (matching groupwise_resolution).
 
+    Method overview
+    -------------------------------
+    Given pairwise affine transforms on an undirected registration graph,
+    each edge transform (u->v) is first projected to the requested model:
+    translation-only, rigid (SE(2)/SE(3)), or similarity (Sim(2)/Sim(3)).
+    For rigid/similarity, the closest rotation is obtained via SVD/polar
+    decomposition; for similarity, the uniform scale is the mean singular
+    value, and rotation is computed on the scale-normalized linear part.
+
+    Global parameters are solved in a single sparse least-squares system
+    with first-order coupling between translation and rotation/scale.
+    Unknowns per node include translation (always), rotation (rigid/similarity),
+    and log-scale (similarity). The reference node is fixed to identity.
+    Each edge contributes linear constraints for rotation, scale, and
+    translation; translation constraints include first-order terms that
+    depend on the target node's rotation and scale. Edge rows are weighted
+    by a scalar derived from registration quality/overlap.
+
+    A two-pass robustification is applied. Pass 1 solves using all edges,
+    then computes edge residuals as RMS distances between corresponding
+    virtual bead pairs (bounding-box corners) after applying the current
+    global transforms, yielding residuals in physical units. Edges are
+    pruned by either an absolute residual threshold or a median absolute
+    deviation (MAD) criterion; optionally, a minimum spanning tree (by
+    residual) is always retained to preserve connectivity. Pass 2 resolves
+    the system using the pruned edge set and returns the final global
+    transforms along with per-edge residual metrics.
+
     Parameters
     ----------
     g_reg_component_tp : nx.Graph
