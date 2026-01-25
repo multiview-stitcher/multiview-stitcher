@@ -11,6 +11,9 @@ from skimage.transform import (
 )
 
 from multiview_stitcher import mv_graph, param_utils, transformation
+from multiview_stitcher.linear_two_pass import (
+    linear_two_pass_groupwise_resolution,
+)
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
 
 logger = logging.getLogger(__name__)
@@ -442,6 +445,10 @@ register_groupwise_resolution_method(
 register_groupwise_resolution_method(
     "shortest_paths", groupwise_resolution_shortest_paths
 )
+register_groupwise_resolution_method(
+    "linear_two_pass", linear_two_pass_groupwise_resolution
+)
+
 
 def get_reg_graph_with_single_tp_transforms(g_reg, t):
     g_reg_t = g_reg.copy()
