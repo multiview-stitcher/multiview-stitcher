@@ -435,7 +435,6 @@ def optimize_bead_subgraph(
                 for e in edges
             ]
 
-            edge_to_remove = edges[np.argmax(edge_residual_values)]
             residual_order = np.argsort(edge_residual_values)[::-1]
             # find first node which had more than one edge and
             # cutting it would leave its nodes in separate connected components
