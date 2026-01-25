@@ -77,23 +77,19 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
 
     params = {node: [] for node in g_reg.nodes}
     info_metrics = []
-    used_edges_t0 = set()
-    residuals_t0 = {}
+    used_edges_by_t = {}
 
     # Resolve per timepoint and connected component, then stitch results.
     t_coords = _get_graph_timepoints(g_reg)
 
     # Normalize to a single-timepoint loop for uniform handling.
     iter_t_coords = t_coords if t_coords else [None]
-    g_reg_t0 = None
     for it, t in enumerate(iter_t_coords):
         g_reg_t = (
             get_reg_graph_with_single_tp_transforms(g_reg, t)
             if t is not None
             else g_reg
         )
-        if it == 0:
-            g_reg_t0 = g_reg_t
         for icc, cc in enumerate(nx.connected_components(g_reg_t)):
             g_reg_subgraph = g_reg_t.subgraph(list(cc))
             if not g_reg_subgraph.number_of_edges():
@@ -118,20 +114,11 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
                     if "icc" not in metrics.columns:
                         metrics["icc"] = [icc] * len(metrics)
                     info_metrics.append(metrics)
-                if it == 0:
-                    used_edges = cc_info.get("used_edges")
-                    if used_edges is not None:
-                        used_edges_t0.update(
-                            tuple(sorted(e)) for e in used_edges
-                        )
-                    edge_residuals = cc_info.get("edge_residuals")
-                    if edge_residuals is not None:
-                        residuals_t0.update(
-                            {
-                                tuple(sorted(e)): v
-                                for e, v in edge_residuals.items()
-                            }
-                        )
+                used_edges = cc_info.get("used_edges")
+                if used_edges is not None:
+                    used_edges_by_t.setdefault(it, set()).update(
+                        tuple(sorted(e)) for e in used_edges
+                    )
 
     # Concatenate per-timepoint parameters.
     if t_coords:
@@ -144,28 +131,28 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     else:
         params = {node: params[node][0] for node in params}
 
-    # Build the optimized graph for the first timepoint.
-    g_opt_t0 = g_reg_t0.copy()
-    if used_edges_t0:
-        edges_to_remove = [
-            e
-            for e in g_opt_t0.edges
-            if tuple(sorted(e)) not in used_edges_t0
-        ]
-        g_opt_t0.remove_edges_from(edges_to_remove)
-    for node in g_opt_t0.nodes:
-        node_params = params[node]
-        if isinstance(node_params, xr.DataArray) and "t" in node_params:
-            node_params = node_params.sel({"t": t_coords[0]})
-        g_opt_t0.nodes[node]["transform"] = node_params
-    for e in g_opt_t0.edges:
-        g_opt_t0.edges[e]["residual"] = residuals_t0.get(
-            tuple(sorted(e)), np.nan
+    edge_residuals_by_t = {}
+    for it, t in enumerate(iter_t_coords):
+        params_t = {
+            node: (
+                params[node].sel({"t": t_coords[it]})
+                if isinstance(params[node], xr.DataArray)
+                and "t" in params[node]
+                else params[node]
+            )
+            for node in params
+        }
+        g_reg_t = (
+            get_reg_graph_with_single_tp_transforms(g_reg, t)
+            if t is not None
+            else g_reg
         )
+        edge_residuals_by_t[it] = _get_edge_residuals(g_reg_t, params_t)
 
     info_dict = {
         "metrics": pd.concat(info_metrics) if info_metrics else None,
-        "optimized_graph_t0": g_opt_t0,
+        "edge_residuals": edge_residuals_by_t,
+        "used_edges": {k: list(v) for k, v in used_edges_by_t.items()},
     }
     return params, info_dict
 
@@ -182,6 +169,27 @@ def _get_graph_ndim(g_reg):
         if "spacing" in stack_props:
             return len(stack_props["spacing"].values())
     raise ValueError("Cannot determine dimensionality from graph.")
+
+
+def _get_edge_residuals(g_reg, params):
+    if not g_reg.number_of_edges():
+        return {}
+
+    ndim = _get_graph_ndim(g_reg)
+    g_beads = get_beads_graph_from_reg_graph(g_reg, ndim=ndim)
+    residuals = {}
+    for e in g_beads.edges:
+        node1, node2 = e
+        pts1 = transformation.transform_pts(
+            g_beads.edges[e]["beads"][node1], params[node1]
+        )
+        pts2 = transformation.transform_pts(
+            g_beads.edges[e]["beads"][node2], params[node2]
+        )
+        residuals[tuple(sorted(e))] = np.sqrt(
+            np.mean(np.sum((pts1 - pts2) ** 2, axis=1))
+        )
+    return residuals
 
 
 def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
@@ -276,7 +284,6 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     return node_transforms, {
         "metrics": None,
         "used_edges": list(used_edges),
-        "edge_residuals": {},
     }
 
 
@@ -353,7 +360,6 @@ def groupwise_resolution_global_optimization(
         info_dict = {
             "metrics": None,
             "used_edges": [],
-            "edge_residuals": {},
         }
         return params, info_dict
 
@@ -425,10 +431,6 @@ def groupwise_resolution_global_optimization(
     info_dict = {
         "metrics": df,
         "used_edges": [tuple(sorted(e)) for e in g_opt_t0.edges],
-        "edge_residuals": {
-            tuple(sorted(e)): g_opt_t0.edges[e].get("residual", np.nan)
-            for e in g_opt_t0.edges
-        },
     }
 
     return params, info_dict
@@ -473,6 +475,10 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
         gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
         bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
         affine = g_reg_subgraph.edges[e]["transform"]
+        quality = g_reg_subgraph.edges[e]["quality"]
+        if isinstance(quality, xr.DataArray):
+            quality = quality.data
+        overlap = g_reg_subgraph.edges[e]["overlap"]
         g_beads_subgraph.add_edge(
             sorted_e[0],
             sorted_e[1],
@@ -483,8 +489,8 @@ def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
                     affine,
                 ),
             },
-            quality=g_reg_subgraph.edges[e]["quality"].data,
-            overlap=g_reg_subgraph.edges[e]["overlap"],
+            quality=quality,
+            overlap=overlap,
         )
 
     # initialise view transforms with identity transforms

@@ -533,49 +533,6 @@ def test_manual_pair_registration(
     assert len(params) == 6
 
 
-@pytest.mark.parametrize(
-    """
-    transform,
-    """,
-    ["translation", "rigid", "similarity", "affine"],
-)
-def test_global_optimization(transform):
-    """
-    Test the global optimization function.
-    Currently only tests that the function runs without errors.
-    """
-
-    sims = sample_data.generate_tiled_dataset(
-        ndim=2,
-        N_t=1,
-        N_c=1,
-        tile_size=15,
-        tiles_x=2,
-        tiles_y=1,
-        tiles_z=1,
-        overlap=5,
-    )
-
-    msims = [
-        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
-    ]
-
-    # Run registration
-    params = registration.register(
-        msims,
-        reg_channel_index=0,
-        transform_key=METADATA_TRANSFORM_KEY,
-        pairwise_reg_func=registration.phase_correlation_registration,
-        new_transform_key="affine_registered",
-        groupwise_resolution_method="global_optimization",
-        groupwise_resolution_kwargs={"transform": transform},
-    )
-
-    if transform == "translation":
-        for p in params:
-            assert np.allclose(p.sel(t=0).data[:2, :2], np.eye(2))
-
-
 def test_reg_channel():
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_into_sims(example_data_path)

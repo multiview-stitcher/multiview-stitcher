@@ -1139,9 +1139,11 @@ def register(
                 - 'qualities': Edge registration qualities
         - 'groupwise_resolution': Dictionary containing the following
             - 'summary_plot': Tuple containing the figure and axis of the summary plot
-            - 'graph': networkx graph of groupwise resolution
             - 'metrics': Dictionary containing the following metrics:
-                - 'residuals': Edge residuals after groupwise resolution
+                - 'edge_residuals': Dict[int, dict[tuple, float]] mapping timepoint index
+                  to edge residuals
+                - 'used_edges': Dict[int, list[tuple]] mapping timepoint index to edges
+                  used by the resolution method
     """
 
     # warn about deprecated parameter
@@ -1222,13 +1224,15 @@ def register(
             weight_key="quality",
         )
 
-    params, groupwise_resolution_info_dict = groupwise_resolution(
+    params_dict, groupwise_resolution_info_dict = groupwise_resolution(
         g_reg_computed,
         method=groupwise_resolution_method,
         **groupwise_resolution_kwargs,
     )
 
-    params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
+    params = [
+        params_dict[iview] for iview in sorted(g_reg_computed.nodes())
+    ]
 
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
@@ -1259,16 +1263,12 @@ def register(
             )
 
             if groupwise_resolution_info_dict is not None:
+                edge_residuals_dict = groupwise_resolution_info_dict[
+                    "edge_residuals"
+                ].get(0, {})
                 edge_residuals = np.array(
                     [
-                        groupwise_resolution_info_dict[
-                            "optimized_graph_t0"
-                        ].get_edge_data(*e)["residual"]
-                        if e
-                        in groupwise_resolution_info_dict[
-                            "optimized_graph_t0"
-                        ].edges
-                        else np.nan
+                        edge_residuals_dict.get(tuple(sorted(e)), np.nan)
                         for e in edges
                     ]
                 )
@@ -1311,6 +1311,22 @@ def register(
                         k
                     ].sel({"t": g_reg_computed.edges[e][k].coords["t"][0]})
 
+        groupwise_resolution_block = (
+            {
+                "summary_plot": (fig_group_res, ax_group_res),
+                "metrics": {
+                    "edge_residuals": groupwise_resolution_info_dict[
+                        "edge_residuals"
+                    ],
+                    "used_edges": groupwise_resolution_info_dict[
+                        "used_edges"
+                    ],
+                },
+            }
+            if groupwise_resolution_info_dict is not None
+            else None
+        )
+
         return {
             "params": params,
             "pairwise_registration": {
@@ -1322,16 +1338,7 @@ def register(
                     ),
                 },
             },
-            "groupwise_resolution": {
-                "summary_plot": (fig_group_res, ax_group_res),
-                "graph": groupwise_resolution_info_dict["optimized_graph_t0"],
-                "metrics": {
-                    "residuals": nx.get_edge_attributes(
-                        groupwise_resolution_info_dict["optimized_graph_t0"],
-                        "residual",
-                    ),
-                },
-            },
+            "groupwise_resolution": groupwise_resolution_block,
         }
     else:
         return params
