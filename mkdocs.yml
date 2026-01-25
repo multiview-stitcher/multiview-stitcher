@@ -58,6 +58,10 @@ nav:
   - data_formats.md
   - implementation_details.md
   - objects.md
+  - Built-in methods:
+    - Pairwise registration: built_in_methods_pairwise_registration.md
+    - Global parameter resolution: built_in_methods_global_param_resolution.md
+    - Fusion: built_in_methods_fusion.md
   - Extension API:
     - extension_api_pairwise_registration.md
     - extension_api_fusion.md
