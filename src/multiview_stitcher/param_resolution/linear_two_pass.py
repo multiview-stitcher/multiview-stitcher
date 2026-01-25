@@ -341,7 +341,8 @@ def groupwise_resolution_linear_two_pass(
         Absolute residual threshold for pruning after pass 1 (physical units).
         If None, a MAD-based threshold is used.
     mad_k : float, optional
-        MAD multiplier for pruning when residual_threshold is None.
+        MAD (median absolute deviation) multiplier for pruning when
+        residual_threshold is None. Set to np.inf to disable MAD pruning.
     keep_mst : bool, optional
         Keep a minimum spanning tree (by residual) to preserve connectivity.
     weight_mode : str, optional
