@@ -1001,19 +1001,12 @@ def register(
     return_dict: bool = False,
 ):
     """
-
     Register a list of views to a common extrinsic coordinate system.
 
-    This function is the main entry point for registration.
-
-    1) Build a graph of pairwise overlaps between views
-    2) Determine registration pairs from this graph
-    3) Register each pair of views.
-       Need to add option to pass registration functions here.
-    4) Determine the parameters mapping each view into the new extrinsic
-       coordinate system.
-       Currently done by determining a reference view and concatenating for reach
-       view the pairwise transforms along the shortest paths towards the ref view.
+    High-level flow:
+    1) Build the overlap graph.
+    2) Run pairwise registrations for selected edges.
+    3) Resolve global transforms from the pairwise results.
 
     Parameters
     ----------
@@ -1055,33 +1048,19 @@ def register(
         - 'transform_type': ['Translation', 'Rigid' 'Affine'] or ['Similarity']
         For further parameters, see the docstring of the registration function.
     groupwise_resolution_method : str, optional
-        Method used to determine the final transform parameters
-        from pairwise registrations:
-        - 'global_optimization': global optimization considering all pairwise transforms
-        - 'shortest_paths': concatenation of pairwise transforms along shortest paths
+        Method used to resolve global transforms from pairwise registrations:
+        - 'global_optimization' (transform: translation|rigid|similarity|affine)
+        - 'shortest_paths' (uses the transform type defined by the pairwise registrations)
+        - 'linear_two_pass' (transform: translation|rigid|similarity)
         Custom component-level methods can be registered via
         `param_resolution.register_groupwise_resolution_method(...)` and
         referenced by name.
     groupwise_resolution_kwargs : dict, optional
-        Additional keyword arguments passed to the groupwise optimization function.
-        IMPORTANT: The "transform" key here determines the final types of transformations.
-        By default this is {'transform': 'translation'}. Even if the pairwise registration
-        function returns a rigid (rotation) or affine transformation, the groupwise resolution
-        will restrict the final transformations to the indicated type (i.e. for a pairwise
-        registration function that returns a rigid transformation, it most cases it makes sense
-        to use 'rigid' as the groupwise resolution transform type).
-        Most important parameters:
-        - 'transform': str
-            Type of transformation to use for groupwise resolution.
-            Available types:
-            - 'translation': translation (default)
-            - 'rigid': rigid body transformation
-            - 'similarity': similarity transformation
-            - 'affine': affine transformation
-        - 'abs_tol': float, optional
-            Absolute value of max edge residual below which the groupwise resolution stops.
-        - 'reference_view': int, optional
-            Reference view which keeps its transformation fixed.
+        Additional keyword arguments passed to the groupwise resolver.
+        Parameters are method-specific. Common options include:
+        - 'transform': final transform type (see method notes above)
+        - 'reference_view': node index to keep fixed
+        See the resolver docstrings for full details.
     pre_registration_pruning_method : str, optional
         Method used to eliminate registration edges (e.g. diagonals) from the view adjacency
         graph before registration. Available methods:

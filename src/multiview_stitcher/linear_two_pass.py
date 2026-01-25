@@ -291,7 +291,7 @@ def _compute_edge_metrics(
 def linear_two_pass_groupwise_resolution(
     g_reg_component_tp,
     reference_view=None,
-    mode="rigid",
+    transform="rigid",
     prune_quantile=0.9,
     keep_mst=True,
     weight_mode="quality_overlap",
@@ -303,7 +303,32 @@ def linear_two_pass_groupwise_resolution(
     Fast groupwise resolution using a sparse linear solve with two-pass
     outlier pruning and first-order coupling between translation and
     rotation/scale.
+
+    Parameters
+    ----------
+    g_reg_component_tp : nx.Graph
+        Registration graph for a single connected component and timepoint.
+    reference_view : hashable, optional
+        Node index to keep fixed. If None, a reference is chosen by quality.
+    transform : str
+        Final transform type: 'translation', 'rigid', or 'similarity'.
+    prune_quantile : float, optional
+        Residual quantile used to prune edges after pass 1.
+    keep_mst : bool, optional
+        Keep a minimum spanning tree (by residual) to preserve connectivity.
+    weight_mode : str, optional
+        Edge weights: 'quality_overlap', 'quality', 'overlap', or 'uniform'.
+    rot_weight : float, optional
+        Weight for rotation residuals when computing pruning scores.
+    scale_weight : float, optional
+        Weight for scale residuals when computing pruning scores.
+    **kwargs : dict
+        Passed to scipy.sparse.linalg.lsqr (e.g., 'atol', 'btol', 'iter_lim').
     """
+    if "mode" in kwargs:
+        # Backward-compatible alias for older callers.
+        transform = kwargs.pop("mode")
+
     if not g_reg_component_tp.number_of_edges():
         ndim = _get_graph_ndim(g_reg_component_tp)
         params = {
@@ -312,15 +337,15 @@ def linear_two_pass_groupwise_resolution(
         }
         return params, {"metrics": None, "used_edges": []}
 
-    if mode not in ("translation", "rigid", "similarity"):
-        raise ValueError(f"Unknown mode: {mode}")
+    if transform not in ("translation", "rigid", "similarity"):
+        raise ValueError(f"Unknown transform: {transform}")
 
     ndim = _get_graph_ndim(g_reg_component_tp)
     if ndim not in (2, 3):
         raise ValueError("Only 2D and 3D supported.")
 
-    use_rot = mode in ("rigid", "similarity")
-    use_scale = mode == "similarity"
+    use_rot = transform in ("rigid", "similarity")
+    use_scale = transform == "similarity"
     rot_dim = 1 if ndim == 2 else 3
 
     if reference_view is not None and reference_view in g_reg_component_tp:
@@ -480,9 +505,9 @@ def linear_two_pass_groupwise_resolution(
 
     params = {}
     for node in nodes:
-        if mode == "translation":
+        if transform == "translation":
             linear = np.eye(ndim)
-        elif mode == "rigid":
+        elif transform == "rigid":
             if ndim == 2:
                 theta = r_final[node][0]
                 c = np.cos(theta)

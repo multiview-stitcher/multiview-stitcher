@@ -321,7 +321,7 @@ def test_linear_two_pass_pruning_improves_error_2d():
         g_reg,
         method="linear_two_pass",
         reference_view=0,
-        mode="similarity",
+        transform="similarity",
         prune_quantile=1.0,
         keep_mst=True,
     )
@@ -329,7 +329,7 @@ def test_linear_two_pass_pruning_improves_error_2d():
         g_reg,
         method="linear_two_pass",
         reference_view=0,
-        mode="similarity",
+        transform="similarity",
         prune_quantile=0.75,
         keep_mst=True,
     )
@@ -362,7 +362,7 @@ def test_linear_two_pass_rigid_3d_accuracy():
         g_reg,
         method="linear_two_pass",
         reference_view=0,
-        mode="rigid",
+        transform="rigid",
         prune_quantile=1.0,
         keep_mst=True,
     )
@@ -389,7 +389,7 @@ def test_linear_two_pass_translation_matches_shortest_paths():
         g_reg,
         method="linear_two_pass",
         reference_view=0,
-        mode="translation",
+        transform="translation",
         prune_quantile=1.0,
     )
     params_paths, _ = param_resolution.groupwise_resolution(
