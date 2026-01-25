@@ -6,7 +6,7 @@ from scipy import sparse
 from scipy.sparse.linalg import lsqr
 from scipy.spatial.transform import Rotation
 
-from multiview_stitcher import mv_graph, param_utils
+from multiview_stitcher import mv_graph, param_utils, transformation
 
 
 def _get_edge_weight(edge_data, weight_mode):
@@ -216,75 +216,113 @@ def _vector_to_node_params(
         if use_rot:
             rotations[node] = solution[slices["rot"]]
         if use_scale:
-            scales[node] = float(solution[slices["scale"]])
+            scales[node] = float(solution[slices["scale"]].item())
 
     return translations, rotations, scales
 
 
-def _compute_edge_metrics(
-    edges,
+def _build_params_from_components(
+    nodes,
     translations,
     rotations,
     scales,
-    use_rot,
-    use_scale,
-    rot_weight,
-    scale_weight,
+    transform,
+    ndim,
+    x_in=None,
+    x_out=None,
 ):
-    """
-    Compute per-edge residuals for pruning and reporting.
+    """Build xarray affine transforms from component parameters."""
+    params = {}
+    for node in nodes:
+        if transform == "translation":
+            linear = np.eye(ndim)
+        elif transform == "rigid":
+            if ndim == 2:
+                theta = rotations[node][0]
+                c = np.cos(theta)
+                s = np.sin(theta)
+                linear = np.array([[c, -s], [s, c]], dtype=float)
+            else:
+                linear = Rotation.from_rotvec(rotations[node]).as_matrix()
+        else:
+            if ndim == 2:
+                theta = rotations[node][0]
+                c = np.cos(theta)
+                s = np.sin(theta)
+                rmat = np.array([[c, -s], [s, c]], dtype=float)
+            else:
+                rmat = Rotation.from_rotvec(rotations[node]).as_matrix()
+            linear = np.exp(scales[node]) * rmat
 
-    Residuals are computed from linearized constraints using pass-1 params.
-    """
+        matrix = np.eye(ndim + 1, dtype=float)
+        matrix[:ndim, :ndim] = linear
+        matrix[:ndim, ndim] = translations[node]
+        xparams = param_utils.affine_to_xaffine(matrix)
+        if x_in is not None and x_out is not None:
+            xparams = xparams.sel(x_in=x_in, x_out=x_out)
+        params[node] = xparams
+    return params
+
+
+def _get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
+    g_beads_subgraph = nx.Graph()
+    g_beads_subgraph.add_nodes_from(g_reg_subgraph.nodes)
+    for e in g_reg_subgraph.edges:
+        sorted_e = tuple(sorted(e))
+        bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data
+        gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
+        bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
+        affine = g_reg_subgraph.edges[e]["transform"]
+        if isinstance(affine, xr.DataArray):
+            affine = affine.data
+        g_beads_subgraph.add_edge(
+            sorted_e[0],
+            sorted_e[1],
+            beads={
+                sorted_e[0]: bbox_vertices,
+                sorted_e[1]: transformation.transform_pts(
+                    bbox_vertices,
+                    affine,
+                ),
+            },
+        )
+    return g_beads_subgraph
+
+
+def _compute_edge_residuals(g_reg_subgraph, params, ndim):
+    """Compute RMS bead residuals in physical units for all edges."""
+    g_beads = _get_beads_graph_from_reg_graph(g_reg_subgraph, ndim)
+    residuals = {}
+    for e in g_beads.edges:
+        node1, node2 = e
+        pts1 = transformation.transform_pts(
+            g_beads.edges[e]["beads"][node1], params[node1]
+        )
+        pts2 = transformation.transform_pts(
+            g_beads.edges[e]["beads"][node2], params[node2]
+        )
+        residuals[tuple(sorted(e))] = float(
+            np.sqrt(np.mean(np.sum((pts1 - pts2) ** 2, axis=1)))
+        )
+    return residuals
+
+
+def _compute_edge_metrics(edges, residuals_by_edge):
+    """Attach per-edge residuals (physical units) for pruning/reporting."""
     metrics = []
     residuals = []
     for edge in edges:
-        u = edge["u"]
-        v = edge["v"]
-        dvec = edge["trans"]
-        cross = edge["cross"]
-
-        t_u = translations[u]
-        t_v = translations[v]
-        rot_v = rotations[v] if use_rot else np.zeros_like(dvec[:0])
-        scale_v = scales[v] if use_scale else 0.0
-
-        cross_term = cross @ rot_v if use_rot else 0.0
-        res_t = (t_u - t_v) - cross_term - scale_v * dvec - dvec
-        r_trans = float(np.linalg.norm(res_t))
-
-        r_rot = 0.0
-        if use_rot:
-            rot_u = rotations[u]
-            r_rot = float(
-                np.linalg.norm((rot_u - rot_v) - edge["rot"])
-            )
-
-        r_scale = 0.0
-        if use_scale:
-            scale_u = scales[u]
-            r_scale = float((scale_u - scale_v) - edge["scale"])
-            r_scale = abs(r_scale)
-
-        r_total = float(
-            np.sqrt(
-                r_trans**2
-                + (rot_weight * r_rot) ** 2
-                + (scale_weight * r_scale) ** 2
-            )
-        )
-        residuals.append(r_total)
+        edge_key = tuple(sorted((edge["u"], edge["v"])))
+        residual = residuals_by_edge.get(edge_key, np.nan)
         metrics.append(
             {
-                "u": u,
-                "v": v,
+                "u": edge["u"],
+                "v": edge["v"],
                 "weight": edge["weight"],
-                "r_trans": r_trans,
-                "r_rot": r_rot,
-                "r_scale": r_scale,
-                "r_total": r_total,
+                "residual": residual,
             }
         )
+        residuals.append(residual)
     return metrics, np.asarray(residuals, dtype=float)
 
 
@@ -292,17 +330,18 @@ def linear_two_pass_groupwise_resolution(
     g_reg_component_tp,
     reference_view=None,
     transform="rigid",
-    prune_quantile=0.9,
+    residual_threshold=None,
+    mad_k=2.0,
     keep_mst=True,
     weight_mode="quality_overlap",
-    rot_weight=1.0,
-    scale_weight=1.0,
     **kwargs,
 ):
     """
     Fast groupwise resolution using a sparse linear solve with two-pass
     outlier pruning and first-order coupling between translation and
     rotation/scale.
+    Residuals used for pruning are RMS distances between virtual beads
+    in physical units (matching groupwise_resolution).
 
     Parameters
     ----------
@@ -312,22 +351,25 @@ def linear_two_pass_groupwise_resolution(
         Node index to keep fixed. If None, a reference is chosen by quality.
     transform : str
         Final transform type: 'translation', 'rigid', or 'similarity'.
-    prune_quantile : float, optional
-        Residual quantile used to prune edges after pass 1.
+    residual_threshold : float, optional
+        Absolute residual threshold for pruning after pass 1 (physical units).
+        If None, a MAD-based threshold is used.
+    mad_k : float, optional
+        MAD multiplier for pruning when residual_threshold is None.
     keep_mst : bool, optional
         Keep a minimum spanning tree (by residual) to preserve connectivity.
     weight_mode : str, optional
         Edge weights: 'quality_overlap', 'quality', 'overlap', or 'uniform'.
-    rot_weight : float, optional
-        Weight for rotation residuals when computing pruning scores.
-    scale_weight : float, optional
-        Weight for scale residuals when computing pruning scores.
     **kwargs : dict
         Passed to scipy.sparse.linalg.lsqr (e.g., 'atol', 'btol', 'iter_lim').
     """
     if "mode" in kwargs:
         # Backward-compatible alias for older callers.
         transform = kwargs.pop("mode")
+    if "prune_quantile" in kwargs:
+        raise TypeError(
+            "prune_quantile is not supported; use residual_threshold or mad_k."
+        )
 
     if not g_reg_component_tp.number_of_edges():
         ndim = _get_graph_ndim(g_reg_component_tp)
@@ -429,28 +471,57 @@ def linear_two_pass_groupwise_resolution(
         use_scale,
     )
 
-    metrics, residuals = _compute_edge_metrics(
-        edges,
+    template = g_reg_component_tp.edges[
+        next(iter(g_reg_component_tp.edges))
+    ]["transform"]
+    if isinstance(template, xr.DataArray):
+        x_in = template.coords["x_in"]
+        x_out = template.coords["x_out"]
+    else:
+        x_in = None
+        x_out = None
+
+    params_pass1 = _build_params_from_components(
+        nodes,
         t_pass1,
         r_pass1,
         s_pass1,
-        use_rot,
-        use_scale,
-        rot_weight,
-        scale_weight,
+        transform,
+        ndim,
+        x_in=x_in,
+        x_out=x_out,
     )
+    # Use physical residuals for pruning and reporting.
+    residuals_by_edge = _compute_edge_residuals(
+        g_reg_component_tp, params_pass1, ndim
+    )
+    metrics, residuals = _compute_edge_metrics(edges, residuals_by_edge)
 
-    if len(residuals):
-        threshold = float(np.quantile(residuals, prune_quantile))
+    residuals = np.asarray(residuals, dtype=float)
+    finite_mask = np.isfinite(residuals)
+    finite_residuals = residuals[finite_mask]
+
+    if residual_threshold is not None:
+        threshold = float(residual_threshold)
+    elif finite_residuals.size:
+        median = float(np.median(finite_residuals))
+        mad = float(np.median(np.abs(finite_residuals - median)))
+        threshold = median + float(mad_k) * mad
     else:
-        threshold = 0.0
+        threshold = np.inf
 
-    keep_mask = residuals <= threshold if len(residuals) else np.array([])
+    residuals_for_keep = residuals.copy()
+    residuals_for_keep[~np.isfinite(residuals_for_keep)] = np.inf
+    keep_mask = (
+        residuals_for_keep <= threshold
+        if len(residuals_for_keep)
+        else np.array([])
+    )
 
     kept_edges = set()
     if keep_mst and len(edges):
         mst_graph = nx.Graph()
-        for edge, residual in zip(edges, residuals):
+        for edge, residual in zip(edges, residuals_for_keep):
             mst_graph.add_edge(edge["u"], edge["v"], weight=residual)
         mst = nx.minimum_spanning_tree(mst_graph, weight="weight")
         kept_edges.update(tuple(sorted(e)) for e in mst.edges)
@@ -493,45 +564,16 @@ def linear_two_pass_groupwise_resolution(
         use_scale,
     )
 
-    template = g_reg_component_tp.edges[
-        next(iter(g_reg_component_tp.edges))
-    ]["transform"]
-    if isinstance(template, xr.DataArray):
-        x_in = template.coords["x_in"]
-        x_out = template.coords["x_out"]
-    else:
-        x_in = None
-        x_out = None
-
-    params = {}
-    for node in nodes:
-        if transform == "translation":
-            linear = np.eye(ndim)
-        elif transform == "rigid":
-            if ndim == 2:
-                theta = r_final[node][0]
-                c = np.cos(theta)
-                s = np.sin(theta)
-                linear = np.array([[c, -s], [s, c]], dtype=float)
-            else:
-                linear = Rotation.from_rotvec(r_final[node]).as_matrix()
-        else:
-            if ndim == 2:
-                theta = r_final[node][0]
-                c = np.cos(theta)
-                s = np.sin(theta)
-                rmat = np.array([[c, -s], [s, c]], dtype=float)
-            else:
-                rmat = Rotation.from_rotvec(r_final[node]).as_matrix()
-            linear = np.exp(s_final[node]) * rmat
-
-        matrix = np.eye(ndim + 1, dtype=float)
-        matrix[:ndim, :ndim] = linear
-        matrix[:ndim, ndim] = t_final[node]
-        xparams = param_utils.affine_to_xaffine(matrix)
-        if x_in is not None and x_out is not None:
-            xparams = xparams.sel(x_in=x_in, x_out=x_out)
-        params[node] = xparams
+    params = _build_params_from_components(
+        nodes,
+        t_final,
+        r_final,
+        s_final,
+        transform,
+        ndim,
+        x_in=x_in,
+        x_out=x_out,
+    )
 
     metrics_df = pd.DataFrame(metrics) if metrics else None
     info_dict = {
