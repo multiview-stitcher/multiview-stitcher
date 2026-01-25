@@ -6,7 +6,11 @@ from scipy import sparse
 from scipy.sparse.linalg import lsqr
 from scipy.spatial.transform import Rotation
 
-from multiview_stitcher import mv_graph, param_utils, transformation
+from multiview_stitcher import mv_graph, param_utils
+from multiview_stitcher.param_resolution_utils import (
+    compute_edge_residuals,
+    get_graph_ndim,
+)
 
 
 def _get_edge_weight(edge_data, weight_mode):
@@ -264,49 +268,6 @@ def _build_params_from_components(
     return params
 
 
-def _get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
-    g_beads_subgraph = nx.Graph()
-    g_beads_subgraph.add_nodes_from(g_reg_subgraph.nodes)
-    for e in g_reg_subgraph.edges:
-        sorted_e = tuple(sorted(e))
-        bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data
-        gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
-        bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
-        affine = g_reg_subgraph.edges[e]["transform"]
-        if isinstance(affine, xr.DataArray):
-            affine = affine.data
-        g_beads_subgraph.add_edge(
-            sorted_e[0],
-            sorted_e[1],
-            beads={
-                sorted_e[0]: bbox_vertices,
-                sorted_e[1]: transformation.transform_pts(
-                    bbox_vertices,
-                    affine,
-                ),
-            },
-        )
-    return g_beads_subgraph
-
-
-def _compute_edge_residuals(g_reg_subgraph, params, ndim):
-    """Compute RMS bead residuals in physical units for all edges."""
-    g_beads = _get_beads_graph_from_reg_graph(g_reg_subgraph, ndim)
-    residuals = {}
-    for e in g_beads.edges:
-        node1, node2 = e
-        pts1 = transformation.transform_pts(
-            g_beads.edges[e]["beads"][node1], params[node1]
-        )
-        pts2 = transformation.transform_pts(
-            g_beads.edges[e]["beads"][node2], params[node2]
-        )
-        residuals[tuple(sorted(e))] = float(
-            np.sqrt(np.mean(np.sum((pts1 - pts2) ** 2, axis=1)))
-        )
-    return residuals
-
-
 def _compute_edge_metrics(edges, residuals_by_edge):
     """Attach per-edge residuals (physical units) for pruning/reporting."""
     metrics = []
@@ -372,7 +333,7 @@ def linear_two_pass_groupwise_resolution(
         )
 
     if not g_reg_component_tp.number_of_edges():
-        ndim = _get_graph_ndim(g_reg_component_tp)
+        ndim = get_graph_ndim(g_reg_component_tp)
         params = {
             node: param_utils.identity_transform(ndim)
             for node in g_reg_component_tp.nodes
@@ -382,7 +343,7 @@ def linear_two_pass_groupwise_resolution(
     if transform not in ("translation", "rigid", "similarity"):
         raise ValueError(f"Unknown transform: {transform}")
 
-    ndim = _get_graph_ndim(g_reg_component_tp)
+    ndim = get_graph_ndim(g_reg_component_tp)
     if ndim not in (2, 3):
         raise ValueError("Only 2D and 3D supported.")
 
@@ -492,7 +453,7 @@ def linear_two_pass_groupwise_resolution(
         x_out=x_out,
     )
     # Use physical residuals for pruning and reporting.
-    residuals_by_edge = _compute_edge_residuals(
+    residuals_by_edge = compute_edge_residuals(
         g_reg_component_tp, params_pass1, ndim
     )
     metrics, residuals = _compute_edge_metrics(edges, residuals_by_edge)
@@ -582,16 +543,3 @@ def linear_two_pass_groupwise_resolution(
     }
     return params, info_dict
 
-
-def _get_graph_ndim(g_reg):
-    if g_reg.number_of_edges():
-        return (
-            g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1]
-            - 1
-        )
-    if len(g_reg.nodes):
-        node = next(iter(g_reg.nodes))
-        stack_props = g_reg.nodes[node].get("stack_props", {})
-        if "spacing" in stack_props:
-            return len(stack_props["spacing"].values())
-    raise ValueError("Cannot determine dimensionality from graph.")

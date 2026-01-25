@@ -11,6 +11,11 @@ from skimage.transform import (
 )
 
 from multiview_stitcher import mv_graph, param_utils, transformation
+from multiview_stitcher.param_resolution_utils import (
+    compute_edge_residuals,
+    get_beads_graph_from_reg_graph,
+    get_graph_ndim,
+)
 from multiview_stitcher.linear_two_pass import (
     linear_two_pass_groupwise_resolution,
 )
@@ -96,7 +101,7 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
         for icc, cc in enumerate(nx.connected_components(g_reg_t)):
             g_reg_subgraph = g_reg_t.subgraph(list(cc))
             if not g_reg_subgraph.number_of_edges():
-                ndim = _get_graph_ndim(g_reg_subgraph)
+                ndim = get_graph_ndim(g_reg_subgraph)
                 cc_params = {
                     node: param_utils.identity_transform(ndim)
                     for node in cc
@@ -150,7 +155,9 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
             if t is not None
             else g_reg
         )
-        edge_residuals_by_t[it] = _get_edge_residuals(g_reg_t, params_t)
+        edge_residuals_by_t[it] = compute_edge_residuals(
+            g_reg_t, params_t
+        )
 
     info_dict = {
         "metrics": pd.concat(info_metrics) if info_metrics else None,
@@ -158,41 +165,6 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
         "used_edges": {k: list(v) for k, v in used_edges_by_t.items()},
     }
     return params, info_dict
-
-
-def _get_graph_ndim(g_reg):
-    if g_reg.number_of_edges():
-        return (
-            g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1]
-            - 1
-        )
-    if len(g_reg.nodes):
-        node = next(iter(g_reg.nodes))
-        stack_props = g_reg.nodes[node].get("stack_props", {})
-        if "spacing" in stack_props:
-            return len(stack_props["spacing"].values())
-    raise ValueError("Cannot determine dimensionality from graph.")
-
-
-def _get_edge_residuals(g_reg, params):
-    if not g_reg.number_of_edges():
-        return {}
-
-    ndim = _get_graph_ndim(g_reg)
-    g_beads = get_beads_graph_from_reg_graph(g_reg, ndim=ndim)
-    residuals = {}
-    for e in g_beads.edges:
-        node1, node2 = e
-        pts1 = transformation.transform_pts(
-            g_beads.edges[e]["beads"][node1], params[node1]
-        )
-        pts2 = transformation.transform_pts(
-            g_beads.edges[e]["beads"][node2], params[node2]
-        )
-        residuals[tuple(sorted(e))] = np.sqrt(
-            np.mean(np.sum((pts1 - pts2) ** 2, axis=1))
-        )
-    return residuals
 
 
 def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
@@ -208,13 +180,13 @@ def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
     """
 
     if not g_reg.number_of_edges():
-        ndim = _get_graph_ndim(g_reg)
+        ndim = get_graph_ndim(g_reg)
         params = {
             node: param_utils.identity_transform(ndim) for node in g_reg.nodes
         }
         return params, {"metrics": None, "used_edges": [], "edge_residuals": {}}
 
-    ndim = _get_graph_ndim(g_reg)
+    ndim = get_graph_ndim(g_reg)
 
     # use quality as weight in shortest path (mean over tp currently)
     # make sure that quality is non-negative (shortest path algo requires this)
@@ -355,7 +327,7 @@ def groupwise_resolution_global_optimization(
     """
 
     if not g_reg.number_of_edges():
-        ndim = _get_graph_ndim(g_reg)
+        ndim = get_graph_ndim(g_reg)
         params = {
             node: param_utils.identity_transform(ndim)
             for node in g_reg.nodes
@@ -457,56 +429,6 @@ def get_reg_graph_with_single_tp_transforms(g_reg, t):
             if isinstance(v, xr.DataArray) and "t" in v.coords:
                 g_reg_t.edges[e][k] = g_reg_t.edges[e][k].sel({"t": t})
     return g_reg_t
-
-
-def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
-    """
-    Get a graph with virtual bead pairs as edges and view transforms as node attributes.
-
-    Parameters
-    ----------
-    g_reg_subgraph : nx.Graph
-        Registration graph with single tp transforms
-
-    Returns
-    -------
-    nx.Graph
-    """
-
-    # undirected graph containing virtual bead pairs as edges
-    g_beads_subgraph = nx.Graph()
-    g_beads_subgraph.add_nodes_from(g_reg_subgraph.nodes)
-    for e in g_reg_subgraph.edges:
-        sorted_e = tuple(sorted(e))
-        bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data
-        gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
-        bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
-        affine = g_reg_subgraph.edges[e]["transform"]
-        quality = g_reg_subgraph.edges[e]["quality"]
-        if isinstance(quality, xr.DataArray):
-            quality = quality.data
-        overlap = g_reg_subgraph.edges[e]["overlap"]
-        g_beads_subgraph.add_edge(
-            sorted_e[0],
-            sorted_e[1],
-            beads={
-                sorted_e[0]: bbox_vertices,
-                sorted_e[1]: transformation.transform_pts(
-                    bbox_vertices,
-                    affine,
-                ),
-            },
-            quality=quality,
-            overlap=overlap,
-        )
-
-    # initialise view transforms with identity transforms
-    for node in g_reg_subgraph.nodes:
-        g_beads_subgraph.nodes[node][
-            "affine"
-        ] = param_utils.identity_transform(ndim)
-
-    return g_beads_subgraph
 
 
 def optimize_bead_subgraph(
