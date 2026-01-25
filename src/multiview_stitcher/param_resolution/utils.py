@@ -20,6 +20,25 @@ def get_graph_ndim(g_reg):
     raise ValueError("Cannot determine dimensionality from graph.")
 
 
+def get_graph_timepoints(g_reg):
+    """Collect unique time coordinates from transform edges."""
+    t_coords = []
+    for e in g_reg.edges:
+        transform = g_reg.edges[e].get("transform")
+        if isinstance(transform, xr.DataArray) and "t" in transform.coords:
+            t_coords.extend(list(transform.coords["t"].values))
+    return sorted(set(t_coords))
+
+
+def get_reg_graph_with_single_tp_transforms(g_reg, t):
+    g_reg_t = g_reg.copy()
+    for e in g_reg_t.edges:
+        for k, v in g_reg_t.edges[e].items():
+            if isinstance(v, xr.DataArray) and "t" in v.coords:
+                g_reg_t.edges[e][k] = g_reg_t.edges[e][k].sel({"t": t})
+    return g_reg_t
+
+
 def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
     """
     Build a virtual bead graph from a registration graph.

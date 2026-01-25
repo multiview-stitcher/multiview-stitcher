@@ -7,10 +7,7 @@ from scipy.sparse.linalg import lsqr
 from scipy.spatial.transform import Rotation
 
 from multiview_stitcher import mv_graph, param_utils
-from multiview_stitcher.param_resolution_utils import (
-    compute_edge_residuals,
-    get_graph_ndim,
-)
+from .utils import compute_edge_residuals, get_graph_ndim
 
 
 def _get_edge_weight(edge_data, weight_mode):
@@ -287,7 +284,7 @@ def _compute_edge_metrics(edges, residuals_by_edge):
     return metrics, np.asarray(residuals, dtype=float)
 
 
-def linear_two_pass_groupwise_resolution(
+def groupwise_resolution_linear_two_pass(
     g_reg_component_tp,
     reference_view=None,
     transform="rigid",
@@ -542,4 +539,3 @@ def linear_two_pass_groupwise_resolution(
         "used_edges": list(kept_edges),
     }
     return params, info_dict
-
