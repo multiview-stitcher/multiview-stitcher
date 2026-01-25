@@ -57,20 +57,24 @@ def groupwise_resolution_global_optimization(
 
     Parameters
     ----------
-    g_beads_subgraph : nx.Graph
-        Virtual bead graph
+    g_reg : nx.Graph
+        Registration graph for a single connected component and a single timepoint.
+        Nodes correspond to views and edges to pairwise registrations between views.
+    reference_view : hashable, optional
+        Identifier of the reference view which keeps its transformation fixed (typically
+        its transform is the identity in the final global coordinate system). If ``None``,
+        a default reference view is chosen.
     transform : str
-        Transformation type ('translation', 'rigid', 'similarity' or 'affine')
-    ref_node : int
-        Reference node which keeps its transformation fixed
+        Transformation type ('translation', 'rigid', 'similarity' or 'affine').
     max_iter : int, optional
-        Maximum number of iterations of inner loop
+        Maximum number of iterations of the inner optimization loop.
     rel_tol : float, optional
-        Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
-        By default 1e-4.
+        Convergence criterion for the inner loop: relative improvement of the maximum
+        edge residual below which the loop stops. By default 1e-4.
     abs_tol : float, optional
-        Convergence criterion for outer loop: absolute value of max edge residual below which loop stops.
-        By default the diagonal of the voxel size (max over tiles).
+        Convergence criterion for the outer loop: absolute value of the maximum edge
+        residual below which the loop stops. By default the diagonal of the voxel size
+        (max over tiles).
 
     Returns
     -------
