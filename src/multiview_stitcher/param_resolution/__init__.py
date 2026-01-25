@@ -56,8 +56,7 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
     if not len(g_reg.edges):
         raise (
             mv_graph.NotEnoughOverlapError(
-                "Not enough overlap between views\
-        for stitching."
+                "Not enough overlap between views for stitching."
             )
         )
 
