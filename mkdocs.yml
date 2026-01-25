@@ -86,7 +86,6 @@ theme:
     - navigation.footer  # next/previous links in footer
     - navigation.instant
     - navigation.instant.progress
-    - navigation.expand
   logo: images/logo_color.svg
   icon:
     # logo: fontawesome/solid/clone
