@@ -127,7 +127,7 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
             node: (
                 params[node].sel({"t": t_coords[it]})
                 if isinstance(params[node], xr.DataArray)
-                and "t" in params[node]
+                and "t" in params[node].coords
                 else params[node]
             )
             for node in params
@@ -146,6 +146,7 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
         "edge_residuals": edge_residuals_by_t,
         "used_edges": {k: list(v) for k, v in used_edges_by_t.items()},
     }
+
     return params, info_dict
 
 
