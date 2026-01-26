@@ -203,7 +203,11 @@ def test_global_optimization(transform):
             assert np.allclose(p.sel(t=0).data[:2, :2], np.eye(2))
 
 
-def test_edge_residual_calculation():
+@pytest.mark.parametrize(
+    "method",
+    ["shortest_paths", "global_optimization", "linear_two_pass"],
+)
+def test_edge_residual_calculation(method):
     """
     Verify that edge residuals are ~0 for edges used by shortest-path
     resolution and non-zero for unused edges on a randomized graph.
@@ -232,7 +236,7 @@ def test_edge_residual_calculation():
         g_reg.edges[e]["bbox"] = bbox
 
     _, info = param_resolution.groupwise_resolution(
-        g_reg, method="shortest_paths", reference_view=0
+        g_reg, method=method, reference_view=0
     )
     residuals = info["edge_residuals"][0]
     used_edges = {
@@ -242,10 +246,14 @@ def test_edge_residual_calculation():
         tuple(sorted(e)) for e in g_reg.edges
     } - used_edges
 
-    for e in used_edges:
-        assert np.isclose(residuals[e], 0.0, atol=1e-6)
-    for e in unused_edges:
-        assert residuals[e] > 1e-5
+
+    if method == "shortest_paths":
+        for e in used_edges:
+            assert np.isclose(residuals[e], 0.0, atol=1e-6)
+        for e in unused_edges:
+            assert residuals[e] > 1e-5
+    else:
+        assert np.min([list(residuals[e] for e in used_edges)]) > 0
 
 
 @pytest.mark.parametrize(
