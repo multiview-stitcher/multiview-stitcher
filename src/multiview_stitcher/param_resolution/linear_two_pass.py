@@ -333,6 +333,13 @@ def groupwise_resolution_linear_two_pass(
     ----------
     g_reg_component_tp : nx.Graph
         Registration graph for a single connected component and timepoint.
+        Each undirected edge should provide:
+        - transform: affine mapping u -> v (homogeneous, xarray or ndarray)
+        - bbox: overlap bounding box used for virtual beads
+        - quality: registration quality (float or array-like)
+        - overlap: overlap area/volume (float or array-like)
+        For graphs from the built-in pipeline, transforms are stored for
+        sorted node order (min(u, v) -> max(u, v)).
     reference_view : hashable, optional
         Node index to keep fixed. If None, a reference is chosen by quality.
     transform : str
@@ -386,7 +393,9 @@ def groupwise_resolution_linear_two_pass(
 
     edges = []
     for edge in g_reg_component_tp.edges:
-        affine = g_reg_component_tp.edges[edge]["transform"]
+        # Use sorted node order to match how pairwise transforms are stored.
+        sorted_e = tuple(sorted(edge))
+        affine = g_reg_component_tp.edges[sorted_e]["transform"]
         if isinstance(affine, xr.DataArray):
             affine = affine.data
         affine = np.asarray(affine, dtype=float)
@@ -405,8 +414,8 @@ def groupwise_resolution_linear_two_pass(
 
         edges.append(
             {
-                "u": edge[0],
-                "v": edge[1],
+                "u": sorted_e[0],
+                "v": sorted_e[1],
                 "trans": dvec,
                 "rot": rot_uv,
                 "scale": scale_uv,

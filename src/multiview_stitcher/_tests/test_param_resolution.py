@@ -152,6 +152,129 @@ def _mean_affine_error(params, gt_affines):
     return float(np.mean(errors))
 
 
+def _make_grid_msims(tiles_x, tiles_y, tile_size=64, overlap=16):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_t=1,
+        N_c=1,
+        tile_size=tile_size,
+        tiles_x=tiles_x,
+        tiles_y=tiles_y,
+        tiles_z=1,
+        overlap=overlap,
+    )
+    sims = [
+        spatial_image_utils.sim_sel_coords(
+            sim, {"c": sim.coords["c"][0], "t": sim.coords["t"][0]}
+        )
+        for sim in sims
+    ]
+    return [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
+
+
+def _build_ground_truth_from_msims(msims, transform, rng, rot_sigma, scale_sigma):
+    gt_params = {}
+    bbox = None
+    for idx, msim in enumerate(msims):
+        sim = msi_utils.get_sim_from_msim(msim)
+        origin = spatial_image_utils.get_origin_from_sim(sim, asarray=True)
+        spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
+        shape = spatial_image_utils.get_shape_from_sim(sim, asarray=True)
+        extent = shape * spacing
+        bbox = xr.DataArray(
+            np.stack([np.zeros(2), extent]),
+            dims=["point_index", "dim"],
+        )
+
+        if transform == "translation":
+            linear = np.eye(2)
+        else:
+            theta = rng.normal(0.0, rot_sigma)
+            linear = _rotation_matrix_2d(theta)
+            if transform == "similarity":
+                scale = np.exp(rng.normal(0.0, scale_sigma))
+                linear = scale * linear
+
+        affine = np.eye(3, dtype=float)
+        affine[:2, :2] = linear
+        affine[:2, 2] = origin
+        gt_params[idx] = param_utils.affine_to_xaffine(affine)
+
+    return gt_params, bbox
+
+
+def _add_noisy_pairwise_transforms(
+    g_base,
+    gt_params,
+    bbox,
+    rng,
+    transform,
+    trans_sigma_px=0.25,
+    rot_sigma=0.005,
+    scale_sigma=0.005,
+):
+    g_reg = g_base.copy()
+    spacing = np.array([1.0, 1.0])
+    for edge in g_reg.edges:
+        u, v = sorted(edge)
+        gt_u = np.asarray(gt_params[u])
+        gt_v = np.asarray(gt_params[v])
+        pairwise = np.linalg.inv(gt_v) @ gt_u
+
+        noise = np.eye(3, dtype=float)
+        if transform in ("rigid", "similarity"):
+            theta = rng.normal(0.0, rot_sigma)
+            rot = _rotation_matrix_2d(theta)
+            scale = 1.0
+            if transform == "similarity":
+                scale = np.exp(rng.normal(0.0, scale_sigma))
+            noise[:2, :2] = scale * rot
+        noise[:2, 2] = rng.normal(0.0, trans_sigma_px, size=2) * spacing
+
+        noisy = noise @ pairwise
+        g_reg.edges[edge]["transform"] = param_utils.affine_to_xaffine(
+            noisy
+        )
+        g_reg.edges[edge]["quality"] = 1.0
+        g_reg.edges[edge]["overlap"] = g_reg.edges[edge].get("overlap", 1.0)
+        g_reg.edges[edge]["bbox"] = bbox
+    return g_reg
+
+
+def _rebase_params(params, reference_node):
+    ref = np.asarray(params[reference_node])
+    inv_ref = np.linalg.inv(ref)
+    return {node: inv_ref @ np.asarray(mat) for node, mat in params.items()}
+
+
+def _rms_component_errors_2d(params, gt_params, reference_node=0):
+    params_rel = _rebase_params(params, reference_node)
+    gt_rel = _rebase_params(gt_params, reference_node)
+
+    t_errors = []
+    r_errors = []
+    s_errors = []
+    for node in params_rel:
+        est = params_rel[node]
+        gt = gt_rel[node]
+
+        t_errors.append(np.sum((est[:2, 2] - gt[:2, 2]) ** 2))
+
+        est_theta = np.arctan2(est[1, 0], est[0, 0])
+        gt_theta = np.arctan2(gt[1, 0], gt[0, 0])
+        r_errors.append((est_theta - gt_theta) ** 2)
+
+        est_scale = np.mean(np.linalg.svd(est[:2, :2], compute_uv=False))
+        gt_scale = np.mean(np.linalg.svd(gt[:2, :2], compute_uv=False))
+        s_errors.append((est_scale - gt_scale) ** 2)
+
+    return (
+        float(np.sqrt(np.mean(t_errors))),
+        float(np.sqrt(np.mean(r_errors))),
+        float(np.sqrt(np.mean(s_errors))),
+    )
+
+
 def _make_sample_msims(tiles_x=3, tiles_y=1):
     sims = sample_data.generate_tiled_dataset(
         ndim=2,
@@ -471,16 +594,17 @@ def test_linear_two_pass_rigid_3d_accuracy():
     assert error < 0.6
 
 
-def test_linear_two_pass_translation_matches_shortest_paths():
+@pytest.mark.parametrize("transform", ["translation", "rigid", "similarity"])
+def test_linear_two_pass_matches_reference(transform):
     rng = np.random.default_rng(2)
     noise_params = {
         "normal": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
         "outlier": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
     }
-    g_reg, _ = _build_synthetic_graph(
+    g_reg, gt_affines = _build_synthetic_graph(
         ndim=2,
         grid_shape=(3, 1),
-        mode="translation",
+        mode=transform,
         rng=rng,
         noise_params=noise_params,
         outlier_fraction=0.0,
@@ -490,18 +614,61 @@ def test_linear_two_pass_translation_matches_shortest_paths():
         g_reg,
         method="linear_two_pass",
         reference_view=0,
-        transform="translation",
+        transform=transform,
         residual_threshold=np.inf,
     )
-    params_paths, _ = param_resolution.groupwise_resolution(
-        g_reg,
-        method="shortest_paths",
-        reference_view=0,
+
+    # shortest_paths concatenates full affines, so it only matches translation.
+    if transform == "translation":
+        params_paths, _ = param_resolution.groupwise_resolution(
+            g_reg,
+            method="shortest_paths",
+            reference_view=0,
+        )
+        for node in g_reg.nodes:
+            assert np.allclose(
+                params_linear[node].data,
+                params_paths[node].data,
+                atol=1e-6,
+            )
+
+    error = _mean_affine_error(params_linear, gt_affines)
+    assert error < 1e-2
+
+
+@pytest.mark.parametrize("transform", ["translation", "rigid", "similarity"])
+@pytest.mark.parametrize("grid_size", [5])
+def test_linear_two_pass_accuracy_grid(transform, grid_size):
+    rng = np.random.default_rng(3)
+    msims = _make_grid_msims(tiles_x=grid_size, tiles_y=grid_size)
+    g_base = mv_graph.build_view_adjacency_graph_from_msims(
+        msims, transform_key=METADATA_TRANSFORM_KEY
+    )
+    gt_params, bbox = _build_ground_truth_from_msims(
+        msims, transform, rng, rot_sigma=0.01, scale_sigma=0.01
+    )
+    g_reg = _add_noisy_pairwise_transforms(
+        g_base,
+        gt_params,
+        bbox,
+        rng,
+        transform,
+        trans_sigma_px=0.2,
+        rot_sigma=0.01,
+        scale_sigma=0.01,
     )
 
-    for node in g_reg.nodes:
-        assert np.allclose(
-            params_linear[node].data,
-            params_paths[node].data,
-            atol=1e-6,
-        )
+    params, _ = param_resolution.groupwise_resolution(
+        g_reg,
+        method="linear_two_pass",
+        reference_view=0,
+        transform=transform,
+        residual_threshold=np.inf,
+    )
+
+    t_err, r_err, s_err = _rms_component_errors_2d(params, gt_params)
+    assert t_err < 0.5
+    if transform in ("rigid", "similarity"):
+        assert r_err < 0.05
+    if transform == "similarity":
+        assert s_err < 0.05
