@@ -328,7 +328,12 @@ def test_global_optimization(transform):
 
 @pytest.mark.parametrize(
     "method",
-    ["shortest_paths", "global_optimization", "linear_two_pass"],
+    [
+        "shortest_paths",
+        "global_optimization",
+        "linear_two_pass",
+        "groupwise_resolution",
+    ],
 )
 def test_edge_residual_calculation(method):
     """
@@ -381,7 +386,12 @@ def test_edge_residual_calculation(method):
 
 @pytest.mark.parametrize(
     "method",
-    ["shortest_paths", "global_optimization", "linear_two_pass"],
+    [
+        "shortest_paths",
+        "global_optimization",
+        "linear_two_pass",
+        "groupwise_resolution",
+    ],
 )
 def test_bad_edge_is_not_used(method):
     """
@@ -594,7 +604,13 @@ def test_linear_two_pass_rigid_3d_accuracy():
     assert error < 0.6
 
 
-@pytest.mark.parametrize("transform", ["translation", "rigid", "similarity"])
+@pytest.mark.parametrize(
+        "transform",
+        [
+            "translation",
+            "rigid",
+            "similarity"
+         ])
 def test_linear_two_pass_matches_reference(transform):
     rng = np.random.default_rng(2)
     noise_params = {
@@ -612,10 +628,10 @@ def test_linear_two_pass_matches_reference(transform):
 
     params_linear, _ = param_resolution.groupwise_resolution(
         g_reg,
-        method="linear_two_pass",
+        method="groupwise_resolution",
         reference_view=0,
         transform=transform,
-        residual_threshold=np.inf,
+        # residual_threshold=np.inf,
     )
 
     # shortest_paths concatenates full affines, so it only matches translation.
@@ -660,10 +676,12 @@ def test_linear_two_pass_accuracy_grid(transform, grid_size):
 
     params, _ = param_resolution.groupwise_resolution(
         g_reg,
-        method="linear_two_pass",
+        # method="linear_two_pass",
+        method="groupwise_resolution",
         reference_view=0,
         transform=transform,
-        residual_threshold=np.inf,
+        # prior_lambda=0,
+        # residual_threshold=np.inf,
     )
 
     t_err, r_err, s_err = _rms_component_errors_2d(params, gt_params)

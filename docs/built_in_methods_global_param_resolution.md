@@ -21,6 +21,15 @@ Extension API section.
   `weight_mode` (quality/overlap weighting).
 - Good for large datasets where speed and robust pruning matter.
 
+## `groupwise_resolution`
+
+- Sparse Laplacian-style solves with first-order rotation/scale linearization
+  and two-pass outlier pruning.
+- Supports `transform` modes: translation, rigid, similarity.
+- Key options: `residual_threshold` or `mad_k`, `keep_mst`, `weight_mode`,
+  and `prior_lambda` (stage-frame regularizer).
+- Uses physical residuals for pruning; designed for fast global correction.
+
 ## `shortest_paths`
 
 - Builds global transforms by concatenating pairwise transforms along
