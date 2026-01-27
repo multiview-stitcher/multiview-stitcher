@@ -1051,6 +1051,7 @@ def register(
         Method used to resolve global transforms from pairwise registrations:
         - 'global_optimization' (transform: translation|rigid|similarity|affine)
         - 'shortest_paths' (uses the transform type defined by the pairwise registrations)
+        - 'linear_two_pass' (transform: translation|rigid)
         Custom component-level methods can be registered via
         `param_resolution.register_groupwise_resolution_method(...)` and
         referenced by name.

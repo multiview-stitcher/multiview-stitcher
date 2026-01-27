@@ -213,7 +213,7 @@ def _compute_edge_metrics(edges, residuals_by_edge):
     return metrics, np.asarray(residuals, dtype=float)
 
 
-def groupwise_resolution_sparse_two_pass(
+def groupwise_resolution_linear_two_pass(
     g_reg_component_tp,
     reference_view=None,
     transform="rigid",

@@ -13,7 +13,7 @@ Extension API section.
 - Prunes edges based on residuals to reject outliers.
 - Robust but can be slower for large graphs.
 
-## `groupwise_resolution`
+## `linear_two_pass`
 
 - Sparse Laplacian-style solves with first-order rotation linearization
   and two-pass outlier pruning.

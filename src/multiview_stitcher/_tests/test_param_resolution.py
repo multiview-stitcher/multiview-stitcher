@@ -331,7 +331,7 @@ def test_global_optimization(transform):
     [
         "shortest_paths",
         "global_optimization",
-        "groupwise_resolution",
+        "linear_two_pass",
     ],
 )
 def test_edge_residual_calculation(method):
@@ -388,7 +388,7 @@ def test_edge_residual_calculation(method):
     [
         "shortest_paths",
         "global_optimization",
-        "groupwise_resolution",
+        "linear_two_pass",
     ],
 )
 def test_bad_edge_is_not_used(method):
@@ -448,7 +448,7 @@ def test_bad_edge_is_not_used(method):
     [
         "shortest_paths",
         "global_optimization",
-        "groupwise_resolution",
+        "linear_two_pass",
     ],
 )
 def test_cc_registration(
@@ -495,7 +495,7 @@ def test_cc_registration(
     [
         "shortest_paths",
         "global_optimization",
-        "groupwise_resolution",
+        "linear_two_pass",
     ],
 )
 def test_manual_pair_registration(
@@ -535,7 +535,7 @@ def test_manual_pair_registration(
 
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
-def test_groupwise_resolution_matches_reference(transform):
+def test_linear_two_pass_matches_reference(transform):
     rng = np.random.default_rng(2)
     noise_params = {
         "normal": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
@@ -552,7 +552,7 @@ def test_groupwise_resolution_matches_reference(transform):
 
     params_linear, _ = param_resolution.groupwise_resolution(
         g_reg,
-        method="groupwise_resolution",
+        method="linear_two_pass",
         reference_view=0,
         transform=transform,
         # residual_threshold=np.inf,
@@ -578,7 +578,7 @@ def test_groupwise_resolution_matches_reference(transform):
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
 @pytest.mark.parametrize("grid_size", [5])
-def test_groupwise_resolution_accuracy_grid(transform, grid_size):
+def test_linear_two_pass_accuracy_grid(transform, grid_size):
     rng = np.random.default_rng(3)
     msims = _make_grid_msims(tiles_x=grid_size, tiles_y=grid_size)
     g_base = mv_graph.build_view_adjacency_graph_from_msims(
@@ -600,7 +600,7 @@ def test_groupwise_resolution_accuracy_grid(transform, grid_size):
 
     params, _ = param_resolution.groupwise_resolution(
         g_reg,
-        method="groupwise_resolution",
+        method="linear_two_pass",
         reference_view=0,
         transform=transform,
         # prior_lambda=0,
