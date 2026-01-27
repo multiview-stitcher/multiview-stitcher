@@ -144,15 +144,17 @@ def _build_synthetic_graph(
     return g_reg, gt_affines
 
 
-def _make_grid_msims(tiles_x, tiles_y, tile_size=64, overlap=16):
+def _make_grid_msims(
+    tiles_x, tiles_y, tiles_z=1, ndim=2, tile_size=64, overlap=16
+):
     sims = sample_data.generate_tiled_dataset(
-        ndim=2,
+        ndim=ndim,
         N_t=1,
         N_c=1,
         tile_size=tile_size,
         tiles_x=tiles_x,
         tiles_y=tiles_y,
-        tiles_z=1,
+        tiles_z=tiles_z,
         overlap=overlap,
     )
     sims = [
@@ -175,6 +177,7 @@ def _build_ground_truth_from_msims(msims, transform, rng, rot_sigma, scale_sigma
         origin = stack_props["origin"]
         spacing = stack_props["spacing"]
         shape = stack_props["shape"]
+        ndim = origin.shape[0]
         extent = shape * spacing
         bbox = xr.DataArray(
             np.stack([np.zeros_like(extent), extent]),
@@ -182,17 +185,21 @@ def _build_ground_truth_from_msims(msims, transform, rng, rot_sigma, scale_sigma
         )
 
         if transform == "translation":
-            linear = np.eye(2)
+            linear = np.eye(ndim)
         else:
-            theta = rng.normal(0.0, rot_sigma)
-            linear = _rotation_matrix_2d(theta)
+            if ndim == 2:
+                theta = rng.normal(0.0, rot_sigma)
+                linear = _rotation_matrix_2d(theta)
+            else:
+                rotvec = rng.normal(0.0, rot_sigma, size=3)
+                linear = Rotation.from_rotvec(rotvec).as_matrix()
             if transform == "similarity":
                 scale = np.exp(rng.normal(0.0, scale_sigma))
                 linear = scale * linear
 
-        affine = np.eye(3, dtype=float)
-        affine[:2, :2] = linear
-        affine[:2, 2] = origin
+        affine = np.eye(ndim + 1, dtype=float)
+        affine[:ndim, :ndim] = linear
+        affine[:ndim, ndim] = origin
         gt_params[idx] = param_utils.affine_to_xaffine(affine)
 
     return gt_params, bbox
@@ -209,22 +216,30 @@ def _add_noisy_pairwise_transforms(
     scale_sigma=0.005,
 ):
     g_reg = g_base.copy()
-    spacing = np.array([1.0, 1.0])
+    sample_affine = np.asarray(next(iter(gt_params.values())))
+    ndim = sample_affine.shape[0] - 1
+    spacing = np.ones(ndim)
     for edge in g_reg.edges:
         u, v = sorted(edge)
         gt_u = np.asarray(gt_params[u])
         gt_v = np.asarray(gt_params[v])
         pairwise = np.linalg.inv(gt_v) @ gt_u
 
-        noise = np.eye(3, dtype=float)
+        noise = np.eye(ndim + 1, dtype=float)
         if transform in ("rigid", "similarity"):
-            theta = rng.normal(0.0, rot_sigma)
-            rot = _rotation_matrix_2d(theta)
+            if ndim == 2:
+                theta = rng.normal(0.0, rot_sigma)
+                rot = _rotation_matrix_2d(theta)
+            else:
+                rotvec = rng.normal(0.0, rot_sigma, size=3)
+                rot = Rotation.from_rotvec(rotvec).as_matrix()
             scale = 1.0
             if transform == "similarity":
                 scale = np.exp(rng.normal(0.0, scale_sigma))
-            noise[:2, :2] = scale * rot
-        noise[:2, 2] = rng.normal(0.0, trans_sigma_px, size=2) * spacing
+            noise[:ndim, :ndim] = scale * rot
+        noise[:ndim, ndim] = (
+            rng.normal(0.0, trans_sigma_px, size=ndim) * spacing
+        )
 
         noisy = noise @ pairwise
         g_reg.edges[edge]["transform"] = param_utils.affine_to_xaffine(
@@ -242,9 +257,12 @@ def _rebase_params(params, reference_node):
     return {node: inv_ref @ np.asarray(mat) for node, mat in params.items()}
 
 
-def _rms_component_errors_2d(params, gt_params, reference_node=0):
+def _rms_component_errors(params, gt_params, reference_node=0):
     params_rel = _rebase_params(params, reference_node)
     gt_rel = _rebase_params(gt_params, reference_node)
+
+    sample_affine = next(iter(params_rel.values()))
+    ndim = sample_affine.shape[0] - 1
 
     t_errors = []
     r_errors = []
@@ -253,14 +271,24 @@ def _rms_component_errors_2d(params, gt_params, reference_node=0):
         est = params_rel[node]
         gt = gt_rel[node]
 
-        t_errors.append(np.sum((est[:2, 2] - gt[:2, 2]) ** 2))
+        t_errors.append(np.sum((est[:ndim, ndim] - gt[:ndim, ndim]) ** 2))
 
-        est_theta = np.arctan2(est[1, 0], est[0, 0])
-        gt_theta = np.arctan2(gt[1, 0], gt[0, 0])
-        r_errors.append((est_theta - gt_theta) ** 2)
+        if ndim == 2:
+            est_theta = np.arctan2(est[1, 0], est[0, 0])
+            gt_theta = np.arctan2(gt[1, 0], gt[0, 0])
+            r_errors.append((est_theta - gt_theta) ** 2)
+        else:
+            est_rot = Rotation.from_matrix(est[:ndim, :ndim])
+            gt_rot = Rotation.from_matrix(gt[:ndim, :ndim])
+            delta = est_rot * gt_rot.inv()
+            r_errors.append(np.linalg.norm(delta.as_rotvec()) ** 2)
 
-        est_scale = np.mean(np.linalg.svd(est[:2, :2], compute_uv=False))
-        gt_scale = np.mean(np.linalg.svd(gt[:2, :2], compute_uv=False))
+        est_scale = np.mean(
+            np.linalg.svd(est[:ndim, :ndim], compute_uv=False)
+        )
+        gt_scale = np.mean(
+            np.linalg.svd(gt[:ndim, :ndim], compute_uv=False)
+        )
         s_errors.append((est_scale - gt_scale) ** 2)
 
     return (
@@ -530,15 +558,17 @@ def test_manual_pair_registration(
 
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
-def test_linear_two_pass_matches_reference(transform):
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_linear_two_pass_matches_reference(transform, ndim):
     rng = np.random.default_rng(2)
     noise_params = {
         "normal": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
         "outlier": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
     }
+    grid_shape = (3, 1) if ndim == 2 else (3, 1, 1)
     g_reg, gt_affines = _build_synthetic_graph(
-        ndim=2,
-        grid_shape=(3, 1),
+        ndim=ndim,
+        grid_shape=grid_shape,
         mode=transform,
         rng=rng,
         noise_params=noise_params,
@@ -570,9 +600,16 @@ def test_linear_two_pass_matches_reference(transform):
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
 @pytest.mark.parametrize("grid_size", [5])
-def test_linear_two_pass_accuracy_grid(transform, grid_size):
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_linear_two_pass_accuracy_grid(transform, grid_size, ndim):
     rng = np.random.default_rng(3)
-    msims = _make_grid_msims(tiles_x=grid_size, tiles_y=grid_size)
+    tiles_z = 1 if ndim == 2 else 2
+    msims = _make_grid_msims(
+        tiles_x=grid_size,
+        tiles_y=grid_size,
+        tiles_z=tiles_z,
+        ndim=ndim,
+    )
     g_base = mv_graph.build_view_adjacency_graph_from_msims(
         msims, transform_key=METADATA_TRANSFORM_KEY
     )
@@ -599,9 +636,17 @@ def test_linear_two_pass_accuracy_grid(transform, grid_size):
         # residual_threshold=np.inf,
     )
 
-    t_err, r_err, s_err = _rms_component_errors_2d(params, gt_params)
-    assert t_err < 0.5
+    t_err, r_err, s_err = _rms_component_errors(params, gt_params)
+    # Thresholds scale with dimensionality and the synthetic noise model used
+    # above. Translation RMS grows with sqrt(ndim), and the 3D rigid case tends
+    # to be a bit noisier due to rotation coupling in the linearized solve, so
+    # we allow a slightly higher translation tolerance there.
+    t_thresh = 0.5 * np.sqrt(ndim / 2)
+    if ndim == 3 and transform == "rigid":
+        t_thresh = 0.9
+    r_thresh = 0.05 if ndim == 2 else 0.08
+    assert t_err < t_thresh
     if transform in ("rigid", "similarity"):
-        assert r_err < 0.05
+        assert r_err < r_thresh
     if transform == "similarity":
         assert s_err < 0.05
