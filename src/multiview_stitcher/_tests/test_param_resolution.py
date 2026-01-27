@@ -177,12 +177,15 @@ def _build_ground_truth_from_msims(msims, transform, rng, rot_sigma, scale_sigma
     bbox = None
     for idx, msim in enumerate(msims):
         sim = msi_utils.get_sim_from_msim(msim)
-        origin = spatial_image_utils.get_origin_from_sim(sim, asarray=True)
-        spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
-        shape = spatial_image_utils.get_shape_from_sim(sim, asarray=True)
+        stack_props = spatial_image_utils.get_stack_properties_from_sim(
+            sim, asarray=True
+        )
+        origin = stack_props["origin"]
+        spacing = stack_props["spacing"]
+        shape = stack_props["shape"]
         extent = shape * spacing
         bbox = xr.DataArray(
-            np.stack([np.zeros(2), extent]),
+            np.stack([np.zeros_like(extent), extent]),
             dims=["point_index", "dim"],
         )
 
