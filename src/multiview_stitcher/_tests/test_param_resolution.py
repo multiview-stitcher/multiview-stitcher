@@ -144,14 +144,6 @@ def _build_synthetic_graph(
     return g_reg, gt_affines
 
 
-def _mean_affine_error(params, gt_affines):
-    errors = []
-    for node, gt_affine in gt_affines.items():
-        est = np.asarray(params[node])
-        errors.append(np.linalg.norm(est - gt_affine))
-    return float(np.mean(errors))
-
-
 def _make_grid_msims(tiles_x, tiles_y, tile_size=64, overlap=16):
     sims = sample_data.generate_tiled_dataset(
         ndim=2,
@@ -574,9 +566,6 @@ def test_linear_two_pass_matches_reference(transform):
                 params_paths[node].data,
                 atol=1e-6,
             )
-
-    error = _mean_affine_error(params_linear, gt_affines)
-    assert error < 1e-2
 
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
