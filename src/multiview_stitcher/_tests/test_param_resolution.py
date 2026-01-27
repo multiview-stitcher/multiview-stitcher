@@ -331,7 +331,6 @@ def test_global_optimization(transform):
     [
         "shortest_paths",
         "global_optimization",
-        "linear_two_pass",
         "groupwise_resolution",
     ],
 )
@@ -389,7 +388,6 @@ def test_edge_residual_calculation(method):
     [
         "shortest_paths",
         "global_optimization",
-        "linear_two_pass",
         "groupwise_resolution",
     ],
 )
@@ -450,7 +448,7 @@ def test_bad_edge_is_not_used(method):
     [
         "shortest_paths",
         "global_optimization",
-        "global_optimization",
+        "groupwise_resolution",
     ],
 )
 def test_cc_registration(
@@ -497,7 +495,7 @@ def test_cc_registration(
     [
         "shortest_paths",
         "global_optimization",
-        "global_optimization",
+        "groupwise_resolution",
     ],
 )
 def test_manual_pair_registration(
@@ -536,82 +534,8 @@ def test_manual_pair_registration(
     assert len(params) == 6
 
 
-def test_linear_two_pass_pruning_improves_error_2d():
-    rng = np.random.default_rng(0)
-    noise_params = {
-        "normal": {"t_sigma": 0.1, "rot_sigma": 0.01, "scale_sigma": 0.005},
-        "outlier": {"t_sigma": 5.0, "rot_sigma": 0.4, "scale_sigma": 0.2},
-    }
-    g_reg, gt_affines = _build_synthetic_graph(
-        ndim=2,
-        grid_shape=(3, 3),
-        mode="similarity",
-        rng=rng,
-        noise_params=noise_params,
-        outlier_fraction=0.25,
-    )
-
-    params_all, _ = param_resolution.groupwise_resolution(
-        g_reg,
-        method="linear_two_pass",
-        reference_view=0,
-        transform="similarity",
-        residual_threshold=np.inf,
-        keep_mst=True,
-    )
-    params_pruned, info = param_resolution.groupwise_resolution(
-        g_reg,
-        method="linear_two_pass",
-        reference_view=0,
-        transform="similarity",
-        mad_k=2.0,
-        keep_mst=True,
-    )
-
-    error_all = _mean_affine_error(params_all, gt_affines)
-    error_pruned = _mean_affine_error(params_pruned, gt_affines)
-    assert error_pruned < error_all
-
-    metrics = info["metrics"]
-    assert metrics is not None
-    assert (~metrics["kept_pass2"]).any()
-
-
-def test_linear_two_pass_rigid_3d_accuracy():
-    rng = np.random.default_rng(1)
-    noise_params = {
-        "normal": {"t_sigma": 0.05, "rot_sigma": 0.01, "scale_sigma": 0.0},
-        "outlier": {"t_sigma": 0.05, "rot_sigma": 0.01, "scale_sigma": 0.0},
-    }
-    g_reg, gt_affines = _build_synthetic_graph(
-        ndim=3,
-        grid_shape=(2, 2, 2),
-        mode="rigid",
-        rng=rng,
-        noise_params=noise_params,
-        outlier_fraction=0.0,
-    )
-
-    params, _ = param_resolution.groupwise_resolution(
-        g_reg,
-        method="linear_two_pass",
-        reference_view=0,
-        transform="rigid",
-        residual_threshold=np.inf,
-        keep_mst=True,
-    )
-    error = _mean_affine_error(params, gt_affines)
-    assert error < 0.6
-
-
-@pytest.mark.parametrize(
-        "transform",
-        [
-            "translation",
-            "rigid",
-            "similarity"
-         ])
-def test_linear_two_pass_matches_reference(transform):
+@pytest.mark.parametrize("transform", ["translation", "rigid"])
+def test_groupwise_resolution_matches_reference(transform):
     rng = np.random.default_rng(2)
     noise_params = {
         "normal": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
@@ -654,7 +578,7 @@ def test_linear_two_pass_matches_reference(transform):
 
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
 @pytest.mark.parametrize("grid_size", [5])
-def test_linear_two_pass_accuracy_grid(transform, grid_size):
+def test_groupwise_resolution_accuracy_grid(transform, grid_size):
     rng = np.random.default_rng(3)
     msims = _make_grid_msims(tiles_x=grid_size, tiles_y=grid_size)
     g_base = mv_graph.build_view_adjacency_graph_from_msims(
@@ -676,7 +600,6 @@ def test_linear_two_pass_accuracy_grid(transform, grid_size):
 
     params, _ = param_resolution.groupwise_resolution(
         g_reg,
-        # method="linear_two_pass",
         method="groupwise_resolution",
         reference_view=0,
         transform=transform,

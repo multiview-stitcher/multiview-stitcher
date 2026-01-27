@@ -13,14 +13,6 @@ Extension API section.
 - Prunes edges based on residuals to reject outliers.
 - Robust but can be slower for large graphs.
 
-## `linear_two_pass`
-
-- Fast sparse least-squares solve with a two-pass outlier pruning step.
-- Supports `transform` modes: translation, rigid, similarity.
-- Key options: `residual_threshold` or `mad_k`, `keep_mst`,
-  `weight_mode` (quality/overlap weighting).
-- Good for large datasets where speed and robust pruning matter.
-
 ## `groupwise_resolution`
 
 - Sparse Laplacian-style solves with first-order rotation linearization
