@@ -652,7 +652,7 @@ def test_linear_two_pass_matches_reference(transform):
     assert error < 1e-2
 
 
-@pytest.mark.parametrize("transform", ["translation", "rigid", "similarity"])
+@pytest.mark.parametrize("transform", ["translation", "rigid"])
 @pytest.mark.parametrize("grid_size", [5])
 def test_linear_two_pass_accuracy_grid(transform, grid_size):
     rng = np.random.default_rng(3)

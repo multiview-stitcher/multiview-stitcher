@@ -242,15 +242,15 @@ def groupwise_resolution_sparse_two_pass(
         }
         return params, {"metrics": None, "used_edges": []}
 
-    if transform not in ("translation", "rigid", "similarity"):
+    if transform not in ("translation", "rigid"):
         raise ValueError(f"Unknown transform: {transform}")
 
     ndim = get_graph_ndim(g_reg_component_tp)
     if ndim not in (2, 3):
         raise ValueError("Only 2D and 3D supported.")
 
-    use_rot = transform in ("rigid", "similarity")
-    use_scale = transform == "similarity"
+    use_rot = transform == "rigid"
+    use_scale = False
     rot_dim = 1 if ndim == 2 else 3
 
     if reference_view is not None and reference_view in g_reg_component_tp:
@@ -290,10 +290,7 @@ def groupwise_resolution_sparse_two_pass(
         if transform == "translation":
             dvec = (linear @ bbox_center + dvec) - bbox_center
         elif use_rot:
-            s_val = scale if use_scale else 1.0
-            dvec = (linear @ bbox_center + dvec) - s_val * (
-                rmat @ bbox_center
-            )
+            dvec = (linear @ bbox_center + dvec) - (rmat @ bbox_center)
 
         edges.append(
             {
@@ -340,28 +337,7 @@ def groupwise_resolution_sparse_two_pass(
         else:
             rot_vecs = {node: np.zeros(rot_dim, dtype=float) for node in nodes}
 
-        if use_scale:
-            scale_slices, scale_params = _build_node_slices(
-                nodes, ref_node, 1
-            )
-            scale_solution = _solve_difference_system(
-                edge_list,
-                scale_slices,
-                scale_params,
-                ref_node,
-                1,
-                "scale",
-                prior_lambda,
-                **lsqr_kwargs,
-            )
-            scale_vals = _unpack_solution(
-                nodes, scale_slices, scale_solution, ref_node, 1
-            )
-            scale_vals = {
-                node: float(scale_vals[node][0]) for node in nodes
-            }
-        else:
-            scale_vals = {node: 0.0 for node in nodes}
+        scale_vals = {node: 0.0 for node in nodes}
 
         if transform == "translation":
             rotations = {
@@ -392,8 +368,7 @@ def groupwise_resolution_sparse_two_pass(
                 rhs = dvec
             else:
                 rmat = _vector_to_rotation(rotations[v], ndim)
-                s_val = float(np.exp(scale_vals[v])) if use_scale else 1.0
-                rhs = s_val * (rmat @ dvec)
+                rhs = rmat @ dvec
 
             for k in range(ndim):
                 b.append(scale * rhs[k])

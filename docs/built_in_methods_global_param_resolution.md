@@ -23,9 +23,9 @@ Extension API section.
 
 ## `groupwise_resolution`
 
-- Sparse Laplacian-style solves with first-order rotation/scale linearization
+- Sparse Laplacian-style solves with first-order rotation linearization
   and two-pass outlier pruning.
-- Supports `transform` modes: translation, rigid, similarity.
+- Supports `transform` modes: translation, rigid.
 - Key options: `residual_threshold` or `mad_k`, `keep_mst`, `weight_mode`,
   and `prior_lambda` (stage-frame regularizer).
 - Uses physical residuals for pruning; designed for fast global correction.
