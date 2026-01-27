@@ -70,6 +70,7 @@ def _vector_to_rotation(rotvec, ndim):
 
 
 def _get_bbox_center(edge_data, ndim):
+    # Use overlap bbox center to anchor translation constraints in physical units.
     bbox = edge_data.get("bbox")
     if bbox is None:
         return np.zeros(ndim, dtype=float)
@@ -82,6 +83,7 @@ def _get_bbox_center(edge_data, ndim):
 
 
 def _build_node_slices(nodes, reference_view, dim):
+    # Pack per-node unknowns into a single vector, excluding the reference.
     index = 0
     slices = {}
     for node in nodes:
@@ -102,6 +104,7 @@ def _solve_difference_system(
     prior_lambda,
     **lsqr_kwargs,
 ):
+    # Solve weighted incidence system with optional Tikhonov prior.
     rows = []
     cols = []
     data = []
@@ -149,6 +152,7 @@ def _solve_difference_system(
 
 
 def _unpack_solution(nodes, node_slices, solution, reference_view, dim):
+    # Expand the packed solution back to per-node vectors.
     values = {node: np.zeros(dim, dtype=float) for node in nodes}
     for node in nodes:
         if node == reference_view:
@@ -168,6 +172,7 @@ def _build_params_from_components(
     x_in=None,
     x_out=None,
 ):
+    # Assemble homogeneous transforms from per-node components.
     params = {}
     for node in nodes:
         if transform == "translation":
@@ -190,6 +195,7 @@ def _build_params_from_components(
 
 
 def _compute_edge_metrics(edges, residuals_by_edge):
+    # Combine residuals with edge metadata for reporting/pruning.
     metrics = []
     residuals = []
     for edge in edges:
@@ -219,13 +225,50 @@ def groupwise_resolution_sparse_two_pass(
     **kwargs,
 ):
     """
-    Fast groupwise resolution using sparse Laplacian solves with a two-pass
-    outlier pruning scheme.
+    Fast groupwise resolution via a single global linearization and two-pass
+    outlier pruning.
 
-    The method performs a first-order linearization of rotations and scales
-    in Lie algebra coordinates, solves for rotation/scale offsets, then solves
-    translations in a second sparse system. After pass 1, edges are pruned
-    based on physical residuals (virtual bead RMS) and pass 2 re-solves.
+    We solve for per-tile correction transforms in the common stage frame,
+    with either translation-only or rigid (SE(2)/SE(3)) parameterization.
+    Pairwise registration provides affine transforms A_ij (u -> v) between
+    already stage-placed tiles; under perfect stage placement A_ij ≈ I, and
+    the true corrections satisfy A_ij ≈ C_j^{-1} C_i. We therefore seek
+    corrections that minimize the discrepancy of these relative constraints.
+
+    Model and linearization
+    -----------------------
+    Each tile i has correction C_i = [R_i, t_i; 0, 1] with R_i ∈ SO(d) and
+    t_i ∈ R^d (d=2 or 3). For each edge (i, j), we project the affine A_ij to
+    the closest rotation R_ij via polar decomposition. We also form a translation
+    measurement using the overlap bounding-box center p (in tile i coordinates):
+        d_ij = A_ij(p) - p                       (translation-only)
+        d_ij = A_ij(p) - R_ij p                  (rigid)
+    This yields a displacement in physical units, consistent with the residual
+    metric used for pruning.
+
+    Rotations are parameterized in the Lie algebra as small vectors ω_i
+    (scalar angle in 2D, axis-angle in 3D). For small angles we use the
+    first-order relation:
+        ω_ij ≈ ω_i - ω_j
+    These equations are assembled into a sparse weighted incidence system
+    (Laplacian least squares) and solved once.
+
+    Given rotations, translations follow from the linear constraints:
+        t_i - t_j ≈ R_j d_ij                     (rigid)
+        t_i - t_j ≈ d_ij                         (translation-only)
+    which again form a sparse weighted incidence system. A small Tikhonov
+    prior (prior_lambda) can be added to keep the solution close to the
+    stage frame and remove gauge ambiguity.
+
+    Two-pass pruning
+    ----------------
+    Pass 1 solves on all edges. Residuals are computed as RMS distances between
+    corresponding virtual bead pairs (overlap bbox corners) after applying the
+    current global transforms, yielding residuals in physical units. Edges with
+    residuals above a user-defined absolute threshold or a MAD-based threshold
+    (median + mad_k * MAD) are removed; optionally, a minimum spanning tree
+    over residuals is retained to preserve connectivity. Pass 2 re-solves on
+    the pruned edge set and returns the final transforms and edge metrics.
     """
     if "mode" in kwargs:
         transform = kwargs.pop("mode")
@@ -270,9 +313,7 @@ def groupwise_resolution_sparse_two_pass(
             affine = affine.data
         affine = np.asarray(affine, dtype=float)
 
-        bbox_center = _get_bbox_center(
-            g_reg_component_tp.edges[edge], ndim
-        )
+        bbox_center = _get_bbox_center(g_reg_component_tp.edges[edge], ndim)
         affine_centered = affine
 
         linear = affine_centered[:ndim, :ndim]
@@ -288,8 +329,10 @@ def groupwise_resolution_sparse_two_pass(
                 scale_uv = np.array([float(np.log(scale))], dtype=float)
 
         if transform == "translation":
+            # Measure displacement in physical units at the overlap center.
             dvec = (linear @ bbox_center + dvec) - bbox_center
         elif use_rot:
+            # Strip the rotation component to obtain the translational mismatch.
             dvec = (linear @ bbox_center + dvec) - (rmat @ bbox_center)
 
         edges.append(
@@ -317,6 +360,7 @@ def groupwise_resolution_sparse_two_pass(
     lsqr_kwargs = {k: v for k, v in kwargs.items() if k in lsqr_keys}
 
     def solve_pass(edge_list):
+        # Solve rotations, then translations, on the provided edge set.
         if use_rot:
             rot_slices, rot_params = _build_node_slices(
                 nodes, ref_node, rot_dim
@@ -430,6 +474,7 @@ def groupwise_resolution_sparse_two_pass(
         x_out=x_out,
     )
 
+    # Compute residuals in physical units for pruning/reporting.
     residuals_by_edge = compute_edge_residuals(
         g_reg_component_tp, params_pass1, ndim
     )
