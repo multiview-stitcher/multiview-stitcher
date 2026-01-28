@@ -4,6 +4,7 @@ import os, shutil
 import dask
 import ngff_zarr
 import numpy as np
+import xarray as xr
 import spatial_image as si
 import zarr
 from tqdm import tqdm
@@ -632,10 +633,10 @@ def read_sim_from_ome_zarr(
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
 ):
     """
-    Read a multiscale NGFF zarr file (v0.4) into a spatial_image
+    Read a multiscale NGFF zarr file (v0.4/v0.5) into a spatial_image
     (multiview-stitcher flavor) at a given resolution level.
 
-    NGFF zarr files v0.4 cannot contain affine transformations, so
+    NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
     an identity transform will be set for the given transform_key.
 
     Parameters
@@ -671,3 +672,43 @@ def read_sim_from_ome_zarr(
         sim = sim.assign_coords(c=ch_coords)
 
     return sim
+
+
+def read_msim_from_ome_zarr(
+    zarr_path,
+    transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+):
+    """
+    Read a multiscale NGFF zarr file (v0.4/v0.5) into a multiscale_spatial_image
+    (multiview-stitcher flavor).
+
+    NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
+    an identity transform will be set for the given transform_key.
+
+    Parameters
+    ----------
+    zarr_path : str or Path
+        Path to the zarr file
+    transform_key : str, optional
+        By default si_utils.DEFAULT_TRANSFORM_KEY
+
+    Returns
+    -------
+    multiscale_spatial_image with transform_key set
+    """
+    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    msim = ngff_multiscales_to_msim(
+        ngff_multiscales, transform_key=transform_key
+    )
+
+    # get channel names from omero metadata if available
+    root = zarr.open_group(zarr_path, mode="r")
+    if "omero" in root.attrs:
+        omero = root.attrs["omero"]
+        ch_coords = [ch["label"] for ch in omero["channels"]]
+        if "c" in msim['scale0']["image"].dims:
+            msim = msim.map_over_datasets(
+                xr.DataArray.assign_coords,
+                kwargs={'c': ch_coords})
+
+    return msim
