@@ -1086,6 +1086,7 @@ def register(
            (stack boundaries shown as before registration)
         2) Residual distances between registration edges after global parameter resolution.
            Grey edges have been removed during glob param res (stack boundaries shown as after registration).
+           Solid edges were used by the resolver, dotted edges were unused.
         Stack boundary positions reflect the registration result.
         By default False
     pairs : list of tuples, optional
@@ -1245,12 +1246,19 @@ def register(
                 edge_residuals_dict = groupwise_resolution_info_dict[
                     "edge_residuals"
                 ].get(0, {})
+                used_edges = groupwise_resolution_info_dict[
+                    'used_edges'
+                ].get(0, [])
                 edge_residuals = np.array(
                     [
                         edge_residuals_dict.get(tuple(sorted(e)), np.nan)
                         for e in edges
                     ]
                 )
+                edge_linestyles = [
+                    "-" if tuple(sorted(e)) in used_edges else ":"
+                    for e in edges
+                ]
                 edge_clims = [
                     np.nanmin(edge_residuals),
                     np.nanmax(edge_residuals),
@@ -1262,6 +1270,11 @@ def register(
                     transform_key=new_transform_key,
                     edges=edges,
                     edge_color_vals=edge_residuals,
+                    edge_linestyles=edge_linestyles,
+                    edge_linestyle_labels={
+                        "-": "Used edges",
+                        ":": "Unused edges",
+                    },
                     edge_cmap="Spectral_r",
                     edge_clims=edge_clims,
                     edge_label="Remaining edge residuals [distance units]",

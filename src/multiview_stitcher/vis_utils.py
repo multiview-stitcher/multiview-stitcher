@@ -12,6 +12,7 @@ import numpy as np
 import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from xarray import DataTree
 
@@ -28,6 +29,8 @@ def plot_positions(
     transform_key,
     edges=None,
     edge_color_vals=None,
+    edge_linestyles=None,
+    edge_linestyle_labels=None,
     edge_cmap=None,
     edge_clims=None,
     edge_label="edge weight",
@@ -67,6 +70,13 @@ def plot_positions(
         Size of the view labels, by default 10
     show_plot : bool, optional
         Whether to show the plot, by default True
+    edge_linestyles : list or str, optional
+        Line styles for edges. If a list/array is provided, it must match the
+        number of edges. If a single string is provided, it is applied to all
+        edges. By default None, which uses dashed lines for all edges.
+    edge_linestyle_labels : dict or list of tuples, optional
+        Optional legend mapping for edge line styles. Provide either a dict
+        of {linestyle: label} or a list of (linestyle, label) pairs.
     spacing : dict, optional
         Overwrite the sims' spacing for plotting. Useful in the case of images with single
         coordinates for which the spacing is not defined in the metadata.
@@ -197,11 +207,20 @@ def plot_positions(
         else:
             edge_colors = ["k" for _ in edges]
 
+        if edge_linestyles is None:
+            edge_linestyles = ["--"] * len(edges)
+        elif isinstance(edge_linestyles, str):
+            edge_linestyles = [edge_linestyles] * len(edges)
+        elif len(edge_linestyles) != len(edges):
+            raise ValueError(
+                "edge_linestyles must be None, a string, or match the length of edges."
+            )
+
         # Plot the edges
-        for e, color in zip(edges, edge_colors):
+        for e, color, linestyle in zip(edges, edge_colors, edge_linestyles):
             ax.plot(
                 *np.array([node_poss_mpl[e[0]], node_poss_mpl[e[1]]]).T,
-                linestyle="--",
+                linestyle=linestyle,
                 color=color,
             )
 
@@ -211,6 +230,29 @@ def plot_positions(
                 list(edge_color_vals) + [edge_clims[0], edge_clims[1]]
             )
             plt.colorbar(sm, label=edge_label, ax=ax)
+        if edge_linestyle_labels is not None:
+            if isinstance(edge_linestyle_labels, dict):
+                label_items = list(edge_linestyle_labels.items())
+            elif isinstance(edge_linestyle_labels, (list, tuple)):
+                label_items = list(edge_linestyle_labels)
+            else:
+                raise ValueError(
+                    "edge_linestyle_labels must be a dict or a list of tuples."
+                )
+            used_linestyles = set(edge_linestyles)
+            legend_handles = [
+                Line2D(
+                    [0],
+                    [0],
+                    color="k",
+                    linestyle=linestyle,
+                    label=label,
+                )
+                for linestyle, label in label_items
+                if linestyle in used_linestyles
+            ]
+            if legend_handles:
+                ax.legend(handles=legend_handles, title="Edge usage", loc="best")
 
     if ndim == 3:
         ax.set_xlabel("z [μm]")
