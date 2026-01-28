@@ -779,7 +779,7 @@ def register_pair_of_msims(
     reg_sims = [sim1, sim2]
 
     # logging without use of %s
-    logger.info("Registration reg resolution level: %s", scale_key)
+    logger.info("Registration resolution level: %s", scale_key)
     logger.info("Registration binning applied at loaded scale: %s", registration_binning)
 
     if max(registration_binning.values()) > 1:
