@@ -6,7 +6,7 @@ import xarray as xr
 
 from multiview_stitcher import mv_graph, param_utils
 from .global_optimization import groupwise_resolution_global_optimization
-from .groupwise_sparse import groupwise_resolution_linear_two_pass
+from .linear_two_pass import groupwise_resolution_linear_two_pass
 from .shortest_paths import groupwise_resolution_shortest_paths
 from .utils import (
     compute_edge_residuals,
