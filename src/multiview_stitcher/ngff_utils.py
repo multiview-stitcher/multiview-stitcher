@@ -4,6 +4,7 @@ import os, shutil
 import dask
 import ngff_zarr
 import numpy as np
+import xarray as xr
 import spatial_image as si
 import zarr
 from tqdm import tqdm
@@ -702,14 +703,12 @@ def read_msim_from_ome_zarr(
 
     # get channel names from omero metadata if available
     root = zarr.open_group(zarr_path, mode="r")
-
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
         ch_coords = [ch["label"] for ch in omero["channels"]]
-        for scale_key in msi_utils.get_sorted_scale_keys(msim):
-            if "c" in msim[scale_key]["image"].dims:
-                msim[scale_key]["image"] = msim[scale_key][
-                    "image"
-                ].assign_coords(c=ch_coords)
+        if "c" in msim['scale0']["image"].dims:
+            msim = msim.map_over_datasets(
+                xr.DataArray.assign_coords,
+                kwargs={'c': ch_coords})
 
     return msim

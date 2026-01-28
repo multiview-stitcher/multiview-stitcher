@@ -128,7 +128,6 @@ def update_msim_transforms_zarr(msim, path, overwrite=False):
         for data_var in [
             dv for dv in msim[scale_key].data_vars if dv != "image"
         ]:
-            # import pdb; pdb.set_trace()
             if (
                 scale_key in msim_disk_scale_keys
                 and data_var in msim_disk[scale_key].data_vars

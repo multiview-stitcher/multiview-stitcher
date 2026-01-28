@@ -93,7 +93,6 @@ def test_round_trip(ndim, ngff_version, n_batch):
                 .coords["y"]
                 .values,
             )
-            # import pdb; pdb.set_trace()
 
         assert len(msi_utils.get_sorted_scale_keys(msim)) == len(
             msi_utils.get_sorted_scale_keys(msim_read)
@@ -147,6 +146,47 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
             [str(v) for v in sim.coords["c"].values],
             [str(v) for v in sim_read.coords["c"].values],
         )
+
+
+def test_read_msim_from_ome_zarr():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=2,
+        N_t=1,
+        tile_size=202,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.1,
+        spacing_y=0.1,
+        spacing_z=2,
+        random_data=True,
+    )[1]
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        msim_read = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        sim_read = msi_utils.get_sim_from_msim(msim_read, scale="scale0")
+
+        assert np.array_equal(sim.dims, sim_read.dims)
+        assert np.allclose(sim.data, sim_read.data)
+        assert np.array_equal(
+            [str(v) for v in sim.coords["c"].values],
+            [str(v) for v in sim_read.coords["c"].values],
+        )
+
+        scale_keys = msi_utils.get_sorted_scale_keys(msim_read)
+        assert len(scale_keys) > 1
+        for scale_key in scale_keys:
+            sim_scale = msi_utils.get_sim_from_msim(
+                msim_read, scale=scale_key
+            )
+            assert np.array_equal(
+                [str(v) for v in sim.coords["c"].values],
+                [str(v) for v in sim_scale.coords["c"].values],
+            )
 
 
 def test_multiscales_completion():
