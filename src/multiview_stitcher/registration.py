@@ -730,6 +730,12 @@ def register_pair_of_msims(
                         f"not a divisor of registration_binning[{dim}]="
                         f"{registration_binning[dim]}"
                     )
+                
+        # calculate remaining binning to be applied after selecting the resolution level
+        registration_binning = {
+            dim: registration_binning[dim] // int(round(actual_factors[dim]))
+            for dim in spatial_dims
+        }
         
         # registration_binning will be applied below
         
@@ -773,7 +779,8 @@ def register_pair_of_msims(
     reg_sims = [sim1, sim2]
 
     # logging without use of %s
-    logger.info("Registration binning: %s", registration_binning)
+    logger.info("Registration resolution level: %s", scale_key)
+    logger.info("Registration binning applied at loaded scale: %s", registration_binning)
 
     if max(registration_binning.values()) > 1:
         reg_sims_b = [
