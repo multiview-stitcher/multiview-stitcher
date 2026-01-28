@@ -314,10 +314,9 @@ def groupwise_resolution_linear_two_pass(
         affine = np.asarray(affine, dtype=float)
 
         bbox_center = _get_bbox_center(g_reg_component_tp.edges[edge], ndim)
-        affine_centered = affine
 
-        linear = affine_centered[:ndim, :ndim]
-        dvec = affine_centered[:ndim, ndim]
+        linear = affine[:ndim, :ndim]
+        dvec = affine[:ndim, ndim]
 
         rot_uv = None
         scale_uv = None
