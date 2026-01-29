@@ -1062,58 +1062,10 @@ def _plot_registration_summaries(
             show_plot=show_plot,
         )
 
-    return fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res
-
-
-def _limit_graph_to_first_timepoint(g_reg_computed):
-    g_reg_computed = g_reg_computed.copy()
-    for e in g_reg_computed.edges:
-        for k, v in g_reg_computed.edges[e].items():
-            if isinstance(v, xr.DataArray) and "t" in v.coords:
-                g_reg_computed.edges[e][k] = v.sel(
-                    {"t": v.coords["t"][0]}
-                )
-    return g_reg_computed
-
-
-def _build_registration_return_dict(
-    params,
-    g_reg_computed,
-    fig_pair_reg,
-    ax_pair_reg,
-    fig_group_res,
-    ax_group_res,
-    groupwise_resolution_info_dict,
-):
-    g_reg_computed = _limit_graph_to_first_timepoint(g_reg_computed)
-
-    groupwise_resolution_block = None
-    if groupwise_resolution_info_dict is not None:
-        groupwise_resolution_block = {
-            "summary_plot": (fig_group_res, ax_group_res),
-            "metrics": {
-                "edge_residuals": groupwise_resolution_info_dict.get(
-                    "edge_residuals"
-                ),
-                "used_edges": groupwise_resolution_info_dict.get(
-                    "used_edges"
-                ),
-            },
-        }
-
-    return {
-        "params": params,
-        "pairwise_registration": {
-            "summary_plot": (fig_pair_reg, ax_pair_reg),
-            "graph": g_reg_computed,
-            "metrics": {
-                "qualities": nx.get_edge_attributes(
-                    g_reg_computed, "quality"
-                ),
-            },
-        },
-        "groupwise_resolution": groupwise_resolution_block,
-    }
+    return {'fig_pair_reg': fig_pair_reg,
+            'ax_pair_reg': ax_pair_reg,
+            'fig_group_res': fig_group_res,
+            'ax_group_res': ax_group_res}
 
 
 def register(
@@ -1353,12 +1305,6 @@ def register(
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
     ]
 
-    fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res = (
-        None,
-        None,
-        None,
-        None,
-    )
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
             msi_utils.set_affine_transform(
@@ -1368,31 +1314,43 @@ def register(
                 base_transform_key=transform_key,
             )
 
-        if plot_summary or return_dict:
-            (
-                fig_pair_reg,
-                ax_pair_reg,
-                fig_group_res,
-                ax_group_res,
-            ) = _plot_registration_summaries(
-                msims,
-                transform_key,
-                new_transform_key,
-                g_reg_computed,
-                groupwise_resolution_info_dict,
-                show_plot=plot_summary,
-            )
+    if plot_summary:
+        plot_info = _plot_registration_summaries(
+            msims,
+            transform_key,
+            new_transform_key,
+            g_reg_computed,
+            groupwise_resolution_info_dict,
+            show_plot=plot_summary,
+        )
+    else:
+        plot_info = {}
 
     if return_dict:
-        return _build_registration_return_dict(
-            params,
-            g_reg_computed,
-            fig_pair_reg,
-            ax_pair_reg,
-            fig_group_res,
-            ax_group_res,
-            groupwise_resolution_info_dict,
-        )
+        return {
+            "params": params,
+            "pairwise_registration": {
+                "graph": g_reg_computed,
+                "metrics": {
+                    "qualities": nx.get_edge_attributes(
+                        g_reg_computed, "quality"
+                    )
+                },
+                "summary_plot": None if plot_summary is False
+                else (
+                    plot_info['fig_pair_reg'],
+                    plot_info['ax_pair_reg']
+                    )
+            },
+            "groupwise_resolution": {
+                "metrics": groupwise_resolution_info_dict,
+                "summary_plot": None if plot_summary is False
+                else (
+                    plot_info['fig_group_res'],
+                    plot_info['ax_group_res']
+                )
+            },
+        }
     else:
         return params
 
