@@ -977,6 +977,145 @@ def register_pair_of_msims_over_time(
     return xp
 
 
+def _plot_registration_summaries(
+    msims,
+    transform_key,
+    new_transform_key,
+    g_reg_computed,
+    groupwise_resolution_info_dict,
+    show_plot,
+):
+    edges = list(g_reg_computed.edges())
+    fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
+        msims,
+        transform_key=transform_key,
+        edges=edges,
+        edge_color_vals=np.array(
+            [
+                g_reg_computed.get_edge_data(*e)["quality"].mean()
+                for e in edges
+            ]
+        ),
+        edge_label="Pairwise view correlation",
+        display_view_indices=True,
+        use_positional_colors=False,
+        plot_title="Pairwise registration summary",
+        show_plot=show_plot,
+    )
+
+    fig_group_res, ax_group_res = None, None
+    if groupwise_resolution_info_dict is not None:
+        edge_residuals_dict = groupwise_resolution_info_dict.get(
+            "edge_residuals"
+        )
+        if isinstance(edge_residuals_dict, dict):
+            edge_residuals_dict = edge_residuals_dict.get(0, {})
+
+        used_edges = groupwise_resolution_info_dict.get("used_edges")
+        if isinstance(used_edges, dict):
+            used_edges = used_edges.get(0, [])
+        used_edge_set = (
+            {tuple(sorted(e)) for e in used_edges}
+            if used_edges
+            else set()
+        )
+
+        if edge_residuals_dict is None or not hasattr(
+            edge_residuals_dict, "get"
+        ):
+            edge_residuals_dict = {}
+
+        edge_residuals = np.array(
+            [
+                edge_residuals_dict.get(tuple(sorted(e)), np.nan)
+                for e in edges
+            ]
+        )
+        edge_linestyles = [
+            "-" if tuple(sorted(e)) in used_edge_set else ":"
+            for e in edges
+        ]
+        finite_vals = edge_residuals[np.isfinite(edge_residuals)]
+        if finite_vals.size == 0:
+            edge_clims = [0, 1]
+        else:
+            vmin, vmax = np.nanmin(edge_residuals), np.nanmax(
+                edge_residuals
+            )
+            edge_clims = [0, 1] if vmin == vmax else [vmin, vmax]
+        fig_group_res, ax_group_res = vis_utils.plot_positions(
+            msims,
+            transform_key=new_transform_key,
+            edges=edges,
+            edge_color_vals=edge_residuals,
+            edge_linestyles=edge_linestyles,
+            edge_linestyle_labels={
+                "-": "Used edges",
+                ":": "Unused edges",
+            },
+            edge_cmap="Spectral_r",
+            edge_clims=edge_clims,
+            edge_label="Remaining edge residuals [distance units]",
+            display_view_indices=True,
+            use_positional_colors=False,
+            plot_title="Global parameter resolution summary",
+            show_plot=show_plot,
+        )
+
+    return fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res
+
+
+def _limit_graph_to_first_timepoint(g_reg_computed):
+    g_reg_computed = g_reg_computed.copy()
+    for e in g_reg_computed.edges:
+        for k, v in g_reg_computed.edges[e].items():
+            if isinstance(v, xr.DataArray) and "t" in v.coords:
+                g_reg_computed.edges[e][k] = v.sel(
+                    {"t": v.coords["t"][0]}
+                )
+    return g_reg_computed
+
+
+def _build_registration_return_dict(
+    params,
+    g_reg_computed,
+    fig_pair_reg,
+    ax_pair_reg,
+    fig_group_res,
+    ax_group_res,
+    groupwise_resolution_info_dict,
+):
+    g_reg_computed = _limit_graph_to_first_timepoint(g_reg_computed)
+
+    groupwise_resolution_block = None
+    if groupwise_resolution_info_dict is not None:
+        groupwise_resolution_block = {
+            "summary_plot": (fig_group_res, ax_group_res),
+            "metrics": {
+                "edge_residuals": groupwise_resolution_info_dict.get(
+                    "edge_residuals"
+                ),
+                "used_edges": groupwise_resolution_info_dict.get(
+                    "used_edges"
+                ),
+            },
+        }
+
+    return {
+        "params": params,
+        "pairwise_registration": {
+            "summary_plot": (fig_pair_reg, ax_pair_reg),
+            "graph": g_reg_computed,
+            "metrics": {
+                "qualities": nx.get_edge_attributes(
+                    g_reg_computed, "quality"
+                ),
+            },
+        },
+        "groupwise_resolution": groupwise_resolution_block,
+    }
+
+
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key: str = None,
@@ -1214,6 +1353,12 @@ def register(
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
     ]
 
+    fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res = (
+        None,
+        None,
+        None,
+        None,
+    )
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
             msi_utils.set_affine_transform(
@@ -1224,114 +1369,30 @@ def register(
             )
 
         if plot_summary or return_dict:
-            edges = list(g_reg_computed.edges())
-            fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
+            (
+                fig_pair_reg,
+                ax_pair_reg,
+                fig_group_res,
+                ax_group_res,
+            ) = _plot_registration_summaries(
                 msims,
-                transform_key=transform_key,
-                edges=edges,
-                edge_color_vals=np.array(
-                    [
-                        g_reg_computed.get_edge_data(*e)["quality"].mean()
-                        for e in edges
-                    ]
-                ),
-                edge_label="Pairwise view correlation",
-                display_view_indices=True,
-                use_positional_colors=False,
-                plot_title="Pairwise registration summary",
+                transform_key,
+                new_transform_key,
+                g_reg_computed,
+                groupwise_resolution_info_dict,
                 show_plot=plot_summary,
             )
 
-            if groupwise_resolution_info_dict is not None:
-                edge_residuals_dict = groupwise_resolution_info_dict[
-                    "edge_residuals"
-                ].get(0, {})
-                used_edges = groupwise_resolution_info_dict[
-                    'used_edges'
-                ].get(0, [])
-                edge_residuals = np.array(
-                    [
-                        edge_residuals_dict.get(tuple(sorted(e)), np.nan)
-                        for e in edges
-                    ]
-                )
-                edge_linestyles = [
-                    "-" if tuple(sorted(e)) in used_edges else ":"
-                    for e in edges
-                ]
-                edge_clims = [
-                    np.nanmin(edge_residuals),
-                    np.nanmax(edge_residuals),
-                ]
-                if edge_clims[0] == edge_clims[1]:
-                    edge_clims = [0, 1]
-                fig_group_res, ax_group_res = vis_utils.plot_positions(
-                    msims,
-                    transform_key=new_transform_key,
-                    edges=edges,
-                    edge_color_vals=edge_residuals,
-                    edge_linestyles=edge_linestyles,
-                    edge_linestyle_labels={
-                        "-": "Used edges",
-                        ":": "Unused edges",
-                    },
-                    edge_cmap="Spectral_r",
-                    edge_clims=edge_clims,
-                    edge_label="Remaining edge residuals [distance units]",
-                    display_view_indices=True,
-                    use_positional_colors=False,
-                    plot_title="Global parameter resolution summary",
-                    show_plot=plot_summary,
-                )
-            else:
-                fig_group_res, ax_group_res = None, None
-    else:
-        fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res = [
-            None,
-            None,
-            None,
-            None,
-        ]
-
     if return_dict:
-        # limit output graphs to first timepoint (for now)
-        g_reg_computed = g_reg_computed.copy()
-        for e in g_reg_computed.edges:
-            for k, v in g_reg_computed.edges[e].items():
-                if isinstance(v, xr.DataArray) and "t" in v.coords:
-                    g_reg_computed.edges[e][k] = g_reg_computed.edges[e][
-                        k
-                    ].sel({"t": g_reg_computed.edges[e][k].coords["t"][0]})
-
-        groupwise_resolution_block = (
-            {
-                "summary_plot": (fig_group_res, ax_group_res),
-                "metrics": {
-                    "edge_residuals": groupwise_resolution_info_dict[
-                        "edge_residuals"
-                    ],
-                    "used_edges": groupwise_resolution_info_dict[
-                        "used_edges"
-                    ],
-                },
-            }
-            if groupwise_resolution_info_dict is not None
-            else None
+        return _build_registration_return_dict(
+            params,
+            g_reg_computed,
+            fig_pair_reg,
+            ax_pair_reg,
+            fig_group_res,
+            ax_group_res,
+            groupwise_resolution_info_dict,
         )
-
-        return {
-            "params": params,
-            "pairwise_registration": {
-                "summary_plot": (fig_pair_reg, ax_pair_reg),
-                "graph": g_reg_computed,
-                "metrics": {
-                    "qualities": nx.get_edge_attributes(
-                        g_reg_computed, "quality"
-                    ),
-                },
-            },
-            "groupwise_resolution": groupwise_resolution_block,
-        }
     else:
         return params
 
