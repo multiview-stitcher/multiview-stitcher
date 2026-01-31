@@ -41,7 +41,7 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "numpy >=1.18",
-    "dask !=2025.11.0",
+    "dask <2025.11.0",
     "dask_image",
     "zarr",
     "xarray >=2024.10.0",
