@@ -17,11 +17,8 @@ from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
-from skimage.transform import (
-    EuclideanTransform,
-    SimilarityTransform,
-)
 
+from multiview_stitcher.param_resolution import groupwise_resolution
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
 
 try:
@@ -987,727 +984,95 @@ def register_pair_of_msims_over_time(
     return xp
 
 
-def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
-    if not len(g_reg.edges):
-        raise (
-            mv_graph.NotEnoughOverlapError(
-                "Not enough overlap between views\
-        for stitching."
-            )
-        )
-
-    # if only two views, set reference view to the first view
-    # this is compatible with a [fixed, moving] convention
-    if "reference_view" not in kwargs and len(g_reg.nodes) == 2:
-        kwargs["reference_view"] = min(list(g_reg.nodes))
-
-    if method == "global_optimization":
-        return groupwise_resolution_global_optimization(g_reg, **kwargs)
-    elif method == "shortest_paths":
-        return groupwise_resolution_shortest_paths(g_reg, **kwargs)
-    else:
-        raise ValueError(f"Unknown groupwise optimization method: {method}")
-
-
-def groupwise_resolution_shortest_paths(g_reg, reference_view=None):
-    """
-    Get final transform parameters by concatenating transforms
-    along paths of pairwise affine transformations.
-
-    Output parameters P for each view map coordinates in the view
-    into the coordinates of a new coordinate system.
-    """
-
-    ndim = (
-        g_reg.get_edge_data(*list(g_reg.edges())[0])["transform"].shape[-1] - 1
-    )
-
-    # use quality as weight in shortest path (mean over tp currently)
-    # make sure that quality is non-negative (shortest path algo requires this)
-    quality_min = np.min([g_reg.edges[e]["quality"] for e in g_reg.edges])
-    for e in g_reg.edges:
-        g_reg.edges[e]["quality_mean"] = np.mean(g_reg.edges[e]["quality"])
-        g_reg.edges[e]["quality_mean_inv"] = 1 / (
-            (g_reg.edges[e]["quality_mean"] - quality_min) + 0.5
-        )
-
-    # get directed graph and invert transforms along edges
-
-    g_reg_di = g_reg.to_directed()
-    for e in g_reg.edges:
-        sorted_e = tuple(sorted(e))
-        g_reg_di.edges[(sorted_e[1], sorted_e[0])][
-            "transform"
-        ] = param_utils.invert_xparams(g_reg.edges[sorted_e]["transform"])
-
-    ccs = list(nx.connected_components(g_reg))
-
-    node_transforms = {}
-
-    for cc in ccs:
-        subgraph = g_reg_di.subgraph(list(cc))
-
-        if reference_view is not None and reference_view in cc:
-            ref_node = reference_view
-        else:
-            ref_node = (
-                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-                    subgraph, weight_key="quality"
-                )
-            )
-
-        # get shortest paths to ref_node
-        paths = {
-            n: nx.shortest_path(
-                subgraph, target=n, source=ref_node, weight="quality_mean_inv"
-            )
-            for n in cc
-        }
-
-        for n in subgraph.nodes:
-            reg_path = paths[n]
-
-            path_pairs = [
-                [reg_path[i], reg_path[i + 1]]
-                for i in range(len(reg_path) - 1)
-            ]
-
-            path_params = param_utils.identity_transform(ndim)
-
-            for pair in path_pairs:
-                path_params = param_utils.rebase_affine(
-                    g_reg_di.edges[(pair[0], pair[1])]["transform"],
-                    path_params,
-                )
-
-            node_transforms[n] = param_utils.invert_xparams(path_params)
-
-    # homogenize dims and coords in node_transforms
-    # e.g. if some node's params are missing 't' dimension, add it
-    node_transforms = xr.Dataset(data_vars=node_transforms).to_array("node")
-    node_transforms = {
-        node: node_transforms.sel({"node": node}).drop_vars("node")
-        for node in node_transforms.coords["node"].values
-    }
-
-    return node_transforms, None
-
-
-def groupwise_resolution_global_optimization(
-    g_reg,
-    reference_view=None,
-    transform="translation",
-    max_iter=None,
-    rel_tol=None,
-    abs_tol=None,
+def _plot_registration_summaries(
+    msims,
+    transform_key,
+    new_transform_key,
+    g_reg_computed,
+    groupwise_resolution_info_dict,
+    show_plot,
 ):
-    """
-    Get final transform parameters by global optimization.
-
-    Output parameters P for each view map coordinates in the view
-    into the coordinates of a new coordinate system.
-
-    Strategy:
-    - iterate over timepoints
-    - iterate over connected components of the registration graph
-    - for each pairwise registration, compute virtual pairs of beads
-        - fixed view: take bounding box corners
-        - moving view: transform fixed view corners using inverse of pairwise transform
-    - determine optimal transformations in an iterative manner
-
-    Two loops:
-    - outer loop: loop over different sets of edges (start with all edges):
-        - set transforms of all nodes to identity
-        - perform inner loop
-        - determine whether result is good enough
-        - if not, remove edges based on criterion
-        - repeat
-    - inner loop: given a set of edges, optimise the transformations of each node
-        - for each node, compute the transform that minimizes the distance between
-            its virtual beads and associated virtual beads in overlapping views
-        - assign the computed transform to the view
-
-    Terms:
-    - "edge residual": mean distance between pair of virtual beads
-        associated with a registration edge
-
-    References:
-    - https://imagej.net/imagej-wiki-static/SPIM_Registration_Method
-    - BigStitcher publication: https://www.nature.com/articles/s41592-019-0501-0#Sec2
-      - Supplementary Note 2
-
-    Parameters
-    ----------
-    g_beads_subgraph : nx.Graph
-        Virtual bead graph
-    transform : str
-        Transformation type ('translation', 'rigid', 'similarity' or 'affine')
-    ref_node : int
-        Reference node which keeps its transformation fixed
-    max_iter : int, optional
-        Maximum number of iterations of inner loop
-    rel_tol : float, optional
-        Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
-        By default 1e-4.
-    abs_tol : float, optional
-        Convergence criterion for outer loop: absolute value of max edge residual below which loop stops.
-        By default the diagonal of the voxel size (max over tiles).
-
-    Returns
-    -------
-    dict
-        Dictionary containing the final transform parameters for each view
-    """
-
-    if max_iter is None:
-        max_iter = 500
-        logger.info("Global optimization: setting max_iter to %s", max_iter)
-    if rel_tol is None:
-        rel_tol = 1e-4
-        logger.info("Global optimization: setting rel_tol to %s", rel_tol)
-
-    ndim = g_reg.edges[list(g_reg.edges)[0]]["transform"].shape[-1] - 1
-
-    # if abs_tol is None, assign multiple of voxel diagonal
-    if abs_tol is None:
-        abs_tol = np.max(
+    edges = list(g_reg_computed.edges())
+    fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
+        msims,
+        transform_key=transform_key,
+        edges=edges,
+        edge_color_vals=np.array(
             [
-                1.0
-                * np.sum(
-                    [
-                        v**2
-                        for v in g_reg.nodes[n]["stack_props"][
-                            "spacing"
-                        ].values()
-                    ]
-                )
-                ** 0.5
-                for n in g_reg.nodes
-            ]
-        )
-        # log without using f strings
-        logger.info("Global optimization: setting abs_tol to %s", abs_tol)
-
-    # find timepoints
-    all_transforms = [g_reg.edges[e]["transform"] for e in g_reg.edges]
-    t_coords = np.unique(
-        [
-            transform.coords["t"].data
-            for transform in all_transforms
-            if "t" in transform.coords
-        ]
-    )
-
-    params = {nodes: [] for nodes in g_reg.nodes}
-    all_dfs = []
-    ccs = list(nx.connected_components(g_reg))
-    cc_g_opt_t0s = []
-    for icc, cc in enumerate(ccs):
-        g_reg_subgraph = g_reg.subgraph(list(cc))
-
-        if reference_view is not None and reference_view in cc:
-            ref_node = reference_view
-        else:
-            ref_node = (
-                mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
-                    g_reg_subgraph, weight_key="quality"
-                )
-            )
-
-        if len(t_coords):
-            g_reg_subgraph_ts = [
-                get_reg_graph_with_single_tp_transforms(g_reg_subgraph, t)
-                for t in t_coords
-            ]
-        else:
-            g_reg_subgraph_ts = [g_reg_subgraph]
-
-        g_beads_subgraph_ts = [
-            get_beads_graph_from_reg_graph(g_reg_subgraph_t, ndim=ndim)
-            for g_reg_subgraph_t in g_reg_subgraph_ts
-        ]
-
-        cc_params, cc_dfs, cc_g_opt_ts = list(
-            zip(
-                *tuple(
-                    [
-                        optimize_bead_subgraph(
-                            g_beads_subgraph,
-                            transform,
-                            ref_node,
-                            max_iter,
-                            rel_tol,
-                            abs_tol,
-                        )
-                        for g_beads_subgraph in g_beads_subgraph_ts
-                    ]
-                )
-            )
-        )
-
-        cc_g_opt_t0s.append(cc_g_opt_ts[0])
-
-        for node in cc:
-            for cc_param in cc_params:
-                params[node].append(cc_param[node])
-
-        if len(t_coords):
-            for it, t in enumerate(t_coords):
-                if cc_dfs[it] is not None:
-                    cc_dfs[it]["t"] = [t] * len(cc_dfs[it])
-                    cc_dfs[it]["icc"] = [icc] * len(cc_dfs[it])
-                    all_dfs.append(cc_dfs[it])
-
-    # join optimized graphs for first timepoint
-
-    g_opt_t0 = nx.compose_all(cc_g_opt_t0s)
-
-    all_dfs = [df for df in all_dfs if df is not None]
-    df = pd.concat(all_dfs) if len(all_dfs) else None
-
-    for node in g_reg.nodes:
-        params[node] = xr.concat(params[node], dim="t").assign_coords(
-            {"t": t_coords}
-        )
-
-    info_dict = {
-        "metrics": df,
-        "optimized_graph_t0": g_opt_t0,
-    }
-
-    return params, info_dict
-
-
-def get_reg_graph_with_single_tp_transforms(g_reg, t):
-    g_reg_t = g_reg.copy()
-    for e in g_reg_t.edges:
-        for k, v in g_reg_t.edges[e].items():
-            if isinstance(v, xr.DataArray) and "t" in v.coords:
-                g_reg_t.edges[e][k] = g_reg_t.edges[e][k].sel({"t": t})
-    return g_reg_t
-
-
-def get_beads_graph_from_reg_graph(g_reg_subgraph, ndim):
-    """
-    Get a graph with virtual bead pairs as edges and view transforms as node attributes.
-
-    Parameters
-    ----------
-    g_reg_subgraph : nx.Graph
-        Registration graph with single tp transforms
-
-    Returns
-    -------
-    nx.Graph
-    """
-
-    # undirected graph containing virtual bead pairs as edges
-    g_beads_subgraph = nx.Graph()
-    g_beads_subgraph.add_nodes_from(g_reg_subgraph.nodes)
-    for e in g_reg_subgraph.edges:
-        sorted_e = tuple(sorted(e))
-        bbox_lower, bbox_upper = g_reg_subgraph.edges[e]["bbox"].data
-        gv = np.array(list(np.ndindex(tuple([2] * len(bbox_lower)))))
-        bbox_vertices = gv * (bbox_upper - bbox_lower) + bbox_lower
-        affine = g_reg_subgraph.edges[e]["transform"]
-        g_beads_subgraph.add_edge(
-            sorted_e[0],
-            sorted_e[1],
-            beads={
-                sorted_e[0]: bbox_vertices,
-                sorted_e[1]: transformation.transform_pts(
-                    bbox_vertices,
-                    affine,
-                ),
-            },
-            quality=g_reg_subgraph.edges[e]["quality"].data,
-            overlap=g_reg_subgraph.edges[e]["overlap"],
-        )
-
-    # initialise view transforms with identity transforms
-    for node in g_reg_subgraph.nodes:
-        g_beads_subgraph.nodes[node][
-            "affine"
-        ] = param_utils.identity_transform(ndim)
-
-    return g_beads_subgraph
-
-
-def optimize_bead_subgraph(
-    g_beads_subgraph,
-    transform,
-    ref_node,
-    max_iter,
-    rel_tol,
-    abs_tol,
-):
-    """
-    Optimize the virtual bead graph.
-
-    Two loops:
-
-    - outer loop: loop over different sets of edges:
-        - start with all edges
-        - determine whether result is good enough
-        - if not, remove edges based on criterion
-    - inner loop: given a set of edges, optimise the transformations of each node
-        - for each node, compute the transform that minimizes the distance between
-            its virtual beads and associated virtual beads in overlapping views
-        - assign the computed transform to the view
-
-    Terms:
-    - "edge residual": mean distance between pair of virtual beads
-        associated with a registration edge
-
-    Parameters
-    ----------
-    g_beads_subgraph : nx.Graph
-        Virtual bead graph
-    transform : str
-        Transformation type ('translation', 'rigid', 'similarity' or 'affine')
-    ref_node : int
-        Reference node which keeps its transformation fixed
-    max_iter : int, optional
-        Maximum number of iterations of inner loop
-    rel_tol : float, optional
-        Convergence criterion for inner loop: relative improvement of max edge residual below which loop stops.
-    abs_tol : float, optional
-        Convergence criterion for outer loop: absolute value of max edge residual below which loop stops.
-    Returns
-    -------
-    nx.Graph
-        Optimized virtual bead graph
-    """
-
-    g_beads_subgraph = copy.deepcopy(g_beads_subgraph)
-
-    # this makes node labels directly usable as indices
-    # (for optimisation purposes)
-    mapping = {n: i for i, n in enumerate(g_beads_subgraph.nodes)}
-    inverse_mapping = dict(enumerate(g_beads_subgraph.nodes))
-
-    # relabel nodes
-    nx.relabel_nodes(g_beads_subgraph, mapping, copy=False)
-    # relabel bead dicts
-    for e in g_beads_subgraph.edges:
-        g_beads_subgraph.edges[e]["beads"] = {
-            mapping[k]: v
-            for k, v in g_beads_subgraph.edges[e]["beads"].items()
-        }
-
-    # calculate an order of views by descending connectivity / number of links
-    centralities = nx.degree_centrality(g_beads_subgraph)
-    sorted_nodes = sorted(centralities, key=centralities.get, reverse=True)
-
-    ndim = (
-        g_beads_subgraph.nodes[list(g_beads_subgraph.nodes)[0]][
-            "affine"
-        ].shape[-1]
-        - 1
-    )
-
-    if transform.lower() == "translation":
-        transform_generator = TranslationTransform(dimensionality=ndim)
-    elif transform.lower() == "rigid":
-        transform_generator = EuclideanTransform(dimensionality=ndim)
-    elif transform.lower() == "similarity":
-        transform_generator = SimilarityTransform(dimensionality=ndim)
-    elif transform.lower() == "affine":
-        transform_generator = AffineTransform(dimensionality=ndim)
-    else:
-        raise ValueError(
-            f"Unknown transformation type in parameter resolution: {transform}"
-        )
-
-    all_nodes = list(mapping.values())
-
-    new_affines = np.array(
-        [
-            param_utils.matmul_xparams(
-                param_utils.identity_transform(ndim),
-                g_beads_subgraph.nodes[n]["affine"],
-            ).data
-            for n in all_nodes
-        ]
-    )
-
-    mean_residuals = []
-    max_residuals = []
-
-    total_iterations = 0
-    # first loop: iterate until max / mean residual ratio is below threshold
-    while True:
-        # second loop: optimise transformations of each node
-        iter_all_residuals = []
-
-        edges = list(g_beads_subgraph.edges)
-
-        if not len(edges):
-            break
-
-        node_edges = [list(g_beads_subgraph.edges(n)) for n in all_nodes]
-
-        node_beads = [
-            np.concatenate(
-                [
-                    g_beads_subgraph.edges[e]["beads"][n]
-                    for ie, e in enumerate(node_edges[n])
-                ],
-                axis=0,
-            )
-            for n in all_nodes
-        ]
-
-        node_beads = [
-            np.concatenate([nb, np.ones((len(nb), 1))], axis=1)
-            for nb in node_beads
-        ]
-
-        adj_nodes = [
-            [
-                n
-                for ie, e in enumerate(node_edges[curr_node])
-                for n in e
-                if n != curr_node
-            ]
-            for curr_node in all_nodes
-        ]
-
-        adj_beads = [
-            [
-                g_beads_subgraph.edges[e]["beads"][n]
-                for ie, e in enumerate(node_edges[curr_node])
-                for n in e
-                if n != curr_node
-            ]
-            for curr_node in all_nodes
-        ]
-
-        adj_beads = [
-            [
-                np.concatenate([abb, np.ones((len(abb), 1))], axis=1)
-                for abb in ab
-            ]
-            for ab in adj_beads
-        ]
-
-        for iteration in range(max_iter):
-            for _icn, curr_node in enumerate(sorted_nodes):
-                if not len(node_edges[curr_node]):
-                    continue
-
-                node_pts = np.dot(
-                    new_affines[curr_node], node_beads[curr_node].T
-                ).T[:, :-1]
-
-                adj_pts = np.concatenate(
-                    [
-                        np.dot(new_affines[an], adj_beads[curr_node][ian].T).T
-                        for ian, an in enumerate(adj_nodes[curr_node])
-                    ],
-                    axis=0,
-                )[:, :-1]
-
-                ### repeat points based on edge quality
-                ### (not used currently, as although it seems to improve convergence, it slows down performance)
-
-                # edge_qualities = np.array([g_beads_subgraph.edges[e]['quality'] for e in node_edges])
-                # edge_qualities_norm = edge_qualities / np.sum(edge_qualities)
-                # edge_repeats = [np.max([1, int(edge_qualities_norm[ie] * ndim ** 2 * 4)])
-                #     for ie in range(len(edge_qualities))]
-
-                # pts_per_edge = ndim ** 2
-                # node_pts_reg = np.concatenate(
-                #     [
-                #         np.repeat(
-                #             node_pts[ie * pts_per_edge : (ie + 1) * pts_per_edge],
-                #             edge_repeats[ie],
-                #             axis=0,
-                #         )
-                #         for ie in range(len(node_edges[curr_node]))
-                #     ], axis=0
-                # )
-
-                # adjecent_pts_reg = np.concatenate(
-                #     [
-                #         np.repeat(
-                #             adjecent_pts[ie * pts_per_edge : (ie + 1) * pts_per_edge],
-                #             edge_repeats[ie],
-                #             axis=0,
-                #         )
-                #         for ie in range(len(node_edges[curr_node]))
-                #     ], axis=0
-                # )
-
-                if curr_node != ref_node:
-                    transform_generator.estimate(node_pts, adj_pts)
-                    transform_generator.residuals(node_pts, adj_pts)
-
-                    new_affines[curr_node] = np.matmul(
-                        transform_generator.params,
-                        new_affines[curr_node],
-                    )
-
-                total_iterations += 1
-
-            # calculate edge residuals
-            edge_residuals = {}
-            for e in g_beads_subgraph.edges:
-                node1, node2 = e
-                node1_pts = transformation.transform_pts(
-                    g_beads_subgraph.edges[e]["beads"][node1],
-                    new_affines[node1],
-                )
-                node2_pts = transformation.transform_pts(
-                    g_beads_subgraph.edges[e]["beads"][node2],
-                    new_affines[node2],
-                )
-                edge_residuals[e] = np.linalg.norm(
-                    node1_pts - node2_pts, axis=1
-                )
-
-            mean_residuals.append(
-                np.mean(
-                    [
-                        np.mean(edge_residuals[e])
-                        for e in g_beads_subgraph.edges
-                    ]
-                )
-            )
-
-            max_residuals.append(
-                np.max(
-                    [np.max(edge_residuals[e]) for e in g_beads_subgraph.edges]
-                )
-            )
-
-            iter_all_residuals.append(edge_residuals)
-
-            logger.debug(
-                "Glob opt iter %s, node %s, mean residual %s, max residual %s",
-                iteration,
-                curr_node,
-                mean_residuals[-1],
-                max_residuals[-1],
-            )
-
-            # check for convergence
-            if iteration > 5:
-                max_rel_change = np.max(
-                    [
-                        np.abs(
-                            (
-                                iter_all_residuals[-1][e]
-                                - iter_all_residuals[-2][e]
-                            )
-                            / max_residuals[-1]
-                            if max_residuals[-1] > 0
-                            else 0
-                        )
-                        for e in g_beads_subgraph.edges
-                    ]
-                )
-
-                # check if max relative change is below rel_tol
-                if max_rel_change < rel_tol:
-                    break
-
-        # keep parameters after one iteration if there are
-        # less than two edges
-        if len(list(g_beads_subgraph.edges)) < 2:
-            break
-
-        edges = list(g_beads_subgraph.edges)
-        if max_residuals[-1] < abs_tol:
-            edge_to_remove = None
-        else:
-            edge_residual_values = [
-                # (1 / float(g_beads_subgraph.edges[e]["overlap"])) ** 2
-                (1 - float(g_beads_subgraph.edges[e]["quality"])) ** 2
-                * np.sqrt(np.max(edge_residuals[e]))
-                * np.log10(
-                    np.max(
-                        [len(list(g_beads_subgraph.neighbors(n))) for n in e]
-                    )
-                )
+                g_reg_computed.get_edge_data(*e)["quality"].mean()
                 for e in edges
             ]
-
-            edge_to_remove = edges[np.argmax(edge_residual_values)]
-            residual_order = np.argsort(edge_residual_values)[::-1]
-            # find first node which had more than one edge and
-            # cutting it would leave its nodes in separate connected components
-            candidate_ind = 0
-            found = False
-            while True:
-                edge_to_remove = edges[residual_order[candidate_ind]]
-                nodes = list(edge_to_remove)
-                tmp_subgraph = copy.deepcopy(g_beads_subgraph)
-                tmp_subgraph.remove_edge(*edge_to_remove)
-                ccs = list(nx.connected_components(tmp_subgraph))
-                cc_ind_node1 = [
-                    i for i, cc in enumerate(ccs) if nodes[0] in cc
-                ][0]
-                if nodes[1] in ccs[cc_ind_node1]:
-                    found = True
-                    break
-                if candidate_ind == len(residual_order) - 1:
-                    break
-                candidate_ind += 1
-
-            if not found:
-                edge_to_remove = None
-
-        logger.debug("Glob opt iter %s", iteration)
-        logger.debug(
-            "Max and mean residuals: %s \t %s",
-            max_residuals[-1],
-            mean_residuals[-1],
-        )
-
-        if edge_to_remove is not None:
-            g_beads_subgraph.remove_edge(*edge_to_remove)
-
-            logger.debug(
-                "Removing edge %s and restarting glob opt.", edge_to_remove
-            )
-        else:
-            logger.info(
-                "Finished glob opt. Max and mean residuals: %s \t %s",
-                max_residuals[-1],
-                mean_residuals[-1],
-            )
-            break
-
-    if total_iterations:
-        for n in all_nodes:
-            # assign new affines to nodes
-            g_beads_subgraph.nodes[n]["affine"] = new_affines[n]
-
-        # assign residuals to edges
-        # for n, edge_residual in iter_all_residuals[-1].items():
-        for e, residual in edge_residuals.items():
-            g_beads_subgraph.edges[e]["residual"] = np.mean(residual)
-
-    # undo node relabeling
-    # skip bead dict unrelabeling, as it is not needed
-    nx.relabel_nodes(g_beads_subgraph, inverse_mapping, copy=False)
-
-    df = pd.DataFrame(
-        {
-            "mean_residual": mean_residuals,
-            "max_residual": max_residuals,
-            "iteration": np.arange(len(mean_residuals)),
-        }
+        ),
+        edge_label="Pairwise view correlation",
+        display_view_indices=True,
+        use_positional_colors=False,
+        plot_title="Pairwise registration summary",
+        show_plot=show_plot,
     )
 
-    params = {
-        node: param_utils.affine_to_xaffine(
-            g_beads_subgraph.nodes[node]["affine"]
+    fig_group_res, ax_group_res = None, None
+    if groupwise_resolution_info_dict is not None:
+        edge_residuals_dict = groupwise_resolution_info_dict.get(
+            "edge_residuals"
         )
-        for node in g_beads_subgraph.nodes
-    }
-    return params, df, g_beads_subgraph
+        if isinstance(edge_residuals_dict, dict):
+            edge_residuals_dict = edge_residuals_dict.get(0, {})
+
+        used_edges = groupwise_resolution_info_dict.get("used_edges")
+        if isinstance(used_edges, dict):
+            used_edges = used_edges.get(0, [])
+        used_edge_set = (
+            {tuple(sorted(e)) for e in used_edges}
+            if used_edges
+            else set()
+        )
+
+        if edge_residuals_dict is None or not hasattr(
+            edge_residuals_dict, "get"
+        ):
+            edge_residuals_dict = {}
+
+        edge_residuals = np.array(
+            [
+                edge_residuals_dict.get(tuple(sorted(e)), np.nan)
+                for e in edges
+            ]
+        )
+        edge_linestyles = [
+            "-" if tuple(sorted(e)) in used_edge_set else ":"
+            for e in edges
+        ]
+        finite_vals = edge_residuals[np.isfinite(edge_residuals)]
+        if finite_vals.size == 0:
+            edge_clims = [0, 1]
+        else:
+            vmin, vmax = np.nanmin(edge_residuals), np.nanmax(
+                edge_residuals
+            )
+            edge_clims = [0, 1] if vmin == vmax else [vmin, vmax]
+        fig_group_res, ax_group_res = vis_utils.plot_positions(
+            msims,
+            transform_key=new_transform_key,
+            edges=edges,
+            edge_color_vals=edge_residuals,
+            edge_linestyles=edge_linestyles,
+            edge_linestyle_labels={
+                "-": "Used edges",
+                ":": "Unused edges",
+            },
+            edge_cmap="Spectral_r",
+            edge_clims=edge_clims,
+            edge_label="Remaining edge residuals [distance units]",
+            display_view_indices=True,
+            use_positional_colors=False,
+            plot_title="Global parameter resolution summary",
+            show_plot=show_plot,
+        )
+
+    return {'fig_pair_reg': fig_pair_reg,
+            'ax_pair_reg': ax_pair_reg,
+            'fig_group_res': fig_group_res,
+            'ax_group_res': ax_group_res}
 
 
 def register(
@@ -1734,19 +1099,12 @@ def register(
     return_dict: bool = False,
 ):
     """
-
     Register a list of views to a common extrinsic coordinate system.
 
-    This function is the main entry point for registration.
-
-    1) Build a graph of pairwise overlaps between views
-    2) Determine registration pairs from this graph
-    3) Register each pair of views.
-       Need to add option to pass registration functions here.
-    4) Determine the parameters mapping each view into the new extrinsic
-       coordinate system.
-       Currently done by determining a reference view and concatenating for reach
-       view the pairwise transforms along the shortest paths towards the ref view.
+    High-level flow:
+    1) Build the overlap graph.
+    2) Run pairwise registrations for selected edges.
+    3) Resolve global transforms from the pairwise results.
 
     Parameters
     ----------
@@ -1788,30 +1146,19 @@ def register(
         - 'transform_type': ['Translation', 'Rigid' 'Affine'] or ['Similarity']
         For further parameters, see the docstring of the registration function.
     groupwise_resolution_method : str, optional
-        Method used to determine the final transform parameters
-        from pairwise registrations:
-        - 'global_optimization': global optimization considering all pairwise transforms
-        - 'shortest_paths': concatenation of pairwise transforms along shortest paths
+        Method used to resolve global transforms from pairwise registrations:
+        - 'global_optimization' (transform: translation|rigid|similarity|affine)
+        - 'shortest_paths' (uses the transform type defined by the pairwise registrations)
+        - 'linear_two_pass' (transform: translation|rigid)
+        Custom component-level methods can be registered via
+        `param_resolution.register_groupwise_resolution_method(...)` and
+        referenced by name.
     groupwise_resolution_kwargs : dict, optional
-        Additional keyword arguments passed to the groupwise optimization function.
-        IMPORTANT: The "transform" key here determines the final types of transformations.
-        By default this is {'transform': 'translation'}. Even if the pairwise registration
-        function returns a rigid (rotation) or affine transformation, the groupwise resolution
-        will restrict the final transformations to the indicated type (i.e. for a pairwise
-        registration function that returns a rigid transformation, it most cases it makes sense
-        to use 'rigid' as the groupwise resolution transform type).
-        Most important parameters:
-        - 'transform': str
-            Type of transformation to use for groupwise resolution.
-            Available types:
-            - 'translation': translation (default)
-            - 'rigid': rigid body transformation
-            - 'similarity': similarity transformation
-            - 'affine': affine transformation
-        - 'abs_tol': float, optional
-            Absolute value of max edge residual below which the groupwise resolution stops.
-        - 'reference_view': int, optional
-            Reference view which keeps its transformation fixed.
+        Additional keyword arguments passed to the groupwise resolver.
+        Parameters are method-specific. Common options include:
+        - 'transform': final transform type (see method notes above)
+        - 'reference_view': node index to keep fixed
+        See the resolver docstrings for full details.
     pre_registration_pruning_method : str, optional
         Method used to eliminate registration edges (e.g. diagonals) from the view adjacency
         graph before registration. Available methods:
@@ -1837,6 +1184,7 @@ def register(
            (stack boundaries shown as before registration)
         2) Residual distances between registration edges after global parameter resolution.
            Grey edges have been removed during glob param res (stack boundaries shown as after registration).
+           Solid edges were used by the resolver, dotted edges were unused.
         Stack boundary positions reflect the registration result.
         By default False
     pairs : list of tuples, optional
@@ -1869,9 +1217,11 @@ def register(
                 - 'qualities': Edge registration qualities
         - 'groupwise_resolution': Dictionary containing the following
             - 'summary_plot': Tuple containing the figure and axis of the summary plot
-            - 'graph': networkx graph of groupwise resolution
             - 'metrics': Dictionary containing the following metrics:
-                - 'residuals': Edge residuals after groupwise resolution
+                - 'edge_residuals': Dict[int, dict[tuple, float]] mapping timepoint index
+                  to edge residuals
+                - 'used_edges': Dict[int, list[tuple]] mapping timepoint index to edges
+                  used by the resolution method
     """
 
     # warn about deprecated parameter
@@ -1952,13 +1302,15 @@ def register(
             weight_key="quality",
         )
 
-    params, groupwise_resolution_info_dict = groupwise_resolution(
+    params_dict, groupwise_resolution_info_dict = groupwise_resolution(
         g_reg_computed,
         method=groupwise_resolution_method,
         **groupwise_resolution_kwargs,
     )
 
-    params = [params[iview] for iview in sorted(g_reg_computed.nodes())]
+    params = [
+        params_dict[iview] for iview in sorted(g_reg_computed.nodes())
+    ]
 
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
@@ -1969,98 +1321,41 @@ def register(
                 base_transform_key=transform_key,
             )
 
-        if plot_summary or return_dict:
-            edges = list(g_reg_computed.edges())
-            fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
-                msims,
-                transform_key=transform_key,
-                edges=edges,
-                edge_color_vals=np.array(
-                    [
-                        g_reg_computed.get_edge_data(*e)["quality"].mean()
-                        for e in edges
-                    ]
-                ),
-                edge_label="Pairwise view correlation",
-                display_view_indices=True,
-                use_positional_colors=False,
-                plot_title="Pairwise registration summary",
-                show_plot=plot_summary,
-            )
-
-            if groupwise_resolution_info_dict is not None:
-                edge_residuals = np.array(
-                    [
-                        groupwise_resolution_info_dict[
-                            "optimized_graph_t0"
-                        ].get_edge_data(*e)["residual"]
-                        if e
-                        in groupwise_resolution_info_dict[
-                            "optimized_graph_t0"
-                        ].edges
-                        else np.nan
-                        for e in edges
-                    ]
-                )
-                edge_clims = [
-                    np.nanmin(edge_residuals),
-                    np.nanmax(edge_residuals),
-                ]
-                if edge_clims[0] == edge_clims[1]:
-                    edge_clims = [0, 1]
-                fig_group_res, ax_group_res = vis_utils.plot_positions(
-                    msims,
-                    transform_key=new_transform_key,
-                    edges=edges,
-                    edge_color_vals=edge_residuals,
-                    edge_cmap="Spectral_r",
-                    edge_clims=edge_clims,
-                    edge_label="Remaining edge residuals [distance units]",
-                    display_view_indices=True,
-                    use_positional_colors=False,
-                    plot_title="Global parameter resolution summary",
-                    show_plot=plot_summary,
-                )
-            else:
-                fig_group_res, ax_group_res = None, None
+    if plot_summary:
+        plot_info = _plot_registration_summaries(
+            msims,
+            transform_key,
+            new_transform_key,
+            g_reg_computed,
+            groupwise_resolution_info_dict,
+            show_plot=plot_summary,
+        )
     else:
-        fig_pair_reg, ax_pair_reg, fig_group_res, ax_group_res = [
-            None,
-            None,
-            None,
-            None,
-        ]
+        plot_info = {}
 
     if return_dict:
-        # limit output graphs to first timepoint (for now)
-        g_reg_computed = g_reg_computed.copy()
-        for e in g_reg_computed.edges:
-            for k, v in g_reg_computed.edges[e].items():
-                if isinstance(v, xr.DataArray) and "t" in v.coords:
-                    g_reg_computed.edges[e][k] = g_reg_computed.edges[e][
-                        k
-                    ].sel({"t": g_reg_computed.edges[e][k].coords["t"][0]})
-
         return {
             "params": params,
             "pairwise_registration": {
-                "summary_plot": (fig_pair_reg, ax_pair_reg),
                 "graph": g_reg_computed,
                 "metrics": {
                     "qualities": nx.get_edge_attributes(
                         g_reg_computed, "quality"
-                    ),
+                    )
                 },
+                "summary_plot": None if plot_summary is False
+                else (
+                    plot_info['fig_pair_reg'],
+                    plot_info['ax_pair_reg']
+                    )
             },
             "groupwise_resolution": {
-                "summary_plot": (fig_group_res, ax_group_res),
-                "graph": groupwise_resolution_info_dict["optimized_graph_t0"],
-                "metrics": {
-                    "residuals": nx.get_edge_attributes(
-                        groupwise_resolution_info_dict["optimized_graph_t0"],
-                        "residual",
-                    ),
-                },
+                "metrics": groupwise_resolution_info_dict,
+                "summary_plot": None if plot_summary is False
+                else (
+                    plot_info['fig_group_res'],
+                    plot_info['ax_group_res']
+                )
             },
         }
     else:

@@ -58,10 +58,14 @@ nav:
   - data_formats.md
   - implementation_details.md
   - objects.md
+  - Built-in methods:
+    - Pairwise registration: built_in_methods_pairwise_registration.md
+    - Global parameter resolution: built_in_methods_global_param_resolution.md
+    - Fusion: built_in_methods_fusion.md
   - Extension API:
     - extension_api_pairwise_registration.md
-    - extension_api_fusion.md
     - extension_api_global_param_resolution.md
+    - extension_api_fusion.md
   - Visualization:
     - napari_stitcher.md
     - neuroglancer.md
@@ -82,7 +86,6 @@ theme:
     - navigation.footer  # next/previous links in footer
     - navigation.instant
     - navigation.instant.progress
-    - navigation.expand
   logo: images/logo_color.svg
   icon:
     # logo: fontawesome/solid/clone
