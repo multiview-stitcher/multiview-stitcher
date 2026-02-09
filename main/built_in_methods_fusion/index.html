@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/notebooks/">
+        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/built_in_methods_fusion/">
       
       
-        <link rel="prev" href="../chart/">
+        <link rel="prev" href="../built_in_methods_global_param_resolution/">
       
       
-        <link rel="next" href="../features/">
+        <link rel="next" href="../extension_api_pairwise_registration/">
       
       
       <link rel="icon" href="../images/logo_color.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Notebooks - multiview-stitcher</title>
+        <title>Fusion - multiview-stitcher</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#notebooks" class="md-skip">
+        <a href="#fusion" class="md-skip">
           Skip to content
         </a>
       
@@ -117,7 +117,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Notebooks
+              Fusion
             
           </span>
         </div>
@@ -527,19 +527,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -548,7 +539,6 @@
   
 
       </a>
-      
     </li>
   
 
@@ -637,17 +627,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" checked>
         
           
           <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
@@ -661,7 +653,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_11">
             <span class="md-nav__icon md-icon"></span>
             Built-in methods
@@ -714,10 +706,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../built_in_methods_fusion/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Fusion
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -726,6 +738,86 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#fusion-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fusion methods
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusion methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weighted_average_fusion-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      weighted_average_fusion (default)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#simple_average_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      simple_average_fusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#max_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      max_fusion
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blending-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      Blending weights
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusion-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fusion weights
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1091,6 +1183,74 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#fusion-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fusion methods
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusion methods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weighted_average_fusion-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      weighted_average_fusion (default)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#simple_average_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      simple_average_fusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#max_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      max_fusion
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blending-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      Blending weights
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusion-weights" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fusion weights
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1107,8 +1267,37 @@
   
 
 
-<h1 id="notebooks">Notebooks</h1>
-<p>Example notebooks can be found here: <a href="https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks">multiview-stitcher/notebooks</a>.</p>
+<h1 id="fusion">Fusion</h1>
+<p>Fusion combines the pre-transformed views into a single output image. Built-in
+methods are selected with <code>fusion.fuse(..., fusion_func=..., weights_func=...)</code>.
+Custom fusion and weight functions are described in the Extension API section.</p>
+<h2 id="fusion-methods">Fusion methods</h2>
+<h3 id="weighted_average_fusion-default"><code>weighted_average_fusion</code> (default)</h3>
+<ul>
+<li>Uses blending weights with optional extra <code>fusion_weights</code>.</li>
+<li>Good general-purpose choice for smooth transitions across overlaps.</li>
+</ul>
+<h3 id="simple_average_fusion"><code>simple_average_fusion</code></h3>
+<ul>
+<li>Averages valid pixels (ignores NaNs), without blending weights.</li>
+<li>Useful as a baseline when weights are not desired.</li>
+</ul>
+<h3 id="max_fusion"><code>max_fusion</code></h3>
+<ul>
+<li>Pixel-wise maximum across views.</li>
+<li>Useful for sparse or bright features where max intensity is preferred.</li>
+</ul>
+<h2 id="blending-weights">Blending weights</h2>
+<p><code>fusion.fuse</code> computes smooth blending weights using
+<code>weights.get_blending_weights</code>. The falloff is controlled by <code>blending_widths</code>
+(physical units per dimension) and normalized across views.</p>
+<h2 id="fusion-weights">Fusion weights</h2>
+<p>Additional per-view weights can be supplied via <code>weights_func</code> when the fusion
+method accepts <code>fusion_weights</code>.</p>
+<ul>
+<li><code>weights.content_based</code>: Content-based weights (Preibisch et al.) computed
+  from local contrast; configure with <code>sigma_1</code> and <code>sigma_2</code>.</li>
+</ul>
 
 
 
@@ -1140,7 +1329,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../chart/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Workflow chart">
+          <a href="../built_in_methods_global_param_resolution/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Global parameter resolution">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1150,20 +1339,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Workflow chart
+                Global parameter resolution
               </div>
             </div>
           </a>
         
         
           
-          <a href="../features/" class="md-footer__link md-footer__link--next" aria-label="Next: Features">
+          <a href="../extension_api_pairwise_registration/" class="md-footer__link md-footer__link--next" aria-label="Next: Pairwise registration">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Features
+                Pairwise registration
               </div>
             </div>
             <div class="md-footer__button md-icon">
