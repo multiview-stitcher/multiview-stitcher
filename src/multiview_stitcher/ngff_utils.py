@@ -275,7 +275,7 @@ def write_and_return_downsampled_sim(
                 dtype=array.dtype,
                 config={'write_empty_chunks': True},
                 fill_value=0,
-                mode="a",
+                mode="w" if overwrite else "a",
                 **zarr_array_creation_kwargs,
             )
 
