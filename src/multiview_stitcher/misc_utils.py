@@ -67,12 +67,18 @@ def process_batch_using_ray(func, block_ids, num_cpus=4):
     return
 
 
-def process_batch_using_joblib(func, block_ids, n_jobs=4):
+def process_batch_using_joblib(
+    func,
+    block_ids,
+    n_jobs=4,
+    backend='loky',
+    ):
     """
     A batch function that uses joblib for parallel processing.
     1. func: function to apply to each block_id
     2. block_ids: list of block IDs to process
     3. n_jobs: number of parallel jobs to run
+    4. backend: joblib backend to use ('threading' or 'loky' (default) for multiprocessing)
     """
 
     try:
@@ -80,7 +86,10 @@ def process_batch_using_joblib(func, block_ids, n_jobs=4):
     except ImportError:
         raise ImportError("Please install joblib to use this function.")
 
-    Parallel(n_jobs=n_jobs)(
+    Parallel(
+        n_jobs=n_jobs,
+        backend=backend
+        )(
         delayed(func)(block_id) for block_id in block_ids
     )
     return
