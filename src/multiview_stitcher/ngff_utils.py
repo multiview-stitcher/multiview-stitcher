@@ -268,7 +268,7 @@ def write_and_return_downsampled_sim(
                     for s, sdim in zip(array.shape, dims)]
             
             # make sure output array exists with correct shape and chunks, and with `write_empty_chunks=True`
-            output_zarr_arr = zarr.open(
+            zarr.open(
                 output_zarr_array_url,
                 shape=[int(s) for s in output_shape],
                 chunks=[int(cs) for cs in chunksizes],
