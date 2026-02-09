@@ -266,6 +266,18 @@ def write_and_return_downsampled_sim(
             output_shape = [np.floor(s) // (downscale_factors_per_spatial_dim[sdim]
                     if sdim in sdims else 1)
                     for s, sdim in zip(array.shape, dims)]
+            
+            # make sure output array exists with correct shape and chunks, and with `write_empty_chunks=True`
+            output_zarr_arr = zarr.open(
+                output_zarr_array_url,
+                shape=[int(s) for s in output_shape],
+                chunks=[int(cs) for cs in chunksizes],
+                dtype=array.dtype,
+                config={'write_empty_chunks': True},
+                fill_value=0,
+                mode="a",
+                **zarr_array_creation_kwargs,
+            )
 
             write_downsampled_chunk_p = partial(write_downsampled_chunk, 
                 input_array=array,
