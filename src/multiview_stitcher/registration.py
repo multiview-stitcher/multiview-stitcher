@@ -1607,9 +1607,6 @@ E.g. using pip:
     simage_affine.estimate(gv, gv_t)
     p = simage_affine.params
 
-    # ants coordinates are in xyz order
-    p = param_utils.invert_coordinate_order(p)
-
     p = param_utils.affine_to_xaffine(p)
 
     if changed_units:

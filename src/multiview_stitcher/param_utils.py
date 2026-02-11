@@ -115,7 +115,7 @@ def affine_from_rotation(angle, direction, point=None):
     M[:3, :3] = R
     if point is not None:
         # rotation not around origin
-        point = np.array(point[:3], dtype=np.float64, copy=False)
+        point = np.asarray(point[:3], dtype=np.float64)
         M[:3, 3] = point - np.dot(R, point)
 
     return M

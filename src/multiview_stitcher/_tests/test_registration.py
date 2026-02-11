@@ -648,3 +648,174 @@ def test_registration_with_reg_res_level():
         
         # Check that the relative position is close to ground truth
         assert np.allclose(rel_pos, gt_shift, atol=tolerance)
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+@pytest.mark.parametrize(
+    "transform_types",
+    [
+        ["Rigid"],
+        ["Translation", "Rigid"],
+        ["Translation", "Rigid", "Similarity"],
+    ],
+)
+def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
+    """
+    Test that registration_ANTsPy can recover known rotations in 2D and 3D.
+
+    Rather than focusing on ensuring precise recovery of the rotation parameters,
+    this test checks that recovered transformations are broadly correct to
+    make sure parameter axis convention / order is correct.
+    
+    This test creates a synthetic image with distinct features, applies a known
+    rotation to it, and then uses registration_ANTsPy to register the rotated
+    image back to the original. It verifies that the recovered transformation
+    closely matches the inverse of the applied rotation.
+    """
+    # Create a synthetic image with distinct features
+    if ndim == 2:
+        # 2D image with multiple rectangular features
+        im = np.zeros((100, 100), dtype=float)
+        im[10:40, 20:40] = 1
+        im[70:80, 60:90] = 1
+        im[20:40, 60:70] = 0.7
+        im[60:80, 20:40] = 0.5
+        spatial_dims = ["y", "x"]
+        # rotation angle in radians (15 degrees)
+        rotation_angle = np.pi / 12
+        # Direction vector for 2D rotation (around z-axis)
+        direction = [0, 0, 1]
+    else:
+        # 3D image with multiple box features
+        im = np.zeros((60, 60, 60), dtype=float)
+        im[10:30, 15:30, 20:35] = 1
+        im[35:50, 10:25, 40:55] = 0.8
+        im[15:25, 35:50, 10:25] = 0.6
+        im[40:55, 40:50, 15:30] = 0.4
+        spatial_dims = ["z", "y", "x"]
+        # rotation angle in radians (10 degrees for 3D to be more conservative)
+        rotation_angle = np.pi / 18
+        # Direction vector for 3D rotation (around diagonal axis)
+        direction = np.array([1, 1, 1]) / np.sqrt(3)
+
+    # Apply Gaussian smoothing to make features less sharp
+    im = ndimage.gaussian_filter(im, sigma=2)
+    
+    # Create the rotation transformation
+    center = np.array(im.shape) / 2
+    if ndim == 2:
+        # For 2D, we need to work in homogeneous coordinates
+        affine_rotation = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=list(center) + [0]
+        )[:3, :3]  # Extract 2D part
+    else:
+        # For 3D, use directly
+        affine_rotation = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=center
+        )
+    
+    # Apply the rotation to create the moving image
+    imt = ndimage.affine_transform(
+        im, 
+        np.linalg.inv(affine_rotation[:ndim, :ndim]),
+        offset=np.linalg.inv(affine_rotation)[:ndim, ndim],
+        order=3,
+        mode='constant',
+        cval=0
+    )
+    
+    # Set up spacing and origin
+    spacing = {dim: 1.0 for dim in spatial_dims}
+    origin = {dim: 0.0 for dim in spatial_dims}
+    
+    # Create xarray DataArrays for fixed and moving images
+    fixed_data = xr.DataArray(
+        im,
+        dims=spatial_dims,
+        coords={dim: np.arange(im.shape[i]) for i, dim in enumerate(spatial_dims)},
+    )
+    
+    moving_data = xr.DataArray(
+        imt,
+        dims=spatial_dims,
+        coords={dim: np.arange(imt.shape[i]) for i, dim in enumerate(spatial_dims)},
+    )
+    
+    # Run registration
+    reg_result = registration.registration_ANTsPy(
+        fixed_data=fixed_data,
+        moving_data=moving_data,
+        fixed_origin=origin,
+        moving_origin=origin,
+        fixed_spacing=spacing,
+        moving_spacing=spacing,
+        initial_affine=param_utils.identity_transform(ndim),
+        transform_types=transform_types,
+    )
+    
+    # Extract the recovered affine matrix
+    recovered_affine = np.array(reg_result["affine_matrix"])
+    
+    # Test in pixel space: transform vertices/borders through expected transform
+    # and back through recovered transform, then check RMS error
+    
+    # Generate vertices (corners) and edge points of the image
+    if ndim == 2:
+        # For 2D: corners and edge midpoints
+        shape = im.shape
+        vertices = np.array([
+            [0, 0], [0, shape[1]-1], [shape[0]-1, 0], [shape[0]-1, shape[1]-1],
+            [shape[0]//2, 0], [shape[0]//2, shape[1]-1],  # top and bottom midpoints
+            [0, shape[1]//2], [shape[0]-1, shape[1]//2],  # left and right midpoints
+            [shape[0]//2, shape[1]//2],  # center
+        ])
+    else:
+        # For 3D: corners and face centers
+        shape = im.shape
+        vertices = []
+        # 8 corners
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    vertices.append([
+                        i * (shape[0]-1),
+                        j * (shape[1]-1),
+                        k * (shape[2]-1)
+                    ])
+        # face centers
+        for dim in range(3):
+            for val in [0, shape[dim]-1]:
+                center = [s // 2 for s in shape]
+                center[dim] = val
+                vertices.append(center)
+        # volume center
+        vertices.append([s // 2 for s in shape])
+        vertices = np.array(vertices)
+    
+    # Transform vertices through the expected rotation (ground truth)
+    vertices_transformed_expected = transformation.transform_pts(
+        vertices, affine_rotation
+    )
+    
+    # Transform back through the recovered transformation
+    # The recovered transform maps moving->fixed, so we need its inverse to go back
+    vertices_recovered = transformation.transform_pts(
+        vertices_transformed_expected, np.linalg.inv(recovered_affine)
+    )
+    
+    # Calculate RMS error between original and round-trip vertices
+    errors = vertices - vertices_recovered
+    rms_error = np.sqrt(np.mean(np.sum(errors**2, axis=1)))
+    
+    # For rigid transforms, the RMS error should be small
+    if any(t in ["Rigid", "Similarity", "Affine"] for t in transform_types):
+        rms_tolerance = 2.0 if ndim == 2 else 3.0
+        assert rms_error < rms_tolerance, (
+            f"RMS error too large for {ndim}D with transform_types={transform_types}. "
+            f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
+        )
+    
+    # Check quality metric
+    assert reg_result["quality"] > 0.5, (
+        f"Registration quality too low: {reg_result['quality']:.3f}"
+    )
