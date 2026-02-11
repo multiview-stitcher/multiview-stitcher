@@ -751,6 +751,9 @@ def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
         moving_spacing=spacing,
         initial_affine=param_utils.identity_transform(ndim),
         transform_types=transform_types,
+        ants_registration_kwargs={
+            'aff_metric': 'meansquares',
+        }
     )
     
     # Extract the recovered affine matrix
