@@ -81,6 +81,9 @@ czi = [
     "czifile ==2019.7.2.1",
     "imagecodecs >=2023.7.10",
 ]
+lif = [
+    "readlif",
+]
 dev = [
     "tox",
     "jupyter",
