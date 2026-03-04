@@ -8,12 +8,14 @@ import numpy as np
 import xarray as xr
 from dask import delayed
 
-try:
-    import czifile
+# try:
+#     import czifile
 
-    from . import czifile_patch  # noqa: F401
-except ImportError:
-    czifile = None
+#     from . import czifile_patch  # noqa: F401
+# except ImportError:
+#     czifile = None
+
+import czifile
 
 
 def get_czi_shape(filepath):
