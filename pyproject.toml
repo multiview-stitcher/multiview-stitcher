@@ -88,7 +88,7 @@ dev = [
     "pytest-benchmark >5",
     "nbmake",  # notebook testing
     "antspyx >=0.6.0",
-    "czifile ==2019.7.2.1",
+    "czifile ==2019.7.2.3",
     "imagecodecs >=2023.7.10",
     "pre-commit",
 ]
