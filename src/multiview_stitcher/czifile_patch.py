@@ -74,7 +74,8 @@ def data(self, raw=False, resize=True, order=0):
 
         if de.compression in {2, 5, 6}: # patched https://github.com/cgohlke/czifile/issues/10
             # LZW
-            data = numpy.fromstring(data, de.dtype)
+            # data = numpy.fromstring(data, de.dtype)
+            data = numpy.frombuffer(data, de.dtype)
     else:
         dtype = numpy.dtype(de.dtype)
         with fh.lock:
