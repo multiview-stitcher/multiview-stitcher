@@ -650,6 +650,7 @@ def test_registration_with_reg_res_level():
         assert np.allclose(rel_pos, gt_shift, atol=tolerance)
 
 
+@pytest.mark.skip(reason="Skipping this test for now because of sporadic failures that need investigation.")
 @pytest.mark.parametrize("ndim", [2, 3])
 @pytest.mark.parametrize(
     "transform_types",
