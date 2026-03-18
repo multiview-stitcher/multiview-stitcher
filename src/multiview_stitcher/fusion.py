@@ -287,8 +287,8 @@ def fuse(
         # Resolve store path for data (OME-Zarr stores scale 0 under "<root>/0")
         store_url = os.path.join(output_zarr_url, "0") if ome_zarr else output_zarr_url
 
-        if overwrite and os.path.exists(store_url):
-            shutil.rmtree(store_url)
+        if overwrite and os.path.exists(output_zarr_url):
+            shutil.rmtree(output_zarr_url)
         if ome_zarr:
             # Ensure creation kwargs reflect NGFF version when writing OME-Zarr
             zarr_array_creation_kwargs = ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
