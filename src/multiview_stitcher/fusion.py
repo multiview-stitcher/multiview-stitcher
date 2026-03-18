@@ -356,6 +356,8 @@ def fuse(
                 output_zarr_url=output_zarr_url,
                 overwrite=False,
                 batch_options=batch_options,
+                zarr_array_creation_kwargs=zarr_array_creation_kwargs,
+                ngff_version=zarr_options.get("ngff_version", "0.4"),
             )
 
         return fused
