@@ -276,13 +276,13 @@ def fuse(
         batch_func = batch_options.get("batch_func", None)
         n_batch = batch_options.get("n_batch", 1)
         batch_func_kwargs = batch_options.get("batch_func_kwargs", None)
-        zarr_array_creation_kwargs = batch_options.get("zarr_array_creation_kwargs", None)
 
         # Collect zarr options with defaults
         zarr_options = zarr_options or {}
         ome_zarr = zarr_options.get("ome_zarr", False)
         ngff_version = zarr_options.get("ngff_version", "0.4")
         overwrite = zarr_options.get("overwrite", True)
+        zarr_array_creation_kwargs = zarr_options.get("zarr_array_creation_kwargs", None)
 
         # Resolve store path for data (OME-Zarr stores scale 0 under "<root>/0")
         store_url = os.path.join(output_zarr_url, "0") if ome_zarr else output_zarr_url
@@ -357,7 +357,7 @@ def fuse(
                 overwrite=False,
                 batch_options=batch_options,
                 zarr_array_creation_kwargs=zarr_array_creation_kwargs,
-                ngff_version=zarr_options.get("ngff_version", "0.4"),
+                ngff_version=ngff_version,
             )
 
         return fused
