@@ -9,6 +9,12 @@ from multiview_stitcher import transformation
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
+try:
+    import cupy as cp
+    import cupyx.scipy.ndimage
+except ImportError:
+    cp = None
+
 
 def calculate_required_overlap(
     method_func=None,
@@ -145,6 +151,7 @@ def get_blending_weights(
     source_bb: BoundingBox,
     affine: xr.DataArray,
     blending_widths: dict[str, float] = None,
+    cupy=False,
 ):
     """
     Calculate smooth blending weights for fusion.
@@ -207,6 +214,9 @@ def get_blending_weights(
         translation=edt_support_origin,
     )
 
+    if cp is not None and cupy:
+        edt_support.data = cp.asarray(edt_support.data)
+
     target_weights = transformation.transform_sim(
         edt_support.astype(np.float32),
         p=np.linalg.inv(affine),
@@ -243,4 +253,4 @@ def get_blending_weights(
 
     target_weights.data = cosine_weights(target_weights.data)
 
-    return target_weights
+    return target_weights.data

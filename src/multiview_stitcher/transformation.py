@@ -6,6 +6,12 @@ from scipy.ndimage import affine_transform
 
 from multiview_stitcher import param_utils, spatial_image_utils
 
+try:
+    import cupy as cp
+    import cupyx.scipy.ndimage
+except ImportError:
+    cp = None
+
 
 def transform_sim(
     sim,
@@ -79,10 +85,20 @@ def transform_sim(
             **affine_transform_kwargs,
         )
     else:
-        out_data = affine_transform(
-            sim.data,
-            **affine_transform_kwargs,
-        )
+        # check if sim.data is a cupy array
+        if cp is not None and isinstance(sim.data, cp.ndarray):
+            # use cupim for affine transform
+            matrix = cp.asarray(affine_transform_kwargs.pop("matrix"))
+            out_data = cupyx.scipy.ndimage.affine_transform(
+                sim.data,
+                matrix=matrix,
+                **affine_transform_kwargs,
+            )
+        else:
+            out_data = affine_transform(
+                sim.data,
+                **affine_transform_kwargs,
+            )
 
     sim = si.to_spatial_image(
         out_data,

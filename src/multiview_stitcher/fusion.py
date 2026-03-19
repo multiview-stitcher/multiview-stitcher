@@ -26,6 +26,11 @@ from multiview_stitcher import (
 )
 from multiview_stitcher import spatial_image_utils as si_utils
 
+try:
+    import cupy as cp
+except ImportError:
+    cp = None
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -734,7 +739,7 @@ def fuse_np(
         ).data
         for sim, param in zip(sims, params)
     ]
-    field_ims_t = np.array(field_ims_t)
+    field_ims_t = np.stack(field_ims_t)
 
     # get blending weights
     if fusion_requires_blending_weights:
@@ -744,9 +749,12 @@ def fuse_np(
                 source_bb=full_view_bbs[iview],
                 affine=params[iview],
                 blending_widths=blending_widths,
+                cupy=False if cp is None else
+                (True if isinstance(sims[iview].data, cp.ndarray) else False),
             )
             for iview in range(len(sims))
         ]
+        field_ws_t = np.stack(field_ws_t)
         field_ws_t = field_ws_t * ~np.isnan(field_ims_t)
         field_ws_t = weights.normalize_weights(field_ws_t)
     else:
