@@ -26,6 +26,10 @@ from multiview_stitcher import (
 )
 from multiview_stitcher import spatial_image_utils as si_utils
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
@@ -1172,7 +1176,11 @@ def prepare_block_fusion(
             {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()})
             for sim in sims]
 
-        print(f"Fusing chunk with block id {block_id}, spatial chunk index {spatial_chunk_ind}")
+        logger.debug(
+            "Fusing chunk with block id %s, spatial chunk index %s",
+            block_id,
+            spatial_chunk_ind,
+        )
         fused = fuse(
             sims=sims,
             **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
