@@ -1118,7 +1118,7 @@ def prepare_block_fusion(
         shape=full_output_shape,
         chunks=full_output_chunksize)
     
-    print(f"Fusing into a an output stack:")
+    print("Fusing into an output stack:")
     print("- shape: ", {dim: int(output_stack_properties['shape'][dim])
         if dim in sdims else ns_shape[dim] for dim in dims})
     print("- spacing: ", {k: float(v)
