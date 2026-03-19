@@ -26,6 +26,10 @@ from multiview_stitcher import (
 )
 from multiview_stitcher import spatial_image_utils as si_utils
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
@@ -324,7 +328,6 @@ def fuse(
         nblocks = block_fusion_info["nblocks"]
         osp = block_fusion_info["output_stack_properties"]
         osp["shape"] = {dim: int(v) for dim, v in osp["shape"].items()}
-
         print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
         for batch in tqdm(
             misc_utils.ndindex_batches(nblocks, n_batch),
@@ -1110,14 +1113,14 @@ def prepare_block_fusion(
          + [output_stack_properties['shape'][dim] for dim in sdims]
     full_output_chunksize = [1,] * len(nsdims)\
          + [int(output_chunksize[dim]) for dim in sdims]
-    
+        
     normalized_chunks = normalize_chunks(
         shape=full_output_shape,
         chunks=full_output_chunksize)
     
-    print(f"Fusing into a an output stack:")
+    print("Fusing into an output stack:")
     print("- shape: ", {dim: int(output_stack_properties['shape'][dim])
-        if dim in sdims else 1 for dim in dims})
+        if dim in sdims else ns_shape[dim] for dim in dims})
     print("- spacing: ", {k: float(v)
         for k, v in output_stack_properties['spacing'].items()})
     print("- origin: ", {k: float(v)
@@ -1165,16 +1168,28 @@ def prepare_block_fusion(
         chunk_shape = {sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
                     for idim, b in enumerate(spatial_chunk_ind)}
 
+
+        sims = fuse_kwargs.get("sims")
+        # restrict sims to relevant non-spatial coordinates
+        sims = [si_utils.sim_sel_coords(
+            sim,
+            {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()})
+            for sim in sims]
+
+        logger.debug(
+            "Fusing chunk with block id %s, spatial chunk index %s",
+            block_id,
+            spatial_chunk_ind,
+        )
         fused = fuse(
-            sims=fuse_kwargs.get("sims"),
+            sims=sims,
             **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
             output_spacing={dim: osp['spacing'][dim] for dim in sdims},
             ).data
 
-        fused = fused[tuple(slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims)]
-
+        # Write the fused chunk to the appropriate location in the Zarr array
         with dask_config.set(scheduler='single-threaded'):
             da.to_zarr(
                 fused, output_zarr_array,
