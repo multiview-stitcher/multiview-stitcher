@@ -9,6 +9,12 @@ from multiview_stitcher import transformation
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
+try:
+    import cupy as cp
+    import cupyx.scipy.ndimage
+except ImportError:
+    cp = None
+
 
 def calculate_required_overlap(
     method_func=None,
@@ -61,10 +67,10 @@ def content_based(
     transformed_views[blending_weights < 1e-7] = np.nan
 
     weights = [
-        nan_gaussian_filter_dask_image(
+        nan_gaussian_filter(
             (
                 sim_t
-                - nan_gaussian_filter_dask_image(
+                - nan_gaussian_filter(
                     sim_t, sigma=sigma_1, mode="reflect"
                 )
             )
@@ -81,31 +87,27 @@ def content_based(
     return weights
 
 
-def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
+def nan_gaussian_filter(ar, *args, **kwargs):
     """
     Gaussian filter ignoring NaNs.
 
     https://stackoverflow.com/questions/18697532/gaussian-filtering-a-image-with-nan-in-python
-
-    Parameters
-    ----------
-    ar : da.array
-
-    Returns
-    -------
-    da.array
-        filtered array
     """
+
+    if cp is not None and isinstance(ar, cp.ndarray):
+        gaussian_filter_func = cupyx.scipy.ndimage.gaussian_filter
+    else:
+        gaussian_filter_func = gaussian_filter
 
     U = ar
     nan_mask = np.isnan(U)
     V = U.copy()
     V[nan_mask] = 0
-    VV = gaussian_filter(V, *args, **kwargs)
+    VV = gaussian_filter_func(V, *args, **kwargs)
 
     W = 0 * U.copy() + 1
     W[nan_mask] = 0
-    WW = gaussian_filter(W, *args, **kwargs)
+    WW = gaussian_filter_func(W, *args, **kwargs)
 
     # avoid division by zero
     WW[nan_mask] = 1
@@ -145,6 +147,7 @@ def get_blending_weights(
     source_bb: BoundingBox,
     affine: xr.DataArray,
     blending_widths: dict[str, float] = None,
+    cupy=False,
 ):
     """
     Calculate smooth blending weights for fusion.
@@ -166,7 +169,8 @@ def get_blending_weights(
 
     Returns
     -------
-    target_weights : spatial_image
+    target_weights : dask array containing blending weights
+        for the target bounding box
     """
 
     if blending_widths is None:
@@ -207,6 +211,9 @@ def get_blending_weights(
         translation=edt_support_origin,
     )
 
+    if cp is not None and cupy:
+        edt_support.data = cp.asarray(edt_support.data)
+
     target_weights = transformation.transform_sim(
         edt_support.astype(np.float32),
         p=np.linalg.inv(affine),
@@ -243,4 +250,4 @@ def get_blending_weights(
 
     target_weights.data = cosine_weights(target_weights.data)
 
-    return target_weights
+    return target_weights.data
