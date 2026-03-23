@@ -87,7 +87,7 @@ def transform_sim(
     else:
         # check if sim.data is a cupy array
         if cp is not None and isinstance(sim.data, cp.ndarray):
-            # use cupim for affine transform
+            # use cupyx.scipy.ndimage for affine transform
             matrix = cp.asarray(affine_transform_kwargs.pop("matrix"))
             out_data = cupyx.scipy.ndimage.affine_transform(
                 sim.data,
