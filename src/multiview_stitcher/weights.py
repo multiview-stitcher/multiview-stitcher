@@ -108,8 +108,6 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
     else:
         gaussian_filter_func = gaussian_filter
 
-    start = time()
-
     U = ar
     nan_mask = np.isnan(U)
     V = U.copy()
