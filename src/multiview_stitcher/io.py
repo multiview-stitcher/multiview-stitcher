@@ -15,7 +15,7 @@ except ImportError:
     AICSImage = None
 
 
-from multiview_stitcher import czi_utils
+from multiview_stitcher import czi_utils, lif_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = si_utils.DEFAULT_TRANSFORM_KEY
@@ -46,6 +46,9 @@ def read_mosaic_into_sims(filepath, scene_index=0):
 
     if filepath.suffix == ".czi":
         return read_mosaic_into_sims_czifile(filepath, scene_index=scene_index)
+
+    elif filepath.suffix == ".lif":
+        return read_mosaic_into_sims_readlif(filepath, scene_index=scene_index)
 
     else:
         return read_mosaic_into_sims_aicsimageio(
@@ -164,6 +167,63 @@ def read_mosaic_into_sims_aicsimageio(path, scene_index=0):
 
     return view_sims
 
+
+
+def read_mosaic_into_sims_readlif(filepath, scene_index=0):
+    """
+    Read the tiles of a LIF mosaic dataset into a list of sims.
+    This function uses readlif (instead of aicsimageio) to read the LIF file.
+
+    Parameters
+    ----------
+    filepath : str or Path
+        Path to the LIF file.
+    scene_index : int, optional
+        Index of the image / scene within the LIF file to read. Default is 0.
+
+    Returns
+    -------
+    list of SpatialImage
+        One SpatialImage per mosaic tile.
+    """
+    filepath = Path(filepath)
+
+    lif_image = lif_utils.get_lif_image(filepath, scene_index=scene_index)
+
+    n_mosaic = max(lif_image.n_mosaic, 1)
+
+    spacing = lif_utils.get_spacing_from_lif_image(lif_image)
+    tile_origins = lif_utils.get_mosaic_tile_origins(lif_image, spacing)
+
+    # TODO: channel names not available in readlif?
+    c_coords = list(range(lif_image.channels))
+
+    sims = []
+    for m in range(n_mosaic):
+        xim, _ = lif_utils.read_lif_tile_into_xim(filepath, scene_index, m)
+
+        spatial_dims = [dim for dim in xim.dims if dim in si_utils.SPATIAL_DIMS]
+
+        origin = tile_origins[m] if m < len(tile_origins) else dict.fromkeys(spatial_dims, 0.0)
+
+        xim = xim.assign_coords(
+            {sdim: xim.coords[sdim].values - xim.coords[sdim].values[0]
+             for sdim in spatial_dims}
+        )
+
+        sim = si_utils.get_sim_from_array(
+            xim.data,
+            dims=list(xim.dims),
+            scale=spacing,
+            translation=origin,
+            transform_key=METADATA_TRANSFORM_KEY,
+            c_coords=c_coords,
+            t_coords=xim.coords["t"].values if "t" in xim.dims else None,
+        )
+
+        sims.append(sim)
+
+    return sims
 
 def read_mosaic_into_sims_czifile(filename, scene_index=0):
     """

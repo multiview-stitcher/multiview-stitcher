@@ -1247,6 +1247,9 @@ def register(
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
     if "c" in msi_utils.get_dims(msims[0]):
+        channel_names = sims[0].coords["c"].values
+        if len(channel_names) != len(set(channel_names)):
+            raise ValueError("Channel names must be unique.")
         if reg_channel is None:
             if reg_channel_index is None:
                 for msim in msims:
