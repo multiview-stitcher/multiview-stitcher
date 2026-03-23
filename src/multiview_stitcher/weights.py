@@ -103,15 +103,22 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
         filtered array
     """
 
+    if cp is not None and isinstance(ar, cp.ndarray):
+        gaussian_filter_func = cupyx.scipy.ndimage.gaussian_filter
+    else:
+        gaussian_filter_func = gaussian_filter
+
+    start = time()
+
     U = ar
     nan_mask = np.isnan(U)
     V = U.copy()
     V[nan_mask] = 0
-    VV = gaussian_filter(V, *args, **kwargs)
+    VV = gaussian_filter_func(V, *args, **kwargs)
 
     W = 0 * U.copy() + 1
     W[nan_mask] = 0
-    WW = gaussian_filter(W, *args, **kwargs)
+    WW = gaussian_filter_func(W, *args, **kwargs)
 
     # avoid division by zero
     WW[nan_mask] = 1

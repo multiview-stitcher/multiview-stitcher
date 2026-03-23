@@ -1197,6 +1197,10 @@ def prepare_block_fusion(
             output_spacing={dim: osp['spacing'][dim] for dim in sdims},
             ).data
 
+        if cp is not None:
+            fused = fused.map_blocks(
+                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x)
+
         # Write the fused chunk to the appropriate location in the Zarr array
         with dask_config.set(scheduler='single-threaded'):
             da.to_zarr(
