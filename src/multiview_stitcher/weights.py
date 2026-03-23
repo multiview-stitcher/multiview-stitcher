@@ -169,7 +169,8 @@ def get_blending_weights(
 
     Returns
     -------
-    target_weights : spatial_image
+    target_weights : dask array containing blending weights
+        for the target bounding box
     """
 
     if blending_widths is None:
