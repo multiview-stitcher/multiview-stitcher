@@ -15,7 +15,9 @@ def _check_readlif():
     if LifFile is None:
         raise ImportError(
             "readlif is required to read LIF files. "
-            "Please install it using `pip install readlif`."
+            "Please install it via the optional extra "
+            "`pip install \"multiview-stitcher[lif]\"`, "
+            "or install `readlif` directly with `pip install readlif`."
         )
 
 
