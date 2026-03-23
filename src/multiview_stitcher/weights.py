@@ -92,15 +92,6 @@ def nan_gaussian_filter(ar, *args, **kwargs):
     Gaussian filter ignoring NaNs.
 
     https://stackoverflow.com/questions/18697532/gaussian-filtering-a-image-with-nan-in-python
-
-    Parameters
-    ----------
-    ar : da.array
-
-    Returns
-    -------
-    da.array
-        filtered array
     """
 
     if cp is not None and isinstance(ar, cp.ndarray):
