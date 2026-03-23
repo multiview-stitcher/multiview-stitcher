@@ -67,10 +67,10 @@ def content_based(
     transformed_views[blending_weights < 1e-7] = np.nan
 
     weights = [
-        nan_gaussian_filter_dask_image(
+        nan_gaussian_filter(
             (
                 sim_t
-                - nan_gaussian_filter_dask_image(
+                - nan_gaussian_filter(
                     sim_t, sigma=sigma_1, mode="reflect"
                 )
             )
@@ -87,7 +87,7 @@ def content_based(
     return weights
 
 
-def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
+def nan_gaussian_filter(ar, *args, **kwargs):
     """
     Gaussian filter ignoring NaNs.
 
