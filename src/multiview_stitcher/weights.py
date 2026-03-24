@@ -2,7 +2,9 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
+from scipy.fft import dctn
 from scipy.ndimage import distance_transform_edt, gaussian_filter
+from scipy.optimize import minimize
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
@@ -29,6 +31,8 @@ def calculate_required_overlap(
         return 0
     elif method_func == content_based:
         return 2 * method_func_kwargs["sigma_2"]
+    elif method_func == dct_shannon_entropy:
+        return 0  # DCT method doesn't require specific overlap
     else:
         raise ValueError(f"Unknown weights method {method_func}")
 
@@ -71,7 +75,9 @@ def content_based(
             (
                 sim_t
                 - nan_gaussian_filter(
-                    sim_t, sigma=sigma_1, mode="reflect"
+                    sim_t,
+                    sigma=sigma_1,
+                    mode="reflect"
                 )
             )
             ** 2,
@@ -85,6 +91,135 @@ def content_based(
     weights = normalize_weights(weights)
 
     return weights
+
+
+def dct_shannon_entropy(
+    transformed_views,
+    blending_weights,
+    axes=None,
+    how_many_best_views=2,
+    cumulative_weight_best_views=0.9,
+):
+    """
+    Calculate weights using DCT Shannon Entropy.
+
+    Based on the method described in:
+    "Adaptive light-sheet microscopy for long-term, high-resolution imaging in living organisms"
+    http://www.nature.com/articles/nbt.3708
+
+    This method computes the Discrete Cosine Transform (DCT) of each view and calculates
+    an entropy-based quality metric. It then applies a heuristic to adapt weights to the
+    number of views, polarizing them so that a small number of best views contribute
+    most of the weight.
+
+    Parameters
+    ----------
+    transformed_views : array-like of shape (n_views, z, y, x) or (n_views, y, x)
+        Input images containing only spatial dimensions.
+    blending_weights : array-like
+        Blending weights for each view (used to mask invalid regions).
+    axes : list of int, optional
+        Axes along which to compute DCT. If None, uses all spatial axes.
+    how_many_best_views : int, optional
+        Number of best views that should carry most of the weight. Default is 2.
+    cumulative_weight_best_views : float, optional
+        Target cumulative weight for the best views (e.g., 0.9 means best views
+        should contribute 90% of total weight). Default is 0.9.
+
+    Returns
+    -------
+    weights : np.ndarray of shape (n_views, z, y, x) or (n_views, y, x)
+        Entropy-based weights for each view.
+    """
+
+    vrs = np.copy(transformed_views)
+    
+    # Set default axes (all spatial dimensions)
+    if axes is None:
+        axes = list(range(1, vrs.ndim))
+    
+    ds = []
+    for v in vrs:
+        # Skip views that are mostly zero
+        if np.sum(v == 0) > np.prod(v.shape) * (4 / 5.):
+            ds.append([0])
+            continue
+        elif v.min() < 0.0001:
+            # Replace zeros with minimum positive value
+            v[v == 0] = v[v > 0].min()
+        
+        # Compute DCT
+        d = dctn(v, norm='ortho', axes=[ax - 1 for ax in axes])
+        ds.append(d.flatten())
+    
+    # L2 norm
+    dsl2 = np.array([np.sum(np.abs(d)) for d in ds])
+    # Don't divide by zero
+    dsl2[dsl2 == 0] = 1
+    
+    def abslog(x):
+        """Compute absolute value of log2, handling zeros."""
+        res = np.zeros_like(x)
+        x = np.abs(x)
+        res[x == 0] = 0
+        res[x > 0] = np.log2(x[x > 0])
+        return res
+    
+    # Calculate entropy-based weights
+    ws = np.array([-np.sum(np.abs(d) * abslog(d / dsl2[id])) for id, d in enumerate(ds)])
+    
+    # Simple uniform weights if everything is zero
+    if not ws.max():
+        ws = np.ones(len(ws)) / float(len(ws))
+    
+    # HEURISTIC to adapt weights to number of views
+    # Polarize weights so that the best few views carry most of the weight
+    if len(ws) > 2 and ws.min() < ws.max():
+        # Normalize weights
+        wsum = np.sum(ws, 0)
+        for iw, w in enumerate(ws):
+            ws[iw] /= wsum
+        
+        wf = ws
+        wfs = np.sort(wf, axis=0)
+        
+        def energy(exp):
+            """Objective function to find optimal exponent."""
+            exp = exp[0]
+            tmpw = wfs ** exp
+            tmpsum = np.sum(tmpw, 0)
+            tmpw = tmpw / tmpsum
+            
+            # Sum of weights for the best N views
+            nsum = np.sum(tmpw[-int(how_many_best_views):], (-1))
+            energy = np.abs(np.sum(nsum) - cumulative_weight_best_views)
+            
+            return energy
+        
+        # Find optimal exponent to polarize weights
+        res = minimize(
+            energy, 
+            [0.5], 
+            bounds=[[0.1, 10]], 
+            method='L-BFGS-B', 
+            options={'maxiter': 10}
+        )
+        
+        exp = res.x[0]
+        
+        # Apply exponent to polarize weights
+        ws = [ws[i] ** exp for i in range(len(ws))]
+        ws = np.array(ws)
+    
+    # Reshape to match input dimensions
+    reshape_dims = [ws.shape[0]] + [1] * (transformed_views.ndim - 1)
+    ws = ws.reshape(reshape_dims)
+    
+    # Normalize final weights
+    ws_expanded = np.broadcast_to(ws, transformed_views.shape)
+    ws_expanded = normalize_weights(ws_expanded)
+    
+    return ws_expanded
 
 
 def nan_gaussian_filter(ar, *args, **kwargs):

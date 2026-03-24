@@ -56,8 +56,10 @@ def test_fuse_sims():
     [
         (2, None),
         (2, weights.content_based),
+        (2, weights.dct_shannon_entropy),
         (3, None),
         (3, weights.content_based),
+        (3, weights.dct_shannon_entropy),
     ],
 )
 def test_multi_view_fusion(ndim, weights_func):
