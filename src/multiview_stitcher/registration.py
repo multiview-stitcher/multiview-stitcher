@@ -1266,6 +1266,7 @@ def register(
     else:
         msims_reg = msims
 
+    # determine registration pairs from input images
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims_reg,
         transform_key=transform_key,
@@ -1273,6 +1274,7 @@ def register(
         overlap_tolerance=overlap_tolerance,
     )
 
+    # prune registration pair graph
     if pre_registration_pruning_method is not None:
         g_reg = mv_graph.prune_view_adjacency_graph(
             g,
@@ -1282,6 +1284,7 @@ def register(
     else:
         g_reg = g
 
+    # compute pairwise registrations
     g_reg_computed = compute_pairwise_registrations(
         msims_reg,
         g_reg,
@@ -1294,6 +1297,7 @@ def register(
         n_parallel_pairwise_regs=n_parallel_pairwise_regs,
     )
 
+    # optionally filter obtained pairwise registrations by quality
     if post_registration_do_quality_filter:
         # filter edges by quality
         g_reg_computed = mv_graph.filter_edges(
@@ -1302,6 +1306,7 @@ def register(
             weight_key="quality",
         )
 
+    # resolve global registration parameters from pairwise registrations
     params_dict, groupwise_resolution_info_dict = groupwise_resolution(
         g_reg_computed,
         method=groupwise_resolution_method,
@@ -1312,6 +1317,8 @@ def register(
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
     ]
 
+    # optionally write registration result back to the input msims
+    # under a new transform key
     if new_transform_key is not None:
         for imsim, msim in enumerate(msims):
             msi_utils.set_affine_transform(
@@ -1321,6 +1328,7 @@ def register(
                 base_transform_key=transform_key,
             )
 
+    # optionally plot registration summaries
     if plot_summary:
         plot_info = _plot_registration_summaries(
             msims,
