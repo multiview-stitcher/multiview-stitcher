@@ -240,7 +240,7 @@ The table below is a **high-level orientation** (features and workflows often ov
 | --- | --- | --- | :--: | :--: | --- | :--: | --- |
 | BigStitcher | Fiji | GUI-driven multi-view + tiled microscopy workflows | ✅ | ✅ | rigid + affine | ✅ | ImageJ macros / batch |
 | Ashlar | Python | multiplexed whole-slide 2D mosaics | ✅ | — | translation/rigid mosaics | limited* | CLI + Python |
-| TeraStitcher | C++ | very large tiled 3D volumes | ✅ | ✅ | translation/rigid | ✅ | CLI |
+| TeraStitcher | C++ | very large tiled 3D volumes | — | ✅ | translation/rigid | ✅ | CLI |
 | multiview-stitcher | Python | modular registration + fusion integrated into Python workflows | ✅ | ✅ | rigid + affine | ✅ | Jupyter notebooks / Python API + napari / neuroglancer |
 
 \* “Out-of-core / huge data” depends heavily on workflow, file formats, and output options. Several tools here can handle very large datasets; in practice, Python can make it particularly convenient to compose and distribute stitching workflows across compute resources.
