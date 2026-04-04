@@ -80,6 +80,21 @@ czi = [
     "czifile ==2019.7.2.3",
     "imagecodecs >=2023.7.10",
 ]
+cupy = [
+    "cupy",
+]
+dpnp = [
+    "dpnp",
+]
+jax = [
+    "jax",
+]
+mlx = [
+    "mlx",
+]
+numba = [
+    "numba",
+]
 dev = [
     "tox",
     "jupyter",
