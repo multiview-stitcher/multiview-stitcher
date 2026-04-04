@@ -37,7 +37,7 @@ def sim_to_ngff_image(sim, transform_key):
             if nsdim in transform.dims:
                 transform = transform.sel(
                     {
-                        nsdim: transform.coords[nsdim][0]
+                        nsdim: transform.coords[nsdim].values[0]
                         for nsdim in transform.dims
                     }
                 )

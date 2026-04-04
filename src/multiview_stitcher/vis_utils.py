@@ -112,7 +112,7 @@ def plot_positions(
             # if nsdim in sim.dims and len(sim.coords[nsdim]) > 1:
             if nsdim in sim.dims:
                 if nsdim not in nscoord:
-                    nscoord[nsdim] = sim.coords[nsdim][0]
+                    nscoord[nsdim] = sim.coords[nsdim].values[0]
                 sims[isim] = spatial_image_utils.sim_sel_coords(sim, nscoord)
 
     if use_positional_colors:

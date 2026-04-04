@@ -1255,7 +1255,7 @@ def register(
                             Exception("Please choose a registration channel.")
                         )
             else:
-                reg_channel = sims[0].coords["c"][reg_channel_index]
+                reg_channel = sims[0].coords["c"].values[reg_channel_index]
 
         msims_reg = [
             msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
@@ -1447,7 +1447,7 @@ def crop_sim_to_references(
 
     if "t" in input_affine.dims:
         input_affine = input_affine.sel(
-            {"t": input_affine.coords["t"][input_time_index]}
+            {"t": input_affine.coords["t"].values[input_time_index]}
         )
 
     input_affine_inv = np.linalg.inv(np.array(input_affine))

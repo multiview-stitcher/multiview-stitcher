@@ -78,7 +78,7 @@ def build_view_adjacency_graph_from_msims(
     if len(nsdims):
         sims = [
             si_utils.sim_sel_coords(
-                sim, {nsdim: sim.coords[nsdim][0] for nsdim in nsdims}
+                sim, {nsdim: sim.coords[nsdim].values[0] for nsdim in nsdims}
             )
             for sim in sims
         ]
@@ -370,7 +370,7 @@ def sims_are_far_apart(sim1, sim2, transform_key):
         np.linalg.norm(
             np.array(
                 [
-                    sim.coords[dim][-1] - sim.coords[dim][0]
+                    sim.coords[dim].values[-1] - sim.coords[dim].values[0]
                     for dim in si_utils.get_spatial_dims_from_sim(sim)
                 ]
             )

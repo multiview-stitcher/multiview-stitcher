@@ -134,7 +134,7 @@ def get_nonspatial_dims_from_sim(sim):
 
 def get_origin_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
-    origin = {dim: float(sim.coords[dim][0]) for dim in spatial_dims}
+    origin = {dim: float(sim.coords[dim].values[0]) for dim in spatial_dims}
 
     if asarray:
         origin = np.array([origin[sd] for sd in spatial_dims])
@@ -155,7 +155,7 @@ def get_shape_from_sim(sim, asarray=False):
 def get_spacing_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
     spacing = {
-        dim: float(sim.coords[dim][1] - sim.coords[dim][0])
+        dim: float(sim.coords[dim].values[1] - sim.coords[dim].values[0])
         if len(sim.coords[dim]) > 1
         else 1.0
         for dim in spatial_dims
@@ -288,7 +288,7 @@ def get_center_of_sim(sim, transform_key=None):
         affine = get_affine_from_sim(sim, transform_key=transform_key)
         # select params of first time point if applicable
         sel_dict = {
-            dim: affine.coords[dim][0].values
+            dim: affine.coords[dim].values[0]
             for dim in affine.dims
             if dim not in ["x_in", "x_out"]
         }
@@ -327,7 +327,7 @@ def get_sim_field(sim, ns_coords=None):
         return sim
 
     if ns_coords is None:
-        ns_coords = {dim: sim.coords[dim][0] for dim in nsdims}
+        ns_coords = {dim: sim.coords[dim].values[0] for dim in nsdims}
 
     sim_field = sim_sel_coords(sim, ns_coords)
 
