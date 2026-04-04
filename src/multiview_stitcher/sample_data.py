@@ -74,7 +74,10 @@ def generate_tiled_dataset(
     tls = []
     for _ch in range(N_c):
         # the channel ground truth
-        im_gt = da.random.randint(
+        # Keep the reference volume as a NumPy array.
+        # Passing a dask array here can trigger map_blocks metadata/indexing
+        # failures for larger tile sizes when chunk grids differ.
+        im_gt = np.random.randint(
             0,
             100,
             [
