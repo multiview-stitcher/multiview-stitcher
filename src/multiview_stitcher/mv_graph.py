@@ -142,27 +142,43 @@ def build_view_adjacency_graph_from_msims(
 
                 pairs.append((iview, close_view))
 
-    overlap_results = []
-    for pair in pairs:
-        overlap_result = delayed(get_overlap_between_pair_of_stack_props)(
-            stack_propss[pair[0]],
-            stack_propss[pair[1]],
-        )
-        overlap_results.append(overlap_result)
+    # Each overlap computation is fast (~2ms). Multiprocessing has high
+    # startup overhead (~4s for process pool), so only use it when the
+    # number of pairs is large enough to amortize that cost.
+    MULTIPROCESSING_PAIR_THRESHOLD = 100
 
-    # multithreading doesn't improve performance here (need to check whether
-    # this is still true after removing Geometry3D). Using multiprocessing instead.
-    if "scheduler" not in dask.config.config:
-        try:
-            overlap_results = compute(overlap_results, scheduler="processes")[
-                0
-            ]
-        except ValueError:
-            # if multiprocessing fails, try default scheduler
-            # (e.g. when running in JupyterLite)
-            overlap_results = compute(overlap_results)[0]
+    if len(pairs) < MULTIPROCESSING_PAIR_THRESHOLD:
+        overlap_results = [
+            get_overlap_between_pair_of_stack_props(
+                stack_propss[pair[0]],
+                stack_propss[pair[1]],
+            )
+            for pair in pairs
+        ]
     else:
-        overlap_results = compute(overlap_results)[0]
+        overlap_results = []
+        for pair in pairs:
+            overlap_result = delayed(
+                get_overlap_between_pair_of_stack_props
+            )(
+                stack_propss[pair[0]],
+                stack_propss[pair[1]],
+            )
+            overlap_results.append(overlap_result)
+
+        # multithreading doesn't improve performance here (need to check whether
+        # this is still true after removing Geometry3D). Using multiprocessing instead.
+        if "scheduler" not in dask.config.config:
+            try:
+                overlap_results = compute(
+                    overlap_results, scheduler="processes"
+                )[0]
+            except ValueError:
+                # if multiprocessing fails, try default scheduler
+                # (e.g. when running in JupyterLite)
+                overlap_results = compute(overlap_results)[0]
+        else:
+            overlap_results = compute(overlap_results)[0]
 
     for pair, overlap_result in zip(pairs, overlap_results):
         overlap_area = overlap_result[0]
