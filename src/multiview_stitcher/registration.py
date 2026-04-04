@@ -21,10 +21,7 @@ from skimage.metrics import structural_similarity
 from multiview_stitcher.param_resolution import groupwise_resolution
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
 
-try:
-    import ants
-except ImportError:
-    ants = None
+ants = None  # lazy-imported in registration_ANTsPy()
 
 from multiview_stitcher import (
     fusion,
@@ -1489,9 +1486,13 @@ def registration_ANTsPy(
     Use ANTsPy to perform registration between two spatial images.
     """
 
+    global ants
     if ants is None:
-        raise (
-            Exception(
+        try:
+            import ants as _ants
+            ants = _ants
+        except ImportError:
+            raise Exception(
                 """
 Please install the antspyx package to use ANTsPy for registration.
 E.g. using pip:
@@ -1499,7 +1500,6 @@ E.g. using pip:
 - `pip install antspyx`
 """
             )
-        )
 
     if transform_types is None:
         transform_types = ["Translation", "Rigid", "Similarity"]
