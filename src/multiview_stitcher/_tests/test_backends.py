@@ -581,23 +581,26 @@ def test_numba_fuse_matches_no_numba_3d():
 
 
 def test_numba_max_fusion():
-    """Numba max_fusion matches numpy."""
+    """max_fusion with numba acceleration matches without it."""
     _skip_unless_numba()
+    from multiview_stitcher._numba_acceleration import set_numba_acceleration
 
     sims = _get_test_sims(ndim=2, tile_size=30)
 
-    fused_np = fusion.fuse(
+    set_numba_acceleration(False)
+    fused_no_nb = fusion.fuse(
         sims, transform_key=METADATA_TRANSFORM_KEY,
         fusion_func=fusion.max_fusion, backend="numpy",
     ).compute(scheduler="single-threaded")
 
+    set_numba_acceleration(True)
     fused_nb = fusion.fuse(
         sims, transform_key=METADATA_TRANSFORM_KEY,
-        fusion_func=fusion.max_fusion, backend="numba",
+        fusion_func=fusion.max_fusion, backend="numpy",
     ).compute(scheduler="single-threaded")
 
     np.testing.assert_allclose(
-        fused_np.values.astype(float),
+        fused_no_nb.values.astype(float),
         fused_nb.values.astype(float),
         atol=1,
     )
@@ -606,6 +609,7 @@ def test_numba_max_fusion():
 def test_numba_blending_weights():
     """Numba blending weights match numpy."""
     _skip_unless_numba()
+    from multiview_stitcher._numba_acceleration import set_numba_acceleration
 
     sdims = ("y", "x")
     target_bb = {
@@ -620,32 +624,15 @@ def test_numba_blending_weights():
     }
     affine = np.eye(3)
 
+    set_numba_acceleration(False)
     w_np = weights.get_blending_weights(target_bb, source_bb, affine)
-    w_nb = weights.get_blending_weights(
-        target_bb, source_bb, affine, backend="numba",
-    )
+
+    set_numba_acceleration(True)
+    w_nb = weights.get_blending_weights(target_bb, source_bb, affine)
 
     np.testing.assert_allclose(
         w_np.data, np.asarray(w_nb), atol=1e-5,
     )
-
-
-def test_numba_custom_fusion_raises():
-    """Custom fusion functions should raise with numba backend."""
-    _skip_unless_numba()
-
-    sims = _get_test_sims(ndim=2, tile_size=30)
-
-    def my_custom_fusion(transformed_views, blending_weights):
-        return np.nanmean(transformed_views, axis=0)
-
-    with pytest.raises(NotImplementedError):
-        fusion.fuse(
-            sims,
-            transform_key=METADATA_TRANSFORM_KEY,
-            fusion_func=my_custom_fusion,
-            backend="numba",
-        ).compute(scheduler="single-threaded")
 
 
 # ---------------------------------------------------------------------------
