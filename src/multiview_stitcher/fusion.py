@@ -29,6 +29,12 @@ from multiview_stitcher import spatial_image_utils as si_utils
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 
+def _free_backend_memory_if_needed(backend):
+    """Free GPU memory pool on backends that support it."""
+    if hasattr(backend, "free_memory"):
+        backend.free_memory()
+
+
 def max_fusion(
     transformed_views,
 ):
@@ -79,9 +85,11 @@ def weighted_average_fusion(
 
     additive_weights = weights.normalize_weights(additive_weights)
 
-    product = transformed_views * additive_weights
+    from multiview_stitcher._numba_acceleration import fused_weighted_nansum
 
-    return np.nansum(product, axis=0).astype(transformed_views[0].dtype)
+    return fused_weighted_nansum(
+        transformed_views, additive_weights
+    ).astype(transformed_views[0].dtype)
 
 
 def simple_average_fusion(
@@ -194,6 +202,7 @@ def fuse(
     output_zarr_url: str | None = None,
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
+    backend: str | None = None,
 ):
     """
 
@@ -264,6 +273,11 @@ def fuse(
             (n_batch>1 only compatible with a provided batch_func). By default 1.
         - batch_func_kwargs: dict, optional
             Additional keyword arguments passed to batch_func.
+    backend : str, optional
+        Compute backend to use for fusion. Available backends: "numpy" (default),
+        "cupy" (GPU-accelerated, requires CuPy). When using "cupy", set
+        ``dask.config.set(scheduler="synchronous")`` before calling ``.compute()``.
+        By default None (uses global default, which is "numpy").
     Returns
     -------
     SpatialImage
@@ -312,6 +326,7 @@ def fuse(
             "overlap_in_pixels": overlap_in_pixels,
             "interpolation_order": interpolation_order,
             "blending_widths": blending_widths,
+            "backend": backend,
         }
 
         # Prepare block fusion and process in batches
@@ -584,6 +599,7 @@ def fuse(
                 interpolation_order=1,
                 full_view_bbs=full_view_bbs,
                 blending_widths=blending_widths,
+                backend=backend,
             )
 
             fused_output_chunk = da.from_delayed(
@@ -657,56 +673,54 @@ def fuse_np(
     spacings: Sequence[dict[str, float]] = None,
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
+    backend=None,
 ):
     """
     Fuse tiles from in-memory slices.
 
     Parameters
     ----------
-    view_data : Sequence[xr.DataArray]
-        _description_
+    sims : Sequence[xr.DataArray]
+        Input spatial images (sliced views for this chunk).
     params : Sequence[xr.DataArray]
-        _description_
-    output_chunk_properties : dict[str, dict[str, Union[int, float]]]
-        _description_
+        Transformation parameters for each view.
+    output_properties : dict[str, dict[str, Union[int, float]]]
+        Output chunk bounding box (shape, spacing, origin).
     fusion_func : Callable, optional
-        _description_, by default weighted_average_fusion
-    weights_func : _type_, optional
-        _description_, by default None
-    weights_func_kwargs : _type_, optional
-        _description_, by default None
-    overlap_in_pixels : int, optional
-        _description_, by default None
+        Fusion function, by default weighted_average_fusion.
+    fusion_method_kwargs : dict, optional
+        Additional kwargs for the fusion function.
+    weights_func : Callable, optional
+        Function to calculate fusion weights, by default None.
+    weights_func_kwargs : dict, optional
+        Additional kwargs for the weights function.
+    trim_overlap_in_pixels : int, optional
+        Pixels to trim from each edge, by default 0.
     interpolation_order : int, optional
-        _description_, by default 1
-    full_view_bbs : Sequence[dict[str, dict[str, Union[int, float]]]], optional
-        _description_, by default None
+        Interpolation order for affine transforms, by default 1.
+    full_view_bbs : Sequence[BoundingBox], optional
+        Full view bounding boxes for blending weight calculation.
     spacings : Sequence[dict[str, float]], optional
-        _description_, by default None
+        Spacings for each view.
     origins : Sequence[dict[str, float]], optional
-        _description_, by default None
+        Origins for each view.
+    blending_widths : dict[float], optional
+        Physical blending widths for each dimension.
+    backend : str or Backend, optional
+        Compute backend. None uses the global default (numpy).
 
-    Returns a delayed object.
+    Returns
+    -------
+    numpy.ndarray
+        Fused output chunk.
     """
 
-    # # convert to xarray.DataArray
-    # # it's useful to be able to pass numpy arrays to this function
-    # # e.g. being able to apply xr.apply_ufunc
-    # for isim in range(len(sims)):
-    #     if not isinstance(sims[isim], xr.DataArray):
-    #         sims[isim] = si.to_spatial_image(
-    #             sims[isim],
-    #             dims=si_utils.SPATIAL_DIMS[-sims[isim].ndim :],
-    #             scale=spacings[isim],
-    #             translation=origins[isim],
-    #         )
+    from multiview_stitcher.backends import get_backend
 
-    if has_keyword(fusion_func, "blending_weights") or has_keyword(
-        weights_func, "blending_weights"
-    ):
-        fusion_requires_blending_weights = True
-    else:
-        fusion_requires_blending_weights = False
+    if backend is None:
+        backend = get_backend()
+    elif isinstance(backend, str):
+        backend = get_backend(backend)
 
     if fusion_method_kwargs is None:
         fusion_method_kwargs = {}
@@ -714,36 +728,52 @@ def fuse_np(
     if weights_func_kwargs is None:
         weights_func_kwargs = {}
 
+    fusion_requires_blending_weights = has_keyword(
+        fusion_func, "blending_weights"
+    ) or has_keyword(weights_func, "blending_weights")
+
     input_dtype = sims[0].dtype
     ndim = si_utils.get_ndim_from_sim(sims[0])
-    si_utils.get_spatial_dims_from_sim(sims[0])
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
 
     # Transform input views
     field_ims_t = [
-        transformation.transform_sim(
-            sim.astype(float),
-            np.linalg.inv(param),
-            output_stack_properties=output_properties,
-            order=interpolation_order,
-            cval=np.nan,
-        ).data
+        backend.to_numpy(
+            transformation.transform_data(
+                backend.asarray(np.asarray(sim).astype(np.float32)),
+                p=np.linalg.inv(param),
+                input_spacing=si_utils.get_spacing_from_sim(sim, asarray=True),
+                input_origin=si_utils.get_origin_from_sim(sim, asarray=True),
+                output_stack_properties=output_properties,
+                spatial_dims=sdims,
+                backend=backend,
+                mode="constant",
+                cval=np.nan,
+                order=interpolation_order,
+            )
+        )
         for sim, param in zip(sims, params)
     ]
     field_ims_t = np.array(field_ims_t)
+    _free_backend_memory_if_needed(backend)
 
     # get blending weights
     if fusion_requires_blending_weights:
         field_ws_t = [
-            weights.get_blending_weights(
-                target_bb=output_properties,
-                source_bb=full_view_bbs[iview],
-                affine=params[iview],
-                blending_widths=blending_widths,
+            backend.to_numpy(
+                weights.get_blending_weights(
+                    target_bb=output_properties,
+                    source_bb=full_view_bbs[iview],
+                    affine=params[iview],
+                    blending_widths=blending_widths,
+                    backend=backend,
+                )
             )
             for iview in range(len(sims))
         ]
         field_ws_t = field_ws_t * ~np.isnan(field_ims_t)
         field_ws_t = weights.normalize_weights(field_ws_t)
+        _free_backend_memory_if_needed(backend)
     else:
         field_ws_t = None
 

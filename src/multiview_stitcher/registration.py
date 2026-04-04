@@ -14,9 +14,7 @@ import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
 from multiscale_spatial_image import MultiscaleSpatialImage
-from scipy import ndimage, stats
-from skimage.exposure import rescale_intensity
-from skimage.metrics import structural_similarity
+from scipy import stats
 
 from multiview_stitcher.param_resolution import groupwise_resolution
 from multiview_stitcher.transforms import AffineTransform, TranslationTransform
@@ -282,6 +280,7 @@ def phase_correlation_registration(
     fixed_data,
     moving_data,
     disambiguate_region_mode=None,
+    backend=None,
     **skimage_phase_corr_kwargs,
 ):
     """
@@ -292,6 +291,13 @@ def phase_correlation_registration(
     ----------
     fixed_data : array-like
     moving_data : array-like
+    disambiguate_region_mode : str, optional
+    backend : Backend, str, or None, optional
+        Compute backend. When set to a non-numpy backend (e.g. ``"cupy"``),
+        the phase cross-correlation and disambiguation affine transforms
+        are run through the backend. If cucim is installed, the CuPy
+        backend will use GPU-native phase_cross_correlation.
+        Disambiguation control flow stays on CPU.
 
     Returns
     -------
@@ -301,6 +307,15 @@ def phase_correlation_registration(
         'quality' : float
             Quality metric.
     """
+    from multiview_stitcher.backends import get_backend
+    from multiview_stitcher.backends._numpy_legacy import NumpyLegacyBackend
+
+    if backend is None:
+        backend = get_backend()
+    elif isinstance(backend, str):
+        backend = get_backend(backend)
+
+    use_numpy_path = isinstance(backend, NumpyLegacyBackend)
 
     im0 = fixed_data.data
     im1 = moving_data.data
@@ -308,10 +323,12 @@ def phase_correlation_registration(
 
     # normalize images
     im0, im1 = (
-        rescale_intensity(
-            im,
-            in_range=(np.nanmin(im), np.nanmax(im)),
-            out_range=(0, 1),
+        backend.to_numpy(
+            backend.rescale_intensity(
+                backend.asarray(im),
+                in_range=(float(np.nanmin(im)), float(np.nanmax(im))),
+                out_range=(0, 1),
+            )
         )
         for im in [im0, im1]
     )
@@ -346,28 +363,36 @@ def phase_correlation_registration(
         # structural similarity score during manual "disambiguation"
         # (which should be a metric orthogonal to the corr coef)
 
+        # Use backend for phase_cross_correlation (GPU if cucim available)
+        pcc_im0nn = backend.asarray(im0nn)
+        pcc_im1nn = backend.asarray(im1nn)
+
         shift_candidates = []
         for normalization in ["phase", None]:
+            result = backend.phase_cross_correlation(
+                pcc_im0nn,
+                pcc_im1nn,
+                disambiguate=False,
+                normalization=normalization,
+                **skimage_phase_corr_kwargs,
+            )
             shift_candidates.append(
-                skimage.registration.phase_cross_correlation(
-                    im0nn,
-                    im1nn,
-                    disambiguate=False,
-                    normalization=normalization,
-                    **skimage_phase_corr_kwargs,
-                )[0]
+                np.asarray(backend.to_numpy(result[0]))
             )
 
         if np.any([im0nm, im1nm]):
+            pcc_im0 = backend.asarray(im0)
+            pcc_im1 = backend.asarray(im1)
+            result = backend.phase_cross_correlation(
+                pcc_im0,
+                pcc_im1,
+                reference_mask=backend.asarray(im0nm),
+                moving_mask=backend.asarray(im1nm),
+                disambiguate=False,
+                **skimage_phase_corr_kwargs,
+            )
             shift_candidates.append(
-                skimage.registration.phase_cross_correlation(
-                    im0,
-                    im1,
-                    reference_mask=im0nm,
-                    moving_mask=im1nm,
-                    disambiguate=False,
-                    **skimage_phase_corr_kwargs,
-                )[0]
+                np.asarray(backend.to_numpy(result[0]))
             )
 
     # disambiguate shift manually
@@ -419,12 +444,17 @@ def phase_correlation_registration(
     im0_bb = get_bb_from_nanmask(~im0nm)
 
     for t_ in t_candidates:
-        im1t = ndimage.affine_transform(
-            im1,
-            param_utils.affine_from_translation(list(t_)),
-            order=1,
-            mode="constant",
-            cval=np.nan,
+        affine_mat = param_utils.affine_from_translation(list(t_))
+        im1t = backend.to_numpy(
+            backend.affine_transform(
+                backend.asarray(im1),
+                matrix=affine_mat[:ndim, :ndim],
+                offset=affine_mat[:ndim, ndim],
+                output_shape=im1.shape,
+                order=1,
+                mode="constant",
+                cval=np.nan,
+            )
         )
         mask = ~np.isnan(im1t) * ~im0nm
 
@@ -463,17 +493,19 @@ def phase_correlation_registration(
             # structural similarity seems to be better than
             # correlation for disambiguation (need to solidify this)
             min_shape = np.min(im0[mask_slices].shape)
-            ssim_win_size = np.min([7, min_shape - ((min_shape - 1) % 2)])
+            ssim_win_size = int(np.min([7, min_shape - ((min_shape - 1) % 2)]))
             if ssim_win_size < 3 or np.max(im1t[mask_slices]) <= im1_min:
                 logger.debug("SSIM window size too small")
                 disambiguate_metric_val = -1
             else:
-                disambiguate_metric_val = structural_similarity(
-                    np.nan_to_num(im0[mask_slices]),
-                    np.nan_to_num(im1t[mask_slices]),
-                    data_range=data_range,
-                    win_size=ssim_win_size,
-                )
+                disambiguate_metric_val = float(backend.to_numpy(
+                    backend.structural_similarity(
+                        backend.asarray(np.nan_to_num(im0[mask_slices])),
+                        backend.asarray(np.nan_to_num(im1t[mask_slices])),
+                        data_range=data_range,
+                        win_size=ssim_win_size,
+                    )
+                ))
             # spearman seems to be better than structural_similarity
             # for filtering out bad links between views
             quality_metric_val = link_quality_metric_func(
@@ -589,7 +621,7 @@ def get_affine_from_intrinsic_affine(
 
 
 def dispatch_pairwise_reg_func(
-    pairwise_reg_func, fixed_data, moving_data, **pairwise_reg_func_kwargs
+    pairwise_reg_func, fixed_data, moving_data, backend=None, **pairwise_reg_func_kwargs
 ):
     """
     Check that images are not constant and apply the registration function.
@@ -614,6 +646,10 @@ def dispatch_pairwise_reg_func(
             reg_result["quality"] = np.nan
             return reg_result
 
+    # Pass backend if the registration function accepts it
+    if has_keyword(pairwise_reg_func, "backend"):
+        pairwise_reg_func_kwargs["backend"] = backend
+
     return pairwise_reg_func(
         fixed_data, moving_data, **pairwise_reg_func_kwargs
     )
@@ -628,6 +664,7 @@ def register_pair_of_msims(
     overlap_tolerance: Union[int, dict[str, int]] = None,
     pairwise_reg_func=phase_correlation_registration,
     pairwise_reg_func_kwargs=None,
+    backend=None,
 ):
     """
     Register the input images containing only spatial dimensions.
@@ -890,6 +927,7 @@ def register_pair_of_msims(
         pairwise_reg_func,
         fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
         moving_data=xr.DataArray(moving_data, dims=spatial_dims),
+        backend=backend,
         **pairwise_reg_func_kwargs,
     )
 
@@ -1094,6 +1132,7 @@ def register(
     scheduler=None,  # deprecated, see docstring
     n_parallel_pairwise_regs: int = None,
     return_dict: bool = False,
+    backend=None,
 ):
     """
     Register a list of views to a common extrinsic coordinate system.
@@ -1289,6 +1328,7 @@ def register(
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         n_parallel_pairwise_regs=n_parallel_pairwise_regs,
+        backend=backend,
     )
 
     if post_registration_do_quality_filter:

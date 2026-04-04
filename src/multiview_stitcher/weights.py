@@ -2,8 +2,7 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
-from scipy.ndimage import distance_transform_edt, gaussian_filter
-from spatial_image import to_spatial_image
+from scipy.ndimage import gaussian_filter
 
 from multiview_stitcher import transformation
 
@@ -131,13 +130,41 @@ def normalize_weights(weights):
     weights : da.array of dim (n_views, (z,) y, x)
         Normalized weights.
     """
+    from multiview_stitcher._numba_acceleration import (
+        normalize_weights as _accel_normalize,
+    )
 
-    wsum = np.nansum(weights, axis=0)
-    wsum[wsum == 0] = 1
+    return _accel_normalize(weights)
 
-    weights = weights / wsum
 
-    return weights
+def _blending_weights_edt_and_spacing(source_bb, blending_widths, sdims):
+    """
+    Compute the EDT mask, support spacing, and origin used for blending.
+
+    Shared between the SpatialImage path and the raw-array backend path.
+    """
+    ndim = len(sdims)
+
+    mask = np.zeros([3 + 2 for dim in sdims])
+    mask[(slice(1, -1),) * ndim] = 1
+
+    support_spacing = {
+        dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
+        for dim in sdims
+    }
+
+    edt_support_spacing = {
+        dim: support_spacing[dim]
+        * (source_bb["shape"][dim] - 1 + 2 * 1)
+        / (source_bb["shape"][dim] - 1)
+        for dim in sdims
+    }
+    edt_support_origin = {
+        dim: source_bb["origin"][dim] - 1 * source_bb["spacing"][dim]
+        for dim in sdims
+    }
+
+    return mask, edt_support_spacing, edt_support_origin
 
 
 def get_blending_weights(
@@ -145,6 +172,7 @@ def get_blending_weights(
     source_bb: BoundingBox,
     affine: xr.DataArray,
     blending_widths: dict[str, float] = None,
+    backend=None,
 ):
     """
     Calculate smooth blending weights for fusion.
@@ -159,88 +187,70 @@ def get_blending_weights(
     ----------
     target_bb : Target bounding box.
     source_bb : Source bounding box.
-    params : list of xarray.DataArray
-        Transformation parameters for each view.
+    affine : xarray.DataArray
+        Transformation parameters.
     blending_widths : dict
         Physical blending widths for each dimension.
+    backend : Backend, str, or None
+        Compute backend. None uses the global default.
 
     Returns
     -------
-    target_weights : spatial_image
+    target_weights : ndarray
+        Blending weights as a raw array on the given backend.
     """
+    from multiview_stitcher.backends import get_backend
+
+    if backend is None:
+        backend = get_backend()
+    elif isinstance(backend, str):
+        backend = get_backend(backend)
 
     if blending_widths is None:
         blending_widths = {"z": 3, "y": 10, "x": 10}
 
     sdims = sorted(source_bb["origin"].keys())[::-1]
-    ndim = len(sdims)
 
-    mask = np.zeros([3 + 2 for dim in sdims])
-    mask[(slice(1, -1),) * ndim] = 1
-    support_spacing = {
-        dim: (source_bb["shape"][dim] - 1) / 4 * source_bb["spacing"][dim]
-        for dim in sdims
-    }
+    mask, edt_support_spacing, edt_support_origin = (
+        _blending_weights_edt_and_spacing(source_bb, blending_widths, sdims)
+    )
 
-    # slightly enlargen the support to avoid edge effects
-    # otherwise there's no smooth transition at shared coordinate boundaries
-    edt_support_spacing = {
-        dim: support_spacing[dim]
-        * (source_bb["shape"][dim] - 1 + 2 * 1)
-        / (source_bb["shape"][dim] - 1)
-        for dim in sdims
-    }
-    edt_support_origin = {
-        dim: source_bb["origin"][dim] - 1 * source_bb["spacing"][dim]
-        for dim in sdims
-    }
-
-    edt_support = distance_transform_edt(
+    edt_support = backend.distance_transform_edt(
         mask,
         sampling=[
-            edt_support_spacing[dim] / blending_widths[dim] for dim in sdims
+            edt_support_spacing[dim] / blending_widths[dim]
+            for dim in sdims
         ],
     )
-    edt_support = to_spatial_image(
-        edt_support,
-        scale=edt_support_spacing,
-        translation=edt_support_origin,
+    edt_support = backend.asarray(
+        np.asarray(backend.to_numpy(edt_support)).astype(np.float32)
     )
 
-    target_weights = transformation.transform_sim(
-        edt_support.astype(np.float32),
+    target_weights = transformation.transform_data(
+        edt_support,
         p=np.linalg.inv(affine),
+        input_spacing=np.array([edt_support_spacing[dim] for dim in sdims]),
+        input_origin=np.array([edt_support_origin[dim] for dim in sdims]),
         output_stack_properties=target_bb,
+        spatial_dims=sdims,
+        backend=backend,
         order=1,
         cval=0.0,
     )
 
-    ## Note: Restriction to valid regions in the target space
-    ## is done in the fusion function.
-
-    # support = to_spatial_image(
-    #     mask,
-    #     scale=support_spacing,
-    #     translation=support_origin,
-    # )
-
-    # target_support = transformation.transform_sim(
-    #     support.astype(np.float32),
-    #     p=np.linalg.inv(affine),
-    #     output_stack_properties=target_bb,
-    #     order=0,
-    #     cval=np.nan,
-    # )
-
-    # target_weights = target_weights * ~np.isnan(target_support)
-
-    def cosine_weights(x):
-        mask = x < 1
-        x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
-        x = np.clip(x, 0, 1)
-        # x[~mask] = 1
-        return x
-
-    target_weights.data = cosine_weights(target_weights.data)
+    # Cosine weighting — use float64 to avoid catastrophic cancellation
+    # in cos(pi - epsilon) + 1 when target_weights has very small values
+    # (e.g. at tile corners).
+    tw_f64 = backend.asarray(
+        np.asarray(backend.to_numpy(target_weights)).astype(np.float64)
+    )
+    below_one = tw_f64 < 1
+    target_weights_cos = (
+        backend.cos((1 - tw_f64) * backend.pi) + 1
+    ) / 2
+    target_weights = (
+        tw_f64 * ~below_one + target_weights_cos * below_one
+    )
+    target_weights = backend.clip(target_weights, 0, 1)
 
     return target_weights
