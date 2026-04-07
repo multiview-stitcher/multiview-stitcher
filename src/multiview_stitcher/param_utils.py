@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import numpy as np
 import xarray as xr
 from scipy.spatial.transform import Rotation
@@ -122,7 +124,14 @@ def affine_from_rotation(angle, direction, point=None):
 
 
 def identity_transform(ndim, t_coords=None):
+    if t_coords is None:
+        return _identity_xaffine_cached(ndim)
     return affine_to_xaffine(np.eye(ndim + 1), t_coords=t_coords)
+
+
+@lru_cache(maxsize=8)
+def _identity_xaffine_cached(ndim):
+    return affine_to_xaffine(np.eye(ndim + 1))
 
 
 def affine_to_xaffine(affine, t_coords=None):
