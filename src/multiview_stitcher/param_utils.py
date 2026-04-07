@@ -160,6 +160,10 @@ def affine_to_xaffine(affine, t_coords=None):
 
 
 def matmul_xparams(xparams1, xparams2):
+    # Fast path: skip apply_ufunc overhead for small eager arrays
+    if not _is_dask_backed(xparams1) and not _is_dask_backed(xparams2):
+        result = np.matmul(xparams1.values, xparams2.values)
+        return xr.DataArray(result, dims=xparams1.dims, coords=xparams1.coords)
     return xr.apply_ufunc(
         np.matmul,
         xparams1,
@@ -170,6 +174,14 @@ def matmul_xparams(xparams1, xparams2):
         vectorize=True,
         join="inner",
     )
+
+
+def _is_dask_backed(xarr):
+    try:
+        import dask.array
+        return isinstance(xarr.data, dask.array.Array)
+    except ImportError:
+        return False
 
 
 def invert_xparams(xparams):
