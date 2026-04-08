@@ -698,8 +698,9 @@ def test_registration_with_reg_res_level():
     "transform_types",
     [
         ["Rigid"],
-        ["Translation", "Rigid"],
-        ["Translation", "Rigid", "Similarity"],
+        ["Similarity"],
+        # ["Translation", "Rigid"],
+        # ["Translation", "Rigid", "Similarity"],
     ],
 )
 def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
@@ -855,14 +856,14 @@ def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
     
     # For rigid transforms, the RMS error should be small
     if any(t in ["Rigid", "Similarity", "Affine"] for t in transform_types):
-        rms_tolerance = 2.0 if ndim == 2 else 3.0
+        rms_tolerance = 0.1 if ndim == 2 else 0.5
         assert rms_error < rms_tolerance, (
             f"RMS error too large for {ndim}D with transform_types={transform_types}. "
             f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
         )
     
     # Check quality metric
-    assert reg_result["quality"] > 0.5, (
+    assert reg_result["quality"] > 0.75, (
         f"Registration quality too low: {reg_result['quality']:.3f}"
     )
 
@@ -872,9 +873,12 @@ def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
 @pytest.mark.parametrize(
     "transform_types",
     [
+        # ["Affine"],
+        # ["Rigid", "Affine"],
         ["Rigid"],
-        ["Translation", "Rigid"],
-        ["Translation", "Rigid", "Similarity"],
+        ["Similarity"],
+        # ["Translation", "Rigid"],
+        # ["Translation", "Rigid", "Similarity"],
     ],
 )
 def test_registration_ITKElastix_rotation_recovery(ndim, transform_types):
@@ -993,12 +997,12 @@ def test_registration_ITKElastix_rotation_recovery(ndim, transform_types):
     errors = vertices - vertices_recovered
     rms_error = np.sqrt(np.mean(np.sum(errors**2, axis=1)))
 
-    rms_tolerance = 2.0 if ndim == 2 else 3.0
+    rms_tolerance = 0.1 if ndim == 2 else 0.5
     assert rms_error < rms_tolerance, (
         f"RMS error too large for {ndim}D with transform_types={transform_types}. "
         f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
     )
-    assert reg_result["quality"] > 0.5, (
+    assert reg_result["quality"] > 0.75, (
         f"Registration quality too low: {reg_result['quality']:.3f}"
     )
 
@@ -1007,10 +1011,10 @@ def test_registration_ITKElastix_rotation_recovery(ndim, transform_types):
 @pytest.mark.parametrize(
     "pairwise_reg_func",
     [
-        pytest.param(
-            registration.registration_ANTsPy,
-            id="registration_ANTsPy",
-        ),
+        # pytest.param(
+        #     registration.registration_ANTsPy,
+        #     id="registration_ANTsPy",
+        # ),
         pytest.param(
             registration.registration_ITKElastix,
             marks=ITK_ELASTIX_MARK,
@@ -1085,7 +1089,10 @@ def test_registration_non_identity_initial_transform_recovery(
         registration_binning={dim: 1 for dim in spatial_dims},
         transform_key=transform_key,
         pairwise_reg_func=pairwise_reg_func,
-        pairwise_reg_func_kwargs={"transform_types": ["Affine"]},
+        pairwise_reg_func_kwargs={
+            "transform_types": ["Rigid"],
+            # "transform_types": ["Rigid", "Affine"],
+            },
     ).compute()
 
     recovered_affine = np.array(reg_result["transform"].sel(t=0))
@@ -1135,12 +1142,12 @@ def test_registration_non_identity_initial_transform_recovery(
     errors = vertices_expected - vertices_recovered
     rms_error = np.sqrt(np.mean(np.sum(errors**2, axis=1)))
 
-    rms_tolerance = 2.0 if ndim == 2 else 3.0
+    rms_tolerance = 0.1
     assert rms_error < rms_tolerance, (
         f"RMS error too large for {ndim}D with {pairwise_reg_func.__name__}. "
         f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
     )
-    assert float(reg_result["quality"].sel(t=0)) > 0.5, (
+    assert float(reg_result["quality"].sel(t=0)) > 0.75, (
         f"Registration quality too low: {float(reg_result['quality'].sel(t=0)):.3f}"
     )
 

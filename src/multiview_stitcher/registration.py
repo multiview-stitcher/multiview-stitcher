@@ -1911,11 +1911,16 @@ E.g. using pip:
             ndim=ndim,
         )
 
+        # output_directory must be set so that intermediate transform parameter
+        # files are written to disk and can be referenced by subsequent stages
+        # (without it, multi-stage chains get InitialTransformParameterFileName=""
+        # for all stages beyond the first, breaking the composed transform).
         result_image, result_parameter_object = itk.elastix_registration_method(
             fixed_image=fixed_image,
             moving_image=moving_image,
             parameter_object=parameter_object,
             initial_transform_parameter_file_name=initial_transform_path,
+            output_directory=tmpdir,
             **elastix_registration_kwargs,
         )
 
