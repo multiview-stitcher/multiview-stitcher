@@ -116,7 +116,7 @@ def nan_gaussian_filter_dask_image(ar, *args, **kwargs):
     return Z
 
 
-def normalize_weights(weights):
+def normalize_weights(weights, backend=None):
     """
     Normalize weights.
 
@@ -124,12 +124,17 @@ def normalize_weights(weights):
     ----------
     weights : da.array of dim (n_views, (z,) y, x)
         Weights to normalize.
+    backend : Backend, optional
+        If provided, delegate to backend.normalize_weights().
 
     Returns
     -------
     weights : da.array of dim (n_views, (z,) y, x)
         Normalized weights.
     """
+    if backend is not None:
+        return backend.normalize_weights(weights)
+
     from multiview_stitcher._numba_acceleration import (
         normalize_weights as _accel_normalize,
     )

@@ -113,6 +113,24 @@ class ArrayAPIBackend(XPBackend):
         except ImportError:
             return self._skimage_structural_similarity(im1, im2, **kwargs)
 
+    # -- Fusion helpers (numpy: use numba, GPU: use array-API) ---------------
+
+    def normalize_weights(self, weights):
+        if self._name == "numpy":
+            from multiview_stitcher._numba_acceleration import (
+                normalize_weights as _accel_normalize,
+            )
+            return _accel_normalize(weights)
+        return super().normalize_weights(weights)
+
+    def fused_weighted_nansum(self, images, weights):
+        if self._name == "numpy":
+            from multiview_stitcher._numba_acceleration import (
+                fused_weighted_nansum as _accel_fwns,
+            )
+            return _accel_fwns(images, weights)
+        return super().fused_weighted_nansum(images, weights)
+
     # -- Memory management (cupy only) --------------------------------------
 
     def free_memory(self):

@@ -37,6 +37,7 @@ def _free_backend_memory_if_needed(backend):
 
 def max_fusion(
     transformed_views,
+    backend=None,
 ):
     """
     Simple pixel-wise maximum fusion.
@@ -45,12 +46,16 @@ def max_fusion(
     ----------
     transformed_views : list of ndarrays
         transformed input views
+    backend : Backend, optional
+        If provided, use backend ops to stay on-device.
 
     Returns
     -------
     ndarray
         Maximum of input views at each pixel
     """
+    if backend is not None:
+        return backend.nanmax(transformed_views, axis=0)
     return np.nanmax(transformed_views, axis=0)
 
 
@@ -58,6 +63,7 @@ def weighted_average_fusion(
     transformed_views,
     blending_weights,
     fusion_weights=None,
+    backend=None,
 ):
     """
     Simple weighted average fusion.
@@ -71,6 +77,8 @@ def weighted_average_fusion(
     fusion_weights : list of ndarrays, optional
         additional view weights for fusion, e.g. contrast weighted scores.
         By default None.
+    backend : Backend, optional
+        If provided, use backend ops to stay on-device.
 
     Returns
     -------
@@ -83,7 +91,14 @@ def weighted_average_fusion(
     else:
         additive_weights = blending_weights * fusion_weights
 
-    additive_weights = weights.normalize_weights(additive_weights)
+    additive_weights = weights.normalize_weights(
+        additive_weights, backend=backend
+    )
+
+    if backend is not None:
+        return backend.fused_weighted_nansum(
+            transformed_views, additive_weights
+        )
 
     from multiview_stitcher._numba_acceleration import fused_weighted_nansum
 
@@ -94,25 +109,30 @@ def weighted_average_fusion(
 
 def simple_average_fusion(
     transformed_views,
+    backend=None,
 ):
     """
-    Simple weighted average fusion.
+    Simple average fusion.
 
     Parameters
     ----------
-    transformed_views : list of ndarrays
-        transformed input views
-    blending_weights : list of ndarrays
-        blending weights for each view
-    fusion_weights : list of ndarrays, optional
-        additional view weights for fusion, e.g. contrast weighted scores.
-        By default None.
+    transformed_views : ndarray
+        transformed input views, stacked along axis 0
+    backend : Backend, optional
+        If provided, use backend ops to stay on-device.
 
     Returns
     -------
     ndarray
         Fusion of input views
     """
+
+    if backend is not None:
+        n_valid = backend.sum(
+            (~backend.isnan(transformed_views)).astype(np.float32), axis=0
+        )
+        n_valid = backend.masked_fill(n_valid, n_valid == 0, np.nan)
+        return backend.nansum(transformed_views, axis=0) / n_valid
 
     number_of_valid_views = np.zeros(
         transformed_views[0].shape, dtype=np.float32
@@ -738,41 +758,38 @@ def fuse_np(
 
     # Transform input views
     field_ims_t = [
-        backend.to_numpy(
-            transformation.transform_data(
-                backend.asarray(np.asarray(sim).astype(np.float32)),
-                p=np.linalg.inv(param),
-                input_spacing=si_utils.get_spacing_from_sim(sim, asarray=True),
-                input_origin=si_utils.get_origin_from_sim(sim, asarray=True),
-                output_stack_properties=output_properties,
-                spatial_dims=sdims,
-                backend=backend,
-                mode="constant",
-                cval=np.nan,
-                order=interpolation_order,
-            )
+        transformation.transform_data(
+            backend.asarray(np.asarray(sim).astype(np.float32)),
+            p=np.linalg.inv(param),
+            input_spacing=si_utils.get_spacing_from_sim(sim, asarray=True),
+            input_origin=si_utils.get_origin_from_sim(sim, asarray=True),
+            output_stack_properties=output_properties,
+            spatial_dims=sdims,
+            backend=backend,
+            mode="constant",
+            cval=np.nan,
+            order=interpolation_order,
         )
         for sim, param in zip(sims, params)
     ]
-    field_ims_t = np.array(field_ims_t)
+    field_ims_t = backend.stack(field_ims_t)
     _free_backend_memory_if_needed(backend)
 
     # get blending weights
     if fusion_requires_blending_weights:
         field_ws_t = [
-            backend.to_numpy(
-                weights.get_blending_weights(
-                    target_bb=output_properties,
-                    source_bb=full_view_bbs[iview],
-                    affine=params[iview],
-                    blending_widths=blending_widths,
-                    backend=backend,
-                )
+            weights.get_blending_weights(
+                target_bb=output_properties,
+                source_bb=full_view_bbs[iview],
+                affine=params[iview],
+                blending_widths=blending_widths,
+                backend=backend,
             )
             for iview in range(len(sims))
         ]
-        field_ws_t = field_ws_t * ~np.isnan(field_ims_t)
-        field_ws_t = weights.normalize_weights(field_ws_t)
+        field_ws_t = backend.stack(field_ws_t)
+        field_ws_t = field_ws_t * ~backend.isnan(field_ims_t)
+        field_ws_t = weights.normalize_weights(field_ws_t, backend=backend)
         _free_backend_memory_if_needed(backend)
     else:
         field_ws_t = None
@@ -782,6 +799,8 @@ def fuse_np(
         fusion_method_kwargs["params"] = params
     if fusion_requires_blending_weights:
         fusion_method_kwargs["blending_weights"] = field_ws_t
+    if has_keyword(fusion_func, "backend"):
+        fusion_method_kwargs["backend"] = backend
 
     # calculate fusion weights if required
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
@@ -790,6 +809,8 @@ def fuse_np(
             weights_func_kwargs["params"] = params
         if fusion_requires_blending_weights:
             weights_func_kwargs["blending_weights"] = field_ws_t
+        if has_keyword(weights_func, "backend"):
+            weights_func_kwargs["backend"] = backend
 
         fusion_weights = weights_func(**weights_func_kwargs)
         fusion_method_kwargs["fusion_weights"] = fusion_weights
@@ -805,7 +826,8 @@ def fuse_np(
             (slice(trim_overlap_in_pixels, -trim_overlap_in_pixels),) * ndim
         ]
 
-    fused = np.nan_to_num(fused).astype(input_dtype)
+    fused = backend.nan_to_num(fused)
+    fused = backend.to_numpy(fused).astype(input_dtype)
 
     return fused
 

@@ -240,6 +240,18 @@ class XPBackend(Backend):
             self.to_numpy(im1), self.to_numpy(im2), **kwargs,
         )
 
+    # -- Fusion helpers (pure array-API, stays on-device) -------------------
+
+    def normalize_weights(self, weights):
+        """Normalize weights along axis 0."""
+        wsum = self.xp.nansum(weights, axis=0)
+        wsum = self.xp.where(wsum == 0, self.xp.ones_like(wsum), wsum)
+        return weights / wsum
+
+    def fused_weighted_nansum(self, images, weights):
+        """Compute nansum(images * weights, axis=0) in one pass."""
+        return self.xp.nansum(images * weights, axis=0)
+
     # -- Dask integration ---------------------------------------------------
 
     @property
