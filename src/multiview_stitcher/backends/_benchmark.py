@@ -965,8 +965,14 @@ def run_benchmarks(
                     label = f"  {tag}: {fn} [chunk={chunk_size}]"
                     print(f"\n{label}: ", end="", flush=True)
 
-                    # Free GPU before preparing inputs
+                    # Release previous GPU arrays before freeing pool
                     if _is_cupy_backend(backend_name):
+                        try:
+                            del inputs
+                        except NameError:
+                            pass
+                        import gc as _gc
+                        _gc.collect()
                         _free_gpu_pool()
 
                     inputs = _prepare_inputs(
@@ -985,6 +991,7 @@ def run_benchmarks(
                         )
                         ref_timing = _bench_function(fn, ref_inputs, return_result=True)
                         references[ref_key] = ref_timing["result"]
+                        del ref_inputs
 
                     # Warm-up
                     warm_t0 = time.perf_counter()
@@ -993,6 +1000,8 @@ def run_benchmarks(
                             print(f"[warm-up capped at {w}/{warm_up_runs}] ", end="")
                             break
                         _bench_function(fn, inputs)
+                    if _is_cupy_backend(backend_name):
+                        _free_gpu_pool()
 
                     # Timed runs
                     timings = []
