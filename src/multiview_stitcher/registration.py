@@ -1886,15 +1886,6 @@ E.g. using pip:
         spacing=[moving_spacing[dim] for dim in spatial_dims],
     )
 
-    parameter_object = itk.ParameterObject.New()
-    for transform_type in transform_types:
-        parameter_object.AddParameterMap(
-            _get_elastix_parameter_map(
-                transform_type,
-                write_result_image=True,
-            )
-        )
-
     default_elastix_registration_kwargs = {
         "log_to_console": False,
     }
@@ -1903,32 +1894,53 @@ E.g. using pip:
         **elastix_registration_kwargs,
     }
 
+    # Run one elastix call per transform type, threading the composed affine
+    # forward as the initial transform for each successive stage.  This avoids
+    # elastix's multi-stage chaining, which breaks when output_directory is not
+    # set (IntialTransformParameterFileName becomes '' for stages beyond the
+    # first) and can also partially undo the initial transform when chaining.
     with tempfile.TemporaryDirectory() as tmpdir:
-        initial_transform_path = os.path.join(tmpdir, "initial_transform.txt")
-        _write_initial_elastix_transform(
-            initial_transform_path,
-            initial_affine=initial_affine,
-            ndim=ndim,
-        )
+        current_affine = initial_affine
+        result_image = None
 
-        # output_directory must be set so that intermediate transform parameter
-        # files are written to disk and can be referenced by subsequent stages
-        # (without it, multi-stage chains get InitialTransformParameterFileName=""
-        # for all stages beyond the first, breaking the composed transform).
-        result_image, result_parameter_object = itk.elastix_registration_method(
-            fixed_image=fixed_image,
-            moving_image=moving_image,
-            parameter_object=parameter_object,
-            initial_transform_parameter_file_name=initial_transform_path,
-            output_directory=tmpdir,
-            **elastix_registration_kwargs,
-        )
+        for i_stage, transform_type in enumerate(transform_types):
+            is_last = i_stage == len(transform_types) - 1
+            stage_dir = os.path.join(tmpdir, f"stage_{i_stage}")
+            os.makedirs(stage_dir)
 
-        affine_matrix = _get_affine_from_elastix_transform_parameter_object(
-            result_parameter_object,
-            moving_image=moving_image,
-            ndim=ndim,
-        )
+            initial_transform_path = os.path.join(
+                stage_dir, "initial_transform.txt"
+            )
+            _write_initial_elastix_transform(
+                initial_transform_path,
+                initial_affine=current_affine,
+                ndim=ndim,
+            )
+
+            single_stage_po = itk.ParameterObject.New()
+            single_stage_po.AddParameterMap(
+                _get_elastix_parameter_map(
+                    transform_type,
+                    write_result_image=is_last,
+                )
+            )
+
+            result_image, result_parameter_object = itk.elastix_registration_method(
+                fixed_image=fixed_image,
+                moving_image=moving_image,
+                parameter_object=single_stage_po,
+                initial_transform_parameter_file_name=initial_transform_path,
+                output_directory=stage_dir,
+                **elastix_registration_kwargs,
+            )
+
+            current_affine = _get_affine_from_elastix_transform_parameter_object(
+                result_parameter_object,
+                moving_image=moving_image,
+                ndim=ndim,
+            )
+
+        affine_matrix = current_affine
 
     quality = link_quality_metric_func(
         np.asarray(fixed_data.data),
