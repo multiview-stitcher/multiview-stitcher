@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 
 import dask.array as da
 import dask.config
@@ -999,3 +1001,204 @@ def test_registration_ITKElastix_rotation_recovery(ndim, transform_types):
     assert reg_result["quality"] > 0.5, (
         f"Registration quality too low: {reg_result['quality']:.3f}"
     )
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+@pytest.mark.parametrize(
+    "pairwise_reg_func",
+    [
+        pytest.param(
+            registration.registration_ANTsPy,
+            id="registration_ANTsPy",
+        ),
+        pytest.param(
+            registration.registration_ITKElastix,
+            marks=ITK_ELASTIX_MARK,
+            id="registration_ITKElastix",
+        ),
+    ],
+)
+def test_registration_non_identity_initial_transform_recovery(
+    ndim,
+    pairwise_reg_func,
+):
+    """
+    Check that pairwise registration can undo a non-identity preregistration
+    when the image content is already aligned.
+    """
+    if ndim == 2:
+        im = np.zeros((100, 100), dtype=float)
+        im[10:40, 20:40] = 1
+        im[70:80, 60:90] = 1
+        im[20:40, 60:70] = 0.7
+        im[60:80, 20:40] = 0.5
+        spatial_dims = ["y", "x"]
+        rotation_angle = np.pi / 12
+        direction = [0, 0, 1]
+    else:
+        im = np.zeros((60, 60, 60), dtype=float)
+        im[10:30, 15:30, 20:35] = 1
+        im[35:50, 10:25, 40:55] = 0.8
+        im[15:25, 35:50, 10:25] = 0.6
+        im[40:55, 40:50, 15:30] = 0.4
+        spatial_dims = ["z", "y", "x"]
+        rotation_angle = np.pi / 18
+        direction = np.array([1, 1, 1]) / np.sqrt(3)
+
+    im = ndimage.gaussian_filter(im, sigma=2)
+
+    center = np.array(im.shape) / 2
+    if ndim == 2:
+        initial_affine = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=list(center) + [0]
+        )[:3, :3]
+    else:
+        initial_affine = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=center
+        )
+
+    transform_key = "initial_transform_test"
+    fixed_sim = spatial_image_utils.get_sim_from_array(
+        im,
+        dims=spatial_dims,
+        affine=initial_affine,
+        transform_key=transform_key,
+    )
+    moving_sim = spatial_image_utils.get_sim_from_array(
+        im,
+        dims=spatial_dims,
+        transform_key=transform_key,
+    )
+
+    fixed_msim = msi_utils.multiscale_sel_coords(
+        msi_utils.get_msim_from_sim(fixed_sim, scale_factors=[]),
+        {"c": 0, "t": 0},
+    )
+    moving_msim = msi_utils.multiscale_sel_coords(
+        msi_utils.get_msim_from_sim(moving_sim, scale_factors=[]),
+        {"c": 0, "t": 0},
+    )
+
+    reg_result = registration.register_pair_of_msims_over_time(
+        fixed_msim,
+        moving_msim,
+        registration_binning={dim: 1 for dim in spatial_dims},
+        transform_key=transform_key,
+        pairwise_reg_func=pairwise_reg_func,
+        pairwise_reg_func_kwargs={"transform_types": ["Affine"]},
+    ).compute()
+
+    recovered_affine = np.array(reg_result["transform"].sel(t=0))
+    expected_affine = np.linalg.inv(initial_affine)
+
+    if ndim == 2:
+        shape = im.shape
+        vertices = np.array(
+            [
+                [0, 0],
+                [0, shape[1] - 1],
+                [shape[0] - 1, 0],
+                [shape[0] - 1, shape[1] - 1],
+                [shape[0] // 2, 0],
+                [shape[0] // 2, shape[1] - 1],
+                [0, shape[1] // 2],
+                [shape[0] - 1, shape[1] // 2],
+                [shape[0] // 2, shape[1] // 2],
+            ]
+        )
+    else:
+        shape = im.shape
+        vertices = []
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    vertices.append(
+                        [
+                            i * (shape[0] - 1),
+                            j * (shape[1] - 1),
+                            k * (shape[2] - 1),
+                        ]
+                    )
+        for dim in range(3):
+            for val in [0, shape[dim] - 1]:
+                face_center = [s // 2 for s in shape]
+                face_center[dim] = val
+                vertices.append(face_center)
+        vertices.append([s // 2 for s in shape])
+        vertices = np.array(vertices)
+
+    vertices_expected = transformation.transform_pts(vertices, expected_affine)
+    vertices_recovered = transformation.transform_pts(
+        vertices, recovered_affine
+    )
+
+    errors = vertices_expected - vertices_recovered
+    rms_error = np.sqrt(np.mean(np.sum(errors**2, axis=1)))
+
+    rms_tolerance = 2.0 if ndim == 2 else 3.0
+    assert rms_error < rms_tolerance, (
+        f"RMS error too large for {ndim}D with {pairwise_reg_func.__name__}. "
+        f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
+    )
+    assert float(reg_result["quality"].sel(t=0)) > 0.5, (
+        f"Registration quality too low: {float(reg_result['quality'].sel(t=0)):.3f}"
+    )
+
+
+@ITK_ELASTIX_MARK
+def test_itk_elastix_initial_transform_handles_large_translation():
+    initial_affine = np.array(
+        [
+            [np.sqrt(0.5), np.sqrt(0.5), 0.0, -242.19528185],
+            [-np.sqrt(0.5), np.sqrt(0.5), 0.0, 174.87901171],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "initial_transform.txt")
+        registration._write_initial_elastix_transform(
+            output_path,
+            initial_affine=initial_affine,
+            ndim=3,
+        )
+
+        assert os.path.exists(output_path)
+        assert os.path.getsize(output_path) > 0
+
+        input_points = registration._get_elastix_probe_points(3)
+        expected_points = transformation.transform_pts(
+            input_points, initial_affine
+        )
+
+        input_points_path = os.path.join(tmpdir, "input_points.txt")
+        output_dir = os.path.join(tmpdir, "transformix_output")
+        os.mkdir(output_dir)
+
+        registration._write_elastix_point_set_file(
+            input_points_path,
+            registration._points_to_itk_spatial_order(input_points),
+        )
+
+        parameter_object = registration.itk.ParameterObject.New()
+        parameter_object.ReadParameterFile(output_path)
+
+        dummy_image = registration._get_itk_image_from_data(
+            np.zeros((1, 1, 1), dtype=np.float32),
+            origin=[0.0, 0.0, 0.0],
+            spacing=[1.0, 1.0, 1.0],
+        )
+
+        registration.itk.transformix_filter(
+            moving_image=dummy_image,
+            transform_parameter_object=parameter_object,
+            output_directory=output_dir,
+            fixed_point_set_file_name=input_points_path,
+            log_to_console=False,
+        )
+
+        transformed_points = registration._parse_elastix_output_points(
+            os.path.join(output_dir, "outputpoints.txt")
+        )
+        assert np.allclose(transformed_points, expected_points)

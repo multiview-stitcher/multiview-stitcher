@@ -1684,6 +1684,48 @@ def _get_itk_image_from_data(data, *, origin, spacing):
     return image
 
 
+def _get_elastix_affine_parameter_map(initial_affine, ndim):
+    affine = np.asarray(initial_affine, dtype=float)
+    itk_matrix = affine[:ndim, :ndim][::-1, ::-1]
+    center_of_rotation = np.zeros(ndim, dtype=float)
+    itk_offset = (
+        affine[:ndim, ndim] + (affine[:ndim, :ndim] - np.eye(ndim)) @ center_of_rotation
+    )[::-1]
+
+    return {
+        "Transform": ["AffineTransform"],
+        "NumberOfParameters": [str(ndim * (ndim + 1))],
+        "TransformParameters": [
+            str(value)
+            for value in np.concatenate(
+                [itk_matrix.reshape(-1), itk_offset]
+            )
+        ],
+        "CenterOfRotationPoint": [
+            str(value) for value in center_of_rotation[::-1]
+        ],
+        "InitialTransformParameterFileName": ["NoInitialTransform"],
+        "HowToCombineTransforms": ["Compose"],
+        "FixedImageDimension": [str(ndim)],
+        "MovingImageDimension": [str(ndim)],
+        "FixedInternalImagePixelType": ["float"],
+        "MovingInternalImagePixelType": ["float"],
+        "Size": ["1"] * ndim,
+        "Index": ["0"] * ndim,
+        "Spacing": ["1"] * ndim,
+        "Origin": ["0"] * ndim,
+        "Direction": [str(value) for value in np.eye(ndim).reshape(-1)],
+        "UseDirectionCosines": ["true"],
+        "ResampleInterpolator": ["FinalBSplineInterpolator"],
+        "Resampler": ["DefaultResampler"],
+        "DefaultPixelValue": ["0"],
+        "CompressResultImage": ["false"],
+        "FinalBSplineInterpolationOrder": ["3"],
+        "ResultImagePixelType": ["float32"],
+        "ResultImageFormat": ["nii"],
+    }
+
+
 def _get_elastix_parameter_map(
     transform_type,
     number_of_resolutions=2,
@@ -1715,10 +1757,25 @@ def _get_elastix_parameter_map(
     return parameter_map
 
 
-def _get_elastix_point_image(points, sigma=1.0, margin=8.0):
+def _get_elastix_point_image(
+    points,
+    sigma=1.0,
+    margin=8.0,
+    lower=None,
+    upper=None,
+):
     points = np.asarray(points, dtype=float)
-    lower = np.floor(np.min(points, axis=0) - margin)
-    upper = np.ceil(np.max(points, axis=0) + margin)
+    if lower is None:
+        lower = np.floor(np.min(points, axis=0) - margin)
+    else:
+        lower = np.asarray(lower, dtype=float
+                           )
+
+    if upper is None:
+        upper = np.ceil(np.max(points, axis=0) + margin)
+    else:
+        upper = np.asarray(upper, dtype=float)
+
     shape = tuple((upper - lower + 1).astype(int))
 
     image_data = np.zeros(shape, dtype=np.float32)
@@ -1741,54 +1798,11 @@ def _write_initial_elastix_transform(
     initial_affine,
     ndim,
 ):
-    fixed_points = _get_elastix_probe_points(ndim)
-    moving_points = transformation.transform_pts(
-        fixed_points,
-        np.asarray(initial_affine),
-    )
-
-    fixed_image = _get_elastix_point_image(fixed_points)
-    moving_image = _get_elastix_point_image(moving_points)
-
-    point_parameter_map = _get_elastix_parameter_map(
-        "affine", number_of_resolutions=2
-    )
-    point_parameter_map["Registration"] = [
-        "MultiMetricMultiResolutionRegistration"
-    ]
-    point_parameter_map["Metric"] = [
-        point_parameter_map["Metric"][0],
-        "CorrespondingPointsEuclideanDistanceMetric",
-    ]
-    point_parameter_map["ImageSampler"] = ["Full"]
-    point_parameter_map["MaximumNumberOfIterations"] = ["256"]
-
     parameter_object = itk.ParameterObject.New()
-    parameter_object.AddParameterMap(point_parameter_map)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        fixed_points_path = os.path.join(tmpdir, "fixed_points.txt")
-        moving_points_path = os.path.join(tmpdir, "moving_points.txt")
-
-        _write_elastix_point_set_file(
-            fixed_points_path,
-            _points_to_itk_spatial_order(fixed_points),
-        )
-        _write_elastix_point_set_file(
-            moving_points_path,
-            _points_to_itk_spatial_order(moving_points),
-        )
-
-        _, result_parameter_object = itk.elastix_registration_method(
-            fixed_image=fixed_image,
-            moving_image=moving_image,
-            parameter_object=parameter_object,
-            fixed_point_set_file_name=fixed_points_path,
-            moving_point_set_file_name=moving_points_path,
-            log_to_console=False,
-        )
-
-    result_parameter_object.WriteParameterFile(path)
+    parameter_object.AddParameterMap(
+        _get_elastix_affine_parameter_map(initial_affine, ndim)
+    )
+    parameter_object.WriteParameterFile(path)
 
 
 def _get_affine_from_elastix_transform_parameter_object(
