@@ -1729,6 +1729,8 @@ def _get_elastix_affine_parameter_map(initial_affine, ndim):
 def _get_elastix_parameter_map(
     transform_type,
     number_of_resolutions=2,
+    number_of_iterations=None,
+    metric=None,
     write_result_image=False,
 ):
     transform_type_map = {
@@ -1753,6 +1755,14 @@ def _get_elastix_parameter_map(
     parameter_map["Transform"] = [elastix_transform_name]
     parameter_map["AutomaticTransformInitialization"] = ["false"]
     parameter_map["WriteResultImage"] = [str(write_result_image).lower()]
+
+    if number_of_iterations is not None:
+        parameter_map["MaximumNumberOfIterations"] = [
+            str(number_of_iterations)
+        ] * number_of_resolutions
+
+    if metric is not None:
+        parameter_map["Metric"] = [metric]
 
     return parameter_map
 
@@ -1855,6 +1865,34 @@ def registration_ITKElastix(
 ):
     """
     Use ITKElastix to perform registration between two spatial images.
+
+    Parameters
+    ----------
+    transform_types : list of str, optional
+        Sequence of transform types to apply in successive stages.
+        Supported values: 'Translation', 'Rigid', 'Similarity', 'Affine'.
+        By default ['Translation', 'Rigid', 'Similarity'].
+    **elastix_registration_kwargs
+        Additional keyword arguments. The following are handled explicitly
+        and applied to the elastix parameter map for each stage:
+
+        number_of_resolutions : int, optional
+            Number of resolution levels in the multi-resolution scheme,
+            by default 2.
+        number_of_iterations : int, optional
+            Maximum number of optimizer iterations per resolution level.
+            If None, the elastix default for the chosen transform type is used.
+        metric : str, optional
+            Similarity metric used by elastix. If None, the elastix default
+            for the chosen transform type is used. Common values:
+
+            - 'AdvancedMattesMutualInformation' (default for most transforms)
+            - 'AdvancedMeanSquares'
+            - 'AdvancedNormalizedCorrelation'
+            - 'NormalizedMutualInformation'
+
+        Remaining kwargs are forwarded to ``itk.elastix_registration_method``
+        (e.g. ``log_to_console=True``).
     """
 
     if itk is None:
@@ -1885,6 +1923,14 @@ E.g. using pip:
         origin=[moving_origin[dim] for dim in spatial_dims],
         spacing=[moving_spacing[dim] for dim in spatial_dims],
     )
+
+    number_of_iterations = elastix_registration_kwargs.pop(
+        "number_of_iterations", None
+    )
+    number_of_resolutions = elastix_registration_kwargs.pop(
+        "number_of_resolutions", 2
+    )
+    metric = elastix_registration_kwargs.pop("metric", None)
 
     default_elastix_registration_kwargs = {
         "log_to_console": False,
@@ -1921,6 +1967,9 @@ E.g. using pip:
             single_stage_po.AddParameterMap(
                 _get_elastix_parameter_map(
                     transform_type,
+                    number_of_resolutions=number_of_resolutions,
+                    number_of_iterations=number_of_iterations,
+                    metric=metric,
                     write_result_image=is_last,
                 )
             )
