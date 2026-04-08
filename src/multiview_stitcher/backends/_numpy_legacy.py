@@ -31,8 +31,8 @@ class NumpyLegacyBackend(Backend):
             stacklevel=2,
         )
 
-    def asarray(self, x):
-        return np.asarray(x)
+    def asarray(self, x, dtype=None):
+        return np.asarray(x, dtype=dtype)
 
     def to_numpy(self, x):
         return np.asarray(x)

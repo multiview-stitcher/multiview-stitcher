@@ -12,6 +12,8 @@ Key characteristics:
   provide them natively.
 """
 
+import warnings
+
 import numpy as np
 
 from multiview_stitcher.backends._xp_backend import XPBackend
@@ -56,20 +58,36 @@ class MLXBackend(XPBackend):
     def _f32(self, x):
         """Ensure array is float32 (MLX does not support float64)."""
         if hasattr(x, "dtype") and x.dtype == self.xp.float64:
+            self._warn_precision_loss(np.float64, np.float32)
             return x.astype(self.xp.float32)
         return x
 
+    def _warn_precision_loss(self, from_dtype, to_dtype):
+        warnings.warn(
+            f"MLXBackend: casting {np.dtype(from_dtype)} to "
+            f"{np.dtype(to_dtype)} — MLX does not support float64. "
+            f"This may reduce numerical precision.",
+            stacklevel=3,
+        )
+
     # -- Array creation / conversion (float32 coercion) ---------------------
 
-    def asarray(self, x):
+    def asarray(self, x, dtype=None):
         arr = self.xp.array(np.asarray(x))
-        return self._f32(arr)
+        arr = self._f32(arr)
+        if dtype is not None and np.dtype(dtype) == np.float64:
+            self._warn_precision_loss(dtype, np.float32)
+            dtype = np.float32
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
 
     def to_numpy(self, x):
         return np.array(x)
 
     def zeros(self, shape, dtype=None):
         if dtype is not None and np.dtype(dtype) == np.float64:
+            self._warn_precision_loss(dtype, np.float32)
             dtype = np.float32
         return self.xp.zeros(shape, dtype=dtype)
 

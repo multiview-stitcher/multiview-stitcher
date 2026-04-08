@@ -43,8 +43,11 @@ class CupyLegacyBackend(Backend):
             stacklevel=2,
         )
 
-    def asarray(self, x):
-        return cp.asarray(x)
+    def asarray(self, x, dtype=None):
+        arr = cp.asarray(x)
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
 
     def to_numpy(self, x):
         if isinstance(x, cp.ndarray):

@@ -31,6 +31,7 @@ def content_based(
     blending_weights,
     sigma_1=5,
     sigma_2=11,
+    backend=None,
 ):
     """
     Calculate weights for content based fusion, Preibisch implementation.
@@ -49,12 +50,20 @@ def content_based(
         Sigma for inner convolution.
     sigma_2 : float
         Sigma for outer convolution.
+    backend : Backend, optional
+        If provided, arrays are converted from backend to numpy
+        (gaussian filtering requires scipy on CPU).
 
     Returns
     -------
     weights : da.array of dim (n_views, (z,) y, x)
         Content based weights for each view.
     """
+
+    # Gaussian filtering requires scipy on CPU
+    if backend is not None:
+        transformed_views = backend.to_numpy(transformed_views)
+        blending_weights = backend.to_numpy(blending_weights)
 
     transformed_views = transformed_views.astype(np.float32)
     transformed_views[blending_weights < 1e-7] = np.nan
@@ -227,9 +236,7 @@ def get_blending_weights(
             for dim in sdims
         ],
     )
-    edt_support = backend.asarray(
-        np.asarray(backend.to_numpy(edt_support)).astype(np.float32)
-    )
+    edt_support = backend.asarray(edt_support, dtype=np.float32)
 
     target_weights = transformation.transform_data(
         edt_support,
@@ -246,9 +253,7 @@ def get_blending_weights(
     # Cosine weighting — use float64 to avoid catastrophic cancellation
     # in cos(pi - epsilon) + 1 when target_weights has very small values
     # (e.g. at tile corners).
-    tw_f64 = backend.asarray(
-        np.asarray(backend.to_numpy(target_weights)).astype(np.float64)
-    )
+    tw_f64 = backend.asarray(target_weights, dtype=np.float64)
     below_one = tw_f64 < 1
     target_weights_cos = (
         backend.cos((1 - tw_f64) * backend.pi) + 1

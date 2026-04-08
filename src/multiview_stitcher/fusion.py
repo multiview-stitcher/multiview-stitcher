@@ -129,7 +129,10 @@ def simple_average_fusion(
 
     if backend is not None:
         n_valid = backend.sum(
-            (~backend.isnan(transformed_views)).astype(np.float32), axis=0
+            backend.asarray(
+                ~backend.isnan(transformed_views), dtype=np.float32
+            ),
+            axis=0,
         )
         n_valid = backend.masked_fill(n_valid, n_valid == 0, np.nan)
         return backend.nansum(transformed_views, axis=0) / n_valid
