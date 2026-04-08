@@ -740,10 +740,7 @@ def fuse_np(
 
     from multiview_stitcher.backends import get_backend
 
-    if backend is None:
-        backend = get_backend()
-    elif isinstance(backend, str):
-        backend = get_backend(backend)
+    backend = get_backend(backend)
 
     if fusion_method_kwargs is None:
         fusion_method_kwargs = {}

@@ -310,10 +310,7 @@ def phase_correlation_registration(
     from multiview_stitcher.backends import get_backend
     from multiview_stitcher.backends._numpy_legacy import NumpyLegacyBackend
 
-    if backend is None:
-        backend = get_backend()
-    elif isinstance(backend, str):
-        backend = get_backend(backend)
+    backend = get_backend(backend)
 
     use_numpy_path = isinstance(backend, NumpyLegacyBackend)
 

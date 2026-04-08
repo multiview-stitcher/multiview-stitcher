@@ -215,10 +215,7 @@ def get_blending_weights(
     """
     from multiview_stitcher.backends import get_backend
 
-    if backend is None:
-        backend = get_backend()
-    elif isinstance(backend, str):
-        backend = get_backend(backend)
+    backend = get_backend(backend)
 
     if blending_widths is None:
         blending_widths = {"z": 3, "y": 10, "x": 10}

@@ -113,10 +113,7 @@ def transform_data(
     """
     from multiview_stitcher.backends import get_backend
 
-    if backend is None:
-        backend = get_backend()
-    elif isinstance(backend, str):
-        backend = get_backend(backend)
+    backend = get_backend(backend)
 
     matrix_prime, offset_prime, output_shape = _compute_affine_params(
         p, input_spacing, input_origin, output_stack_properties, spatial_dims,

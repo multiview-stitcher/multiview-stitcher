@@ -28,13 +28,34 @@ _REGISTRY: dict[str, object] = {
 }
 
 
-def get_backend(name: str | None = None) -> Backend:
+def get_backend(name: str | Backend | None = None) -> Backend:
     """Return an instantiated backend by name.
 
-    If name is None, return the global default.
+    If *name* is already a :class:`Backend` instance it is returned as-is
+    (useful so callers can unconditionally do ``backend = get_backend(backend)``).
+    If *name* is ``None``, the global default is used.
     """
+    if isinstance(name, Backend):
+        return name
     if name is None:
         name = _GLOBAL_BACKEND
+        try:
+            from dask.distributed import get_worker
+
+            worker = get_worker()
+            if name == "numpy":
+                import warnings
+
+                warnings.warn(
+                    "No explicit backend was passed and the global default "
+                    f"('{name}') is being used inside dask worker "
+                    f"'{worker.name}'. Pass backend='...' explicitly to "
+                    "avoid silent fallback to numpy on remote workers.",
+                    stacklevel=2,
+                )
+        except (ImportError, ValueError):
+            # dask.distributed not installed, or not inside a worker
+            pass
     if name not in _REGISTRY:
         raise ValueError(
             f"Unknown backend {name!r}. Available: {list(_REGISTRY)}"
