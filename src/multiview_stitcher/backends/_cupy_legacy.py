@@ -167,6 +167,16 @@ class CupyLegacyBackend(Backend):
         array[mask] = value
         return array
 
+    def normalize_weights(self, weights):
+        """Normalize weights along axis 0."""
+        wsum = cp.nansum(weights, axis=0)
+        wsum = cp.where(wsum == 0, cp.ones_like(wsum), wsum)
+        return weights / wsum
+
+    def fused_weighted_nansum(self, images, weights):
+        """Compute nansum(images * weights, axis=0) in one pass."""
+        return cp.nansum(images * weights, axis=0)
+
     def free_memory(self):
         try:
             cp.cuda.Device().synchronize()
