@@ -26,6 +26,11 @@ try:
 except ImportError:
     ants = None
 
+try:
+    import itk
+except ImportError:
+    itk = None
+
 from multiview_stitcher import (
     fusion,
     msi_utils,
@@ -1630,6 +1635,291 @@ E.g. using pip:
     reg_result["quality"] = quality
 
     return reg_result
+
+
+def _get_elastix_probe_points(ndim, samples_per_axis=5, cube_extent=10.0):
+    axes = [np.linspace(0.0, cube_extent, samples_per_axis) for _ in range(ndim)]
+    grid = np.meshgrid(*axes, indexing="ij")
+    return np.stack(grid, axis=-1).reshape(-1, ndim)
+
+
+def _to_itk_spatial_order(values):
+    return tuple(float(value) for value in values[::-1])
+
+
+def _points_to_itk_spatial_order(points):
+    return np.asarray(points, dtype=float)[:, ::-1]
+
+
+def _points_from_itk_spatial_order(points):
+    return np.asarray(points, dtype=float)[:, ::-1]
+
+
+def _write_elastix_point_set_file(path, points):
+    with open(path, "w", encoding="ascii") as point_file:
+        point_file.write("point\n")
+        point_file.write(f"{len(points)}\n")
+        for point in points:
+            point_file.write(
+                " ".join(str(float(value)) for value in point) + "\n"
+            )
+
+
+def _parse_elastix_output_points(path):
+    transformed_points = []
+    with open(path, encoding="ascii") as output_file:
+        for line in output_file:
+            if "OutputPoint = [" not in line:
+                continue
+            point_str = line.split("OutputPoint = [", 1)[1].split("]", 1)[0]
+            transformed_points.append([float(value) for value in point_str.split()])
+
+    return _points_from_itk_spatial_order(transformed_points)
+
+
+def _get_itk_image_from_data(data, *, origin, spacing):
+    image = itk.image_view_from_array(np.asarray(data, dtype=np.float32))
+    image.SetOrigin(_to_itk_spatial_order(origin))
+    image.SetSpacing(_to_itk_spatial_order(spacing))
+    return image
+
+
+def _get_elastix_parameter_map(
+    transform_type,
+    number_of_resolutions=2,
+    write_result_image=False,
+):
+    transform_type_map = {
+        "translation": ("translation", "TranslationTransform"),
+        "rigid": ("rigid", "EulerTransform"),
+        "similarity": ("rigid", "SimilarityTransform"),
+        "affine": ("affine", "AffineTransform"),
+    }
+
+    normalized_transform_type = transform_type.lower()
+    if normalized_transform_type not in transform_type_map:
+        raise ValueError(
+            f"Unsupported elastix transform type: {transform_type}"
+        )
+
+    default_map_name, elastix_transform_name = transform_type_map[
+        normalized_transform_type
+    ]
+    parameter_map = itk.ParameterObject.GetDefaultParameterMap(
+        default_map_name, number_of_resolutions
+    )
+    parameter_map["Transform"] = [elastix_transform_name]
+    parameter_map["AutomaticTransformInitialization"] = ["false"]
+    parameter_map["WriteResultImage"] = [str(write_result_image).lower()]
+
+    return parameter_map
+
+
+def _get_elastix_point_image(points, sigma=1.0, margin=8.0):
+    points = np.asarray(points, dtype=float)
+    lower = np.floor(np.min(points, axis=0) - margin)
+    upper = np.ceil(np.max(points, axis=0) + margin)
+    shape = tuple((upper - lower + 1).astype(int))
+
+    image_data = np.zeros(shape, dtype=np.float32)
+    for point in points:
+        index = np.round(point - lower).astype(int)
+        image_data[tuple(index)] += 1.0
+
+    image_data = ndimage.gaussian_filter(image_data, sigma=sigma)
+
+    return _get_itk_image_from_data(
+        image_data,
+        origin=lower,
+        spacing=np.ones(points.shape[1], dtype=float),
+    )
+
+
+def _write_initial_elastix_transform(
+    path,
+    *,
+    initial_affine,
+    ndim,
+):
+    fixed_points = _get_elastix_probe_points(ndim)
+    moving_points = transformation.transform_pts(
+        fixed_points,
+        np.asarray(initial_affine),
+    )
+
+    fixed_image = _get_elastix_point_image(fixed_points)
+    moving_image = _get_elastix_point_image(moving_points)
+
+    point_parameter_map = _get_elastix_parameter_map(
+        "affine", number_of_resolutions=2
+    )
+    point_parameter_map["Registration"] = [
+        "MultiMetricMultiResolutionRegistration"
+    ]
+    point_parameter_map["Metric"] = [
+        point_parameter_map["Metric"][0],
+        "CorrespondingPointsEuclideanDistanceMetric",
+    ]
+    point_parameter_map["ImageSampler"] = ["Full"]
+    point_parameter_map["MaximumNumberOfIterations"] = ["256"]
+
+    parameter_object = itk.ParameterObject.New()
+    parameter_object.AddParameterMap(point_parameter_map)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fixed_points_path = os.path.join(tmpdir, "fixed_points.txt")
+        moving_points_path = os.path.join(tmpdir, "moving_points.txt")
+
+        _write_elastix_point_set_file(
+            fixed_points_path,
+            _points_to_itk_spatial_order(fixed_points),
+        )
+        _write_elastix_point_set_file(
+            moving_points_path,
+            _points_to_itk_spatial_order(moving_points),
+        )
+
+        _, result_parameter_object = itk.elastix_registration_method(
+            fixed_image=fixed_image,
+            moving_image=moving_image,
+            parameter_object=parameter_object,
+            fixed_point_set_file_name=fixed_points_path,
+            moving_point_set_file_name=moving_points_path,
+            log_to_console=False,
+        )
+
+    result_parameter_object.WriteParameterFile(path)
+
+
+def _get_affine_from_elastix_transform_parameter_object(
+    transform_parameter_object,
+    *,
+    moving_image,
+    ndim,
+):
+    fixed_points = _get_elastix_probe_points(ndim)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_points_path = os.path.join(tmpdir, "input_points.txt")
+        output_dir = os.path.join(tmpdir, "transformix_output")
+        os.makedirs(output_dir)
+
+        _write_elastix_point_set_file(
+            input_points_path,
+            _points_to_itk_spatial_order(fixed_points),
+        )
+
+        itk.transformix_filter(
+            moving_image=moving_image,
+            transform_parameter_object=transform_parameter_object,
+            output_directory=output_dir,
+            fixed_point_set_file_name=input_points_path,
+            log_to_console=False,
+        )
+
+        moving_points = _parse_elastix_output_points(
+            os.path.join(output_dir, "outputpoints.txt")
+        )
+
+    fixed_to_moving = AffineTransform()
+    fixed_to_moving.estimate(fixed_points, moving_points)
+
+    return param_utils.affine_to_xaffine(fixed_to_moving.params)
+
+
+def registration_ITKElastix(
+    fixed_data,
+    moving_data,
+    *,
+    fixed_origin,
+    moving_origin,
+    fixed_spacing,
+    moving_spacing,
+    initial_affine,
+    transform_types=None,
+    **elastix_registration_kwargs,
+):
+    """
+    Use ITKElastix to perform registration between two spatial images.
+    """
+
+    if itk is None:
+        raise (
+            Exception(
+                """
+Please install the itk-elastix package to use ITKElastix for registration.
+E.g. using pip:
+- `pip install multiview-stitcher[itk-elastix]` or
+- `pip install itk-elastix`
+"""
+            )
+        )
+
+    if transform_types is None:
+        transform_types = ["Translation", "Rigid", "Similarity"]
+
+    spatial_dims = fixed_data.dims
+    ndim = len(spatial_dims)
+
+    fixed_image = _get_itk_image_from_data(
+        fixed_data.data,
+        origin=[fixed_origin[dim] for dim in spatial_dims],
+        spacing=[fixed_spacing[dim] for dim in spatial_dims],
+    )
+    moving_image = _get_itk_image_from_data(
+        moving_data.data,
+        origin=[moving_origin[dim] for dim in spatial_dims],
+        spacing=[moving_spacing[dim] for dim in spatial_dims],
+    )
+
+    parameter_object = itk.ParameterObject.New()
+    for transform_type in transform_types:
+        parameter_object.AddParameterMap(
+            _get_elastix_parameter_map(
+                transform_type,
+                write_result_image=True,
+            )
+        )
+
+    default_elastix_registration_kwargs = {
+        "log_to_console": False,
+    }
+    elastix_registration_kwargs = {
+        **default_elastix_registration_kwargs,
+        **elastix_registration_kwargs,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        initial_transform_path = os.path.join(tmpdir, "initial_transform.txt")
+        _write_initial_elastix_transform(
+            initial_transform_path,
+            initial_affine=initial_affine,
+            ndim=ndim,
+        )
+
+        result_image, result_parameter_object = itk.elastix_registration_method(
+            fixed_image=fixed_image,
+            moving_image=moving_image,
+            parameter_object=parameter_object,
+            initial_transform_parameter_file_name=initial_transform_path,
+            **elastix_registration_kwargs,
+        )
+
+        affine_matrix = _get_affine_from_elastix_transform_parameter_object(
+            result_parameter_object,
+            moving_image=moving_image,
+            ndim=ndim,
+        )
+
+    quality = link_quality_metric_func(
+        np.asarray(fixed_data.data),
+        itk.array_view_from_image(result_image),
+    )
+
+    return {
+        "affine_matrix": affine_matrix,
+        "quality": quality,
+    }
 
 
 def get_pairs_from_sample_masks(

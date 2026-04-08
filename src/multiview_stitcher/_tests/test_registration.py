@@ -21,11 +21,21 @@ from multiview_stitcher import (
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
+ITK_ELASTIX_MARK = pytest.mark.skipif(
+    registration.itk is None,
+    reason="itk-elastix is not installed",
+)
+
+
 @pytest.mark.parametrize(
     "pairwise_reg_func",
     [
         registration.phase_correlation_registration,
         registration.registration_ANTsPy,
+        pytest.param(
+            registration.registration_ITKElastix,
+            marks=ITK_ELASTIX_MARK,
+        ),
     ],
 )
 def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
@@ -69,8 +79,11 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
     )
     tolerance = 1.5
 
-    # somehow antspy sporadically yields different results in ~1/10 times
-    if pairwise_reg_func != registration.registration_ANTsPy:
+    # ANTsPy and ITKElastix can land on slightly different local optima here.
+    if pairwise_reg_func not in [
+        registration.registration_ANTsPy,
+        registration.registration_ITKElastix,
+    ]:
         # assert offset
         assert np.allclose(
             p["transform"].sel(t=0, x_in=["y", "x"], x_out="1") - gt_shift,
@@ -124,8 +137,11 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
         ]
         rel_pos = ctrl_pts_t[0] - ctrl_pts_t[1]
 
-        # somehow antspy sporadically yields different results in ~1/10 times
-        if pairwise_reg_func != registration.registration_ANTsPy:
+        # ANTsPy and ITKElastix can land on slightly different local optima here.
+        if pairwise_reg_func not in [
+            registration.registration_ANTsPy,
+            registration.registration_ITKElastix,
+        ]:
             # assert offset
             assert np.allclose(
                 rel_pos,
@@ -145,6 +161,14 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
             0.1,
             0.1,
             {"transform_types": ["Affine"]},
+        ),
+        pytest.param(
+            registration.registration_ITKElastix,
+            10,
+            0.1,
+            0.1,
+            {"transform_types": ["Affine"]},
+            marks=ITK_ELASTIX_MARK,
         ),
     ],
 )
@@ -214,7 +238,10 @@ def test_pairwise_reg_against_artificial_gt(
     p = pd.compute()
 
     ## compare reg result with ground truth
-    if pairwise_reg_func != registration.registration_ANTsPy:
+    if pairwise_reg_func not in [
+        registration.registration_ANTsPy,
+        registration.registration_ITKElastix,
+    ]:
         assert np.allclose(
             p["transform"].sel(t=0),
             affine,
@@ -353,6 +380,19 @@ def test_get_optimal_registration_binning():
             "shortest_paths_overlap_weighted",
             False,
             "shortest_paths",
+        )
+        for ndim in [2, 3]
+    ]
+    + [
+        pytest.param(
+            ndim,
+            1,
+            3,
+            registration.registration_ITKElastix,
+            "shortest_paths_overlap_weighted",
+            False,
+            "shortest_paths",
+            marks=ITK_ELASTIX_MARK,
         )
         for ndim in [2, 3]
     ]
@@ -820,6 +860,142 @@ def test_registration_ANTsPy_rotation_recovery(ndim, transform_types):
         )
     
     # Check quality metric
+    assert reg_result["quality"] > 0.5, (
+        f"Registration quality too low: {reg_result['quality']:.3f}"
+    )
+
+
+@ITK_ELASTIX_MARK
+@pytest.mark.parametrize("ndim", [2, 3])
+@pytest.mark.parametrize(
+    "transform_types",
+    [
+        ["Rigid"],
+        ["Translation", "Rigid"],
+        ["Translation", "Rigid", "Similarity"],
+    ],
+)
+def test_registration_ITKElastix_rotation_recovery(ndim, transform_types):
+    if ndim == 2:
+        im = np.zeros((100, 100), dtype=float)
+        im[10:40, 20:40] = 1
+        im[70:80, 60:90] = 1
+        im[20:40, 60:70] = 0.7
+        im[60:80, 20:40] = 0.5
+        spatial_dims = ["y", "x"]
+        rotation_angle = np.pi / 12
+        direction = [0, 0, 1]
+    else:
+        im = np.zeros((60, 60, 60), dtype=float)
+        im[10:30, 15:30, 20:35] = 1
+        im[35:50, 10:25, 40:55] = 0.8
+        im[15:25, 35:50, 10:25] = 0.6
+        im[40:55, 40:50, 15:30] = 0.4
+        spatial_dims = ["z", "y", "x"]
+        rotation_angle = np.pi / 18
+        direction = np.array([1, 1, 1]) / np.sqrt(3)
+
+    im = ndimage.gaussian_filter(im, sigma=2)
+
+    center = np.array(im.shape) / 2
+    if ndim == 2:
+        affine_rotation = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=list(center) + [0]
+        )[:3, :3]
+    else:
+        affine_rotation = param_utils.affine_from_rotation(
+            rotation_angle, direction, point=center
+        )
+
+    imt = ndimage.affine_transform(
+        im,
+        np.linalg.inv(affine_rotation)[:ndim, :ndim],
+        offset=np.linalg.inv(affine_rotation)[:ndim, ndim],
+        order=3,
+        mode="constant",
+        cval=0,
+    )
+
+    spacing = {dim: 1.0 for dim in spatial_dims}
+    origin = {dim: 0.0 for dim in spatial_dims}
+
+    fixed_data = xr.DataArray(
+        im,
+        dims=spatial_dims,
+        coords={dim: np.arange(im.shape[i]) for i, dim in enumerate(spatial_dims)},
+    )
+    moving_data = xr.DataArray(
+        imt,
+        dims=spatial_dims,
+        coords={
+            dim: np.arange(imt.shape[i]) for i, dim in enumerate(spatial_dims)
+        },
+    )
+
+    reg_result = registration.registration_ITKElastix(
+        fixed_data=fixed_data,
+        moving_data=moving_data,
+        fixed_origin=origin,
+        moving_origin=origin,
+        fixed_spacing=spacing,
+        moving_spacing=spacing,
+        initial_affine=param_utils.identity_transform(ndim),
+        transform_types=transform_types,
+    )
+
+    recovered_affine = np.array(reg_result["affine_matrix"])
+
+    if ndim == 2:
+        shape = im.shape
+        vertices = np.array(
+            [
+                [0, 0],
+                [0, shape[1] - 1],
+                [shape[0] - 1, 0],
+                [shape[0] - 1, shape[1] - 1],
+                [shape[0] // 2, 0],
+                [shape[0] // 2, shape[1] - 1],
+                [0, shape[1] // 2],
+                [shape[0] - 1, shape[1] // 2],
+                [shape[0] // 2, shape[1] // 2],
+            ]
+        )
+    else:
+        shape = im.shape
+        vertices = []
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    vertices.append(
+                        [
+                            i * (shape[0] - 1),
+                            j * (shape[1] - 1),
+                            k * (shape[2] - 1),
+                        ]
+                    )
+        for dim in range(3):
+            for val in [0, shape[dim] - 1]:
+                face_center = [s // 2 for s in shape]
+                face_center[dim] = val
+                vertices.append(face_center)
+        vertices.append([s // 2 for s in shape])
+        vertices = np.array(vertices)
+
+    vertices_transformed_expected = transformation.transform_pts(
+        vertices, affine_rotation
+    )
+    vertices_recovered = transformation.transform_pts(
+        vertices_transformed_expected, np.linalg.inv(recovered_affine)
+    )
+
+    errors = vertices - vertices_recovered
+    rms_error = np.sqrt(np.mean(np.sum(errors**2, axis=1)))
+
+    rms_tolerance = 2.0 if ndim == 2 else 3.0
+    assert rms_error < rms_tolerance, (
+        f"RMS error too large for {ndim}D with transform_types={transform_types}. "
+        f"RMS error: {rms_error:.4f} pixels, tolerance: {rms_tolerance} pixels"
+    )
     assert reg_result["quality"] > 0.5, (
         f"Registration quality too low: {reg_result['quality']:.3f}"
     )
