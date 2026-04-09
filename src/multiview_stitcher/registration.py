@@ -1873,7 +1873,9 @@ E.g. using pip:
         )
 
     if transform_types is None:
-        transform_types = ["Translation", "Rigid", "Similarity"]
+        transform_types = ["Translation", "Rigid"]
+
+    transform_types = [t.title() for t in transform_types]
 
     spatial_dims = fixed_data.dims
     ndim = len(spatial_dims)
