@@ -96,6 +96,9 @@ class CupyLegacyBackend(Backend):
     def clip(self, x, a_min, a_max):
         return cp.clip(x, a_min, a_max)
 
+    def where(self, condition, x, y):
+        return cp.where(condition, x, y)
+
     @property
     def pi(self):
         return cp.pi
