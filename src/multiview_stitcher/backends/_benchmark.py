@@ -412,25 +412,65 @@ def max_tile_size(
     return s
 
 
-def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
-    """Compute VRAM-safe chunk size for a given function and device."""
-    if not _is_cupy_backend(backend_name):
-        return tile_size
+def _max_chunk_size_cpu(
+    ndim=3,
+    dtype_bytes=4,
+    safety_factor=0.70,
+    n_concurrent_arrays=_PEAK_FLOAT32_ARRAYS,
+):
+    """Compute the largest cube edge that fits in available system RAM.
 
-    try:
-        import cupy as _cp
-        if _cp.cuda.runtime.is_hip:
-            n_arrays = _CONCURRENT_ARRAYS_ROCM.get(
-                func_name, int(_PEAK_FLOAT32_ARRAYS * 1.5)
+    Uses the same formula as ``max_tile_size`` but queries system memory
+    via ``/proc/meminfo`` (available) instead of GPU VRAM.
+
+    Parameters
+    ----------
+    ndim : int
+        Number of spatial dimensions (default 3).
+    dtype_bytes : int
+        Bytes per element of the working dtype (4 for float32).
+    safety_factor : float
+        Fraction of available RAM to consider usable (0-1).
+    n_concurrent_arrays : int
+        Estimated number of dtype-sized arrays alive simultaneously.
+
+    Returns
+    -------
+    int
+        Largest chunk edge length (rounded down to a multiple of 32).
+    """
+    import os
+
+    mem_available = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+    usable = mem_available * safety_factor
+    s = int((usable / (dtype_bytes * n_concurrent_arrays)) ** (1.0 / ndim))
+    s = max(32, (s // 32) * 32)
+    return s
+
+
+# ToDo: Computing the chunk size should be the same for GPU and CPU, just the ammount of memory available changes. We should unify the logic and remove one of these functions.
+# ToDo: Changing the chunking should come with a warning.
+def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
+    """Compute memory-safe chunk size for a given function and device."""
+    if _is_cupy_backend(backend_name):
+        try:
+            import cupy as _cp
+            if _cp.cuda.runtime.is_hip:
+                n_arrays = _CONCURRENT_ARRAYS_ROCM.get(
+                    func_name, int(_PEAK_FLOAT32_ARRAYS * 1.5)
+                )
+            else:
+                n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
+            return min(
+                tile_size,
+                max_tile_size(ndim=3, device_id=device_id, n_concurrent_arrays=n_arrays),
             )
-        else:
-            n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
-        return min(
-            tile_size,
-            max_tile_size(ndim=3, device_id=device_id, n_concurrent_arrays=n_arrays),
-        )
-    except Exception:
-        return tile_size
+        except Exception:
+            return tile_size
+
+    # CPU backends: cap chunk size to available RAM
+    n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
+    return min(tile_size, _max_chunk_size_cpu(ndim=3, n_concurrent_arrays=n_arrays))
 
 
 def _prepare_inputs(tile_size, backend_name, chunk_size=None, device_id=0):
@@ -965,14 +1005,14 @@ def run_benchmarks(
                     label = f"  {tag}: {fn} [chunk={chunk_size}]"
                     print(f"\n{label}: ", end="", flush=True)
 
-                    # Release previous GPU arrays before freeing pool
+                    # Release previous arrays and collect garbage
+                    try:
+                        del inputs
+                    except NameError:
+                        pass
+                    import gc as _gc
+                    _gc.collect()
                     if _is_cupy_backend(backend_name):
-                        try:
-                            del inputs
-                        except NameError:
-                            pass
-                        import gc as _gc
-                        _gc.collect()
                         _free_gpu_pool()
 
                     inputs = _prepare_inputs(
@@ -992,6 +1032,7 @@ def run_benchmarks(
                         ref_timing = _bench_function(fn, ref_inputs, return_result=True)
                         references[ref_key] = ref_timing["result"]
                         del ref_inputs
+                        _gc.collect()
 
                     # Warm-up
                     warm_t0 = time.perf_counter()
@@ -1016,6 +1057,11 @@ def run_benchmarks(
                                 correctness_results.append(corr)
                             # Free the result to save memory
                             del t["result"]
+
+                    # Free reference array once all runs for this key are done
+                    if ref_key in references:
+                        del references[ref_key]
+                        _gc.collect()
 
                     compute_times = [t["compute_time"] for t in timings]
 

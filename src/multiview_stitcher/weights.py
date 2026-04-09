@@ -250,14 +250,13 @@ def get_blending_weights(
     # Cosine weighting — use float64 to avoid catastrophic cancellation
     # in cos(pi - epsilon) + 1 when target_weights has very small values
     # (e.g. at tile corners).
+    # Minimise peak memory by using where() and freeing intermediates.
     tw_f64 = backend.asarray(target_weights, dtype=np.float64)
+    del target_weights
     below_one = tw_f64 < 1
-    target_weights_cos = (
-        backend.cos((1 - tw_f64) * backend.pi) + 1
-    ) / 2
-    target_weights = (
-        tw_f64 * ~below_one + target_weights_cos * below_one
-    )
+    cos_weights = (backend.cos((1 - tw_f64) * backend.pi) + 1) / 2
+    target_weights = backend.where(below_one, cos_weights, tw_f64)
+    del tw_f64, below_one, cos_weights
     target_weights = backend.clip(target_weights, 0, 1)
 
     return target_weights

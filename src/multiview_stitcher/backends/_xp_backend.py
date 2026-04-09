@@ -45,6 +45,8 @@ _XP_DELEGATES = {
     # math
     "nansum", "nanmax", "nanmin", "nan_to_num", "isnan",
     "any", "sum", "abs", "cos", "clip",
+    # selection
+    "where",
     # constants / values
     "pi", "nan", "newaxis",
 }
