@@ -77,7 +77,7 @@ ants = [
     "antspyx >=0.6.0",
 ]
 itk-elastix = [
-    "itk-elastix >=0.25.0",
+    "itk-elastix >=0.25.2",
 ]
 czi = [
     "czifile ==2019.7.2.3",
@@ -91,7 +91,7 @@ dev = [
     "pytest-benchmark >5",
     "nbmake",  # notebook testing
     "antspyx >=0.6.0",
-    "itk-elastix >=0.25.0",
+    "itk-elastix >=0.25.2",
     "czifile ==2019.7.2.3",
     "imagecodecs >=2023.7.10",
     "pre-commit",
@@ -101,6 +101,7 @@ playground = [
     "napari[pyqt6, optional]",
     "pydantic_bigstitcher",
     "ipympl",
+    "ome-types",
 ]
 
 
