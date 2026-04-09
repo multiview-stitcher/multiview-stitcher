@@ -760,12 +760,27 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="global_optimization (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-transform-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      The transform option
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
-  <a href="#linear_two_pass" class="md-nav__link">
+  <a href="#linear_two_pass-experimental" class="md-nav__link">
     <span class="md-ellipsis">
-      linear_two_pass
+      linear_two_pass (experimental)
     </span>
   </a>
   
@@ -1183,12 +1198,27 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="global_optimization (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-transform-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      The transform option
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
-  <a href="#linear_two_pass" class="md-nav__link">
+  <a href="#linear_two_pass-experimental" class="md-nav__link">
     <span class="md-ellipsis">
-      linear_two_pass
+      linear_two_pass (experimental)
     </span>
   </a>
   
@@ -1234,7 +1264,21 @@ Extension API section.</p>
 <li>Prunes edges based on residuals to reject outliers.</li>
 <li>Robust but can be slower for large graphs.</li>
 </ul>
-<h2 id="linear_two_pass"><code>linear_two_pass</code></h2>
+<h3 id="the-transform-option">The <code>transform</code> option</h3>
+<p>The <code>global_optimization</code> method accepts a <code>transform</code> setting in
+<code>groupwise_resolution_kwargs</code> that constrains the type of transforms computed
+during global parameter resolution. It defaults to <code>"translation"</code>, which means
+final transformations are limited to translations. If your pairwise
+registration method returns higher-order transforms (e.g. rigid, similarity, or
+affine), you need to set <code>transform</code> explicitly to preserve those components:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">groupwise_resolution_kwargs</span><span class="o">=</span><span class="p">{</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="s2">&quot;transform&quot;</span><span class="p">:</span> <span class="s2">&quot;rigid&quot;</span><span class="p">,</span>  <span class="c1"># constrains the final type of transforms returned for each tile</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>For example, when using <code>registration_ITKElastix</code> with
+<code>transform_types=["Rigid", "Affine"]</code>, it typically makes sense to set <code>"transform": "affine"</code> so that the global resolution step retains the full affine transforms rather than discarding
+everything beyond translation.</p>
+<h2 id="linear_two_pass-experimental"><code>linear_two_pass</code> (experimental)</h2>
 <ul>
 <li>Sparse Laplacian-style solves with first-order rotation linearization
   and two-pass outlier pruning.</li>
