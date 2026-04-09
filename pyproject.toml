@@ -92,6 +92,12 @@ dev = [
     "imagecodecs >=2023.7.10",
     "pre-commit",
 ]
+playground = [
+    "napari-stitcher",
+    "napari[pyqt6, optional]",
+    "pydantic_bigstitcher",
+    "ipympl",
+]
 
 
 [tool.setuptools]
