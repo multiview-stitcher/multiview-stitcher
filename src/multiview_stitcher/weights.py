@@ -84,7 +84,8 @@ def content_based(
     ]
 
     weights = np.stack(weights, axis=0)
-    weights = normalize_weights(weights)
+    # Data is on CPU here (to_numpy above), so normalize on the CPU path.
+    weights = normalize_weights(weights, backend=None)
 
     return weights
 

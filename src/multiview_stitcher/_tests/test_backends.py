@@ -53,6 +53,19 @@ def test_set_unknown_backend_raises():
         set_backend("nonexistent")
 
 
+def test_get_backend_passthrough():
+    """get_backend returns an already-instantiated Backend as-is."""
+    backend = get_backend("numpy")
+    assert get_backend(backend) is backend
+
+
+def test_get_backend_none_uses_global():
+    """get_backend(None) resolves via the global default."""
+    set_backend("numpy")
+    backend = get_backend(None)
+    assert isinstance(backend, ArrayAPIBackend)
+
+
 def test_numpy_backend_basic_ops():
     backend = get_backend("numpy")
     x = backend.asarray([1.0, 2.0, np.nan])
@@ -95,6 +108,97 @@ def test_numpy_legacy_matches_arrayapi():
                 legacy.asarray(img), in_range=(0, 100), out_range=(0, 1)
             )
         ),
+    )
+
+
+def test_backend_always_propagated():
+    """If a function has a ``backend`` parameter and calls another function
+    that also accepts ``backend``, it must pass ``backend=...`` explicitly.
+
+    This is a static/AST check — no runtime execution needed.  It prevents
+    silent fallback to the global default (numpy) when a caller already has
+    a resolved backend.
+    """
+    import ast
+    from pathlib import Path
+
+    pkg_root = Path(__file__).resolve().parent.parent  # multiview_stitcher/
+
+    # Source files to scan (exclude tests, benchmarks, vendored code)
+    source_files = [
+        p for p in pkg_root.rglob("*.py")
+        if "_tests" not in p.parts and "_benchmarks" not in p.parts
+    ]
+
+    # --- Pass 1: collect every function name that accepts ``backend`` ------
+    funcs_with_backend: set[str] = set()
+    for path in source_files:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                arg_names = [a.arg for a in node.args.args + node.args.kwonlyargs]
+                if "backend" in arg_names:
+                    funcs_with_backend.add(node.name)
+
+    assert funcs_with_backend, "Should find functions with backend param"
+
+    # --- Pass 2: for every function with ``backend``, check its calls -----
+    violations = []
+    for path in source_files:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            caller_args = [a.arg for a in node.args.args + node.args.kwonlyargs]
+            if "backend" not in caller_args:
+                continue
+
+            # Walk every call inside this function
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Call):
+                    continue
+
+                # Resolve the function name from the call node
+                callee_name = None
+                if isinstance(child.func, ast.Name):
+                    callee_name = child.func.id
+                elif isinstance(child.func, ast.Attribute):
+                    # Skip method calls on the backend object itself
+                    # (e.g. backend.normalize_weights() is not a
+                    # propagation site)
+                    if (
+                        isinstance(child.func.value, ast.Name)
+                        and child.func.value.id == "backend"
+                    ):
+                        continue
+                    callee_name = child.func.attr
+
+                if callee_name is None or callee_name not in funcs_with_backend:
+                    continue
+
+                # Check if backend= is passed as keyword or positional arg
+                kw_names = [kw.arg for kw in child.keywords]
+                has_backend_kw = "backend" in kw_names
+                has_backend_positional = any(
+                    isinstance(a, ast.Name) and a.id == "backend"
+                    for a in child.args
+                )
+                # Also accept **kwargs spreading (could contain backend)
+                has_kwargs_spread = any(
+                    kw.arg is None for kw in child.keywords
+                )
+
+                if not (has_backend_kw or has_backend_positional
+                        or has_kwargs_spread):
+                    rel = path.relative_to(pkg_root)
+                    violations.append(
+                        f"  {rel}:{child.lineno}  "
+                        f"{node.name}() -> {callee_name}()"
+                    )
+
+    assert not violations, (
+        "Functions with a 'backend' parameter call other backend-aware "
+        "functions without passing backend=...:\n" + "\n".join(violations)
     )
 
 
