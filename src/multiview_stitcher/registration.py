@@ -1767,41 +1767,6 @@ def _get_elastix_parameter_map(
     return parameter_map
 
 
-def _get_elastix_point_image(
-    points,
-    sigma=1.0,
-    margin=8.0,
-    lower=None,
-    upper=None,
-):
-    points = np.asarray(points, dtype=float)
-    if lower is None:
-        lower = np.floor(np.min(points, axis=0) - margin)
-    else:
-        lower = np.asarray(lower, dtype=float
-                           )
-
-    if upper is None:
-        upper = np.ceil(np.max(points, axis=0) + margin)
-    else:
-        upper = np.asarray(upper, dtype=float)
-
-    shape = tuple((upper - lower + 1).astype(int))
-
-    image_data = np.zeros(shape, dtype=np.float32)
-    for point in points:
-        index = np.round(point - lower).astype(int)
-        image_data[tuple(index)] += 1.0
-
-    image_data = ndimage.gaussian_filter(image_data, sigma=sigma)
-
-    return _get_itk_image_from_data(
-        image_data,
-        origin=lower,
-        spacing=np.ones(points.shape[1], dtype=float),
-    )
-
-
 def _write_initial_elastix_transform(
     path,
     *,
