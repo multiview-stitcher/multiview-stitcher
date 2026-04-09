@@ -32,8 +32,8 @@ Consider which transform suits your data best:
 
 ### Available registration implementations:
 1. Phase correlation (translation)
-1. AntsP (translation, rigid, similarity, affine)
-1. ITK-elastix (translation, rigid, similarity, affine) (WIP)
+1. AntsPy (translation, rigid, similarity, affine)
+1. ITK-elastix (translation, rigid, similarity, affine) - prefered for more-than-translation registration
 1. [Custom registration functions](extension_api_pairwise_registration.md) (up to affine)
 
 ## Change the parameters used during global parameter resolution
