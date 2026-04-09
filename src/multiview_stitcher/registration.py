@@ -26,10 +26,7 @@ try:
 except ImportError:
     ants = None
 
-try:
-    import itk
-except ImportError:
-    itk = None
+itk = None  # lazy-imported inside registration_ITKElastix
 
 from multiview_stitcher import (
     fusion,
@@ -1860,17 +1857,16 @@ def registration_ITKElastix(
         (e.g. ``log_to_console=True``).
     """
 
-    if itk is None:
-        raise (
-            Exception(
-                """
-Please install the itk-elastix package to use ITKElastix for registration.
-E.g. using pip:
-- `pip install multiview-stitcher[itk-elastix]` or
-- `pip install itk-elastix`
-"""
-            )
-        )
+    try:
+        global itk
+        import itk
+    except ImportError:
+        raise ImportError(
+            "Please install the itk-elastix package to use ITKElastix for registration.\n"
+            "E.g. using pip:\n"
+            "- `pip install multiview-stitcher[itk-elastix]` or\n"
+            "- `pip install itk-elastix`"
+        ) from None
 
     if transform_types is None:
         transform_types = ["Translation", "Rigid"]
