@@ -848,6 +848,109 @@ def test_jax_custom_fusion_raises():
 
 
 # ---------------------------------------------------------------------------
+# JAX native phase_cross_correlation / structural_similarity tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("normalization", ["phase", None])
+@pytest.mark.parametrize("upsample_factor", [1, 10])
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_jax_phase_cross_correlation_matches_skimage(ndim, upsample_factor, normalization):
+    """JAX native phase_cross_correlation matches skimage for unmasked inputs."""
+    _skip_unless_jax()
+    from skimage.registration import phase_cross_correlation as skimage_pcc
+
+    rng = np.random.default_rng(0)
+    shape = (24, 24) if ndim == 2 else (12, 12, 12)
+    ref = rng.random(shape, dtype=np.float64).astype(np.float32)
+
+    # Apply a known integer shift
+    true_shift = np.array([3, -2] if ndim == 2 else [2, -1, 3], dtype=float)
+    from scipy.ndimage import shift as scipy_shift
+    mov = scipy_shift(ref, true_shift, mode="wrap").astype(np.float32)
+
+    backend = get_backend("jax")
+    jax_result = backend.phase_cross_correlation(
+        backend.asarray(ref),
+        backend.asarray(mov),
+        normalization=normalization,
+        upsample_factor=upsample_factor,
+        disambiguate=False,
+    )
+    skimage_result = skimage_pcc(
+        ref,
+        mov,
+        normalization=normalization,
+        upsample_factor=upsample_factor,
+        disambiguate=False,
+    )
+
+    np.testing.assert_allclose(
+        backend.to_numpy(jax_result[0]),
+        skimage_result[0],
+        atol=1.0 / upsample_factor,
+        err_msg=f"shift mismatch (ndim={ndim}, upsample={upsample_factor}, norm={normalization})",
+    )
+
+
+def test_jax_phase_cross_correlation_masked_falls_back():
+    """Masked phase_cross_correlation falls back to skimage (CPU) without error."""
+    _skip_unless_jax()
+    from skimage.registration import phase_cross_correlation as skimage_pcc
+
+    rng = np.random.default_rng(1)
+    ref = rng.random((20, 20), dtype=np.float64).astype(np.float32)
+    mov = rng.random((20, 20), dtype=np.float64).astype(np.float32)
+    mask = np.ones((20, 20), dtype=bool)
+
+    backend = get_backend("jax")
+    jax_result = backend.phase_cross_correlation(
+        backend.asarray(ref),
+        backend.asarray(mov),
+        reference_mask=backend.asarray(mask),
+        moving_mask=backend.asarray(mask),
+        disambiguate=False,
+    )
+    skimage_result = skimage_pcc(ref, mov, reference_mask=mask, moving_mask=mask, disambiguate=False)
+
+    np.testing.assert_allclose(
+        backend.to_numpy(jax_result[0]),
+        skimage_result[0],
+        atol=0.5,
+    )
+
+
+@pytest.mark.parametrize("win_size", [3, 7])
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_jax_structural_similarity_matches_skimage(ndim, win_size):
+    """JAX native structural_similarity matches skimage."""
+    _skip_unless_jax()
+    from skimage.metrics import structural_similarity as skimage_ssim
+
+    rng = np.random.default_rng(2)
+    shape = (32, 32) if ndim == 2 else (16, 16, 16)
+    im1 = rng.random(shape, dtype=np.float64).astype(np.float32)
+    im2 = rng.random(shape, dtype=np.float64).astype(np.float32)
+    data_range = 1.0
+
+    backend = get_backend("jax")
+    jax_val = float(backend.to_numpy(
+        backend.structural_similarity(
+            backend.asarray(im1),
+            backend.asarray(im2),
+            data_range=data_range,
+            win_size=win_size,
+        )
+    ))
+    skimage_val = float(skimage_ssim(im1, im2, data_range=data_range, win_size=win_size))
+
+    assert jax_val == pytest.approx(skimage_val, abs=1e-3), (
+        f"SSIM mismatch (ndim={ndim}, win_size={win_size}): "
+        f"jax={jax_val:.6f}, skimage={skimage_val:.6f}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # MLX backend tests (skip when MLX not available — requires macOS + Apple Silicon)
 # ---------------------------------------------------------------------------
 

@@ -44,11 +44,18 @@ class JaxBackend(XPBackend):
     Affine transforms are implemented via
     ``jax.scipy.ndimage.map_coordinates`` so they execute entirely on
     the current JAX device.  Operations without a JAX equivalent
-    (``distance_transform_edt``, ``gaussian_filter``, skimage metrics)
-    fall back to CPU NumPy / SciPy.
+    (``distance_transform_edt``, ``gaussian_filter``) fall back to CPU.
+
+    Phase cross-correlation and structural similarity are implemented
+    natively in JAX using FFTs and sliding-window reductions.  The masked
+    variant of phase_cross_correlation falls back to CPU skimage because
+    it uses a fundamentally different (normalised cross-correlation)
+    algorithm.
     """
 
     _has_native_affine_transform = True
+    _has_native_phase_cross_correlation = True
+    _has_native_structural_similarity = True
     _is_gpu = True  # JAX manages its own parallelism; synchronous avoids conflicts
 
     def __init__(self):
@@ -141,6 +148,182 @@ class JaxBackend(XPBackend):
             )
 
         return result
+
+    # -- Native phase cross-correlation via JAX FFT ----------------------------
+
+    def _native_phase_cross_correlation(self, reference_image, moving_image, **kwargs):
+        """FFT-based phase cross-correlation running entirely on the JAX device.
+
+        The masked variant (``reference_mask`` / ``moving_mask`` kwargs) uses a
+        different algorithm and is delegated to CPU skimage.
+        """
+        jnp = self.xp
+
+        if "reference_mask" in kwargs or "moving_mask" in kwargs:
+            return self._skimage_phase_cross_correlation(
+                reference_image, moving_image, **kwargs
+            )
+
+        normalization = kwargs.get("normalization", "phase")
+        upsample_factor = int(kwargs.get("upsample_factor", 1))
+
+        src_freq = jnp.fft.fftn(reference_image)
+        target_freq = jnp.fft.fftn(moving_image)
+
+        image_product = src_freq * jnp.conj(target_freq)
+
+        if normalization == "phase":
+            eps = jnp.finfo(image_product.real.dtype).eps
+            image_product = image_product / (jnp.abs(image_product) + eps)
+        elif normalization is not None:
+            raise ValueError(
+                f"normalization must be 'phase' or None, got {normalization!r}"
+            )
+
+        cross_correlation = jnp.real(jnp.fft.ifftn(image_product))
+
+        # Integer-pixel peak
+        maxima_idx = int(jnp.argmax(jnp.abs(cross_correlation)))
+        shape = cross_correlation.shape
+        maxima = np.array(np.unravel_index(maxima_idx, shape))
+        midpoints = np.array([s // 2 for s in shape])
+        shift = np.where(
+            maxima > midpoints, maxima - np.array(shape), maxima
+        ).astype(float)
+
+        if upsample_factor == 1:
+            return (jnp.array(shift), 0.0, 0.0)
+
+        # Sub-pixel refinement via upsampled matrix DFT
+        upsample_factor_f = float(upsample_factor)
+        shift = np.round(shift * upsample_factor_f) / upsample_factor_f
+        upsampled_region_size = int(np.ceil(upsample_factor_f * 1.5))
+        dftshift = np.fix(upsampled_region_size / 2.0)
+        sample_region_offset = dftshift - shift * upsample_factor_f
+
+        cross_correlation_up = self._jax_upsampled_dft(
+            jnp.conj(image_product),
+            upsampled_region_size,
+            upsample_factor_f,
+            sample_region_offset,
+        ) / (cross_correlation.size * upsample_factor_f ** reference_image.ndim)
+
+        maxima_idx_up = int(jnp.argmax(jnp.abs(cross_correlation_up)))
+        maxima_up = np.array(
+            np.unravel_index(maxima_idx_up, cross_correlation_up.shape)
+        ).astype(float)
+        maxima_up -= dftshift
+
+        shift = shift + maxima_up / upsample_factor_f
+        return (jnp.array(shift), 0.0, 0.0)
+
+    def _jax_upsampled_dft(self, data, upsampled_region_size, upsample_factor, axis_offsets):
+        """Matrix-DFT based upsampled DFT for sub-pixel shift estimation.
+
+        Port of skimage's ``_upsampled_dft`` to JAX
+        (Guizar-Sicairos et al., Optics Letters, 2008).
+        """
+        jnp = self.xp
+        im2pi = 1j * 2 * np.pi
+
+        dims = data.shape
+        if not hasattr(upsampled_region_size, "__len__"):
+            upsampled_region_size = [int(upsampled_region_size)] * len(dims)
+        if not hasattr(axis_offsets, "__len__"):
+            axis_offsets = [float(axis_offsets)] * len(dims)
+
+        for n_items, ups_size, ax_off in reversed(
+            list(zip(dims, upsampled_region_size, axis_offsets))
+        ):
+            freq = np.fft.ifftshift(np.arange(n_items)) - np.floor(n_items / 2.0)
+            samples = np.arange(ups_size) - ax_off
+            kernel = jnp.array(
+                np.exp(
+                    (-im2pi / (n_items * upsample_factor))
+                    * np.outer(freq, samples)
+                )
+            )
+            # kernel shape: (n_items, ups_size) → kernel.T: (ups_size, n_items)
+            # contract data's last dim with kernel.T's last dim
+            data = jnp.tensordot(kernel.T, data, axes=([-1], [-1]))
+
+        return data
+
+    # -- Native structural similarity via JAX uniform filter ------------------
+
+    def _native_structural_similarity(self, im1, im2, **kwargs):
+        """SSIM computed entirely on the JAX device.
+
+        Uses a uniform sliding-window filter implemented via
+        ``jax.lax.reduce_window`` with reflect padding, matching
+        scipy's ``uniform_filter(mode='reflect')`` behaviour.
+        """
+        import jax.lax as lax
+
+        jnp = self.xp
+
+        data_range = float(kwargs.get("data_range", float(jnp.max(im2) - jnp.min(im2))))
+        win_size = int(kwargs.get("win_size", 7))
+        K1 = float(kwargs.get("K1", 0.01))
+        K2 = float(kwargs.get("K2", 0.03))
+
+        C1 = (K1 * data_range) ** 2
+        C2 = (K2 * data_range) ** 2
+        ndim = im1.ndim
+        NP = win_size ** ndim
+        # Bessel's correction for sample covariance, matching skimage's default
+        # (use_sample_covariance=True)
+        cov_norm = NP / (NP - 1)
+
+        im1 = im1.astype(jnp.float32)
+        im2 = im2.astype(jnp.float32)
+        pad = win_size // 2
+
+        def uniform_filter(x):
+            # scipy.ndimage.uniform_filter applies a 1-D box along each axis in
+            # sequence (separable), with mode='reflect' which is edge-inclusive
+            # (= numpy/JAX 'symmetric').  Reproducing the separable approach
+            # is essential: a single N-D reduce_window gives different boundary
+            # values at corners because 2-D padding interacts differently than
+            # two successive 1-D paddings.
+            for axis in range(ndim):
+                pad_cfg = [(0, 0)] * ndim
+                pad_cfg[axis] = (pad, pad)
+                x = lax.reduce_window(
+                    jnp.pad(x, pad_cfg, mode="symmetric"),
+                    init_value=0.0,
+                    computation=lax.add,
+                    window_dimensions=tuple(
+                        win_size if d == axis else 1 for d in range(ndim)
+                    ),
+                    window_strides=(1,) * ndim,
+                    padding="VALID",
+                ) / win_size
+            return x
+
+        ux = uniform_filter(im1)
+        uy = uniform_filter(im2)
+        uxx = uniform_filter(im1 * im1)
+        uyy = uniform_filter(im2 * im2)
+        uxy = uniform_filter(im1 * im2)
+
+        vx = cov_norm * (uxx - ux * ux)
+        vy = cov_norm * (uyy - uy * uy)
+        vxy = cov_norm * (uxy - ux * uy)
+
+        A1 = 2.0 * ux * uy + C1
+        A2 = 2.0 * vxy + C2
+        B1 = ux ** 2 + uy ** 2 + C1
+        B2 = vx + vy + C2
+
+        S = (A1 * A2) / (B1 * B2)
+
+        # Crop the filter-radius border to match skimage's behaviour
+        # (skimage: `crop(S, pad).mean(dtype=float64)`)
+        pad_crop = (win_size - 1) // 2
+        if pad_crop > 0:
+            S = S[tuple(slice(pad_crop, -pad_crop) for _ in range(ndim))]
+        return jnp.mean(S)
 
     def __repr__(self):
         return "JaxBackend()"
