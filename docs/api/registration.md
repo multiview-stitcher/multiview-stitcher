@@ -2,3 +2,4 @@
     options:
       members:
         - register
+        - registration_ITKElastix

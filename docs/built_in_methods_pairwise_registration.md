@@ -24,3 +24,24 @@ implementations, see the Extension API section.
   sufficient.
 - Configure via `pairwise_reg_func_kwargs`, e.g. `transform_types`,
   `aff_metric`, or `aff_iterations`.
+
+## `registration_ITKElastix`
+
+- Physical-space registration using ITKElastix (requires the optional
+  `itk-elastix` dependency: `pip install multiview-stitcher[itk-elastix]`).
+- Runs a sequence of transform stages (default: Translation, Rigid) starting from the passed `initial_affine`. Supported stages: `'Translation'`, `'Rigid'`, `'Similarity'`, `'Affine'` (case-insensitive).
+- Respects image spacing and origin; each stage threads its result forward as the initial transform for the next stage.
+- Configure via `pairwise_reg_func_kwargs`, for example:
+
+```python
+registration.register(
+    msims,
+    pairwise_reg_func=registration.registration_ITKElastix,
+    pairwise_reg_func_kwargs={
+        "transform_types": ["Rigid", "Affine"],
+        "number_of_resolutions": 3,
+        "number_of_iterations": 500,
+        "metric": "AdvancedMattesMutualInformation",
+    },
+)
+```
