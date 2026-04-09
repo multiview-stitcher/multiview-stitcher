@@ -79,6 +79,9 @@ class NumpyLegacyBackend(Backend):
     def clip(self, x, a_min, a_max):
         return np.clip(x, a_min, a_max)
 
+    def where(self, condition, x, y):
+        return np.where(condition, x, y)
+
     @property
     def pi(self):
         return np.pi
@@ -118,6 +121,17 @@ class NumpyLegacyBackend(Backend):
 
     def structural_similarity(self, im1, im2, **kwargs):
         return structural_similarity(im1, im2, **kwargs)
+
+    def masked_fill(self, array, mask, value):
+        return np.where(mask, value, array)
+
+    def normalize_weights(self, weights):
+        wsum = np.nansum(weights, axis=0)
+        wsum = np.where(wsum == 0, np.ones_like(wsum), wsum)
+        return weights / wsum
+
+    def fused_weighted_nansum(self, images, weights):
+        return np.nansum(images * weights, axis=0)
 
     @property
     def recommended_dask_scheduler(self):
