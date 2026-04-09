@@ -101,7 +101,7 @@ playground = [
     "napari[pyqt6, optional]",
     "pydantic_bigstitcher",
     "ipympl",
-    "ome-types",
+    "ome-types", 
 ]
 
 
