@@ -468,6 +468,27 @@ def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
         except Exception:
             return tile_size
 
+    if backend_name == "jax":
+        try:
+            import jax as _jax
+            devs = _jax.devices()
+            dev = devs[device_id] if device_id < len(devs) else devs[0]
+            if dev.platform != "cpu":
+                mem_stats = dev.memory_stats()
+                if mem_stats:
+                    mem_free = (mem_stats.get("bytes_limit", 0)
+                                - mem_stats.get("bytes_in_use", 0))
+                    n_arrays = _CONCURRENT_ARRAYS.get(
+                        func_name, _PEAK_FLOAT32_ARRAYS
+                    )
+                    safety = 0.70
+                    usable = mem_free * safety
+                    s = int((usable / (4 * n_arrays)) ** (1.0 / 3))
+                    s = max(32, (s // 32) * 32)
+                    return min(tile_size, s)
+        except Exception:
+            pass
+
     # CPU backends: cap chunk size to available RAM
     n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
     return min(tile_size, _max_chunk_size_cpu(ndim=3, n_concurrent_arrays=n_arrays))
