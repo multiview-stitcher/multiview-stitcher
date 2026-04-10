@@ -979,11 +979,18 @@ def run_benchmarks(
             elif backend_name == "jax":
                 try:
                     import jax as _jax
-                    _jax.config.update("jax_enable_x64", True)
                     jax_devices = _jax.devices()
                     if device_id < len(jax_devices):
                         _jax_ctx = _jax.default_device(jax_devices[device_id])
                         _jax_ctx.__enter__()
+                    # Enable fp64 only on devices with native support.
+                    # TPU lacks fp64/complex128 hardware — enabling x64
+                    # would crash FFT-based registration (C128).
+                    if _jax.default_backend() != "tpu":
+                        _jax.config.update("jax_enable_x64", True)
+                    else:
+                        print("[TPU — skipping jax_enable_x64] ",
+                              end="")
                 except Exception:
                     pass
 
