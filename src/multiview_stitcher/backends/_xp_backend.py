@@ -44,7 +44,7 @@ _XP_DELEGATES = {
     "asarray", "zeros", "ones_like", "stack", "array",
     # math
     "nansum", "nanmax", "nanmin", "nan_to_num", "isnan",
-    "any", "sum", "abs", "cos", "clip",
+    "any", "sum", "abs", "cos", "sin", "clip",
     # selection
     "where",
     # constants / values
