@@ -979,6 +979,7 @@ def run_benchmarks(
             elif backend_name == "jax":
                 try:
                     import jax as _jax
+                    _jax.config.update("jax_enable_x64", True)
                     jax_devices = _jax.devices()
                     if device_id < len(jax_devices):
                         _jax_ctx = _jax.default_device(jax_devices[device_id])
