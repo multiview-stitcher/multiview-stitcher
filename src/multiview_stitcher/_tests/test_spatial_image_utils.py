@@ -48,3 +48,21 @@ def test_max_project():
 
     for pdim in ["x_in", "x_out"]:
         assert dim not in affine_sim_proj.coords[pdim].values
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_get_extent_from_sim(ndim):
+    shape = {dim: 10 for dim in si_utils.SPATIAL_DIMS[-ndim:]}
+    scale = {dim: 0.5 for dim in si_utils.SPATIAL_DIMS[-ndim:]}
+
+    sim = si_utils.get_sim_from_array(
+        np.ones(tuple(shape.values())),
+        dims=list(shape.keys()),
+        scale=scale,
+        translation={dim: 0.0 for dim in shape},
+    )
+
+    extent = si_utils.get_extent_from_sim(sim)
+
+    for dim in shape:
+        assert extent[dim] == pytest.approx(scale[dim] * (shape[dim] - 1))

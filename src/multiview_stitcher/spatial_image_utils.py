@@ -180,6 +180,19 @@ def get_stack_properties_from_sim(sim, transform_key=None, asarray=False):
     return stack_properties
 
 
+def get_extent_from_sim(sim):
+    """
+    Get extent from sim, calculated as the span between the first and last
+    coordinate for each spatial dimension.
+    """
+    sp = get_stack_properties_from_sim(sim)
+    extent = {
+        dim: (sp["shape"][dim] - 1) * sp["spacing"][dim]
+        for dim in sp["shape"]
+    }
+    return extent
+
+
 def extend_stack_props(stack_props, extend_by):
     """
     Extend stack properties by a given extent along each spatial dimension.
