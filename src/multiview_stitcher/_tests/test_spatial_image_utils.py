@@ -65,4 +65,4 @@ def test_get_extent_from_sim(ndim):
     extent = si_utils.get_extent_from_sim(sim)
 
     for dim in shape:
-        assert extent[dim] == pytest.approx(scale[dim] * shape[dim])
+        assert extent[dim] == pytest.approx(scale[dim] * (shape[dim] - 1))
