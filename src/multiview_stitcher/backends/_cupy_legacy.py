@@ -93,6 +93,9 @@ class CupyLegacyBackend(Backend):
     def cos(self, x):
         return cp.cos(x)
 
+    def sin(self, x):
+        return cp.sin(x)
+
     def clip(self, x, a_min, a_max):
         return cp.clip(x, a_min, a_max)
 

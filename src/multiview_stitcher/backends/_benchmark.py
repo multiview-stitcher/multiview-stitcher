@@ -182,6 +182,90 @@ def _free_gpu_pool():
         pass
 
 
+def _get_memory_usage_mb(backend_name):
+    """Return (used_MB, total_MB) for the appropriate device.
+
+    For GPU backends the GPU memory is reported; for CPU backends the
+    process RSS is returned (with total system RAM as the second value).
+    """
+    if _is_gpu_backend(backend_name):
+        # --- CuPy / cupy-legacy ---
+        if _is_cupy_backend(backend_name):
+            try:
+                import cupy as _cp
+                free, total = _cp.cuda.Device().mem_info
+                used = total - free
+                return used / 1024**2, total / 1024**2
+            except Exception:
+                pass
+
+        # --- JAX ---
+        if backend_name == "jax":
+            try:
+                import jax
+                dev = jax.devices()[0]
+                stats = dev.memory_stats()
+                if stats is not None:
+                    used = stats.get("bytes_in_use", 0)
+                    total = stats.get("bytes_limit", 0)
+                    return used / 1024**2, total / 1024**2
+            except Exception:
+                pass
+
+        # --- dpnp / Intel GPU ---
+        if backend_name == "dpnp":
+            try:
+                import dpctl
+                dev = dpctl.SyclDevice()
+                total = dev.global_mem_size
+                free = dev.global_mem_free  # may not exist on all runtimes
+                return (total - free) / 1024**2, total / 1024**2
+            except Exception:
+                pass
+
+        # --- MLX (Apple) ---
+        if backend_name == "mlx":
+            try:
+                import mlx.core as mx
+                used = mx.metal.get_active_memory()
+                total = mx.metal.get_cache_memory()
+                return used / 1024**2, total / 1024**2
+            except Exception:
+                pass
+
+    # Fallback: CPU process RSS + system RAM
+    try:
+        import resource
+        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # On Linux ru_maxrss is in KB; on macOS it's bytes
+        if platform.system() == "Darwin":
+            rss_mb = rss_kb / 1024**2
+        else:
+            rss_mb = rss_kb / 1024
+        total_mb = None
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal"):
+                        total_mb = int(line.split()[1]) / 1024
+                        break
+        except FileNotFoundError:
+            pass
+        return rss_mb, total_mb
+    except Exception:
+        return None, None
+
+
+def _fmt_mem(used_mb, total_mb):
+    """Format a (used, total) memory pair as a compact string."""
+    if used_mb is None:
+        return "N/A"
+    used_str = f"{used_mb:.0f}MB"
+    if total_mb is not None:
+        return f"{used_str}/{total_mb:.0f}MB"
+    return used_str
+
+
 # ── Backend spec parsing ─────────────────────────────────────────────
 
 _VALID_DEVICE_TYPES = {"cpu", "gpu", "xpu", "tpu"}
@@ -364,6 +448,15 @@ _CONCURRENT_ARRAYS_ROCM = {
     "register": 5,
     "fuse": 24,
 }
+# XLA keeps coordinate grids, interpolation weights, gathered neighbours,
+# and various intermediate buffers alive simultaneously.  Empirically
+# measured via jax.devices()[0].memory_stats()["peak_bytes_in_use"].
+_CONCURRENT_ARRAYS_JAX = {
+    "transform_data": 20,
+    "get_blending_weights": 20,
+    "register": 10,
+    "fuse": 32,
+}
 _PEAK_FLOAT32_ARRAYS = 16
 
 
@@ -478,10 +571,10 @@ def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
                 if mem_stats:
                     mem_free = (mem_stats.get("bytes_limit", 0)
                                 - mem_stats.get("bytes_in_use", 0))
-                    n_arrays = _CONCURRENT_ARRAYS.get(
-                        func_name, _PEAK_FLOAT32_ARRAYS
+                    n_arrays = _CONCURRENT_ARRAYS_JAX.get(
+                        func_name, _PEAK_FLOAT32_ARRAYS * 2
                     )
-                    safety = 0.70
+                    safety = 0.85
                     usable = mem_free * safety
                     s = int((usable / (4 * n_arrays)) ** (1.0 / 3))
                     s = max(32, (s // 32) * 32)
@@ -976,6 +1069,12 @@ def run_benchmarks(
             backend_name = group_jobs[0]["backend_name"]
             device_id = group_jobs[0]["device_id"]
 
+            # Release GPU memory from previous group so the next backend
+            # starts with a clean device (e.g. CuPy pool before JAX).
+            _free_gpu_pool()
+            import gc as _gc_group
+            _gc_group.collect()
+
             # Set up device context
             _jax_ctx = None
             if _is_cupy_backend(backend_name):
@@ -1019,8 +1118,14 @@ def run_benchmarks(
                 for job in group_jobs:
                     fn = job["function"]
                     tile_size = job["tile_size"]
-                    chunk_size = job["chunk_size"]
                     numba_val = job["numba_enabled"]
+
+                    # Recompute chunk size at run time so it reflects
+                    # actual memory availability (plan-time estimates
+                    # can be stale, e.g. after a CuPy group).
+                    chunk_size = _compute_chunk_size(
+                        backend_name, fn, tile_size, device_id,
+                    )
 
                     # Set numba acceleration
                     if numba_val is not None:
@@ -1056,7 +1161,7 @@ def run_benchmarks(
                         if numba_val is not None:
                             multiview_stitcher.set_numba_acceleration(numba_val)
                         ref_inputs = _prepare_inputs(
-                            tile_size, "numpy", chunk_size=tile_size,
+                            tile_size, "numpy", chunk_size=chunk_size,
                         )
                         ref_timing = _bench_function(fn, ref_inputs, return_result=True)
                         references[ref_key] = ref_timing["result"]
@@ -1073,6 +1178,10 @@ def run_benchmarks(
                     if _is_cupy_backend(backend_name):
                         _free_gpu_pool()
 
+                    # Memory before timed runs
+                    mem_before = _get_memory_usage_mb(backend_name)
+                    print(f"[mem_before={_fmt_mem(*mem_before)}] ", end="", flush=True)
+
                     # Timed runs
                     timings = []
                     correctness_results = []
@@ -1086,6 +1195,10 @@ def run_benchmarks(
                                 correctness_results.append(corr)
                             # Free the result to save memory
                             del t["result"]
+
+                    # Memory after timed runs
+                    mem_after = _get_memory_usage_mb(backend_name)
+                    print(f"[mem_after={_fmt_mem(*mem_after)}] ", end="", flush=True)
 
                     # Free reference array once all runs for this key are done
                     if ref_key in references:
@@ -1105,6 +1218,9 @@ def run_benchmarks(
                         "mean_time_s": float(np.mean(compute_times)),
                         "std_time_s": float(np.std(compute_times)),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "mem_before_mb": mem_before[0],
+                        "mem_after_mb": mem_after[0],
+                        "mem_total_mb": mem_before[1],
                     }
 
                     if fn == "fuse":

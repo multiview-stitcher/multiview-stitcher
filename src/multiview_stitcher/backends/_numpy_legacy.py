@@ -76,6 +76,9 @@ class NumpyLegacyBackend(Backend):
     def cos(self, x):
         return np.cos(x)
 
+    def sin(self, x):
+        return np.sin(x)
+
     def clip(self, x, a_min, a_max):
         return np.clip(x, a_min, a_max)
 
