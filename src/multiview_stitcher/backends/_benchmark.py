@@ -1521,10 +1521,19 @@ def plot_runtime_and_speedup(merged):
     if has_numba_split:
         series_list = []
         for b in backends:
-            for nb in [True, False]:
-                if any(r["backend"] == b and r.get("numba_enabled") == nb
-                       for r in records):
-                    series_list.append((b, nb))
+            # Check if this backend has numba True/False variants
+            has_true = any(r["backend"] == b and r.get("numba_enabled") is True
+                          for r in records)
+            has_false = any(r["backend"] == b and r.get("numba_enabled") is False
+                           for r in records)
+            if has_true or has_false:
+                for nb in [True, False]:
+                    if any(r["backend"] == b and r.get("numba_enabled") == nb
+                           for r in records):
+                        series_list.append((b, nb))
+            else:
+                # Backend has only numba_enabled=None (e.g. "original")
+                series_list.append((b, None))
     else:
         series_list = [(b, None) for b in backends]
 
@@ -1565,13 +1574,19 @@ def plot_runtime_and_speedup(merged):
     _PALETTE = [
         "#4C72B0", "#C44E52", "#55A868", "#8172B2", "#CCB974", "#64B5CD",
     ]
-    backend_color = {
-        b: _PALETTE[i % len(_PALETTE)] for i, b in enumerate(backends)
-    }
+    _FIXED_COLORS = {"original": "#000000"}
+    backend_color = {}
+    palette_idx = 0
+    for b in backends:
+        if b in _FIXED_COLORS:
+            backend_color[b] = _FIXED_COLORS[b]
+        else:
+            backend_color[b] = _PALETTE[palette_idx % len(_PALETTE)]
+            palette_idx += 1
 
     short_names = {dev: _short_device_name(dev) for dev in devices}
 
-    _BASELINE_BACKENDS = ["numpy", "numpy-legacy"]
+    _BASELINE_BACKENDS = ["original", "numpy", "numpy-legacy"]
 
     def _baseline_for_system(func, tile_size, system_id):
         for ref_backend in _BASELINE_BACKENDS:
