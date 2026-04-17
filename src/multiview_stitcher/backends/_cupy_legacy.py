@@ -147,7 +147,10 @@ class CupyLegacyBackend(Backend):
     def phase_cross_correlation(
         self, reference_image, moving_image, **kwargs,
     ):
-        if _HAS_CUCIM_REGISTRATION:
+        from multiview_stitcher.backends._array_api import (
+            _hipcim_current_device_unsupported,
+        )
+        if _HAS_CUCIM_REGISTRATION and not _hipcim_current_device_unsupported():
             return _gpu_phase_cross_correlation(
                 reference_image, moving_image, **kwargs,
             )
@@ -160,7 +163,10 @@ class CupyLegacyBackend(Backend):
         return _cpu_pcc(ref_np, mov_np, **kwargs)
 
     def structural_similarity(self, im1, im2, **kwargs):
-        if _HAS_CUCIM_METRICS:
+        from multiview_stitcher.backends._array_api import (
+            _hipcim_current_device_unsupported,
+        )
+        if _HAS_CUCIM_METRICS and not _hipcim_current_device_unsupported():
             return _gpu_structural_similarity(im1, im2, **kwargs)
         from skimage.metrics import structural_similarity as _cpu_ssim
         im1_np = cp.asnumpy(im1) if isinstance(im1, cp.ndarray) else np.asarray(im1)

@@ -14,13 +14,80 @@ Supported modules
 """
 
 import importlib
+import logging
+import os
 
 import numpy as np
 
 from multiview_stitcher.backends._xp_backend import XPBackend
 
+logger = logging.getLogger(__name__)
+
 # Backends whose arrays live on a device (GPU / XPU).
 _GPU_MODULES = {"cupy", "dpnp"}
+
+# Per-device cache: device_id -> bool (True = rocBLAS lacks Tensile kernels).
+_rocblas_unsupported_cache: dict[int, bool] = {}
+
+
+def _rocblas_missing_for_device(device_id: int) -> bool:
+    """Check whether rocBLAS has Tensile kernel libraries for a HIP device.
+
+    rocBLAS abort()s (SIGABRT, uncatchable) when asked to run on a GPU
+    whose architecture has no ``TensileLibrary_lazy_gfx<ARCH>.dat`` file.
+    This function probes the filesystem so we can route to a CPU fallback
+    before that happens.
+    """
+    if device_id in _rocblas_unsupported_cache:
+        return _rocblas_unsupported_cache[device_id]
+
+    try:
+        import cupy as cp
+
+        props = cp.cuda.runtime.getDeviceProperties(device_id)
+        arch_raw = props.get("gcnArchName", b"")
+        arch_raw = arch_raw.decode() if isinstance(arch_raw, bytes) else str(arch_raw)
+        # e.g. "gfx906:sramecc+:xnack-" -> "gfx906"
+        arch = arch_raw.split(":")[0]
+
+        rocm_home = os.environ.get("ROCM_HOME", "/opt/rocm")
+        tensile_dir = os.path.join(rocm_home, "lib", "rocblas", "library")
+        tensile_file = os.path.join(tensile_dir, f"TensileLibrary_lazy_{arch}.dat")
+
+        missing = not os.path.isfile(tensile_file)
+        if missing:
+            device_name = props.get("name", b"")
+            if isinstance(device_name, bytes):
+                device_name = device_name.decode()
+            logger.warning(
+                "rocBLAS has no Tensile kernels for %s (%s) — "
+                "hipCIM operations (phase_cross_correlation, "
+                "structural_similarity) will fall back to CPU skimage. "
+                "Looked for: %s",
+                device_name, arch, tensile_file,
+            )
+    except Exception:
+        missing = False
+
+    _rocblas_unsupported_cache[device_id] = missing
+    return missing
+
+
+def _hipcim_current_device_unsupported() -> bool:
+    """True if hipCIM calls would crash on the active CuPy device.
+
+    On NVIDIA (CUDA) this always returns False — cucim failures there are
+    catchable Python exceptions.  On AMD (HIP) we probe rocBLAS's Tensile
+    library directory to avoid an uncatchable SIGABRT.
+    """
+    try:
+        import cupy as cp
+
+        if not cp.cuda.runtime.is_hip:
+            return False
+        return _rocblas_missing_for_device(cp.cuda.Device().id)
+    except Exception:
+        return False
 
 
 class ArrayAPIBackend(XPBackend):
@@ -93,6 +160,10 @@ class ArrayAPIBackend(XPBackend):
     def _native_phase_cross_correlation(
         self, reference_image, moving_image, **kwargs,
     ):
+        if _hipcim_current_device_unsupported():
+            return self._skimage_phase_cross_correlation(
+                reference_image, moving_image, **kwargs,
+            )
         try:
             from cucim.skimage.registration import (
                 phase_cross_correlation as _gpu_pcc,
@@ -105,6 +176,8 @@ class ArrayAPIBackend(XPBackend):
             )
 
     def _native_structural_similarity(self, im1, im2, **kwargs):
+        if _hipcim_current_device_unsupported():
+            return self._skimage_structural_similarity(im1, im2, **kwargs)
         try:
             from cucim.skimage.metrics import (
                 structural_similarity as _gpu_ssim,
