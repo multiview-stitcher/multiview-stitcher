@@ -6,6 +6,7 @@ from typing import Optional, Union
 import numpy as np
 import zarr
 from tifffile import TiffFile, imread, imwrite
+from tifffile import __version__ as tifffile_version
 from tqdm import tqdm
 
 # aicsimageio is optional
@@ -318,16 +319,25 @@ def save_sim_as_tif(path, sim):
 
     from packaging.version import parse
 
-    if not parse(zarr.__version__) < parse("3"):
+    # stream if zarr version is >=3 and tifffile >=2025.5.21
+    if not parse(zarr.__version__) < parse("3") and not parse(tifffile_version) < parse("2025.5.21"):
         # warn
-        zarr3 = True
+        stream = True
+    # also stream if zarr version is < 3 and tifffile version is <2025.5.21
+    elif parse(zarr.__version__) < parse("3") and parse(tifffile_version) < parse("2025.5.21"):
+        stream = True
     else:
         warnings.warn(
-            "Streaming into tif is only supported in combination with zarr >= 3",
+            "Streaming into tif is supported either with zarr version >=3 and tifffile >=2025.5.21, "
+            "or with zarr version <3 and tifffile <2025.5.21. Your current versions are zarr {} and tifffile {}. " \
+            "Streaming will be disabled, which may lead to high memory usage.".format(
+                zarr.__version__,
+                tifffile_version,
+                ),
             UserWarning,
             stacklevel=2,
         )
-        zarr3 = False
+        stream = False
 
     spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim, asarray=True)
@@ -351,7 +361,7 @@ def save_sim_as_tif(path, sim):
 
     axes = "".join(sim.dims).upper()
 
-    if not zarr3:
+    if not stream:
         imwrite(
             path,
             data=sim.data,
