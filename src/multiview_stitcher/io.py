@@ -321,14 +321,12 @@ def save_sim_as_tif(path, sim):
     if not parse(zarr.__version__) < parse("3"):
         # warn
         zarr3 = True
+    else:
         warnings.warn(
-            "Streaming into tif is only supported in combination with zarr < 3"
-            " (see https://github.com/cgohlke/tifffile/issues/272). "
-            "Consider using OME-Zarr or install zarr < 3.",
+            "Streaming into tif is only supported in combination with zarr >= 3",
             UserWarning,
             stacklevel=2,
         )
-    else:
         zarr3 = False
 
     spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
@@ -353,7 +351,7 @@ def save_sim_as_tif(path, sim):
 
     axes = "".join(sim.dims).upper()
 
-    if zarr3:
+    if not zarr3:
         imwrite(
             path,
             data=sim.data,
