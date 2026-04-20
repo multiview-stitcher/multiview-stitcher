@@ -731,7 +731,7 @@ def fuse_np(
     # Transform input views
     field_ims_t = [
         transformation.transform_sim(
-            sim.astype(float),
+            sim.astype(np.float32),
             np.linalg.inv(param),
             output_stack_properties=output_properties,
             order=interpolation_order,
