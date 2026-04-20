@@ -82,11 +82,11 @@ def weighted_average_fusion(
     """
 
     if fusion_weights is None:
+        # blending_weights are already normalized in fuse_np; skip redundant pass
         additive_weights = blending_weights
     else:
         additive_weights = blending_weights * fusion_weights
-
-    additive_weights = weights.normalize_weights(additive_weights)
+        additive_weights = weights.normalize_weights(additive_weights)
 
     product = transformed_views * additive_weights
 
@@ -731,7 +731,7 @@ def fuse_np(
     # Transform input views
     field_ims_t = [
         transformation.transform_sim(
-            sim.astype(float),
+            sim.astype(np.float32),
             np.linalg.inv(param),
             output_stack_properties=output_properties,
             order=interpolation_order,
