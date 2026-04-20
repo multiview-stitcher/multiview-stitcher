@@ -5,7 +5,6 @@ from typing import Optional, Union
 
 import numpy as np
 import zarr
-from tifffile import TiffFile, imread, imwrite
 from tqdm import tqdm
 
 # aicsimageio is optional
@@ -278,6 +277,7 @@ def read_tiff_into_spatial_xarray(
     -------
     SpatialImage (multiview-stitcher flavor)
     """
+    from tifffile import TiffFile
 
     with TiffFile(filename) as tif:
         data = tif.asarray()
@@ -313,23 +313,8 @@ def save_sim_as_tif(path, sim):
     path : str
     sim : spatial image
     """
-
-    import warnings
-
-    from packaging.version import parse
-
-    if not parse(zarr.__version__) < parse("3"):
-        # warn
-        zarr3 = True
-        warnings.warn(
-            "Streaming into tif is only supported in combination with zarr < 3"
-            " (see https://github.com/cgohlke/tifffile/issues/272). "
-            "Consider using OME-Zarr or install zarr < 3.",
-            UserWarning,
-            stacklevel=2,
-        )
-    else:
-        zarr3 = False
+    from tifffile import memmap as tif_memmap
+    from tifffile import imwrite
 
     spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim, asarray=True)
@@ -353,53 +338,34 @@ def save_sim_as_tif(path, sim):
 
     axes = "".join(sim.dims).upper()
 
-    if zarr3:
-        imwrite(
-            path,
-            data=sim.data,
-            shape=sim.shape,
-            dtype=sim.dtype,
-            imagej=True,
-            resolution=tuple([1.0 / s for s in spacing[-2:]]),
-            metadata={
-                "axes": axes,
-                "unit": "um",  # assume um
-                "Labels": channels,
-            },
-        )
+    imwrite(
+        path,
+        shape=sim.shape,
+        dtype=sim.dtype,
+        imagej=True,
+        resolution=tuple([1.0 / s for s in spacing[-2:]]),
+        metadata={
+            "axes": axes,
+            "unit": "um",  # assume um
+            "Labels": channels,
+        },
+    )
 
-    else:
-        imwrite(
-            path,
-            shape=sim.shape,
-            dtype=sim.dtype,
-            imagej=True,
-            resolution=tuple([1.0 / s for s in spacing[-2:]]),
-            metadata={
-                "axes": axes,
-                "unit": "um",  # assume um
-                "Labels": channels,
-            },
-        )
+    # iterate over non-spatial dimensions and write one "field" at a time
+    nsdims = [dim for dim in sim.dims if dim not in spatial_dims]
 
-        store = imread(path, mode="r+", aszarr=True)
-        z = zarr.open(store, mode="r+")
-
-        # iterate over non-spatial dimensions and write one "field" at a time
-        nsdims = [dim for dim in sim.dims if dim not in spatial_dims]
-
-        for nsdim_indices in tqdm(
-            itertools.product(
-                *tuple([range(len(sim.coords[nsdim])) for nsdim in nsdims])
-            ),
-            total=np.prod([len(sim.coords[nsdim]) for nsdim in nsdims]),
-        ):
-            sl = [None] * len(sim.dims)
-            for nsdim, ind in zip(nsdims, nsdim_indices):
-                sl[sim.dims.index(nsdim)] = slice(ind, ind + 1)
-            for spatial_dim in spatial_dims:
-                sl[sim.dims.index(spatial_dim)] = slice(None)
-            sl = tuple(sl)
-            z[sl] = sim.data[sl].compute()
-
-        store.close()
+    mmap = tif_memmap(path)
+    for nsdim_indices in tqdm(
+        itertools.product(
+            *tuple([range(len(sim.coords[nsdim])) for nsdim in nsdims])
+        ),
+        total=np.prod([len(sim.coords[nsdim]) for nsdim in nsdims]),
+    ):
+        sl = [None] * len(sim.dims)
+        for nsdim, ind in zip(nsdims, nsdim_indices):
+            sl[sim.dims.index(nsdim)] = slice(ind, ind + 1)
+        for spatial_dim in spatial_dims:
+            sl[sim.dims.index(spatial_dim)] = slice(None)
+        sl = tuple(sl)
+        mmap[sl] = sim.data[sl].compute()
+    del mmap
