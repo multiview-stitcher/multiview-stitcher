@@ -449,14 +449,68 @@ _CONCURRENT_ARRAYS_ROCM = {
     "fuse": 24,
 }
 # XLA keeps coordinate grids, interpolation weights, gathered neighbours,
-# and various intermediate buffers alive simultaneously.  Empirically
-# measured via jax.devices()[0].memory_stats()["peak_bytes_in_use"].
-_CONCURRENT_ARRAYS_JAX = {
+# and various intermediate buffers alive simultaneously.  The peak memory
+# multiplier differs by platform because XLA's compilation passes, fusion
+# heuristics, and downstream BLAS paths (rocBLAS vs Triton GEMM vs TPU
+# systolic) all produce different intermediate buffer patterns.
+#
+# ROCm values empirically measured on AMD Instinct MI100 (gfx908) under
+# ROCm 7.2 via jax.devices()[0].memory_stats()["peak_bytes_in_use"] across
+# chunk sizes 64–400.  Peak converges to ~35× single-array size for
+# transform_data / get_blending_weights / fuse, and ~10× for register.
+_CONCURRENT_ARRAYS_JAX_ROCM = {
+    "transform_data": 40,
+    "get_blending_weights": 40,
+    "register": 12,
+    "fuse": 40,
+}
+# CUDA / TPU / CPU values retain the initial rough estimates — they have
+# not yet been empirically re-measured on those platforms.  Replace with
+# measured values when hardware is available.
+_CONCURRENT_ARRAYS_JAX_CUDA = {
     "transform_data": 20,
     "get_blending_weights": 20,
     "register": 10,
     "fuse": 32,
 }
+_CONCURRENT_ARRAYS_JAX_TPU = dict(_CONCURRENT_ARRAYS_JAX_CUDA)
+_CONCURRENT_ARRAYS_JAX_CPU = dict(_CONCURRENT_ARRAYS_JAX_CUDA)
+
+_CONCURRENT_ARRAYS_JAX_BY_PLATFORM = {
+    "rocm": _CONCURRENT_ARRAYS_JAX_ROCM,
+    "cuda": _CONCURRENT_ARRAYS_JAX_CUDA,
+    "tpu": _CONCURRENT_ARRAYS_JAX_TPU,
+    "cpu": _CONCURRENT_ARRAYS_JAX_CPU,
+}
+
+
+def _detect_jax_platform():
+    """Return 'rocm', 'cuda', 'tpu', or 'cpu' for the active JAX backend."""
+    try:
+        import jax
+        devs = jax.devices()
+        if not devs:
+            return "cpu"
+        platform = devs[0].platform  # 'cpu', 'gpu', 'tpu'
+        if platform in ("cpu", "tpu"):
+            return platform
+        # GPU — distinguish CUDA vs ROCm via the XLA backend's version string.
+        try:
+            backend = jax.extend.backend.get_backend()
+            ver = getattr(backend, "platform_version", "").lower()
+            if "rocm" in ver or "hip" in ver:
+                return "rocm"
+            if "cuda" in ver:
+                return "cuda"
+        except Exception:
+            pass
+        # Fallback: infer from device marketing name.
+        kind = str(devs[0].device_kind).lower()
+        if any(k in kind for k in ("amd", "radeon", "instinct")):
+            return "rocm"
+        return "cuda"
+    except Exception:
+        return "cpu"
 _PEAK_FLOAT32_ARRAYS = 16
 
 
@@ -571,8 +625,12 @@ def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
                 if mem_stats:
                     mem_free = (mem_stats.get("bytes_limit", 0)
                                 - mem_stats.get("bytes_in_use", 0))
-                    n_arrays = _CONCURRENT_ARRAYS_JAX.get(
-                        func_name, _PEAK_FLOAT32_ARRAYS * 2
+                    platform = _detect_jax_platform()
+                    n_arrays_map = _CONCURRENT_ARRAYS_JAX_BY_PLATFORM.get(
+                        platform, _CONCURRENT_ARRAYS_JAX_CUDA,
+                    )
+                    n_arrays = n_arrays_map.get(
+                        func_name, _PEAK_FLOAT32_ARRAYS * 2,
                     )
                     safety = 0.85
                     usable = mem_free * safety
@@ -585,6 +643,129 @@ def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
     # CPU backends: cap chunk size to available RAM
     n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
     return min(tile_size, _max_chunk_size_cpu(ndim=3, n_concurrent_arrays=n_arrays))
+
+
+def calibrate_concurrent_arrays(
+    backend_name,
+    func_name,
+    chunk_sizes=(64, 128, 256, 400),
+    safety_factor=1.15,
+    verbose=True,
+):
+    """Empirically measure the peak-memory multiplier for a benchmark function.
+
+    Runs ``_prepare_inputs`` + ``_bench_function`` at each chunk size and
+    reads the device's peak memory (``peak_bytes_in_use`` for JAX; computed
+    from the CuPy pool for cupy/cupy-legacy).  The ratio ``peak / (chunk^3
+    * 4)`` gives the effective ``n_concurrent_arrays`` factor used by
+    ``_compute_chunk_size`` to pick safe chunk sizes.
+
+    Small chunks over-report because compilation overhead dominates; the
+    factor converges as the chunk grows, so the asymptotic value from the
+    largest successful chunk is the useful one.
+
+    Only one function can be calibrated per Python process for JAX because
+    ``peak_bytes_in_use`` is session-monotonic — run each function in a
+    fresh subprocess to calibrate all four.
+
+    Parameters
+    ----------
+    backend_name : str
+        ``"jax"``, ``"cupy"``, or ``"cupy-legacy"``.
+    func_name : str
+        ``"transform_data"``, ``"get_blending_weights"``, ``"register"``,
+        or ``"fuse"``.
+    chunk_sizes : sequence of int
+        Ascending chunk sizes; the last successful one defines the
+        asymptotic measurement.
+    safety_factor : float
+        Multiplier applied to the asymptote (default 1.15 = 15% headroom).
+    verbose : bool
+        Print per-chunk measurements as they are taken.
+
+    Returns
+    -------
+    dict with keys ``measurements`` (list of per-chunk dicts),
+    ``asymptotic`` (peak-over-single-array at the largest chunk),
+    ``recommended`` (int, ``ceil(asymptotic * safety_factor)``), and
+    ``platform`` (``"rocm"``/``"cuda"``/... for JAX, backend name otherwise).
+    """
+    import math
+
+    def _peak_bytes(cs):
+        if backend_name == "jax":
+            import jax
+            return jax.devices()[0].memory_stats().get("peak_bytes_in_use", 0)
+        if _is_cupy_backend(backend_name):
+            import cupy as _cp
+            free, total = _cp.cuda.Device().mem_info
+            return total - free
+        return 0
+
+    # Warm-up: trigger compilation and populate caches.
+    try:
+        warm_inputs = _prepare_inputs(
+            tile_size=32, backend_name=backend_name, chunk_size=32,
+        )
+        _bench_function(func_name, warm_inputs, return_result=False)
+    except Exception as exc:
+        if verbose:
+            print(f"warm-up failed: {type(exc).__name__}: {str(exc)[:120]}",
+                  flush=True)
+
+    measurements = []
+    for cs in chunk_sizes:
+        try:
+            inputs = _prepare_inputs(
+                tile_size=cs, backend_name=backend_name, chunk_size=cs,
+            )
+            _bench_function(func_name, inputs, return_result=False)
+        except Exception as exc:
+            if verbose:
+                print(f"chunk={cs}: FAILED {type(exc).__name__}: "
+                      f"{str(exc)[:120]}", flush=True)
+            break
+
+        peak = _peak_bytes(cs)
+        single = cs ** 3 * 4
+        n_total = peak / single if single else 0.0
+        measurements.append({
+            "chunk_size": cs,
+            "peak_mb": peak / 1024 ** 2,
+            "n_total": n_total,
+        })
+        if verbose:
+            print(
+                f"chunk={cs:4d}  1arr={single/1024**2:7.1f}MB  "
+                f"peak={peak/1024**2:8.1f}MB  n_total={n_total:5.1f}",
+                flush=True,
+            )
+
+    if not measurements:
+        return {
+            "measurements": [], "asymptotic": None,
+            "recommended": None, "platform": None,
+        }
+
+    asymptotic = measurements[-1]["n_total"]
+    recommended = int(math.ceil(asymptotic * safety_factor))
+
+    platform = (
+        _detect_jax_platform() if backend_name == "jax" else backend_name
+    )
+    if verbose:
+        print(
+            f"\n[{backend_name}/{platform}/{func_name}] asymptotic={asymptotic:.1f} "
+            f"× safety={safety_factor} → recommended={recommended}",
+            flush=True,
+        )
+
+    return {
+        "measurements": measurements,
+        "asymptotic": asymptotic,
+        "recommended": recommended,
+        "platform": platform,
+    }
 
 
 def _prepare_inputs(tile_size, backend_name, chunk_size=None, device_id=0):
