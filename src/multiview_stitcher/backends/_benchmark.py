@@ -568,7 +568,7 @@ def _max_chunk_size_cpu(
     """Compute the largest cube edge that fits in available system RAM.
 
     Uses the same formula as ``max_tile_size`` but queries system memory
-    via ``/proc/meminfo`` (available) instead of GPU VRAM.
+    instead of GPU VRAM.
 
     Parameters
     ----------
@@ -587,12 +587,109 @@ def _max_chunk_size_cpu(
         Largest chunk edge length (rounded down to a multiple of 32).
     """
     import os
+    import subprocess
+    import sys
 
-    mem_available = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+    mem_available = None
+
+    # Linux/Unix: use available physical pages if exposed by libc.
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        for key in ("SC_AVPHYS_PAGES", "SC_AVAILABLE_PHYS_PAGES"):
+            if key in os.sysconf_names:
+                mem_available = page_size * os.sysconf(key)
+                break
+    except Exception:
+        mem_available = None
+
+    # macOS: parse vm_stat output (free + inactive + speculative pages).
+    if mem_available is None and sys.platform == "darwin":
+        try:
+            out = subprocess.check_output(["vm_stat"], text=True)
+            lines = out.splitlines()
+            page_size = 4096
+
+            if lines:
+                first = lines[0]
+                marker = "page size of "
+                if marker in first:
+                    page_size = int(first.split(marker, 1)[1].split(" bytes", 1)[0])
+
+            page_counts = {}
+            for line in lines[1:]:
+                if ":" not in line:
+                    continue
+                k, v = line.split(":", 1)
+                page_counts[k.strip()] = int(v.strip().rstrip(".").replace(".", ""))
+
+            free_pages = (
+                page_counts.get("Pages free", 0)
+                + page_counts.get("Pages inactive", 0)
+                + page_counts.get("Pages speculative", 0)
+            )
+            if free_pages > 0:
+                mem_available = free_pages * page_size
+        except Exception:
+            mem_available = None
+
+    # Conservative fallback when available-memory APIs are not present.
+    if mem_available is None:
+        try:
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            total_pages = os.sysconf("SC_PHYS_PAGES")
+            mem_available = int(page_size * total_pages * 0.5)
+        except Exception:
+            # 2 GiB safe default to avoid overcommitting memory.
+            mem_available = 2 * 1024**3
+
     usable = mem_available * safety_factor
     s = int((usable / (dtype_bytes * n_concurrent_arrays)) ** (1.0 / ndim))
     s = max(32, (s // 32) * 32)
     return s
+
+
+def _max_chunk_size_mlx(
+    ndim=3,
+    dtype_bytes=4,
+    safety_factor=0.70,
+    n_concurrent_arrays=_PEAK_FLOAT32_ARRAYS,
+):
+    """Compute the largest cube edge that fits MLX's recommended memory budget.
+
+    Uses ``mlx.device_info()`` and current MLX allocator usage to estimate
+    free headroom under Metal's recommended working set. Falls back to the
+    generic CPU memory estimator if MLX memory telemetry is unavailable.
+    """
+    try:
+        import mlx.core as mx
+
+        info = mx.device_info() or {}
+        budget = int(
+            info.get("max_recommended_working_set_size")
+            or info.get("memory_size")
+            or 0
+        )
+        if budget <= 0:
+            raise RuntimeError("MLX device memory budget unavailable")
+
+        # Exclude active + cached allocator memory to estimate remaining headroom.
+        active = int(mx.get_active_memory())
+        cache = int(mx.get_cache_memory())
+        free_est = budget - active - cache
+        if free_est <= 0:
+            free_est = int(budget * 0.5)
+
+        usable = free_est * safety_factor
+        s = int((usable / (dtype_bytes * n_concurrent_arrays)) ** (1.0 / ndim))
+        s = max(32, (s // 32) * 32)
+        return s
+    except Exception:
+        return _max_chunk_size_cpu(
+            ndim=ndim,
+            dtype_bytes=dtype_bytes,
+            safety_factor=safety_factor,
+            n_concurrent_arrays=n_concurrent_arrays,
+        )
 
 
 # ToDo: Computing the chunk size should be the same for GPU and CPU, just the ammount of memory available changes. We should unify the logic and remove one of these functions.
@@ -639,6 +736,10 @@ def _compute_chunk_size(backend_name, func_name, tile_size, device_id=0):
                     return min(tile_size, s)
         except Exception:
             pass
+
+    if backend_name == "mlx":
+        n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
+        return min(tile_size, _max_chunk_size_mlx(ndim=3, n_concurrent_arrays=n_arrays))
 
     # CPU backends: cap chunk size to available RAM
     n_arrays = _CONCURRENT_ARRAYS.get(func_name, _PEAK_FLOAT32_ARRAYS)
@@ -1233,7 +1334,8 @@ def run_benchmarks(
     jobs = plan["jobs"]
     groups = plan["groups"]
 
-    # Correctness references: computed lazily, keyed by (tile_size, function, numba_enabled)
+    # Correctness references: computed lazily, keyed by
+    # (tile_size, function, numba_enabled, chunk_size)
     references = {}
 
     # Save and restore numba acceleration state
@@ -1337,7 +1439,7 @@ def run_benchmarks(
                     )
 
                     # Compute numpy reference if needed (lazy)
-                    ref_key = (tile_size, fn, numba_val)
+                    ref_key = (tile_size, fn, numba_val, chunk_size)
                     if check_correctness and ref_key not in references:
                         if numba_val is not None:
                             multiview_stitcher.set_numba_acceleration(numba_val)

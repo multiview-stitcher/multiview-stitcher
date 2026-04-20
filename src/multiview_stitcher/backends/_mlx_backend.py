@@ -70,26 +70,41 @@ class MLXBackend(XPBackend):
             stacklevel=3,
         )
 
+    def _coerce_dtype(self, dtype):
+        """Convert numpy/python dtypes to MLX dtypes for astype/zeros."""
+        if dtype is None:
+            return None
+
+        nd = np.dtype(dtype)
+        if nd == np.dtype(np.float64):
+            self._warn_precision_loss(dtype, np.float32)
+            nd = np.dtype(np.float32)
+
+        mlx_dtype = getattr(self.xp, nd.name, None)
+        if mlx_dtype is not None:
+            return mlx_dtype
+
+        # Conservative fallback when exact dtype is not exposed by MLX.
+        if nd.kind == "f":
+            return self.xp.float32
+        return None
+
     # -- Array creation / conversion (float32 coercion) ---------------------
 
     def asarray(self, x, dtype=None):
         arr = self.xp.array(np.asarray(x))
         arr = self._f32(arr)
-        if dtype is not None and np.dtype(dtype) == np.float64:
-            self._warn_precision_loss(dtype, np.float32)
-            dtype = np.float32
-        if dtype is not None:
-            arr = arr.astype(dtype)
+        mlx_dtype = self._coerce_dtype(dtype)
+        if mlx_dtype is not None:
+            arr = arr.astype(mlx_dtype)
         return arr
 
     def to_numpy(self, x):
         return np.array(x)
 
     def zeros(self, shape, dtype=None):
-        if dtype is not None and np.dtype(dtype) == np.float64:
-            self._warn_precision_loss(dtype, np.float32)
-            dtype = np.float32
-        return self.xp.zeros(shape, dtype=dtype)
+        mlx_dtype = self._coerce_dtype(dtype)
+        return self.xp.zeros(shape, dtype=mlx_dtype)
 
     def array(self, x):
         return self._f32(self.xp.array(np.asarray(x)))

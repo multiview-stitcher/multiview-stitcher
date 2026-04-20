@@ -15,6 +15,9 @@ The kernels are compiled lazily on first use and cached to disk, so the
 ~1 s numba import cost is only paid when a kernel is actually called.
 """
 
+import os
+import sys
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -31,6 +34,15 @@ except ImportError:
     pass
 
 _use_numba_acceleration = _numba_available
+
+# Numba's workqueue backend can SIGABRT on macOS in heavily threaded
+# notebook/debugger contexts. Keep numba acceleration enabled, but compile
+# kernels without parallel threading on Darwin unless explicitly overridden.
+_NUMBA_PARALLEL = (
+    os.getenv("MULTIVIEW_STITCHER_NUMBA_PARALLEL", "0") == "1"
+    if sys.platform == "darwin"
+    else True
+)
 
 
 def set_numba_acceleration(enabled: bool):
@@ -110,7 +122,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # 3-D affine transform (trilinear interpolation, parallelised over z)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __affine_transform_3d(source, matrix, offset, out_z, out_y, out_x,
                               cval, order):
         iz, iy, ix = source.shape
@@ -165,7 +177,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # 2-D affine transform (bilinear interpolation, parallelised over y)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __affine_transform_2d(source, matrix, offset, out_y, out_x,
                               cval, order):
         iy, ix = source.shape
@@ -208,7 +220,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # Cosine weighting (works for any dimensionality via ravel)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __cosine_weights_nb(x):
         flat = x.ravel()
         n = flat.shape[0]
@@ -225,7 +237,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # Weight normalisation (3-D and 2-D)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __normalize_weights_3d_nb(w):
         n_views, nz, ny, nx = w.shape
         for z in prange(nz):
@@ -242,7 +254,7 @@ def _compile_kernels():
                         w[v, z, y, x] /= s
         return w
 
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __normalize_weights_2d_nb(w):
         n_views, ny, nx = w.shape
         for y in prange(ny):
@@ -261,7 +273,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # Fused weighted nansum (3-D and 2-D)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __fused_weighted_nansum_3d(images, weights):
         n_views, nz, ny, nx = images.shape
         result = np.empty((nz, ny, nx), dtype=np.float64)
@@ -276,7 +288,7 @@ def _compile_kernels():
                     result[z, y, x] = s
         return result
 
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __fused_weighted_nansum_2d(images, weights):
         n_views, ny, nx = images.shape
         result = np.empty((ny, nx), dtype=np.float64)
@@ -293,7 +305,7 @@ def _compile_kernels():
     # ------------------------------------------------------------------
     # nan_to_num (flat, any dimensionality)
     # ------------------------------------------------------------------
-    @njit(parallel=True, cache=True)
+    @njit(parallel=_NUMBA_PARALLEL, cache=True)
     def __nan_to_num_nb(arr):
         flat = arr.ravel()
         n = flat.shape[0]
