@@ -705,10 +705,45 @@ def view_neuroglancer(
         from the OME-Zarr omero metadata if available, by default None
     """
 
+    # determine a common root for all local paths so files in different
+    # directories can all be served from a single HTTP server
+    _MAX_SERVE_DEPTH = 3
+    local_paths = [p for p in ome_zarr_paths if not p.startswith("http")]
+    if local_paths:
+        dir_to_serve = os.path.commonpath(
+            [os.path.dirname(os.path.abspath(p)) for p in local_paths]
+        )
+        # safety check: refuse to serve overly broad directories
+        for path in local_paths:
+            rel = os.path.relpath(os.path.abspath(path), dir_to_serve)
+            depth = len(rel.split(os.sep))
+            if dir_to_serve == os.sep or depth > _MAX_SERVE_DEPTH:
+                import warnings
+
+                warnings.warn(
+                    f"view_neuroglancer: the common ancestor directory "
+                    f"'{dir_to_serve}' is too broad (depth {depth} > "
+                    f"{_MAX_SERVE_DEPTH}) or is the filesystem root. "
+                    f"Local files will not be served. "
+                    f"Pass HTTP URLs instead.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                dir_to_serve = None
+                break
+    else:
+        dir_to_serve = None
+
     # generate urls for the ome zarr files
+    # use forward slashes in URLs regardless of OS path separator
     ome_zarr_urls = [
-        f"http://localhost:{port}/{os.path.basename(path)}"
-        if not path.startswith("http")
+        "http://localhost:{port}/{rel}".format(
+            port=port,
+            rel=os.path.relpath(os.path.abspath(path), dir_to_serve).replace(
+                os.sep, "/"
+            ),
+        )
+        if (not path.startswith("http") and dir_to_serve is not None)
         else path
         for path in ome_zarr_paths
     ]
@@ -741,12 +776,5 @@ def view_neuroglancer(
     webbrowser.open(ng_url)
 
     # serve the local ome-zarr files
-    local = False
-    for path in ome_zarr_paths:
-        if not path.startswith("http"):
-            dir_to_serve = os.path.dirname(path)
-            local = True
-            break
-
-    if local:
+    if dir_to_serve is not None:
         serve_dir(dir_to_serve, port=port)
