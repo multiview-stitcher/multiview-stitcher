@@ -43,7 +43,7 @@ def test_quickstart_code_sync():
     ]
     md_strings = []
     for md_path in md_paths:
-        with open(md_path) as f:
+        with open(md_path, encoding="utf-8") as f:
             md_strings.append(f.read())
 
     for block_filepath in sorted(os.listdir(quickstart_code_dir)):
