@@ -705,9 +705,19 @@ def view_neuroglancer(
         from the OME-Zarr omero metadata if available, by default None
     """
 
+    # determine a common root for all local paths so files in different
+    # directories can all be served from a single HTTP server
+    local_paths = [p for p in ome_zarr_paths if not p.startswith("http")]
+    if local_paths:
+        dir_to_serve = os.path.commonpath(
+            [os.path.dirname(os.path.abspath(p)) for p in local_paths]
+        )
+    else:
+        dir_to_serve = None
+
     # generate urls for the ome zarr files
     ome_zarr_urls = [
-        f"http://localhost:{port}/{os.path.basename(path)}"
+        f"http://localhost:{port}/{os.path.relpath(os.path.abspath(path), dir_to_serve)}"
         if not path.startswith("http")
         else path
         for path in ome_zarr_paths
@@ -741,12 +751,5 @@ def view_neuroglancer(
     webbrowser.open(ng_url)
 
     # serve the local ome-zarr files
-    local = False
-    for path in ome_zarr_paths:
-        if not path.startswith("http"):
-            dir_to_serve = os.path.dirname(path)
-            local = True
-            break
-
-    if local:
+    if dir_to_serve is not None:
         serve_dir(dir_to_serve, port=port)
