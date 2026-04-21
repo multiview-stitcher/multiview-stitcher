@@ -96,3 +96,5 @@ notebooks/IP_TIFF/*
 notebooks/*zarr
 *.zarr
 src/multiview_stitcher/_benchmarks/data
+
+.devcontainer
