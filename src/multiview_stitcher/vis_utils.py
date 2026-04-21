@@ -709,9 +709,18 @@ def view_neuroglancer(
     # directories can all be served from a single HTTP server
     local_paths = [p for p in ome_zarr_paths if not p.startswith("http")]
     if local_paths:
-        dir_to_serve = os.path.commonpath(
-            [os.path.dirname(os.path.abspath(p)) for p in local_paths]
-        )
+        local_dirs = [
+            os.path.dirname(os.path.abspath(p)) for p in local_paths
+        ]
+        try:
+            dir_to_serve = os.path.commonpath(local_dirs)
+        except ValueError as exc:
+            raise ValueError(
+                "All local OME-Zarr paths must share a common root directory "
+                "to be served from a single HTTP server. This can fail on "
+                "Windows when paths are on different drives. Local paths: "
+                f"{local_paths}"
+            ) from exc
     else:
         dir_to_serve = None
 
