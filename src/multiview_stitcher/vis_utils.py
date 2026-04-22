@@ -458,6 +458,27 @@ def get_contrast_min_max_from_ome_zarr_omero_metadata(
     return np.array([window["start"], window["end"]])
 
 
+def _affine_to_neuroglancer_source_transform(
+    affine, sdims, output_spacing
+):
+    """
+    Convert a physical-space affine to a Neuroglancer source transform.
+
+    OME-Zarr scale and translation already map pixel coordinates into the
+    source coordinate space. Neuroglancer rescales source-transform linear
+    coefficients from input to output dimension scales internally, but its
+    translation coefficients are expressed directly in output coordinate units.
+    """
+    affine = np.array(affine, dtype=float, copy=True)
+    affine_ndim = affine.shape[-1] - 1
+    affine_sdims = sdims[-affine_ndim:]
+    output_spacing_array = np.array(
+        [output_spacing[dim] for dim in affine_sdims]
+    )
+    affine[:-1, -1] = affine[:-1, -1] / output_spacing_array
+    return affine
+
+
 def generate_neuroglancer_json(
     ome_zarr_paths: list[str],
     ome_zarr_urls: list[str],
@@ -484,18 +505,17 @@ def generate_neuroglancer_json(
 
         full_affines = [np.eye(len(dims) + 1) for _ in sims]
         for isim, sim in enumerate(sims):
-            sim_spacing = spatial_image_utils.get_spacing_from_sim(sim)
             affine = spatial_image_utils.get_affine_from_sim(
                 sim, transform_key=transform_key
             )
             if "t" in affine.dims:
                 affine = affine.sel(t=0)
-            affine = np.array(affine)
-            affine_ndim = affine.shape[-1] - 1
-            # https://github.com/google/neuroglancer/issues/538
-            affine[:-1, -1] = affine[:-1, -1] / np.array(
-                [sim_spacing[dim] for dim in sdims]
+            affine = _affine_to_neuroglancer_source_transform(
+                affine,
+                sdims=sdims,
+                output_spacing=spacing,
             )
+            affine_ndim = affine.shape[-1] - 1
             full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
     else:
         full_affines = [None for _ in ome_zarr_paths]
