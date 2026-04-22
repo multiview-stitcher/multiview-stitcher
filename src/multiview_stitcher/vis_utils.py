@@ -495,7 +495,7 @@ def generate_neuroglancer_json(
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     ndim = len(sdims)
     dims = sim.dims
-    # spacing = spatial_image_utils.get_spacing_from_sim(sim)
+    spacing = spatial_image_utils.get_spacing_from_sim(sim)
 
     if sims is not None:
         if transform_key is None:
