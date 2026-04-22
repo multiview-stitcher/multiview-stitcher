@@ -52,6 +52,8 @@ nav:
       - troubleshoot_registration_OOM.md
     - Fusion:
       - troubleshoot_fusion.md
+    - General:
+      - troubleshoot_multiprocessing.md
   - chart.md
   - notebooks.md
   - features.md
