@@ -506,8 +506,8 @@ def generate_neuroglancer_json(
         full_affines = [np.eye(len(dims) + 1) for _ in sims]
         for isim, sim in enumerate(sims):
 
-            sim = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
-            spacing = spatial_image_utils.get_spacing_from_sim(sim)
+            sim_ome_zarr = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
+            spacing = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
 
             affine = spatial_image_utils.get_affine_from_sim(
                 sim, transform_key=transform_key
