@@ -76,6 +76,52 @@ def test_plot_positions_single_coord(monkeypatch):
     )
 
 
+def test_neuroglancer_source_transform_matches_physical_affine():
+    sdims = ["y", "x"]
+    sim_spacing = {"y": 0.4, "x": 2.0}
+    output_spacing = {"y": 1.2, "x": 0.5}
+    origin = np.array([12.0, -6.0])
+    pixel = np.array([5.0, 8.0])
+
+    theta = np.deg2rad(30)
+    linear = np.array(
+        [
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+    )
+    translation = np.array([3.5, -7.0])
+    affine = np.eye(3)
+    affine[:2, :2] = linear
+    affine[:2, 2] = translation
+
+    ng_affine = vis_utils._affine_to_neuroglancer_source_transform(
+        affine,
+        sdims=sdims,
+        output_spacing=output_spacing,
+    )
+
+    sim_spacing_array = np.array([sim_spacing[dim] for dim in sdims])
+    output_spacing_array = np.array([output_spacing[dim] for dim in sdims])
+
+    expected_world = linear @ (sim_spacing_array * pixel + origin)
+    expected_world += translation
+
+    source_coords = pixel + origin / sim_spacing_array
+    ng_linear = (
+        ng_affine[:2, :2]
+        * sim_spacing_array[None, :]
+        / output_spacing_array[:, None]
+    )
+    ng_output_coords = ng_linear @ source_coords + ng_affine[:2, 2]
+    neuroglancer_world = output_spacing_array * ng_output_coords
+
+    np.testing.assert_allclose(neuroglancer_world, expected_world)
+    np.testing.assert_allclose(
+        ng_affine[:2, 2], translation / output_spacing_array
+    )
+
+
 @pytest.mark.parametrize(
     "ndim, N_t, N_c, option",
     [
