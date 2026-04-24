@@ -230,9 +230,15 @@ def calc_reg_metrics(
     1. Uses *base_transform_key* to determine the overlap region between
        the two views and computes a *comparison bounding box* (optionally
        shrunk by *max_tolerance* from the overlap boundary).
-    2. Pre-transforms the fixed image into the comparison bbox using
-       *base_transform_key* and the moving image using each
-       *query_transform_key*.
+    2. Projects the comparison bbox into the **fixed image's intrinsic
+       (physical) space** via ``inv(T_fixed_base)``.  The fixed image is
+       sampled with an identity transform (always the same pixels across
+       all query keys).  The moving image is sampled with
+       ``inv(T_moving_q) @ T_fixed_q``, i.e. fixed-intrinsic → world via
+       the *query* fixed transform, then world → moving-intrinsic.  The
+       relative positioning of fixed and moving therefore reflects
+       exclusively the query-key transforms, making metrics comparable
+       across keys.
     3. Applies every metric function to the pre-transformed image pair.
 
     Only the first time point (and first channel) of each view is used.
@@ -363,6 +369,33 @@ def calc_reg_metrics(
         sim_fixed = sims_t0[fixed_idx]
         sim_moving = sims_t0[moving_idx]
 
+        lower = comparison_bbox["lower"]
+        upper = comparison_bbox["upper"]
+
+        # Map the world-space comparison bbox to fixed-image intrinsic
+        # (physical) space via inv(T_fixed_base).  This ensures the fixed
+        # image always contributes the same pixel data independently of
+        # the query transform key, which is required for the metrics to be
+        # comparable across query keys.
+        T_fixed_base = (
+            spatial_image_utils.get_affine_from_sim(sim_fixed, base_transform_key)
+            .squeeze()
+            .data
+        )
+        T_fixed_base_inv = np.linalg.inv(T_fixed_base)
+
+        # Find axis-aligned bounding box of all bbox corners in intrinsic space
+        # (handles the general affine case: rotation, shear, scale).
+        corners_world = (
+            np.array(list(np.ndindex(*([2] * ndim))), dtype=float)
+            * (upper - lower)
+            + lower
+        )
+        corners_h = np.c_[corners_world, np.ones(len(corners_world))]
+        corners_int = (T_fixed_base_inv @ corners_h.T).T[:, :ndim]
+        lower_int = corners_int.min(axis=0)
+        upper_int = corners_int.max(axis=0)
+
         # Resolve per-pair spacing: finest spacing of the fixed image
         # when the caller did not supply an explicit value.
         if spacing_arr_global is not None:
@@ -372,15 +405,14 @@ def calc_reg_metrics(
                 sim_fixed, asarray=True
             )
 
-        lower = comparison_bbox["lower"]
-        upper = comparison_bbox["upper"]
         shape = np.maximum(
-            1, np.floor((upper - lower) / spacing_arr + 1).astype(int)
+            1, np.floor((upper_int - lower_int) / spacing_arr + 1).astype(int)
         )
 
+        # output_sp is in fixed-image intrinsic (physical) space
         output_sp = {
             "origin": {
-                dim: float(lower[idim]) for idim, dim in enumerate(spatial_dims)
+                dim: float(lower_int[idim]) for idim, dim in enumerate(spatial_dims)
             },
             "spacing": {
                 dim: float(spacing_arr[idim]) for idim, dim in enumerate(spatial_dims)
@@ -390,28 +422,33 @@ def calc_reg_metrics(
             },
         }
 
-        # Transform the fixed image into the comparison bbox
-        T_fixed_base = (
-            spatial_image_utils.get_affine_from_sim(sim_fixed, base_transform_key)
-            .squeeze()
-            .data
-        )
-        p_fixed = np.linalg.inv(T_fixed_base)
-
+        # Fixed image: identity transform — output space IS fixed-intrinsic
+        # space, so the fixed image is read out directly with no resampling.
+        # This is computed once per directed edge and shared across all query
+        # keys, guaranteeing identical fixed-image content for every comparison.
         sim_fixed_t = transformation.transform_sim(
             sim_fixed.astype(np.float32),
-            p=p_fixed,
+            p=np.eye(ndim + 1),
             output_stack_properties=output_sp,
             mode="constant",
             cval=np.nan,
         )
 
-        # For each query key, transform the moving image and schedule metrics
+        # Moving image: map fixed-intrinsic → world (T_fixed_q) →
+        # moving-intrinsic (inv(T_moving_q)) for each query key.
+        # Using T_fixed_q (not T_fixed_base) means the relative transform
+        # between fixed and moving is taken entirely from the query key,
+        # so images are compared as if they were aligned under that key.
         metric_delayed[(fixed_idx, moving_idx)] = {}
 
         for q in query_transform_keys:
+            T_fixed_q = (
+                spatial_image_utils.get_affine_from_sim(sim_fixed, q)
+                .squeeze()
+                .data
+            )
             T_moving_q = transforms[q]
-            p_moving = np.linalg.inv(T_moving_q)
+            p_moving = np.linalg.inv(T_moving_q) @ T_fixed_q
 
             sim_moving_t = transformation.transform_sim(
                 sim_moving.astype(np.float32),
