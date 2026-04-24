@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from matplotlib import pyplot as plt
 
-from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, spatial_image_utils, vis_utils
+from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, vis_utils
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ def test_ncc_partial_nan():
 
 
 @pytest.mark.parametrize("ndim", [2, 3])
-def test_calc_reg_metrics_aligned_beats_misaligned(ndim):
+def test_tile_pair_image_metrics_aligned_beats_misaligned(ndim):
     """
     A correctly aligned transform key yields higher NCC than misaligned ones,
     both per-pair and in the summary statistics.
@@ -160,7 +160,7 @@ def test_calc_reg_metrics_aligned_beats_misaligned(ndim):
     # -----------------------------------------------------------------------
     # Compute metrics
     # -----------------------------------------------------------------------
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=[base_transform_key, "misaligned_t", "misaligned_r"],
@@ -214,8 +214,8 @@ def test_calc_reg_metrics_aligned_beats_misaligned(ndim):
 # ---------------------------------------------------------------------------
 
 
-def test_calc_reg_metrics_return_structure():
-    """calc_reg_metrics returns a dict with 'pairs' and 'summary' keys."""
+def test_tile_pair_image_metrics_return_structure():
+    """tile_pair_image_metrics returns a dict with 'pairs' and 'summary' keys."""
     base_transform_key = "gt"
     sims = sample_data.generate_tiled_dataset(
         ndim=2, N_c=1, N_t=1, tile_size=40, tiles_x=2, tiles_y=1,
@@ -224,7 +224,7 @@ def test_calc_reg_metrics_return_structure():
     )
     msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
 
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=base_transform_key,  # single str, not list
@@ -248,7 +248,7 @@ def test_calc_reg_metrics_return_structure():
     assert "ncc" in result["summary"][base_transform_key]
 
 
-def test_calc_reg_metrics_custom_metric_func():
+def test_tile_pair_image_metrics_custom_metric_func():
     """Custom metric functions are applied correctly."""
     base_transform_key = "gt"
     sims = sample_data.generate_tiled_dataset(
@@ -264,7 +264,7 @@ def test_calc_reg_metrics_custom_metric_func():
             return np.nan
         return float(np.mean(np.abs(im1[mask] - im2[mask])))
 
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=[base_transform_key],
@@ -278,7 +278,7 @@ def test_calc_reg_metrics_custom_metric_func():
     assert "mad" in result["summary"][base_transform_key]
 
 
-def test_calc_reg_metrics_max_tolerance():
+def test_tile_pair_image_metrics_max_tolerance():
     """Applying max_tolerance shrinks the comparison bbox without error."""
     base_transform_key = "gt"
     sims = sample_data.generate_tiled_dataset(
@@ -289,7 +289,7 @@ def test_calc_reg_metrics_max_tolerance():
     msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
 
     # Small tolerance: bbox should still be valid
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=[base_transform_key],
@@ -299,7 +299,7 @@ def test_calc_reg_metrics_max_tolerance():
     assert len(result["pairs"]) == 1
 
 
-def test_calc_reg_metrics_with_spacing():
+def test_tile_pair_image_metrics_with_spacing():
     """Custom spacing parameter is accepted and produces valid results."""
     base_transform_key = "gt"
     sims = sample_data.generate_tiled_dataset(
@@ -309,7 +309,7 @@ def test_calc_reg_metrics_with_spacing():
     )
     msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
 
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=[base_transform_key],
@@ -324,8 +324,8 @@ def test_calc_reg_metrics_with_spacing():
 
 
 @pytest.mark.parametrize("ndim", [2, 3])
-def test_plot_reg_metrics(ndim, monkeypatch):
-    """plot_reg_metrics returns one (fig, ax) per query key without error."""
+def test_plot_tile_pair_image_metrics(ndim, monkeypatch):
+    """plot_tile_pair_image_metrics returns one (fig, ax) per query key without error."""
     monkeypatch.setattr(plt, "show", lambda: None)
 
     base_transform_key = "gt"
@@ -346,14 +346,14 @@ def test_plot_reg_metrics(ndim, monkeypatch):
     msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
 
     query_keys = [base_transform_key]
-    result = metrics.calc_reg_metrics(
+    result = metrics.tile_pair_image_metrics(
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=query_keys,
     )
 
     for show_bboxes in [True, False]:
-        plots = vis_utils.plot_reg_metrics(
+        plots = vis_utils.plot_tile_pair_image_metrics(
             msims,
             result,
             base_transform_key=base_transform_key,

@@ -359,7 +359,7 @@ def plot_tile_pair_image_metrics(
     msims : list of MultiscaleSpatialImage
         The input views, passed unchanged to :func:`plot_positions`.
     reg_metrics_result : dict
-        The dictionary returned by :func:`multiview_stitcher.metrics.calc_reg_metrics`.
+        The dictionary returned by :func:`multiview_stitcher.metrics.tile_pair_image_metrics`.
         Must contain the ``"pairs"`` and ``"bboxes"`` keys.
     base_transform_key : str
         Transform key used to define the original comparison bboxes and to set
@@ -419,7 +419,7 @@ def plot_tile_pair_image_metrics(
 
     # Determine which metric to colour by
     if metric_key is None:
-        metric_key = next(iter(available_metric_keys)) if available_metric_keys else None
+        metric_key = sorted(available_metric_keys)[0] if available_metric_keys else None
     elif metric_key not in available_metric_keys:
         raise ValueError(
             f"metric_key {metric_key!r} not found in metrics result. "

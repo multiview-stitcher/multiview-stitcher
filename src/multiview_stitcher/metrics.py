@@ -7,7 +7,7 @@ pre-transforming them according to one or more candidate transform keys.
 
 Main entry point
 ----------------
-``calc_reg_metrics`` computes pairwise image similarity metrics for all
+``tile_pair_image_metrics`` computes pairwise image similarity metrics for all
 adjacent view pairs under a set of query transform keys, returning both
 per-pair values and summarised statistics.
 
@@ -25,7 +25,6 @@ import logging
 
 import networkx as nx
 import numpy as np
-import xarray as xr
 from dask import compute, delayed
 
 from multiview_stitcher import (
@@ -109,7 +108,7 @@ def _compute_metrics_from_arrays(fixed_arr, moving_arr, metric_funcs):
     """
     fixed_np = np.asarray(fixed_arr, dtype=np.float64)
     moving_np = np.asarray(moving_arr, dtype=np.float64)
-    return {key: func(fixed_np, moving_np) for key, func in metric_funcs.items()}
+    return {key: float(func(fixed_np, moving_np)) for key, func in metric_funcs.items()}
 
 
 def _build_metrics_graph(
