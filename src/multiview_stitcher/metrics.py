@@ -88,7 +88,12 @@ def normalized_cross_correlation(im1, im2):
 # ---------------------------------------------------------------------------
 
 
-def _compute_metrics_from_arrays(fixed_arr, moving_arr, metric_funcs):
+def _compute_metrics_from_arrays(
+        fixed_sim,
+        moving_sim,
+        metric_funcs,
+        intersection_halfspace=None,
+    ):
     """
     Apply a dict of metric functions to two pre-transformed image arrays.
 
@@ -106,8 +111,21 @@ def _compute_metrics_from_arrays(fixed_arr, moving_arr, metric_funcs):
     -------
     dict[str, float]
     """
-    fixed_np = np.asarray(fixed_arr, dtype=np.float64)
-    moving_np = np.asarray(moving_arr, dtype=np.float64)
+    # fixed_np = np.asarray(fixed_arr, dtype=np.float32)
+    # moving_np = np.asarray(moving_arr, dtype=np.float32)
+    # fixed_sim
+
+    fixed_np = np.asarray(fixed_sim.data, dtype=np.float32)
+    moving_np = np.asarray(moving_sim.data, dtype=np.float32)
+
+    if intersection_halfspace is not None:
+        # Mask out the half-space of the fixed image that lies outside the
+        # overlap region
+        mask = mv_graph.get_mask_from_halfspace(
+            fixed_sim, intersection_halfspace
+        )
+        fixed_np[~mask] = np.nan
+
     return {key: float(func(fixed_np, moving_np)) for key, func in metric_funcs.items()}
 
 
@@ -285,11 +303,14 @@ def tile_pair_image_metrics(
     max_tolerance : float, dict, or None, optional
         Physical distance by
         which the comparison bbox is shrunk on every side relative to the
-        overlap boundary.  This guarantees that the comparison bbox
+        overlap boundary. This guarantees that the comparison bbox
         remains valid for any query transform that deviates from the base
-        by at most *max_tolerance* physical units.
-        A float is applied uniformly; a dict maps spatial dim names to
-        per-dimension values.  ``None`` means no shrinkage.
+        by at most *max_tolerance* physical units. Pixels that are included
+        in the axis-aligned comparison bbox but lie outside of the
+        shrunk overlap halfspace intersection are set to NaN before metric evaluation.
+        A float value is applied uniformly across all spatial dimensions;
+        a dict maps spatial dim names to per-dimension values.
+        ``None`` means no shrinkage.
     spacing : float, dict, or None, optional
         Spacing at which images are pretransformed before metric
         evaluation.  A float is applied uniformly across all spatial
@@ -376,6 +397,7 @@ def tile_pair_image_metrics(
         edge_data = g_metrics.edges[(fixed_idx, moving_idx)]
         comparison_bbox = edge_data["comparison_bbox"]
         transforms = edge_data["transforms"]
+        intersection_halfspace = edge_data["intersection_halfspace"]
 
         if comparison_bbox is None:
             logger.warning(
@@ -459,9 +481,10 @@ def tile_pair_image_metrics(
             )
 
             metric_d = delayed(_compute_metrics_from_arrays)(
-                sim_fixed_t.data,
-                sim_moving_t.data,
+                sim_fixed_t,
+                sim_moving_t,
                 metric_funcs,
+                intersection_halfspace.halfspaces,
             )
             metric_delayed[(fixed_idx, moving_idx)][q] = metric_d
 

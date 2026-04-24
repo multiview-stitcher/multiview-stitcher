@@ -489,7 +489,7 @@ def points_inside_sim(pts, sim, transform_key):
     return inside
 
 
-def get_mask_from_halfspace_equations(sim, halfspace_eqs):
+def get_mask_from_halfspace(sim, halfspace_eqs):
     """
     Create a boolean mask for a spatial image from halfspace equations.
 
