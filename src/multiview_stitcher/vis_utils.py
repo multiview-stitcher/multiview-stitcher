@@ -338,10 +338,15 @@ def plot_reg_metrics(
     Visualise registration quality metrics for each query transform key.
 
     For every entry in *query_transform_keys* a separate figure is produced.
-    Each figure shows the tile layout (in *base_transform_key* world
-    coordinates) and overlays either the pairwise comparison bounding boxes
-    (when *show_bboxes* is ``True``) or a minimalistic graph where edges are
-    coloured by the metric value (when *show_bboxes* is ``False``).
+    Each figure shows the tile layout **in that query transform key's world
+    coordinate space** and overlays either the pairwise comparison bounding
+    boxes (when *show_bboxes* is ``True``) or a minimalistic graph where edges
+    are coloured by the metric value (when *show_bboxes* is ``False``).
+
+    The comparison bboxes, which are originally defined in *base_transform_key*
+    world space, are projected into each query key's world space via
+    ``T_fixed_q @ inv(T_fixed_base)`` (applied to the fixed tile of each pair)
+    before being drawn.
 
     All figures share the same colorbar limits, derived by default from the
     *base_transform_key* metric values when it is included as a query key,
@@ -355,15 +360,12 @@ def plot_reg_metrics(
         The dictionary returned by :func:`multiview_stitcher.metrics.calc_reg_metrics`.
         Must contain the ``"pairs"`` and ``"bboxes"`` keys.
     base_transform_key : str
-        Transform key used to define the tile layout and the world coordinate
-        space in which the comparison bboxes live.  When *clims* is ``None``
-        and *base_transform_key* appears in *query_transform_keys*, the
-        colorbar limits are derived from its metric values so all other query
-        keys share the same reference scale; otherwise the limits are computed
-        from all query-key values combined.
+        Transform key used to define the original comparison bboxes and to set
+        colorbar limits when it appears in *query_transform_keys*.
     query_transform_keys : str or list of str
         Subset of transform keys to visualise.  Each key must appear in
-        *reg_metrics_result["pairs"]*.
+        *reg_metrics_result["pairs"]*.  Tile positions and comparison bboxes
+        are shown in each key's own world coordinate space.
     metric_key : str, optional
         Name of the metric to use for colouring the comparison boxes or edges.
         Defaults to the first metric key found in the result.
@@ -451,7 +453,7 @@ def plot_reg_metrics(
         if show_bboxes:
             fig, ax = plot_positions(
                 msims,
-                transform_key=base_transform_key,
+                transform_key=q,
                 use_positional_colors=False,
                 show_plot=False,
                 plot_title=f"{metric_key}  |  transform key: {q}",
@@ -474,6 +476,23 @@ def plot_reg_metrics(
                 lower = bbox["lower"]
                 upper = bbox["upper"]
 
+                # Project the bbox from base_transform_key world space into
+                # query key world space using the fixed tile's transforms:
+                # T_fixed_q @ inv(T_fixed_base) maps a base-world point to
+                # query-world, so bbox corners are visualised at the correct
+                # location for each query key.
+                T_fixed_base = (
+                    spatial_image_utils.get_affine_from_sim(sims[fi], base_transform_key)
+                    .squeeze()
+                    .data
+                )
+                T_fixed_q = (
+                    spatial_image_utils.get_affine_from_sim(sims[fi], q)
+                    .squeeze()
+                    .data
+                )
+                bbox_transform = T_fixed_q @ np.linalg.inv(T_fixed_base)
+
                 sp = {
                     "origin": {
                         dim: float(lower[idim])
@@ -484,6 +503,7 @@ def plot_reg_metrics(
                         for idim, dim in enumerate(spatial_dims)
                     },
                     "shape": {dim: 2 for dim in spatial_dims},
+                    "transform": bbox_transform,
                 }
                 plot_stack_props(sp, ax, color=color, linewidth=2)
 
@@ -506,7 +526,7 @@ def plot_reg_metrics(
 
             fig, ax = plot_positions(
                 msims,
-                transform_key=base_transform_key,
+                transform_key=q,
                 use_positional_colors=False,
                 edges=undirected_edges,
                 edge_color_vals=edge_color_vals,

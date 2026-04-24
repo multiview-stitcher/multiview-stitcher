@@ -453,6 +453,7 @@ def calc_reg_metrics(
             output_stack_properties=output_sp,
             mode="constant",
             cval=np.nan,
+            order=1,
         )
 
         # Moving image: map fixed-intrinsic → world (T_fixed_q) →
