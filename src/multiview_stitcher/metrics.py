@@ -89,71 +89,6 @@ def normalized_cross_correlation(im1, im2):
 # ---------------------------------------------------------------------------
 
 
-def _get_comparison_bbox(
-    sim_fixed,
-    sim_moving,
-    base_transform_key,
-    max_tolerance,
-):
-    """
-    Return the comparison bounding box in base_transform_key world coordinates.
-
-    The box is the overlap region of the two views (computed from
-    *base_transform_key*), optionally shrunk inward by *max_tolerance* on
-    every side so that the box remains within the moving image even when
-    the query transform deviates from the base by up to *max_tolerance*
-    physical units.
-
-    Parameters
-    ----------
-    sim_fixed, sim_moving : SpatialImage
-        The two views (first time point, no non-spatial dims).
-    base_transform_key : str
-        Transform key that defines the reference spatial layout.
-    max_tolerance : float, dict, or None
-        Amount by which to shrink the overlap box on each side (physical
-        units).  A ``float`` is applied uniformly; a ``dict`` maps spatial
-        dimension names to per-dimension values.  ``None`` means no
-        shrinkage.
-
-    Returns
-    -------
-    dict
-        ``{"lower": np.ndarray, "upper": np.ndarray}`` in world coordinates,
-        or ``None`` when the resulting box is empty.
-    """
-    ndim = spatial_image_utils.get_ndim_from_sim(sim_fixed)
-    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim_fixed)
-
-    # Overlap in base_transform_key world coords (from the fixed image's
-    # perspective, i.e. lowers_phys[0] / uppers_phys[0]).
-    lowers_phys, uppers_phys = registration.get_overlap_bboxes(
-        sim_fixed,
-        sim_moving,
-        input_transform_key=base_transform_key,
-        output_transform_key=base_transform_key,
-    )
-
-    lower = np.asarray(lowers_phys[0], dtype=float)
-    upper = np.asarray(uppers_phys[0], dtype=float)
-
-    # Shrink by max_tolerance
-    if max_tolerance is not None:
-        if isinstance(max_tolerance, (int, float)):
-            tol = np.full(ndim, float(max_tolerance))
-        else:
-            tol = np.array(
-                [float(max_tolerance.get(dim, 0.0)) for dim in spatial_dims]
-            )
-        lower = lower + tol
-        upper = upper - tol
-
-    if np.any(lower >= upper):
-        return None
-
-    return {"lower": lower, "upper": upper}
-
-
 def _compute_metrics_from_arrays(fixed_arr, moving_arr, metric_funcs):
     """
     Apply a dict of metric functions to two pre-transformed image arrays.
@@ -225,12 +160,34 @@ def _build_metrics_graph(
             sim_fixed = sims_t0[fixed_idx]
             sim_moving = sims_t0[moving_idx]
 
-            comparison_bbox = _get_comparison_bbox(
+            # Negative overlap_tolerance shrinks each sim's bbox before
+            # computing the intersection, equivalent to pulling the
+            # comparison box inward by max_tolerance on every side.
+            if max_tolerance is None:
+                tol = None
+            elif isinstance(max_tolerance, (int, float)):
+                tol = -float(max_tolerance)
+            else:
+                sdims = spatial_image_utils.get_spatial_dims_from_sim(sim_fixed)
+                tol = {
+                    dim: -float(max_tolerance.get(dim, 0.0)) for dim in sdims
+                }
+
+            lowers_phys, uppers_phys = registration.get_overlap_bboxes(
                 sim_fixed,
                 sim_moving,
-                base_transform_key,
-                max_tolerance,
+                input_transform_key=base_transform_key,
+                output_transform_key=base_transform_key,
+                overlap_tolerance=tol,
             )
+
+            lower = np.asarray(lowers_phys[0], dtype=float)
+            upper = np.asarray(uppers_phys[0], dtype=float)
+
+            if np.any(lower >= upper):
+                comparison_bbox = None
+            else:
+                comparison_bbox = {"lower": lower, "upper": upper}
 
             transforms = {
                 q: spatial_image_utils.get_affine_from_sim(
