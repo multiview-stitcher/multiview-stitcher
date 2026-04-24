@@ -324,6 +324,165 @@ def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
     ax.add_collection3d(line_collection)
 
 
+def plot_reg_metrics(
+    msims,
+    reg_metrics_result,
+    base_transform_key,
+    query_transform_keys,
+    metric_key=None,
+    c_lims=None,
+    show_plot=True,
+):
+    """
+    Visualise registration quality metrics for each query transform key.
+
+    For every entry in *query_transform_keys* a separate figure is produced.
+    Each figure shows the tile layout (in *base_transform_key* world
+    coordinates) and overlays the pairwise comparison bounding boxes, colour-
+    coded by the metric value for that query transform key.
+
+    All figures share the same colorbar limits, derived by default from the
+    *base_transform_key* metric values when it is included as a query key,
+    so all other query keys are compared against the same reference scale.
+
+    Parameters
+    ----------
+    msims : list of MultiscaleSpatialImage
+        The input views, passed unchanged to :func:`plot_positions`.
+    reg_metrics_result : dict
+        The dictionary returned by :func:`multiview_stitcher.metrics.calc_reg_metrics`.
+        Must contain the ``"pairs"`` and ``"bboxes"`` keys.
+    base_transform_key : str
+        Transform key used to define the tile layout and the world coordinate
+        space in which the comparison bboxes live.  When *c_lims* is ``None``
+        and *base_transform_key* appears in *query_transform_keys*, the
+        colorbar limits are derived from its metric values so all other query
+        keys share the same reference scale; otherwise the limits are computed
+        from all query-key values combined.
+    query_transform_keys : str or list of str
+        Subset of transform keys to visualise.  Each key must appear in
+        *reg_metrics_result["pairs"]*.
+    metric_key : str, optional
+        Name of the metric to use for colouring the comparison boxes.
+        Defaults to the first metric key found in the result.
+    c_lims : tuple of (float, float), optional
+        Explicit ``(vmin, vmax)`` for the shared colorbar.  When ``None``
+        (default) the limits are computed from *base_transform_key* values
+        if that key is present in the result, falling back to all query-key
+        values otherwise.
+    show_plot : bool, optional
+        Whether to call ``plt.show()`` after creating each figure.
+        By default True.
+
+    Returns
+    -------
+    dict[str, tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]]
+        Maps each query transform key to its ``(fig, ax)`` pair.
+    """
+    if isinstance(query_transform_keys, str):
+        query_transform_keys = [query_transform_keys]
+
+    pairs_dict = reg_metrics_result["pairs"]
+    bboxes_dict = reg_metrics_result.get("bboxes", {})
+
+    sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
+    # Determine which metric to colour by
+    if metric_key is None:
+        for q_metrics in pairs_dict.values():
+            for m in q_metrics.values():
+                metric_key = next(iter(m))
+                break
+            break
+
+    # Resolve colorbar limits
+    if c_lims is not None:
+        vmin, vmax = float(c_lims[0]), float(c_lims[1])
+    else:
+        # Use base_transform_key values as the reference scale if it is a query key
+        ref_keys = (
+            [base_transform_key]
+            if base_transform_key in query_transform_keys
+            else query_transform_keys
+        )
+        ref_values = []
+        for pair_metrics in pairs_dict.values():
+            for q in ref_keys:
+                val = pair_metrics.get(q, {}).get(metric_key, np.nan)
+                try:
+                    val_f = float(val)
+                except (TypeError, ValueError):
+                    val_f = np.nan
+                if not np.isnan(val_f):
+                    ref_values.append(val_f)
+
+        if len(ref_values) >= 2 and min(ref_values) < max(ref_values):
+            vmin, vmax = min(ref_values), max(ref_values)
+        elif ref_values:
+            vmin = ref_values[0] - 0.5
+            vmax = ref_values[0] + 0.5
+        else:
+            vmin, vmax = 0.0, 1.0
+
+    norm = colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = colormaps.get_cmap("Spectral")
+
+    plots = {}
+    for q in query_transform_keys:
+        fig, ax = plot_positions(
+            msims,
+            transform_key=base_transform_key,
+            use_positional_colors=False,
+            show_plot=False,
+            plot_title=f"{metric_key}  |  transform key: {q}",
+        )
+
+        for (fi, mi), bbox in bboxes_dict.items():
+            if bbox is None:
+                continue
+
+            # Colour by the metric value for this specific query transform key
+            val = pairs_dict.get((fi, mi), {}).get(q, {}).get(metric_key, np.nan)
+            try:
+                val_f = float(val)
+            except (TypeError, ValueError):
+                val_f = np.nan
+
+            color = (
+                cmap(norm(val_f)) if not np.isnan(val_f) else (0.5, 0.5, 0.5, 1.0)
+            )
+
+            lower = bbox["lower"]
+            upper = bbox["upper"]
+
+            # Build a stack_props for the bbox so plot_stack_props can draw it.
+            # shape=2, spacing=(upper-lower) gives a box from origin to origin+spacing.
+            sp = {
+                "origin": {
+                    dim: float(lower[idim])
+                    for idim, dim in enumerate(spatial_dims)
+                },
+                "spacing": {
+                    dim: float(upper[idim] - lower[idim])
+                    for idim, dim in enumerate(spatial_dims)
+                },
+                "shape": {dim: 2 for dim in spatial_dims},
+            }
+            plot_stack_props(sp, ax, color=color, linewidth=2)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        plt.colorbar(sm, ax=ax, label=metric_key)
+
+        if show_plot:
+            plt.show()
+
+        plots[q] = (fig, ax)
+
+    return plots
+
+
 def serve_dir(dir_path, port=8000):
     """
     Serve a directory with a simple HTTP server.

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from matplotlib import pyplot as plt
 
-from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, spatial_image_utils
+from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, spatial_image_utils, vis_utils
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +352,7 @@ def test_plot_reg_metrics(ndim, monkeypatch):
         query_transform_keys=query_keys,
     )
 
-    plots = metrics.plot_reg_metrics(
+    plots = vis_utils.plot_reg_metrics(
         msims,
         result,
         base_transform_key=base_transform_key,
