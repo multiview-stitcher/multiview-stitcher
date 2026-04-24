@@ -4,6 +4,7 @@ Tests for the metrics module.
 
 import numpy as np
 import pytest
+from matplotlib import pyplot as plt
 
 from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, spatial_image_utils
 
@@ -315,3 +316,53 @@ def test_calc_reg_metrics_with_spacing():
         spacing=1.0,  # coarser spacing → faster computation
     )
     assert "pairs" in result
+
+
+# ---------------------------------------------------------------------------
+# Visualisation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_plot_reg_metrics(ndim, monkeypatch):
+    """plot_reg_metrics returns one (fig, ax) per query key without error."""
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    base_transform_key = "gt"
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        N_c=1,
+        N_t=1,
+        tile_size=30 if ndim == 3 else 40,
+        tiles_x=2,
+        tiles_y=2,
+        tiles_z=1 if ndim == 3 else None,
+        overlap=10,
+        zoom=3 if ndim == 3 else 4,
+        shift_scale=0.0,
+        drift_scale=0.0,
+        transform_key=base_transform_key,
+    )
+    msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
+
+    query_keys = [base_transform_key]
+    result = metrics.calc_reg_metrics(
+        msims,
+        base_transform_key=base_transform_key,
+        query_transform_keys=query_keys,
+    )
+
+    plots = metrics.plot_reg_metrics(
+        msims,
+        result,
+        base_transform_key=base_transform_key,
+        query_transform_keys=query_keys,
+        show_plot=True,  # monkeypatched → no-op
+    )
+
+    assert set(plots.keys()) == set(query_keys)
+    for q, (fig, ax) in plots.items():
+        assert fig is not None
+        assert ax is not None
+
+    plt.close("all")
