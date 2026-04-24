@@ -398,13 +398,20 @@ def plot_reg_metrics(
     sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
 
+    # Collect all available metric keys from the result
+    available_metric_keys = set()
+    for q_metrics in pairs_dict.values():
+        for m in q_metrics.values():
+            available_metric_keys.update(m.keys())
+
     # Determine which metric to colour by
     if metric_key is None:
-        for q_metrics in pairs_dict.values():
-            for m in q_metrics.values():
-                metric_key = next(iter(m))
-                break
-            break
+        metric_key = next(iter(available_metric_keys)) if available_metric_keys else None
+    elif metric_key not in available_metric_keys:
+        raise ValueError(
+            f"metric_key {metric_key!r} not found in metrics result. "
+            f"Available metric keys: {sorted(available_metric_keys)}"
+        )
 
     # Resolve colorbar limits
     if clims is not None:
