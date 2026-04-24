@@ -219,7 +219,7 @@ def _build_metrics_graph(
 # ---------------------------------------------------------------------------
 
 
-def calc_reg_metrics(
+def tile_pair_image_metrics(
     msims,
     base_transform_key,
     query_transform_keys,

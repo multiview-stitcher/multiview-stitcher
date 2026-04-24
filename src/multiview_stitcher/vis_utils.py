@@ -324,7 +324,7 @@ def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
     ax.add_collection3d(line_collection)
 
 
-def plot_reg_metrics(
+def plot_tile_pair_image_metrics(
     msims,
     reg_metrics_result,
     base_transform_key,
