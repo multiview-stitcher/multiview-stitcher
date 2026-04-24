@@ -332,14 +332,16 @@ def plot_reg_metrics(
     metric_key=None,
     c_lims=None,
     show_plot=True,
+    show_bboxes=True,
 ):
     """
     Visualise registration quality metrics for each query transform key.
 
     For every entry in *query_transform_keys* a separate figure is produced.
     Each figure shows the tile layout (in *base_transform_key* world
-    coordinates) and overlays the pairwise comparison bounding boxes, colour-
-    coded by the metric value for that query transform key.
+    coordinates) and overlays either the pairwise comparison bounding boxes
+    (when *show_bboxes* is ``True``) or a minimalistic graph where edges are
+    coloured by the metric value (when *show_bboxes* is ``False``).
 
     All figures share the same colorbar limits, derived by default from the
     *base_transform_key* metric values when it is included as a query key,
@@ -363,7 +365,7 @@ def plot_reg_metrics(
         Subset of transform keys to visualise.  Each key must appear in
         *reg_metrics_result["pairs"]*.
     metric_key : str, optional
-        Name of the metric to use for colouring the comparison boxes.
+        Name of the metric to use for colouring the comparison boxes or edges.
         Defaults to the first metric key found in the result.
     c_lims : tuple of (float, float), optional
         Explicit ``(vmin, vmax)`` for the shared colorbar.  When ``None``
@@ -373,6 +375,12 @@ def plot_reg_metrics(
     show_plot : bool, optional
         Whether to call ``plt.show()`` after creating each figure.
         By default True.
+    show_bboxes : bool, optional
+        When ``True`` (default) the comparison bounding boxes are drawn and
+        coloured by metric value.  When ``False`` a minimalistic
+        :func:`plot_positions` plot is produced instead, where edges between
+        adjacent tiles are coloured by the (mean of the two directed)
+        metric values.
 
     Returns
     -------
@@ -400,7 +408,6 @@ def plot_reg_metrics(
     if c_lims is not None:
         vmin, vmax = float(c_lims[0]), float(c_lims[1])
     else:
-        # Use base_transform_key values as the reference scale if it is a query key
         ref_keys = (
             [base_transform_key]
             if base_transform_key in query_transform_keys
@@ -428,52 +435,87 @@ def plot_reg_metrics(
     norm = colors.Normalize(vmin=vmin, vmax=vmax)
     cmap = colormaps.get_cmap("Spectral")
 
+    # Build the list of undirected edges (averaged over both directions) once,
+    # used only when show_bboxes=False.
+    if not show_bboxes:
+        seen = {}
+        for (fi, mi) in pairs_dict:
+            key = tuple(sorted((fi, mi)))
+            if key not in seen:
+                seen[key] = []
+            seen[key].append((fi, mi))
+        undirected_edges = list(seen.keys())
+
     plots = {}
     for q in query_transform_keys:
-        fig, ax = plot_positions(
-            msims,
-            transform_key=base_transform_key,
-            use_positional_colors=False,
-            show_plot=False,
-            plot_title=f"{metric_key}  |  transform key: {q}",
-        )
-
-        for (fi, mi), bbox in bboxes_dict.items():
-            if bbox is None:
-                continue
-
-            # Colour by the metric value for this specific query transform key
-            val = pairs_dict.get((fi, mi), {}).get(q, {}).get(metric_key, np.nan)
-            try:
-                val_f = float(val)
-            except (TypeError, ValueError):
-                val_f = np.nan
-
-            color = (
-                cmap(norm(val_f)) if not np.isnan(val_f) else (0.5, 0.5, 0.5, 1.0)
+        if show_bboxes:
+            fig, ax = plot_positions(
+                msims,
+                transform_key=base_transform_key,
+                use_positional_colors=False,
+                show_plot=False,
+                plot_title=f"{metric_key}  |  transform key: {q}",
             )
 
-            lower = bbox["lower"]
-            upper = bbox["upper"]
+            for (fi, mi), bbox in bboxes_dict.items():
+                if bbox is None:
+                    continue
 
-            # Build a stack_props for the bbox so plot_stack_props can draw it.
-            # shape=2, spacing=(upper-lower) gives a box from origin to origin+spacing.
-            sp = {
-                "origin": {
-                    dim: float(lower[idim])
-                    for idim, dim in enumerate(spatial_dims)
-                },
-                "spacing": {
-                    dim: float(upper[idim] - lower[idim])
-                    for idim, dim in enumerate(spatial_dims)
-                },
-                "shape": {dim: 2 for dim in spatial_dims},
-            }
-            plot_stack_props(sp, ax, color=color, linewidth=2)
+                val = pairs_dict.get((fi, mi), {}).get(q, {}).get(metric_key, np.nan)
+                try:
+                    val_f = float(val)
+                except (TypeError, ValueError):
+                    val_f = np.nan
 
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        plt.colorbar(sm, ax=ax, label=metric_key)
+                color = (
+                    cmap(norm(val_f)) if not np.isnan(val_f) else (0.5, 0.5, 0.5, 1.0)
+                )
+
+                lower = bbox["lower"]
+                upper = bbox["upper"]
+
+                sp = {
+                    "origin": {
+                        dim: float(lower[idim])
+                        for idim, dim in enumerate(spatial_dims)
+                    },
+                    "spacing": {
+                        dim: float(upper[idim] - lower[idim])
+                        for idim, dim in enumerate(spatial_dims)
+                    },
+                    "shape": {dim: 2 for dim in spatial_dims},
+                }
+                plot_stack_props(sp, ax, color=color, linewidth=2)
+
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            plt.colorbar(sm, ax=ax, label=metric_key)
+
+        else:
+            # Minimalistic mode: colour edges by mean metric value over both
+            # directed pairs.
+            edge_color_vals = []
+            for fi, mi in undirected_edges:
+                directed = seen[(fi, mi)]
+                vals = [
+                    float(pairs_dict.get(d, {}).get(q, {}).get(metric_key, np.nan))
+                    for d in directed
+                ]
+                valid = [v for v in vals if not np.isnan(v)]
+                edge_color_vals.append(float(np.mean(valid)) if valid else np.nan)
+
+            fig, ax = plot_positions(
+                msims,
+                transform_key=base_transform_key,
+                use_positional_colors=False,
+                edges=undirected_edges,
+                edge_color_vals=edge_color_vals,
+                edge_cmap=cmap,
+                edge_clims=[vmin, vmax],
+                edge_label=metric_key,
+                show_plot=False,
+                plot_title=f"{metric_key}  |  transform key: {q}",
+            )
 
         if show_plot:
             plt.show()

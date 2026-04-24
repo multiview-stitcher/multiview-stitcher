@@ -234,8 +234,8 @@ def test_calc_reg_metrics_return_structure():
     assert "pairs" in result
     assert "summary" in result
 
-    # Two tiles → two directed edges: (0→1) and (1→0)
-    assert len(result["pairs"]) == 2
+    # Two tiles, bidirectional=False (default) → one directed edge: (0→1)
+    assert len(result["pairs"]) == 1
 
     for pair, pair_metrics in result["pairs"].items():
         assert isinstance(pair, tuple) and len(pair) == 2
@@ -296,7 +296,7 @@ def test_calc_reg_metrics_max_tolerance():
         max_tolerance=1.0,
     )
     assert "pairs" in result
-    assert len(result["pairs"]) == 2
+    assert len(result["pairs"]) == 1
 
 
 def test_calc_reg_metrics_with_spacing():
@@ -352,17 +352,19 @@ def test_plot_reg_metrics(ndim, monkeypatch):
         query_transform_keys=query_keys,
     )
 
-    plots = vis_utils.plot_reg_metrics(
-        msims,
-        result,
-        base_transform_key=base_transform_key,
-        query_transform_keys=query_keys,
-        show_plot=True,  # monkeypatched → no-op
-    )
+    for show_bboxes in [True, False]:
+        plots = vis_utils.plot_reg_metrics(
+            msims,
+            result,
+            base_transform_key=base_transform_key,
+            query_transform_keys=query_keys,
+            show_plot=True,  # monkeypatched → no-op
+            show_bboxes=show_bboxes,
+        )
 
-    assert set(plots.keys()) == set(query_keys)
-    for q, (fig, ax) in plots.items():
-        assert fig is not None
-        assert ax is not None
+        assert set(plots.keys()) == set(query_keys)
+        for q, (fig, ax) in plots.items():
+            assert fig is not None
+            assert ax is not None
 
-    plt.close("all")
+        plt.close("all")

@@ -118,6 +118,7 @@ def _build_metrics_graph(
     base_transform_key,
     query_transform_keys,
     max_tolerance,
+    bidirectional=False,
 ):
     """
     Build a directed graph used internally for metric computation.
@@ -142,6 +143,10 @@ def _build_metrics_graph(
     base_transform_key : str
     query_transform_keys : list of str
     max_tolerance : float, dict, or None
+    bidirectional : bool, optional
+        When ``False`` (default) only the directed edge ``(i, j)`` with
+        ``i < j`` is built for each undirected adjacency edge.  When
+        ``True`` both directions are built.
 
     Returns
     -------
@@ -156,7 +161,8 @@ def _build_metrics_graph(
         g_metrics.add_node(node)
 
     for i, j in g_adj.edges():
-        for fixed_idx, moving_idx in [(i, j), (j, i)]:
+        directions = [(i, j), (j, i)] if bidirectional else [(min(i, j), max(i, j))]
+        for fixed_idx, moving_idx in directions:
             sim_fixed = sims_t0[fixed_idx]
             sim_moving = sims_t0[moving_idx]
 
@@ -220,6 +226,7 @@ def calc_reg_metrics(
     metric_funcs=None,
     max_tolerance=None,
     spacing=None,
+    bidirectional=False,
 ):
     """
     Calculate registration quality metrics for a list of views.
@@ -287,6 +294,11 @@ def calc_reg_metrics(
         values.  ``None`` (default) uses the finest spacing of the fixed
         image for each pair, preserving the full resolution of the
         reference view.
+    bidirectional : bool, optional
+        When ``False`` (default) only one directed edge per adjacent pair is
+        built, with the lower view index as fixed and the higher as moving.
+        This halves the computation cost.  When ``True`` both directions
+        ``(i → j)`` and ``(j → i)`` are evaluated independently.
 
     Returns
     -------
@@ -340,6 +352,7 @@ def calc_reg_metrics(
         base_transform_key,
         query_transform_keys,
         max_tolerance,
+        bidirectional=bidirectional,
     )
 
     # -----------------------------------------------------------------------
