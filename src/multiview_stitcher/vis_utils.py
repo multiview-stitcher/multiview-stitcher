@@ -330,7 +330,7 @@ def plot_reg_metrics(
     base_transform_key,
     query_transform_keys,
     metric_key=None,
-    c_lims=None,
+    clims=None,
     show_plot=True,
     show_bboxes=True,
 ):
@@ -356,7 +356,7 @@ def plot_reg_metrics(
         Must contain the ``"pairs"`` and ``"bboxes"`` keys.
     base_transform_key : str
         Transform key used to define the tile layout and the world coordinate
-        space in which the comparison bboxes live.  When *c_lims* is ``None``
+        space in which the comparison bboxes live.  When *clims* is ``None``
         and *base_transform_key* appears in *query_transform_keys*, the
         colorbar limits are derived from its metric values so all other query
         keys share the same reference scale; otherwise the limits are computed
@@ -367,7 +367,7 @@ def plot_reg_metrics(
     metric_key : str, optional
         Name of the metric to use for colouring the comparison boxes or edges.
         Defaults to the first metric key found in the result.
-    c_lims : tuple of (float, float), optional
+    clims : tuple of (float, float), optional
         Explicit ``(vmin, vmax)`` for the shared colorbar.  When ``None``
         (default) the limits are computed from *base_transform_key* values
         if that key is present in the result, falling back to all query-key
@@ -405,8 +405,8 @@ def plot_reg_metrics(
             break
 
     # Resolve colorbar limits
-    if c_lims is not None:
-        vmin, vmax = float(c_lims[0]), float(c_lims[1])
+    if clims is not None:
+        vmin, vmax = float(clims[0]), float(clims[1])
     else:
         ref_keys = (
             [base_transform_key]

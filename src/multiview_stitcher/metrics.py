@@ -227,6 +227,7 @@ def calc_reg_metrics(
     max_tolerance=None,
     spacing=None,
     bidirectional=False,
+    metric_channel=None,
 ):
     """
     Calculate registration quality metrics for a list of views.
@@ -299,6 +300,10 @@ def calc_reg_metrics(
         built, with the lower view index as fixed and the higher as moving.
         This halves the computation cost.  When ``True`` both directions
         ``(i → j)`` and ``(j → i)`` are evaluated independently.
+    metric_channel : scalar or None, optional
+        Channel coordinate value to use when selecting the channel for metric
+        computation.  When ``None`` (default) the channel at index 0 is used.
+        Has no effect for views without a ``"c"`` dimension.
 
     Returns
     -------
@@ -321,14 +326,17 @@ def calc_reg_metrics(
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
     ndim = len(spatial_dims)
 
-    # Select first time-point and first channel from each sim
+    # Select first time-point and chosen channel from each sim
     sims_t0 = []
     for sim in sims:
         sel = {}
         if "t" in sim.dims:
             sel["t"] = sim.coords["t"].values[0]
         if "c" in sim.dims:
-            sel["c"] = sim.coords["c"].values[0]
+            if metric_channel is None:
+                sel["c"] = sim.coords["c"].values[0]
+            else:
+                sel["c"] = metric_channel
         if sel:
             sim = spatial_image_utils.sim_sel_coords(sim, sel)
         sims_t0.append(sim)
