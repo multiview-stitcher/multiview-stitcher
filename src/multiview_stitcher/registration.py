@@ -217,7 +217,8 @@ def _get_overlap_bboxes(
     return {
         "lowers": lowers,
         "uppers": uppers,
-        "intersection": intersection
+        "intersection": intersection,
+        "vol": vol,
     }
 
 

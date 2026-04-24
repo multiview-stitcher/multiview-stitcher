@@ -228,7 +228,8 @@ def _build_metrics_graph(
                 moving_idx,
                 comparison_bbox=comparison_bbox,
                 transforms=transforms,
-                intersection_halfspace=overlap_dict['intersection']
+                intersection_halfspace=overlap_dict['intersection'],
+                vol=overlap_dict['vol'],
             )
 
     return g_metrics
@@ -336,8 +337,11 @@ def tile_pair_image_metrics(
       ``(fixed_idx, moving_idx)`` to dicts of the form
       ``{query_transform_key: {metric_key: float}}``.
     * ``"summary"`` – :class:`dict` mapping *query_transform_key* to
-      ``{metric_key: float}`` where each value is the mean across all
-      directional pairs (NaN pairs are excluded from the mean).
+      ``{metric_key: float}`` where each value is the **overlap-volume-weighted
+      mean** across all directional pairs.  The weight for each pair is the
+      physical volume of the overlap region (as returned by
+      :func:`mv_graph.get_overlap_between_pair_of_stack_props`).  Pairs whose
+      metric value is NaN are excluded from both the numerator and denominator.
     """
     if metric_funcs is None:
         metric_funcs = {"ncc": normalized_cross_correlation}
@@ -398,6 +402,12 @@ def tile_pair_image_metrics(
         comparison_bbox = edge_data["comparison_bbox"]
         transforms = edge_data["transforms"]
         intersection_halfspace = edge_data["intersection_halfspace"]
+        vol=edge_data["vol"]
+
+        # expand halfspace slightly to make sure it includes the boundary of the intersection
+        fixed_spacing = spatial_image_utils.get_spacing_from_sim(sims_t0[fixed_idx], asarray=True)
+        tol = 1e-3 * np.min(fixed_spacing)
+        intersection_halfspace = mv_graph.expand_halfspace(intersection_halfspace, distance=tol)
 
         if comparison_bbox is None:
             logger.warning(
@@ -498,18 +508,31 @@ def tile_pair_image_metrics(
         ]
 
     # -----------------------------------------------------------------------
-    # Summarise: mean over all directed pairs, per query key, per metric key
+    # Summarise: overlap-volume-weighted mean over all directed pairs,
+    # per query key, per metric key
     # -----------------------------------------------------------------------
     summary = {}
     for q in query_transform_keys:
         summary[q] = {}
         for metric_key in metric_funcs:
-            values = [
-                float(computed[(fi, mi)][q].get(metric_key, np.nan))
+            values_and_weights = [
+                (
+                    float(computed[(fi, mi)][q].get(metric_key, np.nan)),
+                    float(g_metrics.edges[(fi, mi)]["vol"]),
+                )
                 for fi, mi in g_metrics.edges()
             ]
-            valid = [v for v in values if not np.isnan(v)]
-            summary[q][metric_key] = float(np.mean(valid)) if valid else np.nan
+            valid = [(v, w) for v, w in values_and_weights if not np.isnan(v)]
+            if valid:
+                vals, weights = zip(*valid)
+                total_w = sum(weights)
+                summary[q][metric_key] = (
+                    float(sum(v * w for v, w in zip(vals, weights)) / total_w)
+                    if total_w > 0
+                    else np.nan
+                )
+            else:
+                summary[q][metric_key] = np.nan
 
     return {
         "pairs": {
