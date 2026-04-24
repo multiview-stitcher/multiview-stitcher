@@ -178,13 +178,15 @@ def _build_metrics_graph(
                     dim: -float(max_tolerance.get(dim, 0.0)) for dim in sdims
                 }
 
-            lowers_phys, uppers_phys = registration.get_overlap_bboxes(
+            overlap_dict = registration._get_overlap_bboxes(
                 sim_fixed,
                 sim_moving,
                 input_transform_key=base_transform_key,
-                output_transform_key=base_transform_key,
+                # output_transform_key=base_transform_key,
+                output_transform_key=None,
                 overlap_tolerance=tol,
             )
+            lowers_phys, uppers_phys = overlap_dict["lowers"], overlap_dict["uppers"]
 
             lower = np.asarray(lowers_phys[0], dtype=float)
             upper = np.asarray(uppers_phys[0], dtype=float)
@@ -208,6 +210,7 @@ def _build_metrics_graph(
                 moving_idx,
                 comparison_bbox=comparison_bbox,
                 transforms=transforms,
+                intersection_halfspace=overlap_dict['intersection']
             )
 
     return g_metrics
@@ -389,32 +392,8 @@ def tile_pair_image_metrics(
         sim_fixed = sims_t0[fixed_idx]
         sim_moving = sims_t0[moving_idx]
 
-        lower = comparison_bbox["lower"]
-        upper = comparison_bbox["upper"]
-
-        # Map the world-space comparison bbox to fixed-image intrinsic
-        # (physical) space via inv(T_fixed_base).  This ensures the fixed
-        # image always contributes the same pixel data independently of
-        # the query transform key, which is required for the metrics to be
-        # comparable across query keys.
-        T_fixed_base = (
-            spatial_image_utils.get_affine_from_sim(sim_fixed, base_transform_key)
-            .squeeze()
-            .data
-        )
-        T_fixed_base_inv = np.linalg.inv(T_fixed_base)
-
-        # Find axis-aligned bounding box of all bbox corners in intrinsic space
-        # (handles the general affine case: rotation, shear, scale).
-        corners_world = (
-            np.array(list(np.ndindex(*([2] * ndim))), dtype=float)
-            * (upper - lower)
-            + lower
-        )
-        corners_h = np.c_[corners_world, np.ones(len(corners_world))]
-        corners_int = (T_fixed_base_inv @ corners_h.T).T[:, :ndim]
-        lower_int = corners_int.min(axis=0)
-        upper_int = corners_int.max(axis=0)
+        lower_intrinsic = comparison_bbox["lower"]
+        upper_intrinsic = comparison_bbox["upper"]
 
         # Resolve per-pair spacing: finest spacing of the fixed image
         # when the caller did not supply an explicit value.
@@ -426,13 +405,13 @@ def tile_pair_image_metrics(
             )
 
         shape = np.maximum(
-            1, np.floor((upper_int - lower_int) / spacing_arr + 1).astype(int)
+            1, np.floor((upper_intrinsic - lower_intrinsic) / spacing_arr + 1).astype(int)
         )
 
         # output_sp is in fixed-image intrinsic (physical) space
         output_sp = {
             "origin": {
-                dim: float(lower_int[idim]) for idim, dim in enumerate(spatial_dims)
+                dim: float(lower_intrinsic[idim]) for idim, dim in enumerate(spatial_dims)
             },
             "spacing": {
                 dim: float(spacing_arr[idim]) for idim, dim in enumerate(spatial_dims)

@@ -513,7 +513,7 @@ def plot_tile_pair_image_metrics(
                     .squeeze()
                     .data
                 )
-                bbox_transform = T_fixed_q @ np.linalg.inv(T_fixed_base)
+                bbox_transform = T_fixed_q# @ np.linalg.inv(T_fixed_base)
 
                 sp = {
                     "origin": {
