@@ -198,6 +198,14 @@ def _get_overlap_bboxes(
         
         corners_target_space = corners_intrinsic
 
+        # Transform the halfspace from world space (input_transform_key) into
+        # the intrinsic coordinate space of sim1.  inv(T_sim1) maps world→intrinsic,
+        # i.e. the same direction as transforming points into the new space.
+        T_sim1 = spatial_image_utils.get_affine_from_sim(
+            sim1, transform_key=input_transform_key
+        ).data
+        intersection = mv_graph.transform_halfspace(intersection, np.linalg.inv(T_sim1))
+
     elif output_transform_key == input_transform_key:
         corners_target_space = [corners, corners]
     else:

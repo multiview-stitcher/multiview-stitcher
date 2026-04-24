@@ -248,6 +248,49 @@ def expand_halfspace(halfspace, distance):
     return expanded_halfspace
 
 
+def transform_halfspace(halfspace, affine):
+    """
+    Transform a HalfspaceIntersection into a new coordinate space.
+
+    Given a halfspace defined in space A and an affine that maps points from
+    space A to space B (i.e. ``x_B_h = affine @ x_A_h``), returns an
+    equivalent ``HalfspaceIntersection`` in space B.
+
+    The convention mirrors point transformation: *affine* is the same matrix
+    you would pass to ``transform_pts`` to move points from the source space
+    into the target space.
+
+    The halfspace equations transform as:
+
+    .. math::
+
+        [n, c] \\cdot x_{A,h} = [n, c] \\cdot (\\text{affine}^{-1} \\cdot x_{B,h})
+                               = ([n, c] \\cdot \\text{affine}^{-1}) \\cdot x_{B,h}
+
+    The interior point is mapped by *affine* directly.
+
+    Parameters
+    ----------
+    halfspace : scipy.spatial.HalfspaceIntersection
+        Halfspace intersection object in the source space.
+    affine : np.ndarray, shape (ndim + 1, ndim + 1)
+        Homogeneous affine transform from the *source* space to the *target*
+        (new) space, i.e. the same matrix used to transform points from the
+        old coordinate system into the new one.
+
+    Returns
+    -------
+    scipy.spatial.HalfspaceIntersection
+        Equivalent halfspace expressed in the target coordinate space.
+    """
+    eqs_transformed = halfspace.halfspaces @ np.linalg.inv(affine)
+    interior_transformed = transformation.transform_pts(
+        halfspace.interior_point[np.newaxis],
+        affine,
+    )[0]
+    return HalfspaceIntersection(eqs_transformed, interior_transformed)
+
+
 def get_overlap_between_pair_of_stack_props(stack_props1, stack_props2):
     """
     Get the overlap between two stack properties.
