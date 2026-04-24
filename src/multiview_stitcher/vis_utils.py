@@ -331,8 +331,10 @@ def plot_reg_metrics(
     query_transform_keys,
     metric_key=None,
     clims=None,
-    show_plot=True,
     show_bboxes=True,
+    show_overview_plot=False,
+    overview_pair_linewidth=1.0,
+    show_plot_positions=True,
 ):
     """
     Visualise registration quality metrics for each query transform key.
@@ -374,15 +376,26 @@ def plot_reg_metrics(
         (default) the limits are computed from *base_transform_key* values
         if that key is present in the result, falling back to all query-key
         values otherwise.
-    show_plot : bool, optional
-        Whether to call ``plt.show()`` after creating each figure.
-        By default True.
     show_bboxes : bool, optional
         When ``True`` (default) the comparison bounding boxes are drawn and
         coloured by metric value.  When ``False`` a minimalistic
         :func:`plot_positions` plot is produced instead, where edges between
         adjacent tiles are coloured by the (mean of the two directed)
         metric values.
+    show_overview_plot : bool, optional
+        When ``True``, produce one additional figure showing a paired plot
+        with *query_transform_keys* on the x-axis and the metric value on the
+        y-axis for each pair.  A mean ± std summary (black diamond + error
+        bar) is overlaid for each transform key.  By default ``False``.
+    overview_pair_linewidth : float, optional
+        Line width for the per-pair lines in the overview plot.  Set to
+        ``0`` to suppress the lines entirely and show only the mean ± std
+        summary markers.  By default ``1.0``.
+    show_plot_positions : bool, optional
+        When ``True`` (default) the per-query-key positional plots (tile
+        layout with coloured comparison bboxes or coloured edges) are
+        produced.  Set to ``False`` to skip them, e.g. when only the
+        overview plot is needed.
 
     Returns
     -------
@@ -457,6 +470,8 @@ def plot_reg_metrics(
 
     plots = {}
     for q in query_transform_keys:
+        if not show_plot_positions:
+            continue
         if show_bboxes:
             fig, ax = plot_positions(
                 msims,
@@ -544,10 +559,103 @@ def plot_reg_metrics(
                 plot_title=f"{metric_key}  |  transform key: {q}",
             )
 
-        if show_plot:
-            plt.show()
+        plt.show()
 
         plots[q] = (fig, ax)
+
+    # ------------------------------------------------------------------
+    # Overview plots: one figure per metric key
+    # ------------------------------------------------------------------
+    if show_overview_plot:
+        n_keys = len(query_transform_keys)
+        x_positions = list(range(n_keys))
+
+        for mk in [metric_key]:
+            fig_ov, ax_ov = plt.subplots(figsize=(max(3.5, 1.6 * n_keys + 1.2), 3.8))
+
+            # Collect per-pair values across query keys
+            pair_keys = list(pairs_dict.keys())
+            all_vals_flat = []
+            pair_series = []
+            for pair in pair_keys:
+                y_vals = []
+                for q in query_transform_keys:
+                    raw = pairs_dict[pair].get(q, {}).get(mk, np.nan)
+                    try:
+                        y_vals.append(float(raw))
+                    except (TypeError, ValueError):
+                        y_vals.append(np.nan)
+                pair_series.append(y_vals)
+                all_vals_flat.extend([v for v in y_vals if not np.isnan(v)])
+
+            # Per-pair lines
+            if overview_pair_linewidth > 0:
+                for y_vals in pair_series:
+                    if any(not np.isnan(v) for v in y_vals):
+                        ax_ov.plot(
+                            x_positions,
+                            y_vals,
+                            color="#9e9e9e",
+                            alpha=0.55,
+                            linewidth=overview_pair_linewidth,
+                            marker="o",
+                            markersize=3.5,
+                            zorder=2,
+                        )
+
+            # Mean ± std summary per transform key
+            means, stds = [], []
+            for ix, q in enumerate(query_transform_keys):
+                vals = [
+                    float(pairs_dict[pair].get(q, {}).get(mk, np.nan))
+                    for pair in pair_keys
+                ]
+                vals = [v for v in vals if not np.isnan(v)]
+                if vals:
+                    mean_v = float(np.mean(vals))
+                    std_v = float(np.std(vals))
+                    means.append(mean_v)
+                    stds.append(std_v)
+                    ax_ov.errorbar(
+                        ix,
+                        mean_v,
+                        yerr=std_v,
+                        fmt="o",
+                        color="#1f77b4",
+                        markersize=8,
+                        linewidth=2,
+                        capsize=5,
+                        capthick=2,
+                        zorder=4,
+                    )
+
+            # Connect the mean points with a line for easy trend reading
+            valid_x = [ix for ix, q in enumerate(query_transform_keys)
+                       if any(not np.isnan(float(pairs_dict[pair].get(q, {}).get(mk, np.nan)))
+                              for pair in pair_keys)]
+            if len(valid_x) > 1:
+                mean_y = []
+                for ix in valid_x:
+                    q = query_transform_keys[ix]
+                    vals = [float(pairs_dict[pair].get(q, {}).get(mk, np.nan))
+                            for pair in pair_keys]
+                    vals = [v for v in vals if not np.isnan(v)]
+                    mean_y.append(float(np.mean(vals)) if vals else np.nan)
+                ax_ov.plot(valid_x, mean_y, color="#1f77b4", linewidth=1.5,
+                           zorder=3, alpha=0.8)
+
+            ax_ov.set_xticks(x_positions)
+            ax_ov.set_xticklabels(query_transform_keys, rotation=20, ha="right",
+                                  fontsize=10)
+            ax_ov.set_ylabel(mk, fontsize=11)
+            ax_ov.set_xlim(-0.5, n_keys - 0.5)
+            ax_ov.spines["top"].set_visible(False)
+            ax_ov.spines["right"].set_visible(False)
+            ax_ov.tick_params(axis="both", labelsize=9)
+            ax_ov.grid(axis="y", color="#e0e0e0", linewidth=0.8, zorder=0)
+            plt.tight_layout()
+
+            plt.show()
 
     return plots
 

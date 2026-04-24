@@ -358,7 +358,6 @@ def test_plot_reg_metrics(ndim, monkeypatch):
             result,
             base_transform_key=base_transform_key,
             query_transform_keys=query_keys,
-            show_plot=True,  # monkeypatched → no-op
             show_bboxes=show_bboxes,
         )
 
