@@ -211,6 +211,43 @@ def get_halfspace_equations_from_stack_props(stack_props):
     return np.array(equations)
 
 
+def expand_halfspace(halfspace, distance):
+    """
+    Expand (or shrink) halfspace equations by a given distance in physical units.
+
+    Each halfspace has the form n * x + c <= 0, where n is a unit inward normal.
+    Shifting the boundary plane outward by `distance` is equivalent to subtracting
+    `distance` from the offset c.
+
+    Parameters
+    ----------
+    halfspace : scipy.spatial.HalfspaceIntersection
+        Halfspace intersection object.
+    distance : float
+        Distance to expand the halfspaces. Positive values enlarge the region,
+        negative values shrink it.
+
+    Returns
+    -------
+    np.ndarray, shape (n_halfspaces, ndim + 1)
+        Expanded halfspace equations.
+    """
+    # expanded = copy.deepcopy(halfspace_eqs)
+
+    interior_point = halfspace.interior_point
+    equations = halfspace.halfspaces
+    equations[:, -1] -= distance
+
+    try:
+        expanded_halfspace = HalfspaceIntersection(equations, interior_point)
+    except QhullError:
+        raise ValueError(
+            "Cannot expand halfspace by the given distance. The resulting halfspaces are infeasible."
+        )
+
+    return expanded_halfspace
+
+
 def get_overlap_between_pair_of_stack_props(stack_props1, stack_props2):
     """
     Get the overlap between two stack properties.
@@ -248,7 +285,7 @@ def get_overlap_between_pair_of_stack_props(stack_props1, stack_props2):
     # in 2D this is the area
     volume = ConvexHull(intersection_vertices).volume
 
-    return volume, None
+    return volume, halfspace_intersection
 
 
 def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
@@ -450,6 +487,48 @@ def points_inside_sim(pts, sim, transform_key):
         inside = inside & (np.dot(pts, eq[:-1]) + eq[-1] <= 0)
 
     return inside
+
+
+def get_mask_from_halfspace_equations(sim, halfspace_eqs):
+    """
+    Create a boolean mask for a spatial image from halfspace equations.
+
+    Each pixel whose world coordinates lie in the feasible region
+    (i.e. satisfy ``n · x + c <= 0`` for every halfspace) is set to True;
+    all other pixels are set to False.
+
+    Parameters
+    ----------
+    sim : SpatialImage
+        Input spatial image whose coordinate grid defines the mask domain.
+        Only spatial dimensions are used.
+    halfspace_eqs : np.ndarray, shape (n_halfspaces, ndim + 1)
+        Halfspace equations as returned by
+        :func:`get_halfspace_equations_from_stack_props`.
+
+    Returns
+    -------
+    xr.DataArray
+        Boolean DataArray with the same spatial coordinates as *sim*.
+    """
+    sdims = si_utils.get_spatial_dims_from_sim(sim)
+
+    # Build a meshgrid of world coordinates matching the sim's spatial axes.
+    coord_arrays = [sim.coords[dim].values for dim in sdims]
+    grids = np.meshgrid(*coord_arrays, indexing="ij")
+
+    # Stack into an array of shape (*spatial_shape, ndim).
+    pts = np.stack([g.ravel() for g in grids], axis=-1)
+
+    # Evaluate all halfspace inequalities simultaneously.
+    # Shape: (n_halfspaces, n_pts)
+    vals = pts @ halfspace_eqs[:, :-1].T + halfspace_eqs[:, -1]
+    inside = np.all(vals <= 0, axis=-1)
+
+    spatial_shape = tuple(len(sim.coords[dim]) for dim in sdims)
+    inside = inside.reshape(spatial_shape)
+
+    return xr.DataArray(inside, coords={dim: sim.coords[dim] for dim in sdims})
 
 
 # def get_greedy_colors(sims, n_colors=2, transform_key=None):
