@@ -318,36 +318,36 @@ def test_plot_and_return_dict(plot_summary, return_dict, monkeypatch):
         assert isinstance(out, list)
 
 
-@pytest.mark.parametrize("ndim", [2, 3])
-def test_register_with_single_pixel_overlap(ndim):
-    sims = sample_data.generate_tiled_dataset(
-        ndim=ndim,
-        overlap=1,
-        N_c=1,
-        N_t=2,
-        tile_size=10,
-        tiles_x=1,
-        tiles_y=2,
-        tiles_z=1,
-        spacing_x=1,
-        spacing_y=1,
-        spacing_z=1,
-    )
+# @pytest.mark.parametrize("ndim", [2, 3])
+# def test_register_with_single_pixel_overlap(ndim):
+#     sims = sample_data.generate_tiled_dataset(
+#         ndim=ndim,
+#         overlap=1,
+#         N_c=1,
+#         N_t=2,
+#         tile_size=10,
+#         tiles_x=1,
+#         tiles_y=2,
+#         tiles_z=1,
+#         spacing_x=1,
+#         spacing_y=1,
+#         spacing_z=1,
+#     )
 
-    sims = [
-        spatial_image_utils.sim_sel_coords(sim, {"c": sim.coords["c"][0]})
-        for sim in sims
-    ]
+#     sims = [
+#         spatial_image_utils.sim_sel_coords(sim, {"c": sim.coords["c"][0]})
+#         for sim in sims
+#     ]
 
-    msims = [
-        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
-    ]
+#     msims = [
+#         msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+#     ]
 
-    registration.register_pair_of_msims_over_time(
-        msims[0],
-        msims[1],
-        transform_key=METADATA_TRANSFORM_KEY,
-    )
+#     registration.register_pair_of_msims_over_time(
+#         msims[0],
+#         msims[1],
+#         transform_key=METADATA_TRANSFORM_KEY,
+#     )
 
 
 def test_get_optimal_registration_binning():

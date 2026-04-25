@@ -54,6 +54,7 @@ nav:
       - troubleshoot_fusion.md
     - General:
       - troubleshoot_multiprocessing.md
+  - Registration quality metrics: registration_metrics.md
   - chart.md
   - notebooks.md
   - features.md
@@ -78,6 +79,7 @@ nav:
   - API:
     - api/registration.md
     - api/fusion.md
+    - api/metrics.md
 
 theme:
   name: material
