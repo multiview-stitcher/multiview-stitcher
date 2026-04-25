@@ -249,6 +249,7 @@ def tile_pair_image_metrics(
     spacing=None,
     bidirectional=False,
     metric_channel=None,
+    n_parallel_pairs=None,
 ):
     """
     Calculate registration quality metrics for a list of views.
@@ -328,6 +329,12 @@ def tile_pair_image_metrics(
         Channel coordinate value to use when selecting the channel for metric
         computation.  When ``None`` (default) the channel at index 0 is used.
         Has no effect for views without a ``"c"`` dimension.
+    n_parallel_pairs : int or None, optional
+        Maximum number of directed pairs to compute in parallel.  When
+        ``None`` (default) all pairs are computed in a single :func:`dask.compute`
+        call.  For 3D data this defaults to ``1`` to limit memory usage.
+        Setting this to a small integer batches the computation, reducing peak
+        memory at the cost of reduced parallelism.
 
     Returns
     -------
@@ -498,8 +505,24 @@ def tile_pair_image_metrics(
             )
             metric_delayed[(fixed_idx, moving_idx)][q] = metric_d
 
-    # Compute all pairs and all query keys in parallel
-    computed = compute(metric_delayed)[0]
+    # Compute all pairs and all query keys in parallel,
+    # optionally batched to limit peak memory usage.
+
+    if n_parallel_pairs is None and ndim == 3:
+        n_parallel_pairs = 1
+        logger.info("Setting n_parallel_pairs to 1 for 3D data")
+
+    if n_parallel_pairs is None:
+        logger.info("Computing metrics for all pairs in parallel")
+        computed = compute(metric_delayed)[0]
+    else:
+        logger.info("Computing metrics for %s pair(s) in parallel", n_parallel_pairs)
+        computed = {}
+        all_pairs = list(metric_delayed.keys())
+        for i in range(0, len(all_pairs), n_parallel_pairs):
+            batch_pairs = all_pairs[i : i + n_parallel_pairs]
+            batch = {p: metric_delayed[p] for p in batch_pairs}
+            computed.update(compute(batch)[0])
 
     # Store computed metrics back on the graph edges
     for fixed_idx, moving_idx in g_metrics.edges():
