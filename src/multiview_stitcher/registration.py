@@ -1300,6 +1300,20 @@ def register(
     else:
         g_reg = g
 
+    # if required, import itk already here
+    # to make sure it's available in dask threads
+    if pairwise_reg_func == registration_ITKElastix:
+        try:
+            global itk
+            import itk
+        except ImportError:
+            raise ImportError(
+                "Please install the itk-elastix package to use ITKElastix for registration.\n"
+                "E.g. using pip:\n"
+                "- `pip install multiview-stitcher[itk-elastix]` or\n"
+                "- `pip install itk-elastix`"
+            ) from None
+
     # compute pairwise registrations
     g_reg_computed = compute_pairwise_registrations(
         msims_reg,
