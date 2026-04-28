@@ -283,6 +283,14 @@ def set_affine_transform(
         msim[sk][transform_key] = xaffine
 
 
+def unset_affine_transform(msim, transform_key):
+    """Remove a transform key from all resolution levels of a multiscale image."""
+    scale_keys = get_sorted_scale_keys(msim)
+    for sk in scale_keys:
+        if transform_key in msim[sk]:
+            del msim[sk][transform_key]
+
+
 def ensure_dim(msim, dim):
     if dim in msim["scale0/image"].dims:
         return msim
