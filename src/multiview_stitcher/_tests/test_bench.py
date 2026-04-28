@@ -254,12 +254,13 @@ def test_reg_against_reference_params(dataset):
             },
         )
 
-        lower, upper = registration.get_overlap_bboxes(
+        overlap_dict = registration._get_overlap_bboxes(
             msi_utils.get_sim_from_msim(msim0),
             msi_utils.get_sim_from_msim(msim1),
             input_transform_key=METADATA_TRANSFORM_KEY,
             output_transform_key=None,
         )
+        lower, upper = overlap_dict["lowers"], overlap_dict["uppers"]
         lower, upper = lower[0], upper[0]
 
         # get vertices of the overlap bbox

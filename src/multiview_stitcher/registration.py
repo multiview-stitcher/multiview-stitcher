@@ -136,7 +136,7 @@ def get_optimal_registration_binning(
     return registration_binning
 
 
-def get_overlap_bboxes(
+def _get_overlap_bboxes(
     sim1,
     sim2,
     input_transform_key=None,
@@ -149,7 +149,9 @@ def get_overlap_bboxes(
     into coord system given by output_transform_key (intrinsic
     coordinates if None).
 
-    Return: lower and upper bounds of overlap for both input images
+    Return: dict with keys 'lowers' and 'uppers' containing the
+    lower and upper bounds of overlap for both input images, as well
+    as 'intersection' containing the intersection halfspace.
     """
 
     ndim = spatial_image_utils.get_ndim_from_sim(sim1)
@@ -169,45 +171,55 @@ def get_overlap_bboxes(
             for stack_props in stack_propss
         ]
 
+    vol, intersection = mv_graph.get_overlap_between_pair_of_stack_props(
+        stack_props1=stack_propss[0],
+        stack_props2=stack_propss[1],
+    )
+
     corners = [
         mv_graph.get_vertices_from_stack_props(stack_props).reshape(-1, ndim)
         for stack_props in stack_propss
     ]
 
+    corners = intersection.intersections
+
     if output_transform_key is None:
         # project corners into intrinsic coordinate system
-        corners_intrinsic = np.array(
-            [
-                [
-                    transformation.transform_pts(
-                        corners[isim],
+
+        corners_intrinsic = [transformation.transform_pts(
+                        corners,
                         np.linalg.inv(
                             spatial_image_utils.get_affine_from_sim(
                                 sim, transform_key=input_transform_key
                             ).data
                         ),
                     )
-                    for isim in range(2)
-                ]
-                for sim in [sim1, sim2]
-            ]
-        )
+            for sim in [sim1, sim2]]
+        
         corners_target_space = corners_intrinsic
+
+        # Transform the halfspace from world space (input_transform_key) into
+        # the intrinsic coordinate space of sim1.  inv(T_sim1) maps world→intrinsic,
+        # i.e. the same direction as transforming points into the new space.
+        T_sim1 = spatial_image_utils.get_affine_from_sim(
+            sim1, transform_key=input_transform_key
+        ).data
+        intersection = mv_graph.transform_halfspace(intersection, np.linalg.inv(T_sim1))
+
     elif output_transform_key == input_transform_key:
         corners_target_space = [corners, corners]
     else:
-        raise (NotImplementedError)
+        raise NotImplementedError
 
-    lowers = [
-        np.max(np.min(corners_target_space[isim], axis=1), axis=0)
-        for isim in range(2)
-    ]
-    uppers = [
-        np.min(np.max(corners_target_space[isim], axis=1), axis=0)
-        for isim in range(2)
-    ]
+    lowers = [np.min(cts, axis=0) for cts in corners_target_space]
+    uppers = [np.max(cts, axis=0) for cts in corners_target_space]
 
-    return lowers, uppers
+    return {
+        "lowers": lowers,
+        "uppers": uppers,
+        "intersection": intersection,
+        "vol": vol,
+    }
 
 
 def sims_to_intrinsic_coord_system(
@@ -759,7 +771,7 @@ def register_pair_of_msims(
                 sim1_0, sim2_0
             )
             logger.info("Determined optimal registration binning to be %s",
-                registration_binning)
+                str(registration_binning))
 
         # Only registration_binning specified: find optimal resolution level
         scale_key, remaining_binning = msi_utils.get_res_level_from_binning_factors(
@@ -779,7 +791,7 @@ def register_pair_of_msims(
 
     # logging without use of %s
     logger.info("Registration resolution level: %s", scale_key)
-    logger.info("Registration binning applied at loaded scale: %s", registration_binning)
+    logger.info("Registration binning applied at loaded scale: %s", str(registration_binning))
 
     if max(registration_binning.values()) > 1:
         reg_sims_b = [
@@ -791,13 +803,14 @@ def register_pair_of_msims(
     else:
         reg_sims_b = reg_sims
 
-    lowers, uppers = get_overlap_bboxes(
+    overlap_dict = _get_overlap_bboxes(
         reg_sims_b[0],
         reg_sims_b[1],
         input_transform_key=transform_key,
         output_transform_key=None,
         overlap_tolerance=overlap_tolerance,
     )
+    lowers, uppers = overlap_dict["lowers"], overlap_dict["uppers"]
 
     reg_sims_spacing = [
         spatial_image_utils.get_spacing_from_sim(sim) for sim in reg_sims_b
@@ -932,13 +945,14 @@ def register_pair_of_msims(
     )
 
     # attach bbox in physical coordinates
-    lowers_phys, uppers_phys = get_overlap_bboxes(
+    overlap_dict = _get_overlap_bboxes(
         sim1,
         sim2,
         input_transform_key=transform_key,
         output_transform_key=transform_key,
         overlap_tolerance=overlap_tolerance,
     )
+    lowers_phys, uppers_phys = overlap_dict["lowers"], overlap_dict["uppers"]
 
     param_ds = param_ds.assign(
         {
