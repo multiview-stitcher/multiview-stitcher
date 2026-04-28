@@ -1156,8 +1156,12 @@ def register(
         By default, phase_correlation_registration is used. Another useful built-in
         registration function is `pairwise_reg_func=registration.registration_ANTsPy`
         for translation, rigid, similarity or affine registration using ANTsPy.
-    pairwise_reg_func_kwargs : dict, optional
+        Can also be a list of callables to chain multiple registrations: each function
+        receives the pair positioned at the result of the previous one as initialization,
+        and the edge transforms are composed before the final global resolution.
+    pairwise_reg_func_kwargs : dict or list of dict, optional
         Additional keyword arguments passed to the registration function.
+        When `pairwise_reg_func` is a list, this should be a matching list of dicts.
         In the case of `pairwise_reg_func=registration_ANTsPy`, this can include e.g:
         - 'transform_type': ['Translation', 'Rigid' 'Affine'] or ['Similarity']
         For further parameters, see the docstring of the registration function.
@@ -1300,9 +1304,20 @@ def register(
     else:
         g_reg = g
 
+    # Normalize pairwise_reg_func to a list to support chained registration
+    if isinstance(pairwise_reg_func, list):
+        pairwise_reg_funcs = pairwise_reg_func
+    else:
+        pairwise_reg_funcs = [pairwise_reg_func]
+
+    if isinstance(pairwise_reg_func_kwargs, list):
+        pairwise_reg_func_kwargs_list = pairwise_reg_func_kwargs
+    else:
+        pairwise_reg_func_kwargs_list = [pairwise_reg_func_kwargs] * len(pairwise_reg_funcs)
+
     # if required, import itk already here
     # to make sure it's available in dask threads
-    if pairwise_reg_func == registration_ITKElastix:
+    if registration_ITKElastix in pairwise_reg_funcs:
         try:
             global itk
             import itk
@@ -1314,18 +1329,74 @@ def register(
                 "- `pip install itk-elastix`"
             ) from None
 
-    # compute pairwise registrations
-    g_reg_computed = compute_pairwise_registrations(
-        msims_reg,
-        g_reg,
-        transform_key=transform_key,
-        registration_binning=registration_binning,
-        reg_res_level=reg_res_level,
-        overlap_tolerance=overlap_tolerance,
-        pairwise_reg_func=pairwise_reg_func,
-        pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
-        n_parallel_pairwise_regs=n_parallel_pairwise_regs,
-    )
+    # compute pairwise registrations, chaining multiple functions if a list is given
+    tmp_keys = []
+    pair_transform_key_map = None
+    g_reg_accumulated = None  # composed graph across chain steps
+
+    for i_func, (reg_func, reg_func_kwargs) in enumerate(
+        zip(pairwise_reg_funcs, pairwise_reg_func_kwargs_list)
+    ):
+        is_last = i_func == len(pairwise_reg_funcs) - 1
+
+        g_reg_new = compute_pairwise_registrations(
+            msims_reg,
+            g_reg,
+            transform_key=transform_key,
+            registration_binning=registration_binning,
+            reg_res_level=reg_res_level,
+            overlap_tolerance=overlap_tolerance,
+            pairwise_reg_func=reg_func,
+            pairwise_reg_func_kwargs=reg_func_kwargs,
+            n_parallel_pairwise_regs=n_parallel_pairwise_regs,
+            pair_transform_key_map=pair_transform_key_map,
+        )
+
+        # Compose edge transforms: T_accumulated = T_prev @ T_new.
+        # Both are in the original world space, so the final
+        # groupwise_resolution sees a consistent coordinate frame.
+        if g_reg_accumulated is None:
+            g_reg_accumulated = g_reg_new
+        else:
+            g_reg_accumulated = _compose_pairwise_reg_graphs(
+                g_reg_accumulated, g_reg_new
+            )
+
+        if not is_last:
+            # For each pair, set a temporary per-pair transform key that positions
+            # the moving view j at the accumulated correction's aligned location
+            # (T_acc^-1 @ A_j), so the next registration function is well-initialized
+            # without requiring an intermediate global resolution step.
+            ndim = msi_utils.get_ndim(msims_reg[0])
+            pair_transform_key_map = {}
+            edges = [tuple(sorted([e[0], e[1]])) for e in g_reg_accumulated.edges]
+            for pair in edges:
+                i_view, j_view = pair[0], pair[1]
+                tmp_key = f"_reg_chain_{os.urandom(4).hex()}"
+                tmp_keys.append(tmp_key)
+                T_acc_edge = g_reg_accumulated.edges[pair]["transform"]
+                A_i = (
+                    msi_utils.get_transform_from_msim(msims_reg[i_view], transform_key)
+                    if transform_key is not None
+                    else param_utils.identity_transform(ndim)
+                )
+                A_j = (
+                    msi_utils.get_transform_from_msim(msims_reg[j_view], transform_key)
+                    if transform_key is not None
+                    else param_utils.identity_transform(ndim)
+                )
+                T_j_new = param_utils.rebase_affine(
+                    param_utils.invert_xparams(T_acc_edge), A_j
+                )
+                msi_utils.set_affine_transform(
+                    msims_reg[i_view], A_i, transform_key=tmp_key
+                )
+                msi_utils.set_affine_transform(
+                    msims_reg[j_view], T_j_new, transform_key=tmp_key
+                )
+                pair_transform_key_map[pair] = tmp_key
+
+    g_reg_computed = g_reg_accumulated
 
     # optionally filter obtained pairwise registrations by quality
     if post_registration_do_quality_filter:
@@ -1346,6 +1417,11 @@ def register(
     params = [
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
     ]
+
+    # clean up temporary transform keys used for chaining
+    for tmp_key in tmp_keys:
+        for msim in msims_reg:
+            msi_utils.unset_affine_transform(msim, tmp_key)
 
     # optionally write registration result back to the input msims
     # under a new transform key
@@ -1400,10 +1476,32 @@ def register(
         return params
 
 
+def _compose_pairwise_reg_graphs(g_reg_1, g_reg_2):
+    """
+    Compose edge transforms from two sequential pairwise registration graphs.
+
+    g_reg_2 was computed with each pair's moving view positioned at the
+    accumulated correction implied by g_reg_1. The combined edge transform
+    that maps view i to view j in the original world space is T1 @ T2.
+
+    Bounding boxes are taken from g_reg_1 (original world space); qualities
+    are taken from g_reg_2 (the most recent registration).
+    """
+    g_combined = g_reg_1.copy()
+    for edge in g_combined.edges:
+        T1 = g_reg_1.edges[edge]["transform"]
+        T2 = g_reg_2.edges[edge]["transform"]
+        g_combined.edges[edge]["transform"] = param_utils.matmul_xparams(T1, T2)
+        g_combined.edges[edge]["quality"] = g_reg_2.edges[edge]["quality"]
+        # bbox stays from g_reg_1 (original world-space coordinates)
+    return g_combined
+
+
 def compute_pairwise_registrations(
     msims,
     g_reg,
     n_parallel_pairwise_regs=None,
+    pair_transform_key_map=None,
     **register_kwargs,
 ):
     g_reg_computed = g_reg.copy()
@@ -1413,7 +1511,11 @@ def compute_pairwise_registrations(
         register_pair_of_msims_over_time(
             msims[pair[0]],
             msims[pair[1]],
-            **register_kwargs,
+            **(
+                {**register_kwargs, "transform_key": pair_transform_key_map[pair]}
+                if pair_transform_key_map is not None and pair in pair_transform_key_map
+                else register_kwargs
+            ),
         )
         for pair in edges
     ]

@@ -12,6 +12,23 @@ def register(
 )
 ```
 
+`pairwise_reg_func` can also be a **list of callables** to chain multiple registrations. Each function receives the pair pre-positioned at the result of the previous one, and edge transforms are composed before the final global resolution. When using a list, `pairwise_reg_func_kwargs` should be a matching list of dicts.
+
+```python
+params = registration.register(
+    msims,
+    pairwise_reg_func=[
+        registration.phase_correlation_registration,
+        registration.registration_ITKElastix,
+    ],
+    pairwise_reg_func_kwargs=[
+        {},
+        {"transform_types": ["Rigid"]},
+    ],
+    ...
+)
+```
+
 Custom registration functions can have one of the following two signatures. `registration.register` will automatically detect which signature is used and call the function accordingly, passing to the function
 - `pairwise_reg_func_kwargs`
 - the below detailed parameters to the functions.

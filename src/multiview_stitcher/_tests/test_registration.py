@@ -1236,3 +1236,67 @@ def test_itk_elastix_initial_transform_handles_large_translation():
             os.path.join(output_dir, "outputpoints.txt")
         )
         assert np.allclose(transformed_points, expected_points)
+
+
+def test_chained_pairwise_reg_func():
+    """
+    Test that passing pairwise_reg_func as a list chains the registrations,
+    producing a result consistent with a single registration call.
+
+    Also verifies that no temporary transform keys are left on the msims
+    after the call.
+    """
+    example_data_path = sample_data.get_mosaic_sample_data_path()
+    sims = io.read_mosaic_into_sims(example_data_path)
+    sims = [
+        spatial_image_utils.sim_sel_coords(sim, {"c": sim.coords["c"][0]})
+        for sim in sims
+    ]
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # Single registration as baseline
+    params_single = registration.register(
+        msims,
+        registration_binning={dim: 1 for dim in spatial_dims},
+        transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=registration.phase_correlation_registration,
+        new_transform_key="registered_single",
+    )
+
+    # Chained registration with the same function twice
+    params_chained = registration.register(
+        msims,
+        registration_binning={dim: 1 for dim in spatial_dims},
+        transform_key=METADATA_TRANSFORM_KEY,
+        pairwise_reg_func=[
+            registration.phase_correlation_registration,
+            registration.phase_correlation_registration,
+        ],
+        new_transform_key="registered_chained",
+    )
+
+    assert len(params_chained) == len(params_single)
+
+    # Results should be close: the second pass refines (or confirms) the first
+    ctrl_pt = np.zeros((2,))
+    rel_pos_single = (
+        transformation.transform_pts([ctrl_pt], params_single[0].squeeze())[0]
+        - transformation.transform_pts([ctrl_pt], params_single[1].squeeze())[0]
+    )
+    rel_pos_chained = (
+        transformation.transform_pts([ctrl_pt], params_chained[0].squeeze())[0]
+        - transformation.transform_pts([ctrl_pt], params_chained[1].squeeze())[0]
+    )
+    assert np.allclose(rel_pos_single, rel_pos_chained, atol=1.5)
+
+    # No temporary chain keys should be left on the msims
+    for msim in msims:
+        for scale_key in msi_utils.get_sorted_scale_keys(msim):
+            for key in msim[scale_key].data_vars:
+                assert not key.startswith("_reg_chain_"), (
+                    f"Temporary key '{key}' was not cleaned up from msim"
+                )
