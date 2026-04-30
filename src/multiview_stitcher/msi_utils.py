@@ -415,3 +415,30 @@ def get_spatial_dims(msim):
 
 def get_dims(msim):
     return get_sim_from_msim(msim).dims
+
+
+def correct_multiscale_origins(msim):
+    """
+    Correct origins of all scales in msim to match the origin of the first scale,
+    so that transforms into the intrinsic coordinate system (as defined by
+    OME-Zarr v0.6) are correct.
+    See also https://github.com/ome/ngff-spec/pull/125
+    """
+
+    sks = get_sorted_scale_keys(msim)
+    spacing0 = si_utils.get_spacing_from_sim(get_sim_from_msim(msim, sks[0]))
+    origin0 = si_utils.get_origin_from_sim(get_sim_from_msim(msim, sks[0]))
+    sdims = get_spatial_dims(msim)
+
+    sim0 = get_sim_from_msim(msim, sks[0])
+    shape0 = {dim: len(sim0.coords[dim]) for dim in sdims}
+    msim = msim.map_over_datasets(lambda ds: xr.Dataset(
+        {'image': ds.image.assign_coords(
+            {dim: ds.image.coords[dim] - ds.image.coords[dim].values[0] + origin0[dim]\
+              + (np.round(shape0[dim] / len(ds.image.coords[dim])) - 1) / 2 * spacing0[dim]
+              for dim in sdims}
+                )} | \
+        {t: ds.data_vars[t] for t in ds.data_vars if t != 'image'})
+        if len(ds.data_vars) > 0 else ds)
+
+    return msim
