@@ -202,3 +202,31 @@ def test_get_res_level_from_binning_factors():
     # Remaining should be 1 since scale1 already gives us factor 2
     assert remaining == {"y": 1, "x": 1}
 
+
+def test_get_res_level_from_spacing():
+    """Test that get_res_level_from_spacing returns the coarsest level whose spacing <= target."""
+    # scale0: spacing 1.0, scale1: spacing ~2.0, scale2: spacing ~4.0
+    sim = si_utils.get_sim_from_array(
+        np.ones((100, 100)),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    scale_factors = [{"y": 2, "x": 2}, {"y": 2, "x": 2}]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=scale_factors)
+
+    # Requesting exactly scale0 spacing → level 0
+    assert msi_utils.get_res_level_from_spacing(msim, {"y": 1.0, "x": 1.0}) == 0
+
+    # Requesting spacing that fits scale1 (>= 2.0) → level 1
+    assert msi_utils.get_res_level_from_spacing(msim, {"y": 2.0, "x": 2.0}) == 1
+
+    # Requesting spacing that fits scale2 (>= 4.0) → level 2
+    assert msi_utils.get_res_level_from_spacing(msim, {"y": 4.0, "x": 4.0}) == 2
+
+    # Requesting very coarse spacing (larger than any level) → last level
+    assert msi_utils.get_res_level_from_spacing(msim, {"y": 100.0, "x": 100.0}) == 2
+
+    # Requesting spacing between scale0 and scale1 → level 0 (scale1 spacing too large)
+    assert msi_utils.get_res_level_from_spacing(msim, {"y": 1.5, "x": 1.5}) == 0
+
