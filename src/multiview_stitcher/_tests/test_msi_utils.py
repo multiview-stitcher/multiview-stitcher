@@ -114,6 +114,46 @@ def test_update_msim_transforms_zarr():
     assert "image" in after_update["scale0"].data_vars
 
 
+@pytest.mark.parametrize(
+    "ndim, origin",
+    [
+        (2, {"y": 0.0, "x": 0.0}),
+        (2, {"y": 5.0, "x": 3.0}),
+        (3, {"z": 2.0, "y": 5.0, "x": 3.0}),
+    ],
+)
+def test_correct_multiscale_origins(ndim, origin):
+    """
+    After correct_multiscale_origins:
+    - The scale0 (highest resolution) origin must be unchanged.
+    """
+    shape = (202,) * ndim
+    dims = ["z", "y", "x"][-ndim:]
+    spacing = {dim: 0.5 for dim in dims}
+
+    sim = si_utils.get_sim_from_array(
+        np.zeros(shape),
+        dims=dims,
+        scale=spacing,
+        translation=origin,
+    )
+    msim = msi_utils.get_msim_from_sim(sim)
+    scale_keys = msi_utils.get_sorted_scale_keys(msim)
+    assert len(scale_keys) > 1, "need more than one scale level for this test"
+
+    msim_corrected = msi_utils.correct_multiscale_origins(msim)
+
+    sdims = [dim for dim in dims if dim in si_utils.SPATIAL_DIMS]
+
+    # scale0 origin must be preserved
+    sim0 = msi_utils.get_sim_from_msim(msim_corrected, scale="scale0")
+    for dim in sdims:
+        assert np.isclose(
+            sim0.coords[dim].values[0],
+            origin[dim],
+        ), f"scale0 origin changed for dim {dim}"
+
+
 def test_get_res_level_from_binning_factors():
     """Test that get_res_level_from_binning_factors returns correct resolution level."""
     # Create a test image with known multiscale structure
