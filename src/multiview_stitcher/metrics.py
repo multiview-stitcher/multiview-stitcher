@@ -250,6 +250,7 @@ def tile_pair_image_metrics(
     bidirectional=False,
     metric_channel=None,
     n_parallel_pairs=None,
+    input_res_level=None,
 ):
     """
     Calculate registration quality metrics for a list of views.
@@ -313,10 +314,9 @@ def tile_pair_image_metrics(
         A float value is applied uniformly across all spatial dimensions;
         a dict maps spatial dim names to per-dimension values.
         ``None`` means no shrinkage.
-    spacing : float, dict, or None, optional
+    spacing : dict or None, optional
         Spacing at which images are pretransformed before metric
-        evaluation.  A float is applied uniformly across all spatial
-        dimensions; a dict maps spatial dim names to per-dimension
+        evaluation.  A dict maps spatial dim names to per-dimension
         values.  ``None`` (default) uses the finest spacing of the fixed
         image for each pair, preserving the full resolution of the
         reference view.
@@ -335,6 +335,16 @@ def tile_pair_image_metrics(
         call.  For 3D data this defaults to ``1`` to limit memory usage.
         Setting this to a small integer batches the computation, reducing peak
         memory at the cost of reduced parallelism.
+    input_res_level : int or None, optional
+        Resolution level index used to select the image scale for metric
+        computation.  ``0`` is the finest level (``"scale0"``), ``1`` is
+        ``"scale1"``, etc.
+
+        * When ``None`` and *spacing* is also ``None``: defaults to ``0``
+          (finest resolution).
+        * When ``None`` and *spacing* is provided: the coarsest level whose
+          actual spacing is still ≤ *spacing*, selected independently for
+          each pair, based on the fixed image.
 
     Returns
     -------
@@ -356,7 +366,21 @@ def tile_pair_image_metrics(
     if isinstance(query_transform_keys, str):
         query_transform_keys = [query_transform_keys]
 
-    sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
+    # Resolve input_res_level when not explicitly set.
+    # Per-pair selection (input_res_level stays None) only happens when
+    # spacing is provided; otherwise we fall back to the finest level.
+    per_pair_res_level = False
+    if input_res_level is None:
+        if spacing is None:
+            input_res_level = 0
+        else:
+            per_pair_res_level = True
+
+    # Build sims_t0 for graph construction (overlap / adjacency).  When
+    # the resolution level is fixed we use that level directly; for the
+    # per-pair case we use scale0 here (transforms always come from scale0).
+    graph_scale_key = "scale0" if per_pair_res_level else f"scale{input_res_level}"
+    sims = [msi_utils.get_sim_from_msim(msim, scale=graph_scale_key) for msim in msims]
     spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
     ndim = len(spatial_dims)
 
@@ -375,17 +399,8 @@ def tile_pair_image_metrics(
             sim = spatial_image_utils.sim_sel_coords(sim, sel)
         sims_t0.append(sim)
 
-    # Pre-compute a fixed spacing array when the caller supplies one explicitly.
-    # When spacing=None the per-pair spacing is resolved inside the loop.
-    if spacing is not None:
-        if isinstance(spacing, (int, float)):
-            spacing_arr_global = np.full(ndim, float(spacing))
-        else:
-            spacing_arr_global = np.array(
-                [float(spacing[dim]) for dim in spatial_dims]
-            )
-    else:
-        spacing_arr_global = None
+    # spacing is a dict or None; kept as-is for per-pair use inside the loop.
+    spacing_global = spacing
 
     # Build directed metrics graph (both directions per undirected edge)
     g_metrics = _build_metrics_graph(
@@ -428,24 +443,51 @@ def tile_pair_image_metrics(
             }
             continue
 
-        sim_fixed = sims_t0[fixed_idx]
-        sim_moving = sims_t0[moving_idx]
+        # Select the sims for metric computation at the appropriate resolution.
+        if per_pair_res_level:
+            pair_res_level = msi_utils.get_res_level_from_spacing(
+                msims[fixed_idx], spacing
+            )
+            pair_scale_key = f"scale{pair_res_level}"
+            def _get_sim_t0(msim, scale_key):
+                sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
+                sel = {}
+                if "t" in sim.dims:
+                    sel["t"] = sim.coords["t"].values[0]
+                if "c" in sim.dims:
+                    if metric_channel is None:
+                        sel["c"] = sim.coords["c"].values[0]
+                    else:
+                        sel["c"] = metric_channel
+                if sel:
+                    sim = spatial_image_utils.sim_sel_coords(sim, sel)
+                return sim
+            sim_fixed = _get_sim_t0(msims[fixed_idx], pair_scale_key)
+            sim_moving = _get_sim_t0(msims[moving_idx], pair_scale_key)
+        else:
+            sim_fixed = sims_t0[fixed_idx]
+            sim_moving = sims_t0[moving_idx]
 
         lower_intrinsic = comparison_bbox["lower"]
         upper_intrinsic = comparison_bbox["upper"]
 
-        # Resolve per-pair spacing: finest spacing of the fixed image
-        # when the caller did not supply an explicit value.
-        if spacing_arr_global is not None:
-            spacing_arr = spacing_arr_global
+        # Resolve per-pair spacing: use caller-supplied dict or fall back to
+        # the spacing of the resolution level corresponding to input_res_level
+        # for the fixed image (sim_fixed already comes from that level).
+        if spacing_global is not None:
+            spacing_d = spacing_global
         else:
-            spacing_arr = spatial_image_utils.get_spacing_from_sim(
-                sim_fixed, asarray=True
-            )
+            spacing_d = spatial_image_utils.get_spacing_from_sim(sim_fixed)
 
-        shape = np.maximum(
-            1, np.floor((upper_intrinsic - lower_intrinsic) / spacing_arr + 1).astype(int)
-        )
+        shape = {
+            dim: max(
+                1,
+                int(np.floor(
+                    (upper_intrinsic[idim] - lower_intrinsic[idim]) / spacing_d[dim] + 1
+                )),
+            )
+            for idim, dim in enumerate(spatial_dims)
+        }
 
         # output_sp is in fixed-image intrinsic (physical) space
         output_sp = {
@@ -453,10 +495,10 @@ def tile_pair_image_metrics(
                 dim: float(lower_intrinsic[idim]) for idim, dim in enumerate(spatial_dims)
             },
             "spacing": {
-                dim: float(spacing_arr[idim]) for idim, dim in enumerate(spatial_dims)
+                dim: float(spacing_d[dim]) for dim in spatial_dims
             },
             "shape": {
-                dim: int(shape[idim]) for idim, dim in enumerate(spatial_dims)
+                dim: int(shape[dim]) for dim in spatial_dims
             },
         }
 
