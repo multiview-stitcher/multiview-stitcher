@@ -686,6 +686,104 @@ def read_sim_from_ome_zarr(
     return sim
 
 
+def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
+    """
+    Update the multiscales coordinate transformations (scale and translation)
+    of an OME-Zarr file on disk using the spacing and origin from the
+    resolution levels of an in-memory msim.
+
+    Only the "ome" key (v0.5) or "multiscales" key (v0.4) of the zarr group
+    attributes is modified; other metadata (e.g. "omero") is preserved.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the OME-Zarr file on disk.
+    msim : multiscale_spatial_image
+        In-memory multiscale image whose resolution levels provide the spacing
+        and origin (and optionally the translational component of a transform)
+        to write back to disk.
+    transform_key : str or None
+        Transform key from which to extract the translational component of the
+        affine. Pass None to use the sim origin only.
+
+    Raises
+    ------
+    ValueError
+        If the on-disk OME-Zarr is not v0.4 or v0.5, or if the number of
+        resolution levels in msim does not match the on-disk zarr.
+    """
+    root = zarr.open_group(zarr_path, mode="a")
+    attrs = dict(root.attrs)
+
+    # Detect OME-Zarr version and retrieve the multiscales list
+    if "ome" in attrs:
+        ngff_version = attrs["ome"].get("version", "0.5")
+        if not ngff_version.startswith("0.5"):
+            raise ValueError(
+                f"On-disk OME-Zarr has unsupported version '{ngff_version}'. "
+                "Only v0.4 and v0.5 are supported."
+            )
+        multiscales = attrs["ome"]["multiscales"]
+    elif "multiscales" in attrs:
+        multiscales = attrs["multiscales"]
+        ngff_version_in_meta = multiscales[0].get("version", "0.4")
+        if not ngff_version_in_meta.startswith("0.4"):
+            raise ValueError(
+                f"On-disk OME-Zarr has unsupported multiscales version "
+                f"'{ngff_version_in_meta}'. Only v0.4 and v0.5 are supported."
+            )
+        ngff_version = "0.4"
+    else:
+        raise ValueError(
+            f"No OME-Zarr multiscales metadata found in {zarr_path}."
+        )
+
+    scale_keys = msi_utils.get_sorted_scale_keys(msim)
+    n_levels_msim = len(scale_keys)
+    n_levels_disk = len(multiscales[0]["datasets"])
+    if n_levels_msim != n_levels_disk:
+        raise ValueError(
+            f"Number of resolution levels in msim ({n_levels_msim}) does not "
+            f"match on-disk OME-Zarr ({n_levels_disk})."
+        )
+
+    sim0 = msi_utils.get_sim_from_msim(msim, scale=scale_keys[0])
+    nsdims = si_utils.get_nonspatial_dims_from_sim(sim0)
+    sdims = si_utils.get_spatial_dims_from_sim(sim0)
+
+    for iscale, scale_key in enumerate(scale_keys):
+        sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
+        ngff_im = sim_to_ngff_image(sim, transform_key=transform_key)
+
+        new_coordtfs = [
+            {
+                "type": "scale",
+                "scale": [1.0] * len(nsdims)
+                + [float(ngff_im.scale[dim]) for dim in sdims],
+            },
+            {
+                "type": "translation",
+                "translation": [0.0] * len(nsdims)
+                + [float(ngff_im.translation[dim]) for dim in sdims],
+            },
+        ]
+        multiscales[0]["datasets"][iscale]["coordinateTransformations"] = (
+            new_coordtfs
+        )
+
+    # Write back only the "multiscales" key, leaving all other metadata intact
+    if ngff_version.startswith("0.5"):
+        # "multiscales" lives inside the "ome" namespace; read-modify-write
+        # only that sub-key so that other "ome" entries (e.g. "omero") survive
+        ome = dict(root.attrs["ome"])
+        ome["multiscales"] = multiscales
+        root.attrs["ome"] = ome
+    else:
+        # "multiscales" is a top-level attr in v0.4
+        root.attrs["multiscales"] = multiscales
+
+
 def read_msim_from_ome_zarr(
     zarr_path,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,

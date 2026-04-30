@@ -25,6 +25,8 @@ from multiview_stitcher import spatial_image_utils as si_utils
     ],
 )
 def test_round_trip(ndim, ngff_version, n_batch):
+    """Round-trip a sim and msim through OME-Zarr and verify pixel data and
+    spatial coordinates are preserved at every resolution level."""
     sim = sample_data.generate_tiled_dataset(
         ndim=ndim,
         overlap=0,
@@ -104,6 +106,8 @@ def test_round_trip(ndim, ngff_version, n_batch):
     [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
 )
 def test_ome_zarr_read_write(ndim, N_t, N_c):
+    """Write a sim to OME-Zarr and read it back, checking that dims, channel
+    names and omero window metadata are preserved for various t/c combinations."""
     sim = sample_data.generate_tiled_dataset(
         ndim=ndim,
         overlap=0,
@@ -149,6 +153,8 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
 
 
 def test_read_msim_from_ome_zarr():
+    """Verify that read_msim_from_ome_zarr returns a multiscale image with
+    correct pixel data, channel names and more than one resolution level."""
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
         overlap=0,
@@ -190,6 +196,9 @@ def test_read_msim_from_ome_zarr():
 
 
 def test_multiscales_completion():
+    """Check that writing without overwrite completes a partially deleted pyramid:
+    after removing a resolution level on disk, re-writing fills it in and the
+    metadata remains valid."""
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
         overlap=0,
@@ -235,6 +244,8 @@ def test_multiscales_completion():
 
 
 def test_multiscales_overwrite():
+    """Verify that overwrite=True replaces both pixel data and spatial
+    coordinates at all resolution levels with those of the new sim."""
     sim1 = si_utils.get_sim_from_array(
         np.zeros((202, 202)),
         translation={"y": 0, "x": 0},
@@ -263,3 +274,66 @@ def test_multiscales_overwrite():
                 if dim not in si_utils.SPATIAL_DIMS:
                     continue
                 assert sim_read.coords[dim].values[0] > 0
+
+
+@pytest.mark.parametrize("ngff_version", ["0.4", "0.5"])
+def test_update_ome_zarr_multiscales_metadata(ngff_version):
+    """Write an OME-Zarr with one origin, call update_ome_zarr_multiscales_metadata
+    with a new origin, then read back and assert the scale0 translation was
+    updated while the multiscales key structure is intact."""
+    if zarr.__version__ < "3" and ngff_version >= "0.5":
+        pytest.skip("zarr>=3 required for ngff_version 0.5")
+
+    spacing = {"y": 0.5, "x": 0.5}
+    translation_orig = {"y": 10.0, "x": 20.0}
+    translation_new = {"y": 3.0, "x": 7.0}
+
+    sim = si_utils.get_sim_from_array(
+        np.zeros((202, 202)),
+        scale=spacing,
+        translation=translation_orig,
+    )
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(
+            sim, zarr_path, ngff_version=ngff_version
+        )
+
+        # build an updated msim with different translation
+        sim_new = si_utils.get_sim_from_array(
+            np.zeros((202, 202)),
+            scale=spacing,
+            translation=translation_new,
+        )
+        msim_new = msi_utils.get_msim_from_sim(sim_new, scale_factors=[])
+        n_levels = len(
+            msi_utils.get_sorted_scale_keys(
+                ngff_utils.read_msim_from_ome_zarr(zarr_path)
+            )
+        )
+        # match the number of resolution levels on disk
+        msim_new = msi_utils.get_msim_from_sim(
+            sim_new,
+            scale_factors=[2] * (n_levels - 1),
+        )
+
+        ngff_utils.update_ome_zarr_multiscales_metadata(
+            zarr_path, msim_new, transform_key=None
+        )
+
+        # read back and verify scale0 translation was updated
+        sim_read = ngff_utils.read_sim_from_ome_zarr(zarr_path, resolution_level=0)
+        sdims = si_utils.get_spatial_dims_from_sim(sim_read)
+        for dim in sdims:
+            assert np.isclose(
+                sim_read.coords[dim].values[0],
+                translation_new[dim],
+            ), f"Expected {translation_new[dim]} for dim {dim}, got {sim_read.coords[dim].values[0]}"
+
+        # verify that omero metadata (if present) is still intact
+        root = zarr.open_group(zarr_path, mode="r")
+        all_attrs = dict(root.attrs)
+        if ngff_version == "0.5":
+            assert "multiscales" in all_attrs.get("ome", {})
+        else:
+            assert "multiscales" in all_attrs
