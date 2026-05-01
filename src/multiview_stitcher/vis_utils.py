@@ -840,10 +840,12 @@ def generate_neuroglancer_json(
             )
 
         full_affines = [np.eye(len(dims) + 1) for _ in sims]
+        spacings_per_sim = []
         for isim, sim in enumerate(sims):
 
             sim_ome_zarr = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
-            spacing = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacing_isim = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacings_per_sim.append(spacing_isim)
 
             affine = spatial_image_utils.get_affine_from_sim(
                 sim, transform_key=transform_key
@@ -853,12 +855,13 @@ def generate_neuroglancer_json(
             affine = _affine_to_neuroglancer_source_transform(
                 affine,
                 sdims=sdims,
-                output_spacing=spacing,
+                output_spacing=spacing_isim,
             )
             affine_ndim = affine.shape[-1] - 1
             full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
     else:
         full_affines = [None for _ in ome_zarr_paths]
+        spacings_per_sim = [spacing] * len(ome_zarr_paths)
 
     if contrast_limits is not None:
         window = {
@@ -930,8 +933,11 @@ def generate_neuroglancer_json(
                             list(row) for row in full_affines[iview][:-1]
                         ],
                         "outputDimensions": {
-                            (dim if dim != "c" else "c'"): d
-                            for dim, d in output_dimensions.items()
+                            (dim if dim != "c" else "c'"): [
+                                spacings_per_sim[iview][dim] * 1e-6 if dim in sdims else 1e-6,
+                                "",
+                            ]
+                            for dim in dims
                         },
                     }
                     if full_affines[iview] is not None
@@ -973,8 +979,11 @@ def generate_neuroglancer_json(
                                 list(row) for row in full_affines[iview][:-1]
                             ],
                             "outputDimensions": {
-                                (dim if dim != "c" else "c'"): d
-                                for dim, d in output_dimensions.items()
+                                (dim if dim != "c" else "c'"): [
+                                    spacings_per_sim[iview][dim] * 1e-6 if dim in sdims else 1e-6,
+                                    "",
+                                ]
+                                for dim in dims
                             },
                         },
                     }
@@ -1120,6 +1129,9 @@ def view_neuroglancer(
         global_dict=global_dict,
     )
     ng_url = get_neuroglancer_url(ng_json)
+
+    print("Neuroglancer configuration JSON:")
+    print(ng_json)
 
     print("Opening Neuroglancer in browser...")
     print("URL:", ng_url)
