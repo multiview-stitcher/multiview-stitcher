@@ -1058,7 +1058,7 @@ def view_neuroglancer(
 
     Parameters
     ----------
-    ome_zarr_paths : list of str
+    ome_zarr_paths : list of str or Path
         path to OME-Zarrs
     sims : list of spatial_images, optional
     transform_key : str, optional
@@ -1073,6 +1073,8 @@ def view_neuroglancer(
         Contrast limits (min, max) to use for visualization. If None, contrast limits are read
         from the OME-Zarr omero metadata if available, by default None
     """
+
+    ome_zarr_paths = [str(p) for p in ome_zarr_paths]
 
     # determine a common root for all local paths so files in different
     # directories can all be served from a single HTTP server
