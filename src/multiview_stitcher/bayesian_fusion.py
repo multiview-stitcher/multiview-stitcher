@@ -22,17 +22,22 @@ Based on the BigStitcher / multiview-reconstruction implementation:
     https://github.com/JaneliaSciComp/multiview-reconstruction
 """
 
+import logging
 from enum import Enum
 
 import numpy as np
+from scipy.ndimage import binary_erosion as _scipy_binary_erosion
 from scipy.ndimage import convolve as _scipy_convolve
 from scipy.ndimage import gaussian_filter as _scipy_gaussian_filter
+from scipy.ndimage import generate_binary_structure as _scipy_generate_binary_structure
 
 try:
     import cupy as cp
     import cupyx.scipy.ndimage as _cupyx_ndimage
 except ImportError:
     cp = None
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +270,7 @@ def bayesian_fusion(
     output_spacing=None,
     na=0.8,
     wavelength_um=0.5,
+    border_px=None,
 ):
     """Bayesian multi-view deconvolution fusion.
 
@@ -322,6 +328,16 @@ def bayesian_fusion(
     wavelength_um : float, optional
         Emission wavelength in µm, used together with *output_spacing*.
         Default ``0.5`` (500 nm, green channel).
+    border_px : int or None, optional
+        Number of pixels to erode from each view's blending-weight mask before
+        the iterative update.  Pixels within *border_px* of a view boundary
+        (where ``blending_weights[v] == 0``) get their weight forced to zero,
+        preventing the border convolution artefacts that arise because
+        ``convolve`` "sees" zero-padded values outside the view domain.
+        This mirrors the border-shrinking strategy used in BigStitcher.
+        ``None`` (default) sets *border_px* automatically to half the PSF
+        width along the first spatial axis (``psf_shape[0] // 2``), which
+        is the minimum safe margin.
 
     Returns
     -------
@@ -338,6 +354,13 @@ def bayesian_fusion(
     n_views = transformed_views.shape[0]
     ndim = transformed_views.ndim - 1
     input_dtype = transformed_views.dtype
+
+    logger.info(
+        "Bayesian multi-view fusion: %d view(s), %dD, shape %s, "
+        "psf_type=%s, n_iterations=%d, lambda_reg=%g",
+        n_views, ndim, transformed_views.shape[1:],
+        psf_type, n_iterations, lambda_reg,
+    )
 
     # ------------------------------------------------------------------
     # Replace NaN → 0 in observed images (0 = "no data" sentinel)
@@ -385,11 +408,43 @@ def bayesian_fusion(
     # Compute compound back-projection kernels (always on CPU)
     # ------------------------------------------------------------------
     # kernels stay as numpy arrays; _convolve handles device transfer
+    logger.info("Computing compound back-projection kernels (psf_type=%s) ...", psf_type)
     kernels1 = psfs_cpu
     kernels2 = [
         _compute_compound_kernel(v, psfs_cpu, psf_type)
         for v in range(n_views)
     ]
+    logger.info("PSF shape: %s", psfs_cpu[0].shape)
+
+    # ------------------------------------------------------------------
+    # Border erosion of blending weights
+    # ------------------------------------------------------------------
+    # Erode the per-view binary presence mask by border_px iterations using
+    # a full connectivity structuring element so that pixels within one
+    # PSF-half-width of any view edge get weight 0 and are skipped during
+    # the update.  This suppresses the bright-ring convolution artefacts
+    # that arise because convolve() sees zero-padded values outside the
+    # view domain (BigStitcher "border" strategy).
+    if border_px is None:
+        border_px = psfs_cpu[0].shape[0] // 2
+    logger.info("Border erosion: border_px=%d", border_px)
+
+    if border_px > 0:
+        struct = _scipy_generate_binary_structure(ndim, ndim)  # full connectivity
+        eroded_weights = np.empty_like(
+            np.asarray(blending_weights, dtype=np.float32)
+        )
+        for v in range(n_views):
+            mask = np.asarray(blending_weights[v]) > 0
+            eroded = _scipy_binary_erosion(
+                mask, structure=struct, iterations=border_px
+            )
+            eroded_weights[v] = np.asarray(blending_weights[v]) * eroded
+        # Transfer back to the same device as the original weights
+        if cp is not None and isinstance(blending_weights, cp.ndarray):
+            blending_weights = cp.asarray(eroded_weights)
+        else:
+            blending_weights = eroded_weights
 
     # ------------------------------------------------------------------
     # Initialisation: blending-weighted average of observed views
@@ -406,7 +461,9 @@ def bayesian_fusion(
     # ------------------------------------------------------------------
     # Iterative deconvolution (sequential per-view update)
     # ------------------------------------------------------------------
+    logger.info("Starting %d iteration(s) ...", n_iterations)
     for _it in range(n_iterations):
+        logger.debug("Iteration %d / %d", _it + 1, n_iterations)
         for v in range(n_views):
             w_v = blending_weights[v]    # shape: spatial
             img_v = observed[v]          # shape: spatial
