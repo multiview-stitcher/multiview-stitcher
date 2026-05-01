@@ -169,8 +169,27 @@ def _build_metrics_graph(
     -------
     nx.DiGraph
     """
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims_t0[0])
+
+    if max_tolerance is None:
+        tol = None
+    elif isinstance(max_tolerance, (int, float)):
+        tol = -float(max_tolerance)
+    else:
+        tol = {
+            dim: -float(max_tolerance.get(dim, 0.0)) for dim in sdims
+        }
+
     g_adj = mv_graph.build_view_adjacency_graph_from_msims(
-        msims, transform_key=base_transform_key
+        msims, transform_key=base_transform_key, overlap_tolerance=tol
+    )
+
+    # log which pairs are considered
+    logger.info(
+        "Building metrics graph with %s directed edge(s) from %s undirected adjacency edge(s)",
+        len(g_adj.edges()) * (2 if bidirectional else 1),
+        len(g_adj.edges()),
     )
 
     g_metrics = nx.DiGraph()
@@ -186,15 +205,6 @@ def _build_metrics_graph(
             # Negative overlap_tolerance shrinks each sim's bbox before
             # computing the intersection, equivalent to pulling the
             # comparison box inward by max_tolerance on every side.
-            if max_tolerance is None:
-                tol = None
-            elif isinstance(max_tolerance, (int, float)):
-                tol = -float(max_tolerance)
-            else:
-                sdims = spatial_image_utils.get_spatial_dims_from_sim(sim_fixed)
-                tol = {
-                    dim: -float(max_tolerance.get(dim, 0.0)) for dim in sdims
-                }
 
             overlap_dict = registration._get_overlap_bboxes(
                 sim_fixed,
