@@ -417,40 +417,51 @@ def bayesian_fusion(
     logger.info("PSF shape: %s", psfs_cpu[0].shape)
 
     # ------------------------------------------------------------------
-    # Border erosion of blending weights
+    # Border erosion of blending weights (update step only)
     # ------------------------------------------------------------------
-    # Erode the per-view binary presence mask by border_px iterations using
-    # a full connectivity structuring element so that pixels within one
-    # PSF-half-width of any view edge get weight 0 and are skipped during
-    # the update.  This suppresses the bright-ring convolution artefacts
-    # that arise because convolve() sees zero-padded values outside the
-    # view domain (BigStitcher "border" strategy).
+    # Erode the per-view data-presence mask by border_px iterations so that
+    # pixels within one PSF-half-width of any TRUE view border get update
+    # weight 0, suppressing bright-ring convolution artefacts (BigStitcher
+    # "border" strategy).
+    #
+    # Two key choices vs a naive implementation:
+    #   1. Erode based on observed[v] > 0 (hard NaN boundary), not on
+    #      blending_weights > 0, so smoothly-tapered weights don't cause
+    #      over-erosion in dark regions.
+    #   2. border_value=1: assume the view *continues* outside the current
+    #      chunk.  This prevents erosion at chunk-split edges where the view
+    #      genuinely extends beyond the chunk boundary.
     if border_px is None:
         border_px = psfs_cpu[0].shape[0] // 2
     logger.info("Border erosion: border_px=%d", border_px)
 
     if border_px > 0:
         struct = _scipy_generate_binary_structure(ndim, ndim)  # full connectivity
-        eroded_weights = np.empty_like(
+        eroded_weights_np = np.empty_like(
             np.asarray(blending_weights, dtype=np.float32)
         )
         for v in range(n_views):
-            mask = np.asarray(blending_weights[v]) > 0
-            eroded = _scipy_binary_erosion(
-                mask, structure=struct, iterations=border_px
+            # Use where the view has actual data (not zero-padded NaN regions)
+            data_mask = np.asarray(observed[v]) > 0
+            # border_value=1: outside this chunk the view is assumed present
+            # → erosion only happens at internal view-border transitions
+            eroded_mask = _scipy_binary_erosion(
+                data_mask, structure=struct,
+                iterations=border_px, border_value=1,
             )
-            eroded_weights[v] = np.asarray(blending_weights[v]) * eroded
-        # Transfer back to the same device as the original weights
+            eroded_weights_np[v] = np.asarray(blending_weights[v]) * eroded_mask
         if cp is not None and isinstance(blending_weights, cp.ndarray):
-            blending_weights = cp.asarray(eroded_weights)
+            update_weights = cp.asarray(eroded_weights_np)
         else:
-            blending_weights = eroded_weights
+            update_weights = eroded_weights_np
+    else:
+        update_weights = blending_weights
 
     # ------------------------------------------------------------------
     # Initialisation: blending-weighted average of observed views
     # ------------------------------------------------------------------
-    # blending_weights are already normalised (sum ≤ 1 per pixel), so the
-    # sum-to-1 denominator is effectively already applied.
+    # Use the ORIGINAL (non-eroded) blending weights so that the starting
+    # estimate is unaffected by the border erosion.
     psi = np.nansum(observed * blending_weights, axis=0).astype(np.float32)
     psi = psi.clip(np.float32(min_value))
 
@@ -465,7 +476,7 @@ def bayesian_fusion(
     for _it in range(n_iterations):
         logger.debug("Iteration %d / %d", _it + 1, n_iterations)
         for v in range(n_views):
-            w_v = blending_weights[v]    # shape: spatial
+            w_v = update_weights[v]      # eroded weights: zero at view borders
             img_v = observed[v]          # shape: spatial
 
             # 1. Forward projection: blur current estimate with PSF_v
