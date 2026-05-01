@@ -100,7 +100,7 @@ def _flip(kernel):
 
 def _norm(kernel):
     """Normalise *kernel* so it sums to 1.  Returns float32 numpy array."""
-    kernel = np.asarray(kernel, dtype=np.float64)
+    kernel = kernel.astype(np.float64)  # use float64 for stable normalisation
     s = kernel.sum()
     if s > 0:
         kernel = kernel / s
@@ -131,7 +131,7 @@ def make_gaussian_psf(sigma, ndim=None, shape=None):
     np.ndarray, float32
         Normalised Gaussian PSF.
     """
-    sigma = np.atleast_1d(np.asarray(sigma, dtype=float))
+    sigma = np.atleast_1d(sigma)
     if sigma.size == 1 and ndim is not None:
         sigma = np.full(ndim, float(sigma[0]))
 
@@ -386,7 +386,7 @@ def bayesian_fusion(
                 f"len(psfs) = {len(psfs)}, but n_views = {n_views}. "
                 "Provide one PSF per view."
             )
-        psfs_cpu = [_norm(np.asarray(p, dtype=np.float32)) for p in psfs]
+        psfs_cpu = [_norm(p.astype(np.float32)) for p in psfs]
 
     # Ensure all PSFs have the same shape (pad with zeros to the maximum
     # extent along each dimension)
@@ -436,24 +436,27 @@ def bayesian_fusion(
     logger.info("Border erosion: border_px=%d", border_px)
 
     if border_px > 0:
+        use_gpu = cp is not None and isinstance(blending_weights, cp.ndarray)
         struct = _scipy_generate_binary_structure(ndim, ndim)  # full connectivity
-        eroded_weights_np = np.empty_like(
-            np.asarray(blending_weights, dtype=np.float32)
-        )
+        eroded_weights = np.empty_like(blending_weights).astype(np.float32)
         for v in range(n_views):
             # Use where the view has actual data (not zero-padded NaN regions)
-            data_mask = np.asarray(observed[v]) > 0
+            data_mask_np = observed[v] > 0
             # border_value=1: outside this chunk the view is assumed present
             # → erosion only happens at internal view-border transitions
-            eroded_mask = _scipy_binary_erosion(
-                data_mask, structure=struct,
-                iterations=border_px, border_value=1,
-            )
-            eroded_weights_np[v] = np.asarray(blending_weights[v]) * eroded_mask
-        if cp is not None and isinstance(blending_weights, cp.ndarray):
-            update_weights = cp.asarray(eroded_weights_np)
-        else:
-            update_weights = eroded_weights_np
+            if use_gpu:
+                eroded_mask = _cupyx_ndimage.binary_erosion(
+                    data_mask_np, structure=cp.asarray(struct),
+                    iterations=border_px, border_value=1, brute_force=True,
+                )
+                eroded_weights[v] = blending_weights[v] * eroded_mask
+            else:
+                eroded_mask = _scipy_binary_erosion(
+                    data_mask_np, structure=struct,
+                    iterations=border_px, border_value=1, brute_force=True,
+                )
+                eroded_weights[v] = blending_weights[v] * eroded_mask
+        update_weights = eroded_weights
     else:
         update_weights = blending_weights
 
