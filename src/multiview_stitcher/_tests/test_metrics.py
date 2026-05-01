@@ -313,7 +313,7 @@ def test_tile_pair_image_metrics_with_spacing():
         msims,
         base_transform_key=base_transform_key,
         query_transform_keys=[base_transform_key],
-        spacing=1.0,  # coarser spacing → faster computation
+        spacing={"y": 1.0, "x": 1.0},  # coarser spacing → faster computation
     )
     assert "pairs" in result
 

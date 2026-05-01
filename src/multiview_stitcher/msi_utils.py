@@ -318,6 +318,39 @@ def get_first_scale_above_target_spacing(msim, target_spacing, dim="y"):
     return scale
 
 
+def get_res_level_from_spacing(msim, spacing: dict) -> int:
+    """
+    Find the highest (coarsest) resolution level whose actual spacing is
+    still lower or equal to the target spacing in every requested dimension.
+
+    Parameters
+    ----------
+    msim : MultiscaleSpatialImage
+        Multiscale spatial image.
+    spacing : dict[str, float]
+        Target spacing per spatial dimension.  Only dimensions present in
+        this dict are considered; others are ignored.
+
+    Returns
+    -------
+    int
+        Integer index of the selected resolution level (e.g. ``0`` for
+        ``"scale0"``, ``1`` for ``"scale1"``, etc.).
+    """
+    sorted_scale_keys = get_sorted_scale_keys(msim)
+
+    best_level = 0
+    for i, scale_key in enumerate(sorted_scale_keys):
+        sim = get_sim_from_msim(msim, scale=scale_key)
+        actual_spacing = si_utils.get_spacing_from_sim(sim)
+        if all(actual_spacing[dim] <= spacing[dim] for dim in spacing):
+            best_level = i
+        else:
+            break
+
+    return best_level
+
+
 def get_res_level_from_binning_factors(msim, binning_factors):
     """
     Find the optimal resolution level for the given binning factors.
@@ -415,3 +448,30 @@ def get_spatial_dims(msim):
 
 def get_dims(msim):
     return get_sim_from_msim(msim).dims
+
+
+def correct_multiscale_origins(msim):
+    """
+    Correct origins of all scales in msim to match the origin of the first scale,
+    so that transforms into the intrinsic coordinate system (as defined by
+    OME-Zarr v0.6) are correct.
+    See also https://github.com/ome/ngff-spec/pull/125
+    """
+
+    sks = get_sorted_scale_keys(msim)
+    spacing0 = si_utils.get_spacing_from_sim(get_sim_from_msim(msim, sks[0]))
+    origin0 = si_utils.get_origin_from_sim(get_sim_from_msim(msim, sks[0]))
+    sdims = get_spatial_dims(msim)
+
+    sim0 = get_sim_from_msim(msim, sks[0])
+    shape0 = {dim: len(sim0.coords[dim]) for dim in sdims}
+    msim = msim.map_over_datasets(lambda ds: xr.Dataset(
+        {'image': ds.image.assign_coords(
+            {dim: ds.image.coords[dim] - ds.image.coords[dim].values[0] + origin0[dim]\
+              + (np.round(shape0[dim] / len(ds.image.coords[dim])) - 1) / 2 * spacing0[dim]
+              for dim in sdims}
+                )} | \
+        {t: ds.data_vars[t] for t in ds.data_vars if t != 'image'})
+        if len(ds.data_vars) > 0 else ds)
+
+    return msim
