@@ -151,13 +151,18 @@ def process_output_chunksize(sims, output_chunksize):
 
 def process_output_stack_properties(
     sims,
-    output_spacing,
-    output_origin,
-    output_shape,
-    output_stack_properties,
-    output_stack_mode,
-    transform_key,
+    output_spacing=None,
+    output_origin=None,
+    output_shape=None,
+    output_stack_properties=None,
+    output_stack_mode="union",
+    transform_key=None,
 ):
+    if transform_key is None:
+        raise ValueError(
+            "transform_key must be provided to determine transformation" \
+            "parameters for calculating output stack properties."
+        )
     
     params = [
         si_utils.get_affine_from_sim(sim, transform_key=transform_key)

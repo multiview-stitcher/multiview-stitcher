@@ -5,12 +5,21 @@ After running registration it is useful to verify *how much better* (or worse) a
 
 | Function | Purpose |
 |---|---|
-| `metrics.tile_pair_image_metrics` | Compute image similarity metrics in the overlap region for every adjacent tile pair under one or more transform keys |
+| `metrics.tile_pair_image_metrics` | Compute image similarity metrics in the overlap region for every adjacent tile pair – supports two modes (see below) |
 | `vis_utils.plot_tile_pair_image_metrics` | Visualise the results as a positional tile graph and/or a summary overview plot |
+
+### Two modes
+
+`tile_pair_image_metrics` accepts **exactly one** of:
+
+- **`query_transform_keys`** *(Mode 1)* — pairs are derived automatically from spatial overlap; metrics are evaluated under each named transform key, enabling side-by-side comparison (e.g. stage position vs. registered).
+- **`pairs_graph`** *(Mode 2)* — pairs and their transforms are taken directly from a pre-computed pairwise registration graph (e.g. `g_reg_computed` from `registration.compute_pairwise_registrations`). Each edge contributes one candidate. Useful for quality assessment and pair filtering between the pairwise and global resolution steps. `base_transform_key` is still required: it defines the overlap geometry and is used to convert each world-space edge transform into the intrinsic sampling convention (`p_moving = inv(T_moving_base) @ T_edge @ T_fixed_base`).
 
 ---
 
-## How it works
+## How it works (Mode 1)
+
+The steps below apply to **Mode 1** (`query_transform_keys`). In **Mode 2** the pair list and candidate transforms come from the supplied `pairs_graph`; the overlap geometry and sampling steps (2–4) are identical.
 
 ### 1 – Overlap region (`base_transform_key`)
 
@@ -41,6 +50,8 @@ NaN pixels (outside the image domain after resampling) are handled by the built-
 
 ## Usage example
 
+### Mode 1 – compare multiple transform keys
+
 ```python
 import functools
 import skimage.metrics
@@ -65,7 +76,7 @@ metrics_result = metrics.tile_pair_image_metrics(
     max_tolerance=1,   # shrink comparison box by 1 physical unit on each side
 )
 
-# --- visualise ---
+# --- visualise (works with both modes) ---
 vis_utils.plot_tile_pair_image_metrics(
     msims,
     metrics_result,
@@ -80,6 +91,21 @@ vis_utils.plot_tile_pair_image_metrics(
     show_overview_plot=True,    # summary: per-pair lines + mean ± std across keys
 )
 ```
+
+### Mode 2 – evaluate a pre-computed registration graph
+
+```python
+from multiview_stitcher import metrics, registration
+
+# g_reg_computed is the output of registration.compute_pairwise_registrations()
+metrics_result = metrics.tile_pair_image_metrics(
+    msims,
+    base_transform_key='affine_metadata',
+    pairs_graph=g_reg_computed,
+)
+```
+
+---
 
 ### Output – `metrics_result`
 
