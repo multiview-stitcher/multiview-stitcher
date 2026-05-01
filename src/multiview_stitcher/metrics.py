@@ -138,8 +138,9 @@ def _build_metrics_graph(
 
     Each directed edge ``(fixed_idx, moving_idx)`` stores:
 
-    * ``comparison_bbox`` – bounding box (world coords, base_transform_key)
-      for this direction, or ``None`` when no valid overlap exists.
+    * ``comparison_bbox`` – overlap bounding box for this direction,
+      expressed in the intrinsic coordinate system of the fixed image,
+      or ``None`` when no valid overlap exists.
     * ``transforms`` – dict mapping each candidate key to the sampling
       transform ``p_moving`` (ndarray, shape ``(ndim+1, ndim+1)``) that
       maps fixed-intrinsic coordinates to moving-intrinsic coordinates.
