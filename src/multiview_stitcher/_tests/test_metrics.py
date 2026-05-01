@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from matplotlib import pyplot as plt
 
-from multiview_stitcher import metrics, msi_utils, param_utils, sample_data, vis_utils
+from multiview_stitcher import metrics, msi_utils, param_utils, registration, sample_data, vis_utils
 
 
 # ---------------------------------------------------------------------------
@@ -367,3 +367,70 @@ def test_plot_tile_pair_image_metrics(ndim, monkeypatch):
             assert ax is not None
 
         plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# Mode 2: pairs_graph
+# ---------------------------------------------------------------------------
+
+
+def test_tile_pair_image_metrics_pairs_graph_mode():
+    """
+    Mode 2 (pairs_graph): metrics computed from a pairwise registration graph
+    return the expected structure and high NCC for well-registered tiles.
+
+    The registered transform produced by ``registration.register`` is passed
+    back via the ``pairs_graph`` (``g_reg_computed``) returned from the same
+    call.  The Mode 2 NCC should be high (tiles are correctly aligned) and the
+    output structure must use ``"transform"`` as the candidate key.
+    """
+    base_transform_key = "affine_metadata"
+    reg_transform_key = "affine_registered"
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=15,
+        tiles_x=2,
+        tiles_y=1,
+        overlap=10,
+        zoom=6,
+        shift_scale=0.0,
+        drift_scale=0.0,
+        transform_key=base_transform_key,
+    )
+    msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
+
+    # Run full registration (pairwise + groupwise); get g_reg_computed back
+    reg_result = registration.register(
+        msims,
+        transform_key=base_transform_key,
+        new_transform_key=reg_transform_key,
+        reg_channel_index=0,
+        return_dict=True,
+    )
+    g_reg_computed = reg_result["pairwise_registration"]["graph"]
+
+    # Mode 2: evaluate quality using pairs_graph
+    result = metrics.tile_pair_image_metrics(
+        msims,
+        base_transform_key=base_transform_key,
+        pairs_graph=g_reg_computed,
+        metric_funcs={"ncc": metrics.normalized_cross_correlation},
+    )
+
+    # Structure checks
+    assert "pairs" in result
+    assert "summary" in result
+    assert len(result["pairs"]) >= 1
+
+    for pair, pair_metrics in result["pairs"].items():
+        assert isinstance(pair, tuple) and len(pair) == 2
+        assert "transform" in pair_metrics, "Mode 2 candidate key must be 'transform'"
+        ncc = pair_metrics["transform"]["ncc"]
+        assert not np.isnan(ncc), f"NCC is NaN for pair {pair}"
+        assert ncc > 0.5, f"Expected high NCC for registered pair {pair}, got {ncc:.4f}"
+
+    assert "transform" in result["summary"]
+    assert not np.isnan(result["summary"]["transform"]["ncc"])
