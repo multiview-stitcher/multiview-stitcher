@@ -5,11 +5,7 @@ This module provides tools to assess the quality of image registration by
 comparing image content in the overlap regions between adjacent views, after
 pre-transforming them according to one or more candidate transform keys.
 
-Main entry point
-----------------
-``tile_pair_image_metrics`` computes pairwise image similarity metrics for all
-adjacent view pairs under a set of query transform keys, returning both
-per-pair values and summarised statistics.
+Main entry point: ``tile_pair_image_metrics``.
 
 Built-in metric function
 ------------------------
@@ -144,9 +140,9 @@ def _build_metrics_graph(
 
     * ``comparison_bbox`` – bounding box (world coords, base_transform_key)
       for this direction, or ``None`` when no valid overlap exists.
-    * ``transforms`` – dict mapping each query_transform_key to the
-      corresponding moving-image affine matrix (ndarray, shape
-      ``(ndim+1, ndim+1)``).
+    * ``transforms`` – dict mapping each candidate key to the sampling
+      transform ``p_moving`` (ndarray, shape ``(ndim+1, ndim+1)``) that
+      maps fixed-intrinsic coordinates to moving-intrinsic coordinates.
 
     The graph mirrors the ``g_reg_computed`` convention used in
     :func:`registration.register`, extended to be directed and to hold
@@ -224,14 +220,19 @@ def _build_metrics_graph(
             else:
                 comparison_bbox = {"lower": lower, "upper": upper}
 
-            transforms = {
-                q: spatial_image_utils.get_affine_from_sim(
-                    sim_moving, q
+            transforms = {}
+            for q in query_transform_keys:
+                T_fixed_q = (
+                    spatial_image_utils.get_affine_from_sim(sim_fixed, q)
+                    .squeeze()
+                    .data
                 )
-                .squeeze()
-                .data
-                for q in query_transform_keys
-            }
+                T_moving_q = (
+                    spatial_image_utils.get_affine_from_sim(sim_moving, q)
+                    .squeeze()
+                    .data
+                )
+                transforms[q] = np.linalg.inv(T_moving_q) @ T_fixed_q
 
             g_metrics.add_edge(
                 fixed_idx,
@@ -245,6 +246,139 @@ def _build_metrics_graph(
     return g_metrics
 
 
+def _build_metrics_graph_from_pairs_graph(
+    msims,
+    sims_t0,
+    base_transform_key,
+    pairs_graph,
+    max_tolerance,
+    bidirectional=False,
+):
+    """
+    Build a directed metrics graph from a pre-computed pairwise registration
+    graph.
+
+    Mirrors :func:`_build_metrics_graph` but derives pairs and transforms from
+    ``pairs_graph`` (e.g. ``g_reg_computed`` from
+    :func:`registration.compute_pairwise_registrations`) instead of from the
+    msim transform keys.
+
+    The edge ``"transform"`` attribute is expected to map world coordinates of
+    the lower-index view (fixed) to world coordinates of the higher-index view
+    (moving).  The resulting ``g_metrics`` edges store ``transforms`` in the
+    same unified format as :func:`_build_metrics_graph`: a dict with key
+    ``"transform"`` mapping to ``p_moving`` (fixed-intrinsic →
+    moving-intrinsic ndarray).
+
+    Parameters
+    ----------
+    msims : list of MultiscaleSpatialImage
+    sims_t0 : list of SpatialImage
+        First time-point (and first channel) of each view.
+    base_transform_key : str
+        Transform key used to compute overlap geometry and to convert the
+        world-space edge transform to the intrinsic sampling convention.
+    pairs_graph : nx.Graph
+        Pairwise registration graph.  Each edge ``(i, j)`` with ``i < j``
+        must carry a ``"transform"`` attribute (world-space affine,
+        lower-index view → higher-index view).
+    max_tolerance : float, dict, or None
+    bidirectional : bool, optional
+        When ``False`` (default) only the edge ``(min_i, max_i)`` direction
+        is evaluated.  When ``True`` both directions are evaluated.
+
+    Returns
+    -------
+    nx.DiGraph
+    """
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims_t0[0])
+
+    if max_tolerance is None:
+        tol = None
+    elif isinstance(max_tolerance, (int, float)):
+        tol = -float(max_tolerance)
+    else:
+        tol = {
+            dim: -float(max_tolerance.get(dim, 0.0)) for dim in sdims
+        }
+
+    g_metrics = nx.DiGraph()
+    for node in pairs_graph.nodes():
+        g_metrics.add_node(node)
+
+    logger.info(
+        "Building metrics graph from pairs_graph with %s directed edge(s) "
+        "from %s undirected edge(s)",
+        pairs_graph.number_of_edges() * (2 if bidirectional else 1),
+        pairs_graph.number_of_edges(),
+    )
+
+    for i, j in pairs_graph.edges():
+        # Canonical direction stored in pairs_graph: lower index = fixed
+        fixed_base, moving_base = min(i, j), max(i, j)
+
+        # Extract edge transform: world(fixed_base) → world(moving_base)
+        T_edge_raw = pairs_graph.edges[fixed_base, moving_base]["transform"]
+        if hasattr(T_edge_raw, "coords") and "t" in T_edge_raw.coords:
+            T_edge_raw = T_edge_raw.isel(t=0)
+        T_edge = np.asarray(T_edge_raw).squeeze()
+
+        directions = [(fixed_base, moving_base)]
+        if bidirectional:
+            directions = [(fixed_base, moving_base), (moving_base, fixed_base)]
+
+        for fixed_idx, moving_idx in directions:
+            sim_fixed = sims_t0[fixed_idx]
+            sim_moving = sims_t0[moving_idx]
+
+            overlap_dict = registration._get_overlap_bboxes(
+                sim_fixed,
+                sim_moving,
+                input_transform_key=base_transform_key,
+                output_transform_key=None,
+                overlap_tolerance=tol,
+            )
+            lowers_phys, uppers_phys = overlap_dict["lowers"], overlap_dict["uppers"]
+
+            lower = np.asarray(lowers_phys[0], dtype=float)
+            upper = np.asarray(uppers_phys[0], dtype=float)
+
+            if np.any(lower >= upper):
+                comparison_bbox = None
+            else:
+                comparison_bbox = {"lower": lower, "upper": upper}
+
+            T_fixed_base = (
+                spatial_image_utils.get_affine_from_sim(sim_fixed, base_transform_key)
+                .squeeze()
+                .data
+            )
+            T_moving_base = (
+                spatial_image_utils.get_affine_from_sim(sim_moving, base_transform_key)
+                .squeeze()
+                .data
+            )
+
+            # Convert world-space edge transform to fixed-intrinsic → moving-intrinsic.
+            # T_edge maps world(fixed_base) → world(moving_base).
+            # For the reverse direction, use inv(T_edge).
+            if fixed_idx < moving_idx:
+                p_moving = np.linalg.inv(T_moving_base) @ T_edge @ T_fixed_base
+            else:
+                p_moving = np.linalg.inv(T_fixed_base) @ np.linalg.inv(T_edge) @ T_moving_base
+
+            g_metrics.add_edge(
+                fixed_idx,
+                moving_idx,
+                comparison_bbox=comparison_bbox,
+                transforms={"transform": p_moving},
+                intersection_halfspace=overlap_dict["intersection"],
+                vol=overlap_dict["vol"],
+            )
+
+    return g_metrics
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -253,7 +387,7 @@ def _build_metrics_graph(
 def tile_pair_image_metrics(
     msims,
     base_transform_key,
-    query_transform_keys,
+    query_transform_keys=None,
     metric_funcs=None,
     max_tolerance=None,
     spacing=None,
@@ -261,12 +395,28 @@ def tile_pair_image_metrics(
     metric_channel=None,
     n_parallel_pairs=None,
     input_res_level=None,
+    *,
+    pairs_graph=None,
 ):
     """
     Calculate registration quality metrics for a list of views.
 
-    For each pair of adjacent views and for both possible fixed/moving
-    directions, the function:
+    Two modes are supported, selected by providing exactly one of
+    ``query_transform_keys`` (Mode 1) or ``pairs_graph`` (Mode 2):
+
+    **Mode 1** – pairs are determined automatically from the spatial overlap
+    of the views under ``base_transform_key``; metrics are evaluated under
+    each of the supplied ``query_transform_keys``, enabling comparison across
+    multiple candidate transforms (e.g. stage vs. registered).
+
+    **Mode 2** – pairs and their transforms are taken directly from a
+    pre-computed pairwise registration graph (``pairs_graph``, e.g.
+    ``g_reg_computed`` from :func:`registration.compute_pairwise_registrations`).
+    Each edge contributes one candidate (its ``"transform"`` attribute).
+    Useful for quality assessment and pair filtering between the pairwise
+    registration and global resolution steps.
+
+    For each pair the function:
 
     1. Uses *base_transform_key* to determine the overlap region between
        the two views and computes a *comparison bounding box* (optionally
@@ -291,9 +441,9 @@ def tile_pair_image_metrics(
     base_transform_key : str
         Transform key that defines the reference spatial layout.  Used
         to compute overlap regions and to position the fixed image.
-    query_transform_keys : str or list of str
-        One or more transform keys to evaluate.  Each key must exist in
-        every input view.
+    query_transform_keys : str or list of str, optional
+        *Mode 1* — one or more transform keys to evaluate.  Each key must
+        exist in every input view.  Mutually exclusive with ``pairs_graph``.
     metric_funcs : dict[str, callable], optional
         Maps arbitrary string keys to metric functions.  Each function
         must have the signature
@@ -355,6 +505,16 @@ def tile_pair_image_metrics(
         * When ``None`` and *spacing* is provided: the coarsest level whose
           actual spacing is still ≤ *spacing*, selected independently for
           each pair, based on the fixed image.
+    pairs_graph : nx.Graph, optional
+        *Mode 2* — a pre-computed pairwise registration graph (e.g.
+        ``g_reg_computed`` returned by
+        :func:`registration.compute_pairwise_registrations`).  Each edge
+        must carry a ``"transform"`` attribute (the world-space pairwise
+        affine, lower-index view → higher-index view).  The edges define
+        which pairs are evaluated; each edge contributes a single candidate
+        transform.  Mutually exclusive with ``query_transform_keys``.
+        The output ``"pairs"`` dict uses ``"transform"`` as the candidate
+        key.
 
     Returns
     -------
@@ -362,7 +522,8 @@ def tile_pair_image_metrics(
 
     * ``"pairs"`` – :class:`dict` mapping directional-pair tuples
       ``(fixed_idx, moving_idx)`` to dicts of the form
-      ``{query_transform_key: {metric_key: float}}``.
+      ``{candidate_key: {metric_key: float}}``, where ``candidate_key``
+      is a query transform key name (Mode 1) or ``"transform"`` (Mode 2).
     * ``"summary"`` – :class:`dict` mapping *query_transform_key* to
       ``{metric_key: float}`` where each value is the **overlap-volume-weighted
       mean** across all directional pairs.  The weight for each pair is the
@@ -370,11 +531,20 @@ def tile_pair_image_metrics(
       :func:`mv_graph.get_overlap_between_pair_of_stack_props`).  Pairs whose
       metric value is NaN are excluded from both the numerator and denominator.
     """
+    if (query_transform_keys is None) == (pairs_graph is None):
+        raise ValueError(
+            "Exactly one of 'query_transform_keys' or 'pairs_graph' must be provided."
+        )
+
     if metric_funcs is None:
         metric_funcs = {"ncc": normalized_cross_correlation}
 
-    if isinstance(query_transform_keys, str):
-        query_transform_keys = [query_transform_keys]
+    if query_transform_keys is not None:
+        if isinstance(query_transform_keys, str):
+            query_transform_keys = [query_transform_keys]
+        candidate_keys = query_transform_keys
+    else:
+        candidate_keys = ["transform"]
 
     # Resolve input_res_level when not explicitly set.
     # Per-pair selection (input_res_level stays None) only happens when
@@ -412,15 +582,25 @@ def tile_pair_image_metrics(
     # spacing is a dict or None; kept as-is for per-pair use inside the loop.
     spacing_global = spacing
 
-    # Build directed metrics graph (both directions per undirected edge)
-    g_metrics = _build_metrics_graph(
-        msims,
-        sims_t0,
-        base_transform_key,
-        query_transform_keys,
-        max_tolerance,
-        bidirectional=bidirectional,
-    )
+    # Build directed metrics graph
+    if query_transform_keys is not None:
+        g_metrics = _build_metrics_graph(
+            msims,
+            sims_t0,
+            base_transform_key,
+            query_transform_keys,
+            max_tolerance,
+            bidirectional=bidirectional,
+        )
+    else:
+        g_metrics = _build_metrics_graph_from_pairs_graph(
+            msims,
+            sims_t0,
+            base_transform_key,
+            pairs_graph,
+            max_tolerance,
+            bidirectional=bidirectional,
+        )
 
     # -----------------------------------------------------------------------
     # Build delayed metric computations for every directed edge and every
@@ -449,7 +629,7 @@ def tile_pair_image_metrics(
                 moving_idx,
             )
             metric_delayed[(fixed_idx, moving_idx)] = {
-                q: {k: np.nan for k in metric_funcs} for q in query_transform_keys
+                q: {k: np.nan for k in metric_funcs} for q in candidate_keys
             }
             continue
 
@@ -525,21 +705,12 @@ def tile_pair_image_metrics(
             order=1,
         )
 
-        # Moving image: map fixed-intrinsic → world (T_fixed_q) →
-        # moving-intrinsic (inv(T_moving_q)) for each query key.
-        # Using T_fixed_q (not T_fixed_base) means the relative transform
-        # between fixed and moving is taken entirely from the query key,
-        # so images are compared as if they were aligned under that key.
+        # Moving image: for each candidate key retrieve the pre-computed
+        # p_moving (fixed-intrinsic → moving-intrinsic) stored on the edge.
         metric_delayed[(fixed_idx, moving_idx)] = {}
 
-        for q in query_transform_keys:
-            T_fixed_q = (
-                spatial_image_utils.get_affine_from_sim(sim_fixed, q)
-                .squeeze()
-                .data
-            )
-            T_moving_q = transforms[q]
-            p_moving = np.linalg.inv(T_moving_q) @ T_fixed_q
+        for q in candidate_keys:
+            p_moving = transforms[q]
 
             sim_moving_t = transformation.transform_sim(
                 sim_moving.astype(np.float32),
@@ -587,7 +758,7 @@ def tile_pair_image_metrics(
     # per query key, per metric key
     # -----------------------------------------------------------------------
     summary = {}
-    for q in query_transform_keys:
+    for q in candidate_keys:
         summary[q] = {}
         for metric_key in metric_funcs:
             values_and_weights = [
@@ -612,7 +783,7 @@ def tile_pair_image_metrics(
     return {
         "pairs": {
             (fi, mi): {
-                q: computed[(fi, mi)][q] for q in query_transform_keys
+                q: computed[(fi, mi)][q] for q in candidate_keys
             }
             for fi, mi in g_metrics.edges()
         },
