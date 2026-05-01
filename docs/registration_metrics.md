@@ -13,7 +13,7 @@ After running registration it is useful to verify *how much better* (or worse) a
 `tile_pair_image_metrics` accepts **exactly one** of:
 
 - **`query_transform_keys`** *(Mode 1)* — pairs are derived automatically from spatial overlap; metrics are evaluated under each named transform key, enabling side-by-side comparison (e.g. stage position vs. registered).
-- **`pairs_graph`** *(Mode 2)* — pairs and their transforms are taken directly from a pre-computed pairwise registration graph (e.g. `g_reg_computed` from `registration.compute_pairwise_registrations`). Each edge contributes one candidate. Useful for quality assessment and pair filtering between the pairwise and global resolution steps.
+- **`pairs_graph`** *(Mode 2)* — pairs and their transforms are taken directly from a pre-computed pairwise registration graph (e.g. `g_reg_computed` from `registration.compute_pairwise_registrations`). Each edge contributes one candidate. Useful for quality assessment and pair filtering between the pairwise and global resolution steps. `base_transform_key` is still required: it defines the overlap geometry and is used to convert each world-space edge transform into the intrinsic sampling convention (`p_moving = inv(T_moving_base) @ T_edge @ T_fixed_base`).
 
 ---
 

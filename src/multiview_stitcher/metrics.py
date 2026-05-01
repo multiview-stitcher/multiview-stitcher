@@ -415,6 +415,10 @@ def tile_pair_image_metrics(
     Each edge contributes one candidate (its ``"transform"`` attribute).
     Useful for quality assessment and pair filtering between the pairwise
     registration and global resolution steps.
+    ``base_transform_key`` is still required in this mode: it is used both
+    to determine the overlap region between each pair of views *and* to
+    convert the world-space edge transform into the intrinsic sampling
+    convention (``p_moving = inv(T_moving_base) @ T_edge @ T_fixed_base``).
 
     For each pair the function:
 
@@ -440,7 +444,11 @@ def tile_pair_image_metrics(
         Input views.
     base_transform_key : str
         Transform key that defines the reference spatial layout.  Used
-        to compute overlap regions and to position the fixed image.
+        in **both modes** to (1) compute the overlap region between each
+        pair of views and (2) position the fixed image for sampling.  In
+        Mode 2 it is additionally used to convert the world-space edge
+        transform from ``pairs_graph`` into the intrinsic sampling
+        convention: ``p_moving = inv(T_moving_base) @ T_edge @ T_fixed_base``.
     query_transform_keys : str or list of str, optional
         *Mode 1* — one or more transform keys to evaluate.  Each key must
         exist in every input view.  Mutually exclusive with ``pairs_graph``.
