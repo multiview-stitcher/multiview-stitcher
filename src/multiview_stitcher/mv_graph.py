@@ -985,6 +985,7 @@ def get_overlap_for_bbs(
     param: xr.DataArray,
     additional_extent_in_pixels: dict[str, int] = None,
     tol: float = 1e-6,
+    param_is_inverse: bool = False,
 ):
     """
     Get slices of query bounding boxes that overlap with target bounding box.
@@ -996,9 +997,15 @@ def get_overlap_for_bbs(
     query_bbs : list[dict[str, dict[str, Union[int, float]]]]
         Query bounding boxes.
     param : xr.DataArray
-        Affine transformation parameters mapping query to target.
+        Affine transformation parameters mapping query to target, or its
+        pre-computed inverse when param_is_inverse=True.
     overlap_in_pixels : int
         Additional overlap in pixels.
+    param_is_inverse : bool, optional
+        If True, ``param`` is already the inverse of the forward transform
+        (i.e. maps target to query coordinates), so np.linalg.inv is skipped.
+        Pre-computing the inverse once per tile avoids O(N_tiles * N_chunks)
+        matrix inversions. By default False.
 
     Returns
     -------
@@ -1015,9 +1022,10 @@ def get_overlap_for_bbs(
     )
 
     # project corners into intrinsic coordinate system
+    inv_param = param.data if param_is_inverse else np.linalg.inv(param.data)
     corners_query = transformation.transform_pts(
         corners_target,
-        np.linalg.inv(param.data),
+        inv_param,
     )
 
     corners_query_min = np.min(corners_query, axis=0)
