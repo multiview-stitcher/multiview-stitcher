@@ -104,6 +104,9 @@ playground = [
     "ome-types",
     "ipyfilechooser>=0.6.0",
 ]
+gpu-cuda12 = [
+    "cupy-cuda12x",
+]
 
 
 [tool.setuptools]
