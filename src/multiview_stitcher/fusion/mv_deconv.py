@@ -364,9 +364,9 @@ def multi_view_deconvolution(
     # ------------------------------------------------------------------
     # Replace NaN → 0 in observed images (0 = "no data" sentinel)
     # ------------------------------------------------------------------
-    observed = np.nan_to_num(
-        transformed_views.astype(np.float32), nan=0.0
-    )
+
+    view_coverage = ~np.isnan(transformed_views)  # True = pixel is inside this view
+    observed = np.nan_to_num(transformed_views, nan=0.0)
 
     # ------------------------------------------------------------------
     # Build / validate PSFs
@@ -424,7 +424,7 @@ def multi_view_deconvolution(
     # "border" strategy).
     #
     # Two key choices vs a naive implementation:
-    #   1. Erode based on observed[v] > 0 (hard NaN boundary), not on
+    #   1. Erode based on observed[v] == nan (hard NaN boundary), not on
     #      blending_weights > 0, so smoothly-tapered weights don't cause
     #      over-erosion in dark regions.
     #   2. border_value=1: assume the view *continues* outside the current
@@ -439,19 +439,21 @@ def multi_view_deconvolution(
         struct = _scipy_generate_binary_structure(ndim, ndim)  # full connectivity
         eroded_weights = np.empty_like(blending_weights).astype(np.float32)
         for v in range(n_views):
-            # Use where the view has actual data (not zero-padded NaN regions)
-            data_mask_np = observed[v] > 0
+            # Use the geometric view coverage mask (True = inside view),
+            # not intensity > 0, so dark pixels inside the view are not
+            # incorrectly treated as view boundaries.
+            data_mask = view_coverage[v]
             # border_value=1: outside this chunk the view is assumed present
             # → erosion only happens at internal view-border transitions
             if use_gpu:
                 eroded_mask = _cupyx_ndimage.binary_erosion(
-                    data_mask_np, structure=cp.asarray(struct),
+                    data_mask, structure=cp.asarray(struct),
                     iterations=border_px, border_value=1, brute_force=True,
                 )
                 eroded_weights[v] = blending_weights[v] * eroded_mask
             else:
                 eroded_mask = _scipy_binary_erosion(
-                    data_mask_np, structure=struct,
+                    data_mask, structure=struct,
                     iterations=border_px, border_value=1, brute_force=True,
                 )
                 eroded_weights[v] = blending_weights[v] * eroded_mask
