@@ -1003,9 +1003,9 @@ def get_overlap_for_bbs(
         Additional overlap in pixels.
     param_is_inverse : bool, optional
         If True, ``param`` is already the inverse of the forward transform
-        (i.e. maps target to query coordinates), so ``np.linalg.inv`` is
-        skipped. Pre-computing the inverse once per tile and passing it here
-        avoids O(N_tiles * N_chunks) matrix inversions. By default False.
+        (i.e. maps target to query coordinates), so np.linalg.inv is skipped.
+        Pre-computing the inverse once per tile avoids O(N_tiles * N_chunks)
+        matrix inversions. By default False.
 
     Returns
     -------

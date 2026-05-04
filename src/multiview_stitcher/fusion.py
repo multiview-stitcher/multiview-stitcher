@@ -482,11 +482,10 @@ def fuse(
                 continue
             fix_dims.append(dim)
 
-        # Pre-compute inverse params and tile AABBs in output space.
-        # This avoids O(N_tiles * N_chunks) matrix inversions and allows a
-        # cheap vectorised interval check to reject non-overlapping tiles
-        # before calling the more expensive get_overlap_for_bbs.
-        _inv_sparams = [
+        # Pre-compute the inverse of each tile's affine transform once.
+        # This avoids recomputing np.linalg.inv inside get_overlap_for_bbs for
+        # every (tile, chunk) pair.
+        inv_sparams = [
             xr.DataArray(
                 np.linalg.inv(sp.data),
                 dims=sp.dims,
@@ -494,30 +493,69 @@ def fuse(
             )
             for sp in sparams
         ]
-        _tile_corners_output = [
-            transformation.transform_pts(
+
+        # Build a chunk_index -> [tile_indices] mapping by iterating over tiles
+        # and using the regular output chunk grid to find overlapping chunks via
+        # simple index arithmetic — O(N_tiles * ndim) instead of O(N_tiles * N_chunks).
+        #
+        # Output chunks form a regular grid: all blocks have the same pixel size
+        # per dimension except possibly the last block (which may be smaller).
+        # The first (uniform) block size is sufficient to map any physical
+        # coordinate to a chunk index via floor division; we clamp to the valid
+        # range so the last partial block is always included when needed.
+        _normalized_chunks = normalize_chunks(
+            [output_chunksize[dim] for dim in sdims],
+            [output_stack_properties["shape"][dim] for dim in sdims],
+        )
+        _n_blocks_per_dim = [len(c) for c in _normalized_chunks]
+        _uniform_cs_per_dim = [c[0] for c in _normalized_chunks]
+        _osp_origin = np.array(
+            [output_stack_properties["origin"][dim] for dim in sdims]
+        )
+        _osp_spacing = np.array(
+            [output_stack_properties["spacing"][dim] for dim in sdims]
+        )
+        # Physical padding: interpolation extent + chunk overlap added to output chunks
+        _additional_extent_pixels = np.array(
+            [0.0 if dim in fix_dims else float(interpolation_order) for dim in sdims]
+        )
+        _padding_phys = (
+            _additional_extent_pixels * _osp_spacing
+            + overlap_in_pixels * _osp_spacing
+        )
+
+        _chunk_to_tiles: dict = {}
+        for iview in range(len(sims)):
+            # Forward-project tile corners through the affine to get its AABB
+            # in output (world) space.
+            tile_corners_output = transformation.transform_pts(
                 mv_graph.get_vertices_from_stack_props(views_bb[iview]),
                 sparams[iview].data,
             )
-            for iview in range(len(sims))
-        ]
-        _tile_aabb_mins = np.array(
-            [np.min(c, axis=0) for c in _tile_corners_output]
-        )  # (N_views, ndim)
-        _tile_aabb_maxs = np.array(
-            [np.max(c, axis=0) for c in _tile_corners_output]
-        )  # (N_views, ndim)
-        # Conservative padding per dim to account for interpolation extent
-        # (additional_extent_in_pixels tiles * tile spacing).
-        _aabb_padding = np.array(
-            [
-                0.0
-                if dim in fix_dims
-                else interpolation_order
-                * max(views_bb[iview]["spacing"][dim] for iview in range(len(sims)))
-                for dim in sdims
-            ]
-        )
+            aabb_min = np.min(tile_corners_output, axis=0) - _padding_phys
+            aabb_max = np.max(tile_corners_output, axis=0) + _padding_phys
+
+            # Map the padded AABB to a range of chunk indices per dimension.
+            idx_ranges = []
+            skip = False
+            for idim in range(len(sdims)):
+                cs_phys = _uniform_cs_per_dim[idim] * _osp_spacing[idim]
+                i_first = max(
+                    0,
+                    int(np.floor((aabb_min[idim] - _osp_origin[idim]) / cs_phys)),
+                )
+                i_last = min(
+                    _n_blocks_per_dim[idim] - 1,
+                    int(np.floor((aabb_max[idim] - _osp_origin[idim]) / cs_phys)),
+                )
+                if i_first > i_last:
+                    skip = True
+                    break
+                idx_ranges.append(range(i_first, i_last + 1))
+            if skip:
+                continue
+            for chunk_idx in product(*idx_ranges):
+                _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
 
         fused_output_chunks = np.empty(
             np.max(block_indices, 0) + 1, dtype=object
@@ -526,36 +564,15 @@ def fuse(
         for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
             output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
         ):
-            # Fast AABB pre-filter: determine which tiles can possibly overlap
-            # this output chunk using a simple interval check in output space.
-            # This reduces the call count from O(N_tiles) to O(K) where K is
-            # the number of tiles actually overlapping the chunk.
-            _chunk_min = np.array(
-                [output_chunk_bb_with_overlap["origin"][dim] for dim in sdims]
-            )
-            _chunk_max = _chunk_min + (
-                np.array(
-                    [output_chunk_bb_with_overlap["shape"][dim] for dim in sdims]
-                )
-                - 1
-            ) * np.array(
-                [output_chunk_bb_with_overlap["spacing"][dim] for dim in sdims]
-            )
-            _candidate_view_indices = np.where(
-                np.all(
-                    (_tile_aabb_mins <= _chunk_max[None, :] + _aabb_padding[None, :])
-                    & (_tile_aabb_maxs >= _chunk_min[None, :] - _aabb_padding[None, :]),
-                    axis=1,
-                )
-            )[0]
+            # Look up candidate tiles via the pre-built mapping (O(1) per chunk).
+            candidate_view_indices = _chunk_to_tiles.get(tuple(block_index), [])
 
-            # calculate relevant slices for each candidate tile only
             views_overlap_bb = [None] * len(sims)
-            for iview in _candidate_view_indices:
+            for iview in candidate_view_indices:
                 views_overlap_bb[iview] = mv_graph.get_overlap_for_bbs(
                     target_bb=output_chunk_bb_with_overlap,
                     query_bbs=[views_bb[iview]],
-                    param=_inv_sparams[iview],
+                    param=inv_sparams[iview],
                     additional_extent_in_pixels={
                         dim: 0 if dim in fix_dims else int(interpolation_order)
                         for dim in sdims
