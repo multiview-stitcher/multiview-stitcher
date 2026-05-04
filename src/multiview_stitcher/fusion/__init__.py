@@ -3,16 +3,8 @@ from multiview_stitcher.fusion._core import (
     calc_fusion_stack_properties,
     calc_stack_properties_from_view_properties_and_params,
     calc_stack_properties_from_volume,
-    combine_stack_props,
     fuse,
-    fuse_np,
-    fuse_to_multiscale_ome_zarr,
-    fuse_to_zarr,
-    func_ignore_nan_warning,
-    get_interpolated_image,
-    get_transformed_stack_vertices,
     max_fusion,
-    prepare_block_fusion,
     process_output_chunksize,
     process_output_stack_properties,
     simple_average_fusion,
@@ -21,23 +13,18 @@ from multiview_stitcher.fusion._core import (
 from multiview_stitcher.fusion.mv_deconv import multi_view_deconvolution
 
 __all__ = [
-    "BoundingBox",
+    # high level API
+    "fuse",
+
     "calc_fusion_stack_properties",
     "calc_stack_properties_from_view_properties_and_params",
     "calc_stack_properties_from_volume",
-    "combine_stack_props",
-    "fuse",
-    "fuse_np",
-    "fuse_to_multiscale_ome_zarr",
-    "fuse_to_zarr",
-    "func_ignore_nan_warning",
-    "get_interpolated_image",
-    "get_transformed_stack_vertices",
-    "max_fusion",
-    "multi_view_deconvolution",
-    "prepare_block_fusion",
     "process_output_chunksize",
     "process_output_stack_properties",
+
+    # fusion methods
     "simple_average_fusion",
     "weighted_average_fusion",
+    "max_fusion",
+    "multi_view_deconvolution",
 ]
