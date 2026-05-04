@@ -482,6 +482,43 @@ def fuse(
                 continue
             fix_dims.append(dim)
 
+        # Pre-compute inverse params and tile AABBs in output space.
+        # This avoids O(N_tiles * N_chunks) matrix inversions and allows a
+        # cheap vectorised interval check to reject non-overlapping tiles
+        # before calling the more expensive get_overlap_for_bbs.
+        _inv_sparams = [
+            xr.DataArray(
+                np.linalg.inv(sp.data),
+                dims=sp.dims,
+                coords=sp.coords,
+            )
+            for sp in sparams
+        ]
+        _tile_corners_output = [
+            transformation.transform_pts(
+                mv_graph.get_vertices_from_stack_props(views_bb[iview]),
+                sparams[iview].data,
+            )
+            for iview in range(len(sims))
+        ]
+        _tile_aabb_mins = np.array(
+            [np.min(c, axis=0) for c in _tile_corners_output]
+        )  # (N_views, ndim)
+        _tile_aabb_maxs = np.array(
+            [np.max(c, axis=0) for c in _tile_corners_output]
+        )  # (N_views, ndim)
+        # Conservative padding per dim to account for interpolation extent
+        # (additional_extent_in_pixels tiles * tile spacing).
+        _aabb_padding = np.array(
+            [
+                0.0
+                if dim in fix_dims
+                else interpolation_order
+                * max(views_bb[iview]["spacing"][dim] for iview in range(len(sims)))
+                for dim in sdims
+            ]
+        )
+
         fused_output_chunks = np.empty(
             np.max(block_indices, 0) + 1, dtype=object
         )
@@ -489,20 +526,42 @@ def fuse(
         for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
             output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
         ):
-            # calculate relevant slices for each output chunk
-            # this is specific to each non spatial coordinate
-            views_overlap_bb = [
-                mv_graph.get_overlap_for_bbs(
+            # Fast AABB pre-filter: determine which tiles can possibly overlap
+            # this output chunk using a simple interval check in output space.
+            # This reduces the call count from O(N_tiles) to O(K) where K is
+            # the number of tiles actually overlapping the chunk.
+            _chunk_min = np.array(
+                [output_chunk_bb_with_overlap["origin"][dim] for dim in sdims]
+            )
+            _chunk_max = _chunk_min + (
+                np.array(
+                    [output_chunk_bb_with_overlap["shape"][dim] for dim in sdims]
+                )
+                - 1
+            ) * np.array(
+                [output_chunk_bb_with_overlap["spacing"][dim] for dim in sdims]
+            )
+            _candidate_view_indices = np.where(
+                np.all(
+                    (_tile_aabb_mins <= _chunk_max[None, :] + _aabb_padding[None, :])
+                    & (_tile_aabb_maxs >= _chunk_min[None, :] - _aabb_padding[None, :]),
+                    axis=1,
+                )
+            )[0]
+
+            # calculate relevant slices for each candidate tile only
+            views_overlap_bb = [None] * len(sims)
+            for iview in _candidate_view_indices:
+                views_overlap_bb[iview] = mv_graph.get_overlap_for_bbs(
                     target_bb=output_chunk_bb_with_overlap,
-                    query_bbs=[view_bb],
-                    param=sparams[iview],
+                    query_bbs=[views_bb[iview]],
+                    param=_inv_sparams[iview],
                     additional_extent_in_pixels={
                         dim: 0 if dim in fix_dims else int(interpolation_order)
                         for dim in sdims
                     },
+                    param_is_inverse=True,
                 )[0]
-                for iview, view_bb in enumerate(views_bb)
-            ]
 
             # append to output
             relevant_view_indices = np.where(
