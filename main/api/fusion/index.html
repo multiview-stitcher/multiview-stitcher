@@ -1897,7 +1897,83 @@ Returns</p>
 <span class="normal"><a href="#__codelineno-0-646">646</a></span>
 <span class="normal"><a href="#__codelineno-0-647">647</a></span>
 <span class="normal"><a href="#__codelineno-0-648">648</a></span>
-<span class="normal"><a href="#__codelineno-0-649">649</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-192"><a id="__codelineno-0-192" name="__codelineno-0-192"></a><span class="k">def</span> <span class="nf">fuse</span><span class="p">(</span>
+<span class="normal"><a href="#__codelineno-0-649">649</a></span>
+<span class="normal"><a href="#__codelineno-0-650">650</a></span>
+<span class="normal"><a href="#__codelineno-0-651">651</a></span>
+<span class="normal"><a href="#__codelineno-0-652">652</a></span>
+<span class="normal"><a href="#__codelineno-0-653">653</a></span>
+<span class="normal"><a href="#__codelineno-0-654">654</a></span>
+<span class="normal"><a href="#__codelineno-0-655">655</a></span>
+<span class="normal"><a href="#__codelineno-0-656">656</a></span>
+<span class="normal"><a href="#__codelineno-0-657">657</a></span>
+<span class="normal"><a href="#__codelineno-0-658">658</a></span>
+<span class="normal"><a href="#__codelineno-0-659">659</a></span>
+<span class="normal"><a href="#__codelineno-0-660">660</a></span>
+<span class="normal"><a href="#__codelineno-0-661">661</a></span>
+<span class="normal"><a href="#__codelineno-0-662">662</a></span>
+<span class="normal"><a href="#__codelineno-0-663">663</a></span>
+<span class="normal"><a href="#__codelineno-0-664">664</a></span>
+<span class="normal"><a href="#__codelineno-0-665">665</a></span>
+<span class="normal"><a href="#__codelineno-0-666">666</a></span>
+<span class="normal"><a href="#__codelineno-0-667">667</a></span>
+<span class="normal"><a href="#__codelineno-0-668">668</a></span>
+<span class="normal"><a href="#__codelineno-0-669">669</a></span>
+<span class="normal"><a href="#__codelineno-0-670">670</a></span>
+<span class="normal"><a href="#__codelineno-0-671">671</a></span>
+<span class="normal"><a href="#__codelineno-0-672">672</a></span>
+<span class="normal"><a href="#__codelineno-0-673">673</a></span>
+<span class="normal"><a href="#__codelineno-0-674">674</a></span>
+<span class="normal"><a href="#__codelineno-0-675">675</a></span>
+<span class="normal"><a href="#__codelineno-0-676">676</a></span>
+<span class="normal"><a href="#__codelineno-0-677">677</a></span>
+<span class="normal"><a href="#__codelineno-0-678">678</a></span>
+<span class="normal"><a href="#__codelineno-0-679">679</a></span>
+<span class="normal"><a href="#__codelineno-0-680">680</a></span>
+<span class="normal"><a href="#__codelineno-0-681">681</a></span>
+<span class="normal"><a href="#__codelineno-0-682">682</a></span>
+<span class="normal"><a href="#__codelineno-0-683">683</a></span>
+<span class="normal"><a href="#__codelineno-0-684">684</a></span>
+<span class="normal"><a href="#__codelineno-0-685">685</a></span>
+<span class="normal"><a href="#__codelineno-0-686">686</a></span>
+<span class="normal"><a href="#__codelineno-0-687">687</a></span>
+<span class="normal"><a href="#__codelineno-0-688">688</a></span>
+<span class="normal"><a href="#__codelineno-0-689">689</a></span>
+<span class="normal"><a href="#__codelineno-0-690">690</a></span>
+<span class="normal"><a href="#__codelineno-0-691">691</a></span>
+<span class="normal"><a href="#__codelineno-0-692">692</a></span>
+<span class="normal"><a href="#__codelineno-0-693">693</a></span>
+<span class="normal"><a href="#__codelineno-0-694">694</a></span>
+<span class="normal"><a href="#__codelineno-0-695">695</a></span>
+<span class="normal"><a href="#__codelineno-0-696">696</a></span>
+<span class="normal"><a href="#__codelineno-0-697">697</a></span>
+<span class="normal"><a href="#__codelineno-0-698">698</a></span>
+<span class="normal"><a href="#__codelineno-0-699">699</a></span>
+<span class="normal"><a href="#__codelineno-0-700">700</a></span>
+<span class="normal"><a href="#__codelineno-0-701">701</a></span>
+<span class="normal"><a href="#__codelineno-0-702">702</a></span>
+<span class="normal"><a href="#__codelineno-0-703">703</a></span>
+<span class="normal"><a href="#__codelineno-0-704">704</a></span>
+<span class="normal"><a href="#__codelineno-0-705">705</a></span>
+<span class="normal"><a href="#__codelineno-0-706">706</a></span>
+<span class="normal"><a href="#__codelineno-0-707">707</a></span>
+<span class="normal"><a href="#__codelineno-0-708">708</a></span>
+<span class="normal"><a href="#__codelineno-0-709">709</a></span>
+<span class="normal"><a href="#__codelineno-0-710">710</a></span>
+<span class="normal"><a href="#__codelineno-0-711">711</a></span>
+<span class="normal"><a href="#__codelineno-0-712">712</a></span>
+<span class="normal"><a href="#__codelineno-0-713">713</a></span>
+<span class="normal"><a href="#__codelineno-0-714">714</a></span>
+<span class="normal"><a href="#__codelineno-0-715">715</a></span>
+<span class="normal"><a href="#__codelineno-0-716">716</a></span>
+<span class="normal"><a href="#__codelineno-0-717">717</a></span>
+<span class="normal"><a href="#__codelineno-0-718">718</a></span>
+<span class="normal"><a href="#__codelineno-0-719">719</a></span>
+<span class="normal"><a href="#__codelineno-0-720">720</a></span>
+<span class="normal"><a href="#__codelineno-0-721">721</a></span>
+<span class="normal"><a href="#__codelineno-0-722">722</a></span>
+<span class="normal"><a href="#__codelineno-0-723">723</a></span>
+<span class="normal"><a href="#__codelineno-0-724">724</a></span>
+<span class="normal"><a href="#__codelineno-0-725">725</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-192"><a id="__codelineno-0-192" name="__codelineno-0-192"></a><span class="k">def</span> <span class="nf">fuse</span><span class="p">(</span>
 </span><span id="__span-0-193"><a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="n">sims</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span>
 </span><span id="__span-0-194"><a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="n">transform_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-195"><a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="n">fusion_func</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">=</span> <span class="n">weighted_average_fusion</span><span class="p">,</span>
@@ -2190,171 +2266,247 @@ Returns</p>
 </span><span id="__span-0-482"><a id="__codelineno-0-482" name="__codelineno-0-482"></a>                <span class="k">continue</span>
 </span><span id="__span-0-483"><a id="__codelineno-0-483" name="__codelineno-0-483"></a>            <span class="n">fix_dims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dim</span><span class="p">)</span>
 </span><span id="__span-0-484"><a id="__codelineno-0-484" name="__codelineno-0-484"></a>
-</span><span id="__span-0-485"><a id="__codelineno-0-485" name="__codelineno-0-485"></a>        <span class="n">fused_output_chunks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span>
-</span><span id="__span-0-486"><a id="__codelineno-0-486" name="__codelineno-0-486"></a>            <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">block_indices</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">object</span>
-</span><span id="__span-0-487"><a id="__codelineno-0-487" name="__codelineno-0-487"></a>        <span class="p">)</span>
-</span><span id="__span-0-488"><a id="__codelineno-0-488" name="__codelineno-0-488"></a>
-</span><span id="__span-0-489"><a id="__codelineno-0-489" name="__codelineno-0-489"></a>        <span class="k">for</span> <span class="n">output_chunk_bb</span><span class="p">,</span> <span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span> <span class="n">block_index</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
-</span><span id="__span-0-490"><a id="__codelineno-0-490" name="__codelineno-0-490"></a>            <span class="n">output_chunk_bbs</span><span class="p">,</span> <span class="n">output_chunk_bbs_with_overlap</span><span class="p">,</span> <span class="n">block_indices</span>
-</span><span id="__span-0-491"><a id="__codelineno-0-491" name="__codelineno-0-491"></a>        <span class="p">):</span>
-</span><span id="__span-0-492"><a id="__codelineno-0-492" name="__codelineno-0-492"></a>            <span class="c1"># calculate relevant slices for each output chunk</span>
-</span><span id="__span-0-493"><a id="__codelineno-0-493" name="__codelineno-0-493"></a>            <span class="c1"># this is specific to each non spatial coordinate</span>
-</span><span id="__span-0-494"><a id="__codelineno-0-494" name="__codelineno-0-494"></a>            <span class="n">views_overlap_bb</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-495"><a id="__codelineno-0-495" name="__codelineno-0-495"></a>                <span class="n">mv_graph</span><span class="o">.</span><span class="n">get_overlap_for_bbs</span><span class="p">(</span>
-</span><span id="__span-0-496"><a id="__codelineno-0-496" name="__codelineno-0-496"></a>                    <span class="n">target_bb</span><span class="o">=</span><span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span>
-</span><span id="__span-0-497"><a id="__codelineno-0-497" name="__codelineno-0-497"></a>                    <span class="n">query_bbs</span><span class="o">=</span><span class="p">[</span><span class="n">view_bb</span><span class="p">],</span>
-</span><span id="__span-0-498"><a id="__codelineno-0-498" name="__codelineno-0-498"></a>                    <span class="n">param</span><span class="o">=</span><span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">],</span>
-</span><span id="__span-0-499"><a id="__codelineno-0-499" name="__codelineno-0-499"></a>                    <span class="n">additional_extent_in_pixels</span><span class="o">=</span><span class="p">{</span>
-</span><span id="__span-0-500"><a id="__codelineno-0-500" name="__codelineno-0-500"></a>                        <span class="n">dim</span><span class="p">:</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">fix_dims</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="n">interpolation_order</span><span class="p">)</span>
-</span><span id="__span-0-501"><a id="__codelineno-0-501" name="__codelineno-0-501"></a>                        <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span>
-</span><span id="__span-0-502"><a id="__codelineno-0-502" name="__codelineno-0-502"></a>                    <span class="p">},</span>
-</span><span id="__span-0-503"><a id="__codelineno-0-503" name="__codelineno-0-503"></a>                <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
-</span><span id="__span-0-504"><a id="__codelineno-0-504" name="__codelineno-0-504"></a>                <span class="k">for</span> <span class="n">iview</span><span class="p">,</span> <span class="n">view_bb</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">views_bb</span><span class="p">)</span>
-</span><span id="__span-0-505"><a id="__codelineno-0-505" name="__codelineno-0-505"></a>            <span class="p">]</span>
-</span><span id="__span-0-506"><a id="__codelineno-0-506" name="__codelineno-0-506"></a>
-</span><span id="__span-0-507"><a id="__codelineno-0-507" name="__codelineno-0-507"></a>            <span class="c1"># append to output</span>
-</span><span id="__span-0-508"><a id="__codelineno-0-508" name="__codelineno-0-508"></a>            <span class="n">relevant_view_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
-</span><span id="__span-0-509"><a id="__codelineno-0-509" name="__codelineno-0-509"></a>                <span class="p">[</span>
-</span><span id="__span-0-510"><a id="__codelineno-0-510" name="__codelineno-0-510"></a>                    <span class="n">view_overlap_bb</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
-</span><span id="__span-0-511"><a id="__codelineno-0-511" name="__codelineno-0-511"></a>                    <span class="k">for</span> <span class="n">view_overlap_bb</span> <span class="ow">in</span> <span class="n">views_overlap_bb</span>
-</span><span id="__span-0-512"><a id="__codelineno-0-512" name="__codelineno-0-512"></a>                <span class="p">]</span>
-</span><span id="__span-0-513"><a id="__codelineno-0-513" name="__codelineno-0-513"></a>            <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
-</span><span id="__span-0-514"><a id="__codelineno-0-514" name="__codelineno-0-514"></a>
-</span><span id="__span-0-515"><a id="__codelineno-0-515" name="__codelineno-0-515"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">relevant_view_indices</span><span class="p">):</span>
-</span><span id="__span-0-516"><a id="__codelineno-0-516" name="__codelineno-0-516"></a>                <span class="n">fused_output_chunks</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">block_index</span><span class="p">)]</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
-</span><span id="__span-0-517"><a id="__codelineno-0-517" name="__codelineno-0-517"></a>                    <span class="nb">tuple</span><span class="p">([</span><span class="n">output_chunk_bb</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]),</span>
-</span><span id="__span-0-518"><a id="__codelineno-0-518" name="__codelineno-0-518"></a>                    <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
-</span><span id="__span-0-519"><a id="__codelineno-0-519" name="__codelineno-0-519"></a>                <span class="p">)</span>
-</span><span id="__span-0-520"><a id="__codelineno-0-520" name="__codelineno-0-520"></a>                <span class="k">continue</span>
-</span><span id="__span-0-521"><a id="__codelineno-0-521" name="__codelineno-0-521"></a>
-</span><span id="__span-0-522"><a id="__codelineno-0-522" name="__codelineno-0-522"></a>            <span class="n">tol</span> <span class="o">=</span> <span class="mf">1e-6</span>
-</span><span id="__span-0-523"><a id="__codelineno-0-523" name="__codelineno-0-523"></a>            <span class="n">sims_slices</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-524"><a id="__codelineno-0-524" name="__codelineno-0-524"></a>                <span class="n">sims</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span>
-</span><span id="__span-0-525"><a id="__codelineno-0-525" name="__codelineno-0-525"></a>                    <span class="n">sim_coord_dict</span>
-</span><span id="__span-0-526"><a id="__codelineno-0-526" name="__codelineno-0-526"></a>                    <span class="o">|</span> <span class="p">{</span>
-</span><span id="__span-0-527"><a id="__codelineno-0-527" name="__codelineno-0-527"></a>                        <span class="n">dim</span><span class="p">:</span> <span class="nb">slice</span><span class="p">(</span>
-</span><span id="__span-0-528"><a id="__codelineno-0-528" name="__codelineno-0-528"></a>                            <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;origin&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="o">-</span> <span class="n">tol</span><span class="p">,</span>
-</span><span id="__span-0-529"><a id="__codelineno-0-529" name="__codelineno-0-529"></a>                            <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;origin&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span>
-</span><span id="__span-0-530"><a id="__codelineno-0-530" name="__codelineno-0-530"></a>                            <span class="o">+</span> <span class="p">(</span><span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
-</span><span id="__span-0-531"><a id="__codelineno-0-531" name="__codelineno-0-531"></a>                            <span class="o">*</span> <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;spacing&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span>
-</span><span id="__span-0-532"><a id="__codelineno-0-532" name="__codelineno-0-532"></a>                            <span class="o">+</span> <span class="n">tol</span><span class="p">,</span>
-</span><span id="__span-0-533"><a id="__codelineno-0-533" name="__codelineno-0-533"></a>                        <span class="p">)</span>
-</span><span id="__span-0-534"><a id="__codelineno-0-534" name="__codelineno-0-534"></a>                        <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span>
-</span><span id="__span-0-535"><a id="__codelineno-0-535" name="__codelineno-0-535"></a>                    <span class="p">},</span>
-</span><span id="__span-0-536"><a id="__codelineno-0-536" name="__codelineno-0-536"></a>                    <span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-0-537"><a id="__codelineno-0-537" name="__codelineno-0-537"></a>                <span class="p">)</span>
-</span><span id="__span-0-538"><a id="__codelineno-0-538" name="__codelineno-0-538"></a>                <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
-</span><span id="__span-0-539"><a id="__codelineno-0-539" name="__codelineno-0-539"></a>            <span class="p">]</span>
-</span><span id="__span-0-540"><a id="__codelineno-0-540" name="__codelineno-0-540"></a>
-</span><span id="__span-0-541"><a id="__codelineno-0-541" name="__codelineno-0-541"></a>            <span class="c1"># determine whether to fuse plany by plane</span>
-</span><span id="__span-0-542"><a id="__codelineno-0-542" name="__codelineno-0-542"></a>            <span class="c1">#  to avoid weighting edge artifacts</span>
-</span><span id="__span-0-543"><a id="__codelineno-0-543" name="__codelineno-0-543"></a>            <span class="c1"># fuse planewise if:</span>
-</span><span id="__span-0-544"><a id="__codelineno-0-544" name="__codelineno-0-544"></a>            <span class="c1"># - z dimension is present</span>
-</span><span id="__span-0-545"><a id="__codelineno-0-545" name="__codelineno-0-545"></a>            <span class="c1"># - params don&#39;t affect z dimension</span>
-</span><span id="__span-0-546"><a id="__codelineno-0-546" name="__codelineno-0-546"></a>            <span class="c1"># - shape in z dimension is 1 (i.e. only one plane)</span>
-</span><span id="__span-0-547"><a id="__codelineno-0-547" name="__codelineno-0-547"></a>            <span class="c1"># (the last criterium above could be dropped if we find a way</span>
-</span><span id="__span-0-548"><a id="__codelineno-0-548" name="__codelineno-0-548"></a>            <span class="c1"># (to propagate metadata through xr.apply_ufunc)</span>
-</span><span id="__span-0-549"><a id="__codelineno-0-549" name="__codelineno-0-549"></a>
-</span><span id="__span-0-550"><a id="__codelineno-0-550" name="__codelineno-0-550"></a>            <span class="k">if</span> <span class="p">(</span>
-</span><span id="__span-0-551"><a id="__codelineno-0-551" name="__codelineno-0-551"></a>                <span class="s2">&quot;z&quot;</span> <span class="ow">in</span> <span class="n">fix_dims</span>
-</span><span id="__span-0-552"><a id="__codelineno-0-552" name="__codelineno-0-552"></a>                <span class="ow">and</span> <span class="n">output_chunk_bb_with_overlap</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="s2">&quot;z&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span>
-</span><span id="__span-0-553"><a id="__codelineno-0-553" name="__codelineno-0-553"></a>            <span class="p">):</span>
-</span><span id="__span-0-554"><a id="__codelineno-0-554" name="__codelineno-0-554"></a>                <span class="n">fuse_planewise</span> <span class="o">=</span> <span class="kc">True</span>
-</span><span id="__span-0-555"><a id="__codelineno-0-555" name="__codelineno-0-555"></a>
-</span><span id="__span-0-556"><a id="__codelineno-0-556" name="__codelineno-0-556"></a>                <span class="n">sims_slices</span> <span class="o">=</span> <span class="p">[</span><span class="n">sim</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">z</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">sim</span> <span class="ow">in</span> <span class="n">sims_slices</span><span class="p">]</span>
-</span><span id="__span-0-557"><a id="__codelineno-0-557" name="__codelineno-0-557"></a>                <span class="n">tmp_params</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-558"><a id="__codelineno-0-558" name="__codelineno-0-558"></a>                    <span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span>
-</span><span id="__span-0-559"><a id="__codelineno-0-559" name="__codelineno-0-559"></a>                        <span class="n">x_in</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">],</span>
-</span><span id="__span-0-560"><a id="__codelineno-0-560" name="__codelineno-0-560"></a>                        <span class="n">x_out</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">],</span>
-</span><span id="__span-0-561"><a id="__codelineno-0-561" name="__codelineno-0-561"></a>                    <span class="p">)</span>
-</span><span id="__span-0-562"><a id="__codelineno-0-562" name="__codelineno-0-562"></a>                    <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
-</span><span id="__span-0-563"><a id="__codelineno-0-563" name="__codelineno-0-563"></a>                <span class="p">]</span>
-</span><span id="__span-0-564"><a id="__codelineno-0-564" name="__codelineno-0-564"></a>
-</span><span id="__span-0-565"><a id="__codelineno-0-565" name="__codelineno-0-565"></a>                <span class="n">output_chunk_bb_with_overlap</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">project_bb_along_dim</span><span class="p">(</span>
-</span><span id="__span-0-566"><a id="__codelineno-0-566" name="__codelineno-0-566"></a>                    <span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;z&quot;</span>
-</span><span id="__span-0-567"><a id="__codelineno-0-567" name="__codelineno-0-567"></a>                <span class="p">)</span>
-</span><span id="__span-0-568"><a id="__codelineno-0-568" name="__codelineno-0-568"></a>
-</span><span id="__span-0-569"><a id="__codelineno-0-569" name="__codelineno-0-569"></a>                <span class="n">full_view_bbs</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-570"><a id="__codelineno-0-570" name="__codelineno-0-570"></a>                    <span class="n">mv_graph</span><span class="o">.</span><span class="n">project_bb_along_dim</span><span class="p">(</span><span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;z&quot;</span><span class="p">)</span>
-</span><span id="__span-0-571"><a id="__codelineno-0-571" name="__codelineno-0-571"></a>                    <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
-</span><span id="__span-0-572"><a id="__codelineno-0-572" name="__codelineno-0-572"></a>                <span class="p">]</span>
-</span><span id="__span-0-573"><a id="__codelineno-0-573" name="__codelineno-0-573"></a>
-</span><span id="__span-0-574"><a id="__codelineno-0-574" name="__codelineno-0-574"></a>            <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-575"><a id="__codelineno-0-575" name="__codelineno-0-575"></a>                <span class="n">fuse_planewise</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="__span-0-576"><a id="__codelineno-0-576" name="__codelineno-0-576"></a>                <span class="n">tmp_params</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-577"><a id="__codelineno-0-577" name="__codelineno-0-577"></a>                    <span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
-</span><span id="__span-0-578"><a id="__codelineno-0-578" name="__codelineno-0-578"></a>                <span class="p">]</span>
-</span><span id="__span-0-579"><a id="__codelineno-0-579" name="__codelineno-0-579"></a>                <span class="n">full_view_bbs</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-580"><a id="__codelineno-0-580" name="__codelineno-0-580"></a>                    <span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
-</span><span id="__span-0-581"><a id="__codelineno-0-581" name="__codelineno-0-581"></a>                <span class="p">]</span>
+</span><span id="__span-0-485"><a id="__codelineno-0-485" name="__codelineno-0-485"></a>        <span class="c1"># Pre-compute the inverse of each tile&#39;s affine transform once.</span>
+</span><span id="__span-0-486"><a id="__codelineno-0-486" name="__codelineno-0-486"></a>        <span class="c1"># This avoids recomputing np.linalg.inv inside get_overlap_for_bbs for</span>
+</span><span id="__span-0-487"><a id="__codelineno-0-487" name="__codelineno-0-487"></a>        <span class="c1"># every (tile, chunk) pair.</span>
+</span><span id="__span-0-488"><a id="__codelineno-0-488" name="__codelineno-0-488"></a>        <span class="n">inv_sparams</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-489"><a id="__codelineno-0-489" name="__codelineno-0-489"></a>            <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">(</span>
+</span><span id="__span-0-490"><a id="__codelineno-0-490" name="__codelineno-0-490"></a>                <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">sp</span><span class="o">.</span><span class="n">data</span><span class="p">),</span>
+</span><span id="__span-0-491"><a id="__codelineno-0-491" name="__codelineno-0-491"></a>                <span class="n">dims</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">dims</span><span class="p">,</span>
+</span><span id="__span-0-492"><a id="__codelineno-0-492" name="__codelineno-0-492"></a>                <span class="n">coords</span><span class="o">=</span><span class="n">sp</span><span class="o">.</span><span class="n">coords</span><span class="p">,</span>
+</span><span id="__span-0-493"><a id="__codelineno-0-493" name="__codelineno-0-493"></a>            <span class="p">)</span>
+</span><span id="__span-0-494"><a id="__codelineno-0-494" name="__codelineno-0-494"></a>            <span class="k">for</span> <span class="n">sp</span> <span class="ow">in</span> <span class="n">sparams</span>
+</span><span id="__span-0-495"><a id="__codelineno-0-495" name="__codelineno-0-495"></a>        <span class="p">]</span>
+</span><span id="__span-0-496"><a id="__codelineno-0-496" name="__codelineno-0-496"></a>
+</span><span id="__span-0-497"><a id="__codelineno-0-497" name="__codelineno-0-497"></a>        <span class="c1"># Build a chunk_index -&gt; [tile_indices] mapping by iterating over tiles</span>
+</span><span id="__span-0-498"><a id="__codelineno-0-498" name="__codelineno-0-498"></a>        <span class="c1"># and using the regular output chunk grid to find overlapping chunks via</span>
+</span><span id="__span-0-499"><a id="__codelineno-0-499" name="__codelineno-0-499"></a>        <span class="c1"># simple index arithmetic — O(N_tiles * ndim) instead of O(N_tiles * N_chunks).</span>
+</span><span id="__span-0-500"><a id="__codelineno-0-500" name="__codelineno-0-500"></a>        <span class="c1">#</span>
+</span><span id="__span-0-501"><a id="__codelineno-0-501" name="__codelineno-0-501"></a>        <span class="c1"># Output chunks form a regular grid: all blocks have the same pixel size</span>
+</span><span id="__span-0-502"><a id="__codelineno-0-502" name="__codelineno-0-502"></a>        <span class="c1"># per dimension except possibly the last block (which may be smaller).</span>
+</span><span id="__span-0-503"><a id="__codelineno-0-503" name="__codelineno-0-503"></a>        <span class="c1"># The first (uniform) block size is sufficient to map any physical</span>
+</span><span id="__span-0-504"><a id="__codelineno-0-504" name="__codelineno-0-504"></a>        <span class="c1"># coordinate to a chunk index via floor division; we clamp to the valid</span>
+</span><span id="__span-0-505"><a id="__codelineno-0-505" name="__codelineno-0-505"></a>        <span class="c1"># range so the last partial block is always included when needed.</span>
+</span><span id="__span-0-506"><a id="__codelineno-0-506" name="__codelineno-0-506"></a>        <span class="n">_normalized_chunks</span> <span class="o">=</span> <span class="n">normalize_chunks</span><span class="p">(</span>
+</span><span id="__span-0-507"><a id="__codelineno-0-507" name="__codelineno-0-507"></a>            <span class="p">[</span><span class="n">output_chunksize</span><span class="p">[</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">],</span>
+</span><span id="__span-0-508"><a id="__codelineno-0-508" name="__codelineno-0-508"></a>            <span class="p">[</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">],</span>
+</span><span id="__span-0-509"><a id="__codelineno-0-509" name="__codelineno-0-509"></a>        <span class="p">)</span>
+</span><span id="__span-0-510"><a id="__codelineno-0-510" name="__codelineno-0-510"></a>        <span class="n">_n_blocks_per_dim</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_normalized_chunks</span><span class="p">]</span>
+</span><span id="__span-0-511"><a id="__codelineno-0-511" name="__codelineno-0-511"></a>        <span class="n">_uniform_cs_per_dim</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_normalized_chunks</span><span class="p">]</span>
+</span><span id="__span-0-512"><a id="__codelineno-0-512" name="__codelineno-0-512"></a>        <span class="n">_osp_origin</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+</span><span id="__span-0-513"><a id="__codelineno-0-513" name="__codelineno-0-513"></a>            <span class="p">[</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;origin&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]</span>
+</span><span id="__span-0-514"><a id="__codelineno-0-514" name="__codelineno-0-514"></a>        <span class="p">)</span>
+</span><span id="__span-0-515"><a id="__codelineno-0-515" name="__codelineno-0-515"></a>        <span class="n">_osp_spacing</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+</span><span id="__span-0-516"><a id="__codelineno-0-516" name="__codelineno-0-516"></a>            <span class="p">[</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;spacing&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]</span>
+</span><span id="__span-0-517"><a id="__codelineno-0-517" name="__codelineno-0-517"></a>        <span class="p">)</span>
+</span><span id="__span-0-518"><a id="__codelineno-0-518" name="__codelineno-0-518"></a>        <span class="c1"># Physical padding: interpolation extent + chunk overlap added to output chunks</span>
+</span><span id="__span-0-519"><a id="__codelineno-0-519" name="__codelineno-0-519"></a>        <span class="n">_additional_extent_pixels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+</span><span id="__span-0-520"><a id="__codelineno-0-520" name="__codelineno-0-520"></a>            <span class="p">[</span><span class="mf">0.0</span> <span class="k">if</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">fix_dims</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">interpolation_order</span><span class="p">)</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]</span>
+</span><span id="__span-0-521"><a id="__codelineno-0-521" name="__codelineno-0-521"></a>        <span class="p">)</span>
+</span><span id="__span-0-522"><a id="__codelineno-0-522" name="__codelineno-0-522"></a>        <span class="n">_padding_phys</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-0-523"><a id="__codelineno-0-523" name="__codelineno-0-523"></a>            <span class="n">_additional_extent_pixels</span> <span class="o">*</span> <span class="n">_osp_spacing</span>
+</span><span id="__span-0-524"><a id="__codelineno-0-524" name="__codelineno-0-524"></a>            <span class="o">+</span> <span class="n">overlap_in_pixels</span> <span class="o">*</span> <span class="n">_osp_spacing</span>
+</span><span id="__span-0-525"><a id="__codelineno-0-525" name="__codelineno-0-525"></a>        <span class="p">)</span>
+</span><span id="__span-0-526"><a id="__codelineno-0-526" name="__codelineno-0-526"></a>
+</span><span id="__span-0-527"><a id="__codelineno-0-527" name="__codelineno-0-527"></a>        <span class="n">_chunk_to_tiles</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-0-528"><a id="__codelineno-0-528" name="__codelineno-0-528"></a>        <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sims</span><span class="p">)):</span>
+</span><span id="__span-0-529"><a id="__codelineno-0-529" name="__codelineno-0-529"></a>            <span class="c1"># Forward-project tile corners through the affine to get its AABB</span>
+</span><span id="__span-0-530"><a id="__codelineno-0-530" name="__codelineno-0-530"></a>            <span class="c1"># in output (world) space.</span>
+</span><span id="__span-0-531"><a id="__codelineno-0-531" name="__codelineno-0-531"></a>            <span class="n">tile_corners_output</span> <span class="o">=</span> <span class="n">transformation</span><span class="o">.</span><span class="n">transform_pts</span><span class="p">(</span>
+</span><span id="__span-0-532"><a id="__codelineno-0-532" name="__codelineno-0-532"></a>                <span class="n">mv_graph</span><span class="o">.</span><span class="n">get_vertices_from_stack_props</span><span class="p">(</span><span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">]),</span>
+</span><span id="__span-0-533"><a id="__codelineno-0-533" name="__codelineno-0-533"></a>                <span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">,</span>
+</span><span id="__span-0-534"><a id="__codelineno-0-534" name="__codelineno-0-534"></a>            <span class="p">)</span>
+</span><span id="__span-0-535"><a id="__codelineno-0-535" name="__codelineno-0-535"></a>            <span class="n">aabb_min</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">tile_corners_output</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">-</span> <span class="n">_padding_phys</span>
+</span><span id="__span-0-536"><a id="__codelineno-0-536" name="__codelineno-0-536"></a>            <span class="n">aabb_max</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">tile_corners_output</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">_padding_phys</span>
+</span><span id="__span-0-537"><a id="__codelineno-0-537" name="__codelineno-0-537"></a>
+</span><span id="__span-0-538"><a id="__codelineno-0-538" name="__codelineno-0-538"></a>            <span class="c1"># Map the padded AABB to a range of chunk indices per dimension.</span>
+</span><span id="__span-0-539"><a id="__codelineno-0-539" name="__codelineno-0-539"></a>            <span class="n">idx_ranges</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="__span-0-540"><a id="__codelineno-0-540" name="__codelineno-0-540"></a>            <span class="n">skip</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-0-541"><a id="__codelineno-0-541" name="__codelineno-0-541"></a>            <span class="k">for</span> <span class="n">idim</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sdims</span><span class="p">)):</span>
+</span><span id="__span-0-542"><a id="__codelineno-0-542" name="__codelineno-0-542"></a>                <span class="n">cs_phys</span> <span class="o">=</span> <span class="n">_uniform_cs_per_dim</span><span class="p">[</span><span class="n">idim</span><span class="p">]</span> <span class="o">*</span> <span class="n">_osp_spacing</span><span class="p">[</span><span class="n">idim</span><span class="p">]</span>
+</span><span id="__span-0-543"><a id="__codelineno-0-543" name="__codelineno-0-543"></a>                <span class="n">i_first</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span>
+</span><span id="__span-0-544"><a id="__codelineno-0-544" name="__codelineno-0-544"></a>                    <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-545"><a id="__codelineno-0-545" name="__codelineno-0-545"></a>                    <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">((</span><span class="n">aabb_min</span><span class="p">[</span><span class="n">idim</span><span class="p">]</span> <span class="o">-</span> <span class="n">_osp_origin</span><span class="p">[</span><span class="n">idim</span><span class="p">])</span> <span class="o">/</span> <span class="n">cs_phys</span><span class="p">)),</span>
+</span><span id="__span-0-546"><a id="__codelineno-0-546" name="__codelineno-0-546"></a>                <span class="p">)</span>
+</span><span id="__span-0-547"><a id="__codelineno-0-547" name="__codelineno-0-547"></a>                <span class="n">i_last</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span>
+</span><span id="__span-0-548"><a id="__codelineno-0-548" name="__codelineno-0-548"></a>                    <span class="n">_n_blocks_per_dim</span><span class="p">[</span><span class="n">idim</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-0-549"><a id="__codelineno-0-549" name="__codelineno-0-549"></a>                    <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">((</span><span class="n">aabb_max</span><span class="p">[</span><span class="n">idim</span><span class="p">]</span> <span class="o">-</span> <span class="n">_osp_origin</span><span class="p">[</span><span class="n">idim</span><span class="p">])</span> <span class="o">/</span> <span class="n">cs_phys</span><span class="p">)),</span>
+</span><span id="__span-0-550"><a id="__codelineno-0-550" name="__codelineno-0-550"></a>                <span class="p">)</span>
+</span><span id="__span-0-551"><a id="__codelineno-0-551" name="__codelineno-0-551"></a>                <span class="k">if</span> <span class="n">i_first</span> <span class="o">&gt;</span> <span class="n">i_last</span><span class="p">:</span>
+</span><span id="__span-0-552"><a id="__codelineno-0-552" name="__codelineno-0-552"></a>                    <span class="n">skip</span> <span class="o">=</span> <span class="kc">True</span>
+</span><span id="__span-0-553"><a id="__codelineno-0-553" name="__codelineno-0-553"></a>                    <span class="k">break</span>
+</span><span id="__span-0-554"><a id="__codelineno-0-554" name="__codelineno-0-554"></a>                <span class="n">idx_ranges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">i_first</span><span class="p">,</span> <span class="n">i_last</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+</span><span id="__span-0-555"><a id="__codelineno-0-555" name="__codelineno-0-555"></a>            <span class="k">if</span> <span class="n">skip</span><span class="p">:</span>
+</span><span id="__span-0-556"><a id="__codelineno-0-556" name="__codelineno-0-556"></a>                <span class="k">continue</span>
+</span><span id="__span-0-557"><a id="__codelineno-0-557" name="__codelineno-0-557"></a>            <span class="k">for</span> <span class="n">chunk_idx</span> <span class="ow">in</span> <span class="n">product</span><span class="p">(</span><span class="o">*</span><span class="n">idx_ranges</span><span class="p">):</span>
+</span><span id="__span-0-558"><a id="__codelineno-0-558" name="__codelineno-0-558"></a>                <span class="n">_chunk_to_tiles</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">chunk_idx</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">iview</span><span class="p">)</span>
+</span><span id="__span-0-559"><a id="__codelineno-0-559" name="__codelineno-0-559"></a>
+</span><span id="__span-0-560"><a id="__codelineno-0-560" name="__codelineno-0-560"></a>        <span class="n">fused_output_chunks</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span>
+</span><span id="__span-0-561"><a id="__codelineno-0-561" name="__codelineno-0-561"></a>            <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">block_indices</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">object</span>
+</span><span id="__span-0-562"><a id="__codelineno-0-562" name="__codelineno-0-562"></a>        <span class="p">)</span>
+</span><span id="__span-0-563"><a id="__codelineno-0-563" name="__codelineno-0-563"></a>
+</span><span id="__span-0-564"><a id="__codelineno-0-564" name="__codelineno-0-564"></a>        <span class="k">for</span> <span class="n">output_chunk_bb</span><span class="p">,</span> <span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span> <span class="n">block_index</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
+</span><span id="__span-0-565"><a id="__codelineno-0-565" name="__codelineno-0-565"></a>            <span class="n">output_chunk_bbs</span><span class="p">,</span> <span class="n">output_chunk_bbs_with_overlap</span><span class="p">,</span> <span class="n">block_indices</span>
+</span><span id="__span-0-566"><a id="__codelineno-0-566" name="__codelineno-0-566"></a>        <span class="p">):</span>
+</span><span id="__span-0-567"><a id="__codelineno-0-567" name="__codelineno-0-567"></a>            <span class="c1"># Look up candidate tiles via the pre-built mapping (O(1) per chunk).</span>
+</span><span id="__span-0-568"><a id="__codelineno-0-568" name="__codelineno-0-568"></a>            <span class="n">candidate_view_indices</span> <span class="o">=</span> <span class="n">_chunk_to_tiles</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">block_index</span><span class="p">),</span> <span class="p">[])</span>
+</span><span id="__span-0-569"><a id="__codelineno-0-569" name="__codelineno-0-569"></a>
+</span><span id="__span-0-570"><a id="__codelineno-0-570" name="__codelineno-0-570"></a>            <span class="n">views_overlap_bb</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">sims</span><span class="p">)</span>
+</span><span id="__span-0-571"><a id="__codelineno-0-571" name="__codelineno-0-571"></a>            <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">candidate_view_indices</span><span class="p">:</span>
+</span><span id="__span-0-572"><a id="__codelineno-0-572" name="__codelineno-0-572"></a>                <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">get_overlap_for_bbs</span><span class="p">(</span>
+</span><span id="__span-0-573"><a id="__codelineno-0-573" name="__codelineno-0-573"></a>                    <span class="n">target_bb</span><span class="o">=</span><span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span>
+</span><span id="__span-0-574"><a id="__codelineno-0-574" name="__codelineno-0-574"></a>                    <span class="n">query_bbs</span><span class="o">=</span><span class="p">[</span><span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">]],</span>
+</span><span id="__span-0-575"><a id="__codelineno-0-575" name="__codelineno-0-575"></a>                    <span class="n">param</span><span class="o">=</span><span class="n">inv_sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">],</span>
+</span><span id="__span-0-576"><a id="__codelineno-0-576" name="__codelineno-0-576"></a>                    <span class="n">additional_extent_in_pixels</span><span class="o">=</span><span class="p">{</span>
+</span><span id="__span-0-577"><a id="__codelineno-0-577" name="__codelineno-0-577"></a>                        <span class="n">dim</span><span class="p">:</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">fix_dims</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="n">interpolation_order</span><span class="p">)</span>
+</span><span id="__span-0-578"><a id="__codelineno-0-578" name="__codelineno-0-578"></a>                        <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span>
+</span><span id="__span-0-579"><a id="__codelineno-0-579" name="__codelineno-0-579"></a>                    <span class="p">},</span>
+</span><span id="__span-0-580"><a id="__codelineno-0-580" name="__codelineno-0-580"></a>                    <span class="n">param_is_inverse</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-581"><a id="__codelineno-0-581" name="__codelineno-0-581"></a>                <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
 </span><span id="__span-0-582"><a id="__codelineno-0-582" name="__codelineno-0-582"></a>
-</span><span id="__span-0-583"><a id="__codelineno-0-583" name="__codelineno-0-583"></a>            <span class="n">fused_output_chunk</span> <span class="o">=</span> <span class="n">delayed</span><span class="p">(</span>
-</span><span id="__span-0-584"><a id="__codelineno-0-584" name="__codelineno-0-584"></a>                <span class="k">lambda</span> <span class="n">append_leading_axis</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">fuse_np</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)[</span>
-</span><span id="__span-0-585"><a id="__codelineno-0-585" name="__codelineno-0-585"></a>                    <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
-</span><span id="__span-0-586"><a id="__codelineno-0-586" name="__codelineno-0-586"></a>                <span class="p">]</span>
-</span><span id="__span-0-587"><a id="__codelineno-0-587" name="__codelineno-0-587"></a>                <span class="k">if</span> <span class="n">append_leading_axis</span>
-</span><span id="__span-0-588"><a id="__codelineno-0-588" name="__codelineno-0-588"></a>                <span class="k">else</span> <span class="n">fuse_np</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">),</span>
-</span><span id="__span-0-589"><a id="__codelineno-0-589" name="__codelineno-0-589"></a>            <span class="p">)(</span>
-</span><span id="__span-0-590"><a id="__codelineno-0-590" name="__codelineno-0-590"></a>                <span class="n">append_leading_axis</span><span class="o">=</span><span class="n">fuse_planewise</span><span class="p">,</span>
-</span><span id="__span-0-591"><a id="__codelineno-0-591" name="__codelineno-0-591"></a>                <span class="n">sims</span><span class="o">=</span><span class="n">sims_slices</span><span class="p">,</span>
-</span><span id="__span-0-592"><a id="__codelineno-0-592" name="__codelineno-0-592"></a>                <span class="n">params</span><span class="o">=</span><span class="n">tmp_params</span><span class="p">,</span>
-</span><span id="__span-0-593"><a id="__codelineno-0-593" name="__codelineno-0-593"></a>                <span class="n">output_properties</span><span class="o">=</span><span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span>
-</span><span id="__span-0-594"><a id="__codelineno-0-594" name="__codelineno-0-594"></a>                <span class="n">fusion_func</span><span class="o">=</span><span class="n">fusion_func</span><span class="p">,</span>
-</span><span id="__span-0-595"><a id="__codelineno-0-595" name="__codelineno-0-595"></a>                <span class="n">fusion_method_kwargs</span><span class="o">=</span><span class="n">fusion_method_kwargs</span><span class="p">,</span>
-</span><span id="__span-0-596"><a id="__codelineno-0-596" name="__codelineno-0-596"></a>                <span class="n">weights_func</span><span class="o">=</span><span class="n">weights_func</span><span class="p">,</span>
-</span><span id="__span-0-597"><a id="__codelineno-0-597" name="__codelineno-0-597"></a>                <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="n">weights_func_kwargs</span><span class="p">,</span>
-</span><span id="__span-0-598"><a id="__codelineno-0-598" name="__codelineno-0-598"></a>                <span class="n">trim_overlap_in_pixels</span><span class="o">=</span><span class="n">overlap_in_pixels</span><span class="p">,</span>
-</span><span id="__span-0-599"><a id="__codelineno-0-599" name="__codelineno-0-599"></a>                <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
-</span><span id="__span-0-600"><a id="__codelineno-0-600" name="__codelineno-0-600"></a>                <span class="n">full_view_bbs</span><span class="o">=</span><span class="n">full_view_bbs</span><span class="p">,</span>
-</span><span id="__span-0-601"><a id="__codelineno-0-601" name="__codelineno-0-601"></a>                <span class="n">blending_widths</span><span class="o">=</span><span class="n">blending_widths</span><span class="p">,</span>
-</span><span id="__span-0-602"><a id="__codelineno-0-602" name="__codelineno-0-602"></a>            <span class="p">)</span>
-</span><span id="__span-0-603"><a id="__codelineno-0-603" name="__codelineno-0-603"></a>
-</span><span id="__span-0-604"><a id="__codelineno-0-604" name="__codelineno-0-604"></a>            <span class="n">fused_output_chunk</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
-</span><span id="__span-0-605"><a id="__codelineno-0-605" name="__codelineno-0-605"></a>                <span class="n">fused_output_chunk</span><span class="p">,</span>
-</span><span id="__span-0-606"><a id="__codelineno-0-606" name="__codelineno-0-606"></a>                <span class="n">shape</span><span class="o">=</span><span class="nb">tuple</span><span class="p">([</span><span class="n">output_chunk_bb</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]),</span>
-</span><span id="__span-0-607"><a id="__codelineno-0-607" name="__codelineno-0-607"></a>                <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
-</span><span id="__span-0-608"><a id="__codelineno-0-608" name="__codelineno-0-608"></a>            <span class="p">)</span>
-</span><span id="__span-0-609"><a id="__codelineno-0-609" name="__codelineno-0-609"></a>
-</span><span id="__span-0-610"><a id="__codelineno-0-610" name="__codelineno-0-610"></a>            <span class="n">fused_output_chunks</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">block_index</span><span class="p">)]</span> <span class="o">=</span> <span class="n">fused_output_chunk</span>
-</span><span id="__span-0-611"><a id="__codelineno-0-611" name="__codelineno-0-611"></a>
-</span><span id="__span-0-612"><a id="__codelineno-0-612" name="__codelineno-0-612"></a>        <span class="n">fused</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">block</span><span class="p">(</span><span class="n">fused_output_chunks</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
-</span><span id="__span-0-613"><a id="__codelineno-0-613" name="__codelineno-0-613"></a>
-</span><span id="__span-0-614"><a id="__codelineno-0-614" name="__codelineno-0-614"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">to_spatial_image</span><span class="p">(</span>
-</span><span id="__span-0-615"><a id="__codelineno-0-615" name="__codelineno-0-615"></a>            <span class="n">fused</span><span class="p">,</span>
-</span><span id="__span-0-616"><a id="__codelineno-0-616" name="__codelineno-0-616"></a>            <span class="n">dims</span><span class="o">=</span><span class="n">sdims</span><span class="p">,</span>
-</span><span id="__span-0-617"><a id="__codelineno-0-617" name="__codelineno-0-617"></a>            <span class="n">scale</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;spacing&quot;</span><span class="p">],</span>
-</span><span id="__span-0-618"><a id="__codelineno-0-618" name="__codelineno-0-618"></a>            <span class="n">translation</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;origin&quot;</span><span class="p">],</span>
-</span><span id="__span-0-619"><a id="__codelineno-0-619" name="__codelineno-0-619"></a>        <span class="p">)</span>
-</span><span id="__span-0-620"><a id="__codelineno-0-620" name="__codelineno-0-620"></a>
-</span><span id="__span-0-621"><a id="__codelineno-0-621" name="__codelineno-0-621"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">expand_dims</span><span class="p">(</span><span class="n">nsdims</span><span class="p">)</span>
-</span><span id="__span-0-622"><a id="__codelineno-0-622" name="__codelineno-0-622"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span>
-</span><span id="__span-0-623"><a id="__codelineno-0-623" name="__codelineno-0-623"></a>            <span class="p">{</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="p">[</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">values</span><span class="p">]</span> <span class="k">for</span> <span class="n">ns_coord</span> <span class="ow">in</span> <span class="n">ns_coords</span><span class="p">}</span>
-</span><span id="__span-0-624"><a id="__codelineno-0-624" name="__codelineno-0-624"></a>        <span class="p">)</span>
-</span><span id="__span-0-625"><a id="__codelineno-0-625" name="__codelineno-0-625"></a>        <span class="n">merges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">merge</span><span class="p">)</span>
-</span><span id="__span-0-626"><a id="__codelineno-0-626" name="__codelineno-0-626"></a>
-</span><span id="__span-0-627"><a id="__codelineno-0-627" name="__codelineno-0-627"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">merges</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-</span><span id="__span-0-628"><a id="__codelineno-0-628" name="__codelineno-0-628"></a>        <span class="c1"># suppress pandas future warning occuring within xarray.concat</span>
-</span><span id="__span-0-629"><a id="__codelineno-0-629" name="__codelineno-0-629"></a>        <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">():</span>
-</span><span id="__span-0-630"><a id="__codelineno-0-630" name="__codelineno-0-630"></a>            <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="n">action</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">FutureWarning</span><span class="p">)</span>
+</span><span id="__span-0-583"><a id="__codelineno-0-583" name="__codelineno-0-583"></a>            <span class="c1"># append to output</span>
+</span><span id="__span-0-584"><a id="__codelineno-0-584" name="__codelineno-0-584"></a>            <span class="n">relevant_view_indices</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+</span><span id="__span-0-585"><a id="__codelineno-0-585" name="__codelineno-0-585"></a>                <span class="p">[</span>
+</span><span id="__span-0-586"><a id="__codelineno-0-586" name="__codelineno-0-586"></a>                    <span class="n">view_overlap_bb</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+</span><span id="__span-0-587"><a id="__codelineno-0-587" name="__codelineno-0-587"></a>                    <span class="k">for</span> <span class="n">view_overlap_bb</span> <span class="ow">in</span> <span class="n">views_overlap_bb</span>
+</span><span id="__span-0-588"><a id="__codelineno-0-588" name="__codelineno-0-588"></a>                <span class="p">]</span>
+</span><span id="__span-0-589"><a id="__codelineno-0-589" name="__codelineno-0-589"></a>            <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+</span><span id="__span-0-590"><a id="__codelineno-0-590" name="__codelineno-0-590"></a>
+</span><span id="__span-0-591"><a id="__codelineno-0-591" name="__codelineno-0-591"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">relevant_view_indices</span><span class="p">):</span>
+</span><span id="__span-0-592"><a id="__codelineno-0-592" name="__codelineno-0-592"></a>                <span class="n">fused_output_chunks</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">block_index</span><span class="p">)]</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span>
+</span><span id="__span-0-593"><a id="__codelineno-0-593" name="__codelineno-0-593"></a>                    <span class="nb">tuple</span><span class="p">([</span><span class="n">output_chunk_bb</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]),</span>
+</span><span id="__span-0-594"><a id="__codelineno-0-594" name="__codelineno-0-594"></a>                    <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+</span><span id="__span-0-595"><a id="__codelineno-0-595" name="__codelineno-0-595"></a>                <span class="p">)</span>
+</span><span id="__span-0-596"><a id="__codelineno-0-596" name="__codelineno-0-596"></a>                <span class="k">continue</span>
+</span><span id="__span-0-597"><a id="__codelineno-0-597" name="__codelineno-0-597"></a>
+</span><span id="__span-0-598"><a id="__codelineno-0-598" name="__codelineno-0-598"></a>            <span class="n">tol</span> <span class="o">=</span> <span class="mf">1e-6</span>
+</span><span id="__span-0-599"><a id="__codelineno-0-599" name="__codelineno-0-599"></a>            <span class="n">sims_slices</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-600"><a id="__codelineno-0-600" name="__codelineno-0-600"></a>                <span class="n">sims</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span>
+</span><span id="__span-0-601"><a id="__codelineno-0-601" name="__codelineno-0-601"></a>                    <span class="n">sim_coord_dict</span>
+</span><span id="__span-0-602"><a id="__codelineno-0-602" name="__codelineno-0-602"></a>                    <span class="o">|</span> <span class="p">{</span>
+</span><span id="__span-0-603"><a id="__codelineno-0-603" name="__codelineno-0-603"></a>                        <span class="n">dim</span><span class="p">:</span> <span class="nb">slice</span><span class="p">(</span>
+</span><span id="__span-0-604"><a id="__codelineno-0-604" name="__codelineno-0-604"></a>                            <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;origin&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="o">-</span> <span class="n">tol</span><span class="p">,</span>
+</span><span id="__span-0-605"><a id="__codelineno-0-605" name="__codelineno-0-605"></a>                            <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;origin&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span>
+</span><span id="__span-0-606"><a id="__codelineno-0-606" name="__codelineno-0-606"></a>                            <span class="o">+</span> <span class="p">(</span><span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+</span><span id="__span-0-607"><a id="__codelineno-0-607" name="__codelineno-0-607"></a>                            <span class="o">*</span> <span class="n">views_overlap_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">][</span><span class="s2">&quot;spacing&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span>
+</span><span id="__span-0-608"><a id="__codelineno-0-608" name="__codelineno-0-608"></a>                            <span class="o">+</span> <span class="n">tol</span><span class="p">,</span>
+</span><span id="__span-0-609"><a id="__codelineno-0-609" name="__codelineno-0-609"></a>                        <span class="p">)</span>
+</span><span id="__span-0-610"><a id="__codelineno-0-610" name="__codelineno-0-610"></a>                        <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span>
+</span><span id="__span-0-611"><a id="__codelineno-0-611" name="__codelineno-0-611"></a>                    <span class="p">},</span>
+</span><span id="__span-0-612"><a id="__codelineno-0-612" name="__codelineno-0-612"></a>                    <span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-613"><a id="__codelineno-0-613" name="__codelineno-0-613"></a>                <span class="p">)</span>
+</span><span id="__span-0-614"><a id="__codelineno-0-614" name="__codelineno-0-614"></a>                <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
+</span><span id="__span-0-615"><a id="__codelineno-0-615" name="__codelineno-0-615"></a>            <span class="p">]</span>
+</span><span id="__span-0-616"><a id="__codelineno-0-616" name="__codelineno-0-616"></a>
+</span><span id="__span-0-617"><a id="__codelineno-0-617" name="__codelineno-0-617"></a>            <span class="c1"># determine whether to fuse plany by plane</span>
+</span><span id="__span-0-618"><a id="__codelineno-0-618" name="__codelineno-0-618"></a>            <span class="c1">#  to avoid weighting edge artifacts</span>
+</span><span id="__span-0-619"><a id="__codelineno-0-619" name="__codelineno-0-619"></a>            <span class="c1"># fuse planewise if:</span>
+</span><span id="__span-0-620"><a id="__codelineno-0-620" name="__codelineno-0-620"></a>            <span class="c1"># - z dimension is present</span>
+</span><span id="__span-0-621"><a id="__codelineno-0-621" name="__codelineno-0-621"></a>            <span class="c1"># - params don&#39;t affect z dimension</span>
+</span><span id="__span-0-622"><a id="__codelineno-0-622" name="__codelineno-0-622"></a>            <span class="c1"># - shape in z dimension is 1 (i.e. only one plane)</span>
+</span><span id="__span-0-623"><a id="__codelineno-0-623" name="__codelineno-0-623"></a>            <span class="c1"># (the last criterium above could be dropped if we find a way</span>
+</span><span id="__span-0-624"><a id="__codelineno-0-624" name="__codelineno-0-624"></a>            <span class="c1"># (to propagate metadata through xr.apply_ufunc)</span>
+</span><span id="__span-0-625"><a id="__codelineno-0-625" name="__codelineno-0-625"></a>
+</span><span id="__span-0-626"><a id="__codelineno-0-626" name="__codelineno-0-626"></a>            <span class="k">if</span> <span class="p">(</span>
+</span><span id="__span-0-627"><a id="__codelineno-0-627" name="__codelineno-0-627"></a>                <span class="s2">&quot;z&quot;</span> <span class="ow">in</span> <span class="n">fix_dims</span>
+</span><span id="__span-0-628"><a id="__codelineno-0-628" name="__codelineno-0-628"></a>                <span class="ow">and</span> <span class="n">output_chunk_bb_with_overlap</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="s2">&quot;z&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span>
+</span><span id="__span-0-629"><a id="__codelineno-0-629" name="__codelineno-0-629"></a>            <span class="p">):</span>
+</span><span id="__span-0-630"><a id="__codelineno-0-630" name="__codelineno-0-630"></a>                <span class="n">fuse_planewise</span> <span class="o">=</span> <span class="kc">True</span>
 </span><span id="__span-0-631"><a id="__codelineno-0-631" name="__codelineno-0-631"></a>
-</span><span id="__span-0-632"><a id="__codelineno-0-632" name="__codelineno-0-632"></a>            <span class="c1"># if sims are named, combine_by_coord returns a dataset</span>
-</span><span id="__span-0-633"><a id="__codelineno-0-633" name="__codelineno-0-633"></a>            <span class="n">res</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">combine_by_coords</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">merges</span><span class="p">])</span>
-</span><span id="__span-0-634"><a id="__codelineno-0-634" name="__codelineno-0-634"></a>    <span class="k">else</span><span class="p">:</span>
-</span><span id="__span-0-635"><a id="__codelineno-0-635" name="__codelineno-0-635"></a>        <span class="n">res</span> <span class="o">=</span> <span class="n">merge</span>
-</span><span id="__span-0-636"><a id="__codelineno-0-636" name="__codelineno-0-636"></a>
-</span><span id="__span-0-637"><a id="__codelineno-0-637" name="__codelineno-0-637"></a>    <span class="n">res</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_xim</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
-</span><span id="__span-0-638"><a id="__codelineno-0-638" name="__codelineno-0-638"></a>    <span class="n">si_utils</span><span class="o">.</span><span class="n">set_sim_affine</span><span class="p">(</span>
-</span><span id="__span-0-639"><a id="__codelineno-0-639" name="__codelineno-0-639"></a>        <span class="n">res</span><span class="p">,</span>
-</span><span id="__span-0-640"><a id="__codelineno-0-640" name="__codelineno-0-640"></a>        <span class="n">param_utils</span><span class="o">.</span><span class="n">identity_transform</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sdims</span><span class="p">)),</span>
-</span><span id="__span-0-641"><a id="__codelineno-0-641" name="__codelineno-0-641"></a>        <span class="n">transform_key</span><span class="p">,</span>
-</span><span id="__span-0-642"><a id="__codelineno-0-642" name="__codelineno-0-642"></a>    <span class="p">)</span>
-</span><span id="__span-0-643"><a id="__codelineno-0-643" name="__codelineno-0-643"></a>
-</span><span id="__span-0-644"><a id="__codelineno-0-644" name="__codelineno-0-644"></a>    <span class="c1"># order channels in the same way as first input sim</span>
-</span><span id="__span-0-645"><a id="__codelineno-0-645" name="__codelineno-0-645"></a>    <span class="c1"># (combine_by_coords may change coordinate order)</span>
-</span><span id="__span-0-646"><a id="__codelineno-0-646" name="__codelineno-0-646"></a>    <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">dims</span><span class="p">:</span>
-</span><span id="__span-0-647"><a id="__codelineno-0-647" name="__codelineno-0-647"></a>        <span class="n">res</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">sel</span><span class="p">({</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">})</span>
-</span><span id="__span-0-648"><a id="__codelineno-0-648" name="__codelineno-0-648"></a>
-</span><span id="__span-0-649"><a id="__codelineno-0-649" name="__codelineno-0-649"></a>    <span class="k">return</span> <span class="n">res</span>
+</span><span id="__span-0-632"><a id="__codelineno-0-632" name="__codelineno-0-632"></a>                <span class="n">sims_slices</span> <span class="o">=</span> <span class="p">[</span><span class="n">sim</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">z</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">sim</span> <span class="ow">in</span> <span class="n">sims_slices</span><span class="p">]</span>
+</span><span id="__span-0-633"><a id="__codelineno-0-633" name="__codelineno-0-633"></a>                <span class="n">tmp_params</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-634"><a id="__codelineno-0-634" name="__codelineno-0-634"></a>                    <span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span>
+</span><span id="__span-0-635"><a id="__codelineno-0-635" name="__codelineno-0-635"></a>                        <span class="n">x_in</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">],</span>
+</span><span id="__span-0-636"><a id="__codelineno-0-636" name="__codelineno-0-636"></a>                        <span class="n">x_out</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">],</span>
+</span><span id="__span-0-637"><a id="__codelineno-0-637" name="__codelineno-0-637"></a>                    <span class="p">)</span>
+</span><span id="__span-0-638"><a id="__codelineno-0-638" name="__codelineno-0-638"></a>                    <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
+</span><span id="__span-0-639"><a id="__codelineno-0-639" name="__codelineno-0-639"></a>                <span class="p">]</span>
+</span><span id="__span-0-640"><a id="__codelineno-0-640" name="__codelineno-0-640"></a>
+</span><span id="__span-0-641"><a id="__codelineno-0-641" name="__codelineno-0-641"></a>                <span class="n">output_chunk_bb_with_overlap</span> <span class="o">=</span> <span class="n">mv_graph</span><span class="o">.</span><span class="n">project_bb_along_dim</span><span class="p">(</span>
+</span><span id="__span-0-642"><a id="__codelineno-0-642" name="__codelineno-0-642"></a>                    <span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;z&quot;</span>
+</span><span id="__span-0-643"><a id="__codelineno-0-643" name="__codelineno-0-643"></a>                <span class="p">)</span>
+</span><span id="__span-0-644"><a id="__codelineno-0-644" name="__codelineno-0-644"></a>
+</span><span id="__span-0-645"><a id="__codelineno-0-645" name="__codelineno-0-645"></a>                <span class="n">full_view_bbs</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-646"><a id="__codelineno-0-646" name="__codelineno-0-646"></a>                    <span class="n">mv_graph</span><span class="o">.</span><span class="n">project_bb_along_dim</span><span class="p">(</span><span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;z&quot;</span><span class="p">)</span>
+</span><span id="__span-0-647"><a id="__codelineno-0-647" name="__codelineno-0-647"></a>                    <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
+</span><span id="__span-0-648"><a id="__codelineno-0-648" name="__codelineno-0-648"></a>                <span class="p">]</span>
+</span><span id="__span-0-649"><a id="__codelineno-0-649" name="__codelineno-0-649"></a>
+</span><span id="__span-0-650"><a id="__codelineno-0-650" name="__codelineno-0-650"></a>            <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-0-651"><a id="__codelineno-0-651" name="__codelineno-0-651"></a>                <span class="n">fuse_planewise</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="__span-0-652"><a id="__codelineno-0-652" name="__codelineno-0-652"></a>                <span class="n">tmp_params</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-653"><a id="__codelineno-0-653" name="__codelineno-0-653"></a>                    <span class="n">sparams</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
+</span><span id="__span-0-654"><a id="__codelineno-0-654" name="__codelineno-0-654"></a>                <span class="p">]</span>
+</span><span id="__span-0-655"><a id="__codelineno-0-655" name="__codelineno-0-655"></a>                <span class="n">full_view_bbs</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-656"><a id="__codelineno-0-656" name="__codelineno-0-656"></a>                    <span class="n">views_bb</span><span class="p">[</span><span class="n">iview</span><span class="p">]</span> <span class="k">for</span> <span class="n">iview</span> <span class="ow">in</span> <span class="n">relevant_view_indices</span>
+</span><span id="__span-0-657"><a id="__codelineno-0-657" name="__codelineno-0-657"></a>                <span class="p">]</span>
+</span><span id="__span-0-658"><a id="__codelineno-0-658" name="__codelineno-0-658"></a>
+</span><span id="__span-0-659"><a id="__codelineno-0-659" name="__codelineno-0-659"></a>            <span class="n">fused_output_chunk</span> <span class="o">=</span> <span class="n">delayed</span><span class="p">(</span>
+</span><span id="__span-0-660"><a id="__codelineno-0-660" name="__codelineno-0-660"></a>                <span class="k">lambda</span> <span class="n">append_leading_axis</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">fuse_np</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)[</span>
+</span><span id="__span-0-661"><a id="__codelineno-0-661" name="__codelineno-0-661"></a>                    <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span>
+</span><span id="__span-0-662"><a id="__codelineno-0-662" name="__codelineno-0-662"></a>                <span class="p">]</span>
+</span><span id="__span-0-663"><a id="__codelineno-0-663" name="__codelineno-0-663"></a>                <span class="k">if</span> <span class="n">append_leading_axis</span>
+</span><span id="__span-0-664"><a id="__codelineno-0-664" name="__codelineno-0-664"></a>                <span class="k">else</span> <span class="n">fuse_np</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">),</span>
+</span><span id="__span-0-665"><a id="__codelineno-0-665" name="__codelineno-0-665"></a>            <span class="p">)(</span>
+</span><span id="__span-0-666"><a id="__codelineno-0-666" name="__codelineno-0-666"></a>                <span class="n">append_leading_axis</span><span class="o">=</span><span class="n">fuse_planewise</span><span class="p">,</span>
+</span><span id="__span-0-667"><a id="__codelineno-0-667" name="__codelineno-0-667"></a>                <span class="n">sims</span><span class="o">=</span><span class="n">sims_slices</span><span class="p">,</span>
+</span><span id="__span-0-668"><a id="__codelineno-0-668" name="__codelineno-0-668"></a>                <span class="n">params</span><span class="o">=</span><span class="n">tmp_params</span><span class="p">,</span>
+</span><span id="__span-0-669"><a id="__codelineno-0-669" name="__codelineno-0-669"></a>                <span class="n">output_properties</span><span class="o">=</span><span class="n">output_chunk_bb_with_overlap</span><span class="p">,</span>
+</span><span id="__span-0-670"><a id="__codelineno-0-670" name="__codelineno-0-670"></a>                <span class="n">fusion_func</span><span class="o">=</span><span class="n">fusion_func</span><span class="p">,</span>
+</span><span id="__span-0-671"><a id="__codelineno-0-671" name="__codelineno-0-671"></a>                <span class="n">fusion_method_kwargs</span><span class="o">=</span><span class="n">fusion_method_kwargs</span><span class="p">,</span>
+</span><span id="__span-0-672"><a id="__codelineno-0-672" name="__codelineno-0-672"></a>                <span class="n">weights_func</span><span class="o">=</span><span class="n">weights_func</span><span class="p">,</span>
+</span><span id="__span-0-673"><a id="__codelineno-0-673" name="__codelineno-0-673"></a>                <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="n">weights_func_kwargs</span><span class="p">,</span>
+</span><span id="__span-0-674"><a id="__codelineno-0-674" name="__codelineno-0-674"></a>                <span class="n">trim_overlap_in_pixels</span><span class="o">=</span><span class="n">overlap_in_pixels</span><span class="p">,</span>
+</span><span id="__span-0-675"><a id="__codelineno-0-675" name="__codelineno-0-675"></a>                <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-0-676"><a id="__codelineno-0-676" name="__codelineno-0-676"></a>                <span class="n">full_view_bbs</span><span class="o">=</span><span class="n">full_view_bbs</span><span class="p">,</span>
+</span><span id="__span-0-677"><a id="__codelineno-0-677" name="__codelineno-0-677"></a>                <span class="n">blending_widths</span><span class="o">=</span><span class="n">blending_widths</span><span class="p">,</span>
+</span><span id="__span-0-678"><a id="__codelineno-0-678" name="__codelineno-0-678"></a>            <span class="p">)</span>
+</span><span id="__span-0-679"><a id="__codelineno-0-679" name="__codelineno-0-679"></a>
+</span><span id="__span-0-680"><a id="__codelineno-0-680" name="__codelineno-0-680"></a>            <span class="n">fused_output_chunk</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
+</span><span id="__span-0-681"><a id="__codelineno-0-681" name="__codelineno-0-681"></a>                <span class="n">fused_output_chunk</span><span class="p">,</span>
+</span><span id="__span-0-682"><a id="__codelineno-0-682" name="__codelineno-0-682"></a>                <span class="n">shape</span><span class="o">=</span><span class="nb">tuple</span><span class="p">([</span><span class="n">output_chunk_bb</span><span class="p">[</span><span class="s2">&quot;shape&quot;</span><span class="p">][</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">]),</span>
+</span><span id="__span-0-683"><a id="__codelineno-0-683" name="__codelineno-0-683"></a>                <span class="n">dtype</span><span class="o">=</span><span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+</span><span id="__span-0-684"><a id="__codelineno-0-684" name="__codelineno-0-684"></a>            <span class="p">)</span>
+</span><span id="__span-0-685"><a id="__codelineno-0-685" name="__codelineno-0-685"></a>
+</span><span id="__span-0-686"><a id="__codelineno-0-686" name="__codelineno-0-686"></a>            <span class="n">fused_output_chunks</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">block_index</span><span class="p">)]</span> <span class="o">=</span> <span class="n">fused_output_chunk</span>
+</span><span id="__span-0-687"><a id="__codelineno-0-687" name="__codelineno-0-687"></a>
+</span><span id="__span-0-688"><a id="__codelineno-0-688" name="__codelineno-0-688"></a>        <span class="n">fused</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">block</span><span class="p">(</span><span class="n">fused_output_chunks</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+</span><span id="__span-0-689"><a id="__codelineno-0-689" name="__codelineno-0-689"></a>
+</span><span id="__span-0-690"><a id="__codelineno-0-690" name="__codelineno-0-690"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">to_spatial_image</span><span class="p">(</span>
+</span><span id="__span-0-691"><a id="__codelineno-0-691" name="__codelineno-0-691"></a>            <span class="n">fused</span><span class="p">,</span>
+</span><span id="__span-0-692"><a id="__codelineno-0-692" name="__codelineno-0-692"></a>            <span class="n">dims</span><span class="o">=</span><span class="n">sdims</span><span class="p">,</span>
+</span><span id="__span-0-693"><a id="__codelineno-0-693" name="__codelineno-0-693"></a>            <span class="n">scale</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;spacing&quot;</span><span class="p">],</span>
+</span><span id="__span-0-694"><a id="__codelineno-0-694" name="__codelineno-0-694"></a>            <span class="n">translation</span><span class="o">=</span><span class="n">output_stack_properties</span><span class="p">[</span><span class="s2">&quot;origin&quot;</span><span class="p">],</span>
+</span><span id="__span-0-695"><a id="__codelineno-0-695" name="__codelineno-0-695"></a>        <span class="p">)</span>
+</span><span id="__span-0-696"><a id="__codelineno-0-696" name="__codelineno-0-696"></a>
+</span><span id="__span-0-697"><a id="__codelineno-0-697" name="__codelineno-0-697"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">expand_dims</span><span class="p">(</span><span class="n">nsdims</span><span class="p">)</span>
+</span><span id="__span-0-698"><a id="__codelineno-0-698" name="__codelineno-0-698"></a>        <span class="n">merge</span> <span class="o">=</span> <span class="n">merge</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span>
+</span><span id="__span-0-699"><a id="__codelineno-0-699" name="__codelineno-0-699"></a>            <span class="p">{</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="p">[</span><span class="n">ns_coord</span><span class="o">.</span><span class="n">values</span><span class="p">]</span> <span class="k">for</span> <span class="n">ns_coord</span> <span class="ow">in</span> <span class="n">ns_coords</span><span class="p">}</span>
+</span><span id="__span-0-700"><a id="__codelineno-0-700" name="__codelineno-0-700"></a>        <span class="p">)</span>
+</span><span id="__span-0-701"><a id="__codelineno-0-701" name="__codelineno-0-701"></a>        <span class="n">merges</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">merge</span><span class="p">)</span>
+</span><span id="__span-0-702"><a id="__codelineno-0-702" name="__codelineno-0-702"></a>
+</span><span id="__span-0-703"><a id="__codelineno-0-703" name="__codelineno-0-703"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">merges</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+</span><span id="__span-0-704"><a id="__codelineno-0-704" name="__codelineno-0-704"></a>        <span class="c1"># suppress pandas future warning occuring within xarray.concat</span>
+</span><span id="__span-0-705"><a id="__codelineno-0-705" name="__codelineno-0-705"></a>        <span class="k">with</span> <span class="n">warnings</span><span class="o">.</span><span class="n">catch_warnings</span><span class="p">():</span>
+</span><span id="__span-0-706"><a id="__codelineno-0-706" name="__codelineno-0-706"></a>            <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="n">action</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">FutureWarning</span><span class="p">)</span>
+</span><span id="__span-0-707"><a id="__codelineno-0-707" name="__codelineno-0-707"></a>
+</span><span id="__span-0-708"><a id="__codelineno-0-708" name="__codelineno-0-708"></a>            <span class="c1"># if sims are named, combine_by_coord returns a dataset</span>
+</span><span id="__span-0-709"><a id="__codelineno-0-709" name="__codelineno-0-709"></a>            <span class="n">res</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">combine_by_coords</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">merges</span><span class="p">])</span>
+</span><span id="__span-0-710"><a id="__codelineno-0-710" name="__codelineno-0-710"></a>    <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-0-711"><a id="__codelineno-0-711" name="__codelineno-0-711"></a>        <span class="n">res</span> <span class="o">=</span> <span class="n">merge</span>
+</span><span id="__span-0-712"><a id="__codelineno-0-712" name="__codelineno-0-712"></a>
+</span><span id="__span-0-713"><a id="__codelineno-0-713" name="__codelineno-0-713"></a>    <span class="n">res</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_xim</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+</span><span id="__span-0-714"><a id="__codelineno-0-714" name="__codelineno-0-714"></a>    <span class="n">si_utils</span><span class="o">.</span><span class="n">set_sim_affine</span><span class="p">(</span>
+</span><span id="__span-0-715"><a id="__codelineno-0-715" name="__codelineno-0-715"></a>        <span class="n">res</span><span class="p">,</span>
+</span><span id="__span-0-716"><a id="__codelineno-0-716" name="__codelineno-0-716"></a>        <span class="n">param_utils</span><span class="o">.</span><span class="n">identity_transform</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sdims</span><span class="p">)),</span>
+</span><span id="__span-0-717"><a id="__codelineno-0-717" name="__codelineno-0-717"></a>        <span class="n">transform_key</span><span class="p">,</span>
+</span><span id="__span-0-718"><a id="__codelineno-0-718" name="__codelineno-0-718"></a>    <span class="p">)</span>
+</span><span id="__span-0-719"><a id="__codelineno-0-719" name="__codelineno-0-719"></a>
+</span><span id="__span-0-720"><a id="__codelineno-0-720" name="__codelineno-0-720"></a>    <span class="c1"># order channels in the same way as first input sim</span>
+</span><span id="__span-0-721"><a id="__codelineno-0-721" name="__codelineno-0-721"></a>    <span class="c1"># (combine_by_coords may change coordinate order)</span>
+</span><span id="__span-0-722"><a id="__codelineno-0-722" name="__codelineno-0-722"></a>    <span class="k">if</span> <span class="s2">&quot;c&quot;</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">dims</span><span class="p">:</span>
+</span><span id="__span-0-723"><a id="__codelineno-0-723" name="__codelineno-0-723"></a>        <span class="n">res</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">sel</span><span class="p">({</span><span class="s2">&quot;c&quot;</span><span class="p">:</span> <span class="n">sims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">coords</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">})</span>
+</span><span id="__span-0-724"><a id="__codelineno-0-724" name="__codelineno-0-724"></a>
+</span><span id="__span-0-725"><a id="__codelineno-0-725" name="__codelineno-0-725"></a>    <span class="k">return</span> <span class="n">res</span>
 </span></code></pre></div></td></tr></table></div>
             </details>
     </div>
