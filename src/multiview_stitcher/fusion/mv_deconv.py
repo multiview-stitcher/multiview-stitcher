@@ -1,26 +1,4 @@
-"""
-Bayesian multi-view deconvolution fusion.
-
-Implements the efficient Bayesian-based multiview deconvolution method from:
-
-    Preibisch et al., "Efficient Bayesian-based multiview deconvolution",
-    Nature Methods 11, 645–648 (2014). https://doi.org/10.1038/nmeth.2929
-
-Algorithm (sequential per-view update):
-    Initialise *ψ* as a blending-weighted average of the input views.
-    For each iteration:
-        For each view v:
-            1. Forward:     blurred  = convolve(ψ, PSF_v)
-            2. Quotient:    ratio    = img_v / blurred  (1 where no image data)
-            3. Back-project: integral = convolve(ratio, kernel2_v)
-            4. Update:      ψ ← ψ + (clamp(ψ · integral) − ψ) · w_v
-
-The back-projection kernel (``kernel2``) is a compound kernel derived from all
-view PSFs.  Four variants are provided (see :class:`PSFType`).
-
-Based on the BigStitcher / multiview-reconstruction implementation:
-    https://github.com/JaneliaSciComp/multiview-reconstruction
-"""
+"""Multi-view deconvolution fusion."""
 
 import logging
 from enum import Enum
@@ -190,7 +168,7 @@ def _compute_compound_kernel(v_idx, psfs, psf_type):
 
     All calculations are performed on the CPU with numpy/scipy regardless of
     where the image data lives; the result is moved to the target device in
-    :func:`bayesian_fusion`.
+    :func:`multi_view_deconvolution`.
 
     Parameters
     ----------
@@ -258,7 +236,7 @@ def _compute_compound_kernel(v_idx, psfs, psf_type):
 # Main fusion function
 # ---------------------------------------------------------------------------
 
-def bayesian_fusion(
+def multi_view_deconvolution(
     transformed_views,
     blending_weights,
     psfs=None,
@@ -272,7 +250,28 @@ def bayesian_fusion(
     wavelength_um=0.5,
     border_px=None,
 ):
-    """Bayesian multi-view deconvolution fusion.
+    """Multi-view deconvolution fusion.
+
+    Implements the efficient Bayesian-based multiview deconvolution method from:
+
+        Preibisch et al., "Efficient Bayesian-based multiview deconvolution",
+        Nature Methods 11, 645–648 (2014). https://doi.org/10.1038/nmeth.2929
+
+    Algorithm (sequential per-view update):
+        Initialise *ψ* as a blending-weighted average of the input views.
+        For each iteration:
+            For each view v:
+
+            1. Forward:     blurred  = convolve(ψ, PSF_v)
+            2. Quotient:    ratio    = img_v / blurred  (1 where no image data)
+            3. Back-project: integral = convolve(ratio, kernel2_v)
+            4. Update:      ψ ← ψ + (clamp(ψ · integral) − ψ) · w_v
+
+    The back-projection kernel (``kernel2``) is a compound kernel derived from
+    all view PSFs.  Four variants are provided (see :class:`PSFType`).
+
+    Based on the BigStitcher / multiview-reconstruction implementation:
+    https://github.com/JaneliaSciComp/multiview-reconstruction
 
     Fuses multiple pre-transformed views via iterative Richardson-Lucy
     deconvolution with per-view compound back-projection kernels.  Blending
