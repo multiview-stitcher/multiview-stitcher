@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from multiview_stitcher import fusion, sample_data
+from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.fusion.mv_deconv import (
     PSFType,
     multi_view_deconvolution,
@@ -150,3 +151,85 @@ def test_fuse_pipeline_mv_deconvolution(ndim):
     result = fused.compute(scheduler="single-threaded")
     assert result.dtype == sims[0].dtype
     assert np.all(np.isfinite(result.data))
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Known regression: multi_view_deconvolution creates border-localized "
+        "seams at input-view boundaries."
+    ),
+    strict=True,
+)
+def test_fuse_pipeline_mv_deconvolution_has_no_tile_border_artefacts():
+    """Joint deconvolution should not introduce seam-specific border jumps."""
+    np.random.seed(0)
+
+    tile_size = 40
+    overlap = 30
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        overlap=overlap,
+        tile_size=tile_size,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        shift_scale=0,
+        drift_scale=0,
+        zoom=10,
+    )
+
+    independently_deconvolved = []
+    for sim in sims:
+        deconvolved = fusion.fuse(
+            [sim],
+            fusion_func=multi_view_deconvolution,
+            transform_key="affine_metadata",
+        )
+        independently_deconvolved.append(
+            si_utils.get_sim_from_array(
+                deconvolved.data,
+                dims=deconvolved.dims,
+                scale=si_utils.get_spacing_from_sim(sim),
+                translation=si_utils.get_origin_from_sim(sim),
+            )
+        )
+
+    fused_independent = fusion.fuse(
+        independently_deconvolved,
+        transform_key="affine_metadata",
+    )
+    fused_joint = fusion.fuse(
+        sims,
+        fusion_func=multi_view_deconvolution,
+        transform_key="affine_metadata",
+    )
+
+    profiles = np.array(
+        [
+            fused_independent.data[0, 0].mean(0),
+            fused_joint.data[0, 0].mean(0),
+        ]
+    )
+
+    border_ids = np.array(
+        [
+            tile_size - overlap,
+            tile_size,
+            tile_size - overlap - 1,
+            tile_size - 1,
+        ]
+    )
+    overlap_region_ids = np.arange(tile_size - overlap + 5, tile_size - 5)
+
+    border_diffs = np.abs(profiles[0][border_ids] - profiles[1][border_ids])
+    mean_overlap_diff = np.mean(
+        np.abs(profiles[0][overlap_region_ids] - profiles[1][overlap_region_ids])
+    )
+
+    assert np.all(border_diffs <= 2 * mean_overlap_diff), (
+        "Border-localized seam detected: "
+        f"border_diffs={border_diffs}, "
+        f"mean_overlap_diff={mean_overlap_diff}"
+    )
