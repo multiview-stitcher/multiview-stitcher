@@ -396,18 +396,17 @@ def fuse(
         for sim in sims
     ]
 
-    # determine overlap from weights method
-    # (soon: fusion methods will also require overlap)
-    overlap_in_pixels = 0
-    if weights_func is not None:
-        overlap_in_pixels = np.max(
-            [
+    # determine overlap from weights/fusion methods and user-supplied value
+    overlap_in_pixels = overlap_in_pixels or 0
+    for func, func_kwargs in [
+        (weights_func, weights_func_kwargs),
+        (fusion_func, fusion_method_kwargs),
+    ]:
+        if func is not None and hasattr(func, "required_overlap"):
+            overlap_in_pixels = max(
                 overlap_in_pixels,
-                weights.calculate_required_overlap(
-                    weights_func, weights_func_kwargs
-                ),
-            ]
-        )
+                func.required_overlap(func_kwargs),
+            )
 
     # calculate output chunk bounding boxes
     output_chunk_bbs, block_indices = mv_graph.get_chunk_bbs(

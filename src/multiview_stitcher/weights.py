@@ -6,6 +6,7 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
+from multiview_stitcher.misc_utils import requires_overlap
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
@@ -16,23 +17,7 @@ except ImportError:
     cp = None
 
 
-def calculate_required_overlap(
-    method_func=None,
-    method_func_kwargs=None,
-):
-    """
-    Calculate the required overlap for fusion given
-    - weights method and params
-    # - fusion method and params
-    """
-    if method_func is None:
-        return 0
-    elif method_func == content_based:
-        return 2 * method_func_kwargs["sigma_2"]
-    else:
-        raise ValueError(f"Unknown weights method {method_func}")
-
-
+@requires_overlap(lambda kwargs: 2 * kwargs["sigma_2"])
 def content_based(
     transformed_views,
     blending_weights,
