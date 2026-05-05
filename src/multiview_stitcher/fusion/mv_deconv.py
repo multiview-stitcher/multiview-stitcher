@@ -4,6 +4,7 @@ import logging
 from enum import Enum
 
 import numpy as np
+from scipy.ndimage import binary_erosion as _scipy_binary_erosion
 from scipy.ndimage import convolve as _scipy_convolve
 from scipy.ndimage import gaussian_filter as _scipy_gaussian_filter
 
@@ -55,6 +56,13 @@ class PSFType(str, Enum):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _binary_erosion(mask, iterations=1):
+    """Erode a boolean mask, dispatching to cupy when appropriate."""
+    if cp is not None and isinstance(mask, cp.ndarray):
+        return _cupyx_ndimage.binary_erosion(mask, iterations=iterations, border_value=1, brute_force=True)
+    return _scipy_binary_erosion(mask, iterations=iterations, border_value=1, brute_force=True)
+
 
 def _convolve(arr, kernel, mode="mirror", cval=0.0):
     """Convolve *arr* with *kernel*, dispatching to cupy when appropriate.
@@ -251,6 +259,7 @@ def multi_view_deconvolution(
     output_spacing=None,
     na=0.8,
     wavelength_um=0.5,
+    sample_boundary_erosion_px=0,
 ):
     """Multi-view deconvolution fusion.
 
@@ -324,6 +333,13 @@ def multi_view_deconvolution(
     wavelength_um : float, optional
         Emission wavelength in µm, used together with *output_spacing*.
         Default ``0.5`` (500 nm, green channel).
+    sample_boundary_erosion_px : int, optional
+        Number of pixels to erode the union of all view coverage masks before
+        masking the deconvolved output.  Pixels outside the eroded mask are
+        set to zero.  This removes the bright-ring artefact that RL
+        deconvolution produces at the outer sample boundary (where valid data
+        meets background) because the PSF window reaches into the no-data
+        region.  Default ``0`` (no masking).
 
     Returns
     -------
@@ -470,6 +486,17 @@ def multi_view_deconvolution(
                 np.float32(min_value),
                 np.maximum(adjusted, np.float32(min_value)),
             )
+
+    # ------------------------------------------------------------------
+    # Sample-boundary masking: erode the union coverage mask and zero out
+    # pixels outside it.  This removes the bright-ring artefact at the
+    # outer edge of the sample where RL amplifies values near the
+    # valid-data / background transition.
+    # ------------------------------------------------------------------
+    if sample_boundary_erosion_px > 0:
+        union_mask = np.any(view_coverage, axis=0)  # shape: spatial
+        eroded_mask = _binary_erosion(union_mask, iterations=sample_boundary_erosion_px)
+        psi = np.where(eroded_mask, psi, np.float32(0.0))
 
     return psi.astype(input_dtype)
 
