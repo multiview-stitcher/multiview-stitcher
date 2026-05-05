@@ -4,10 +4,8 @@ import logging
 from enum import Enum
 
 import numpy as np
-from scipy.ndimage import binary_erosion as _scipy_binary_erosion
 from scipy.ndimage import convolve as _scipy_convolve
 from scipy.ndimage import gaussian_filter as _scipy_gaussian_filter
-from scipy.ndimage import generate_binary_structure as _scipy_generate_binary_structure
 
 try:
     import cupy as cp
@@ -250,11 +248,9 @@ def multi_view_deconvolution(
     n_iterations=10,
     lambda_reg=0.0,
     min_value=1e-4,
-    psf_sigma_px=None,
     output_spacing=None,
     na=0.8,
     wavelength_um=0.5,
-    border_px=None,
 ):
     """Multi-view deconvolution fusion.
 
@@ -317,28 +313,17 @@ def multi_view_deconvolution(
     min_value : float, optional
         Minimum pixel value for the deconvolved image and denominators.
         By default ``1e-4``.
-    psf_sigma_px : float or sequence of float, optional
-        Gaussian PSF sigma(s) in pixels, used when *psfs* is ``None``.
-        Scalar → isotropic; sequence → one value per spatial dimension
-        in **(z, y, x)** order.  Defaults to ``1.5`` pixels isotropic when
-        neither *psfs* nor *psf_sigma_px* are given and *output_spacing* is
-        also absent.
     output_spacing : dict, optional
         Pixel spacing in physical units (µm) keyed by dimension name, used to
-        estimate a physically motivated PSF when *psfs* and *psf_sigma_px* are
-        both ``None``.  Requires *na* and *wavelength_um*.
+        estimate a physically motivated PSF when *psfs* is ``None``.
+        Requires *na* and *wavelength_um*.  When absent a 1.5-pixel isotropic
+        Gaussian PSF is used as a default.
     na : float, optional
         Numerical aperture, used together with *output_spacing* for PSF
         estimation.  Default ``0.8``.
     wavelength_um : float, optional
         Emission wavelength in µm, used together with *output_spacing*.
         Default ``0.5`` (500 nm, green channel).
-    border_px : int or None, optional
-        Unused — kept for API compatibility.  Border handling is now done
-        implicitly via :func:`required_overlap`: the fusion framework
-        automatically expands each chunk by the PSF half-width so that
-        view boundaries are never at chunk edges, eliminating mirror-padding
-        artefacts without explicit weight erosion.
 
     Returns
     -------
@@ -374,9 +359,7 @@ def multi_view_deconvolution(
     # Build / validate PSFs
     # ------------------------------------------------------------------
     if psfs is None:
-        if psf_sigma_px is not None:
-            psf0 = make_gaussian_psf(psf_sigma_px, ndim=ndim)
-        elif output_spacing is not None:
+        if output_spacing is not None:
             psf0 = estimate_psf(output_spacing, na=na, wavelength_um=wavelength_um)
         else:
             psf0 = make_gaussian_psf(1.5, ndim=ndim)
@@ -501,13 +484,16 @@ def _required_overlap_for_deconvolution(func_kwargs):
     pixels ensures that the PSF window never straddles an unpadded chunk
     edge at a view boundary.
     """
-    psf_sigma_px = (func_kwargs or {}).get("psf_sigma_px", 1.5)
-    if hasattr(psf_sigma_px, "__iter__"):
-        max_sigma = float(max(psf_sigma_px))
+    kwargs = func_kwargs or {}
+    output_spacing = kwargs.get("output_spacing", None)
+    if output_spacing is not None:
+        na = kwargs.get("na", 0.8)
+        wavelength_um = kwargs.get("wavelength_um", 0.5)
+        psf = estimate_psf(output_spacing, na=na, wavelength_um=wavelength_um)
+        psf_size = max(psf.shape)
     else:
-        max_sigma = float(psf_sigma_px)
-    # PSF kernel size = ceil(6·σ) rounded up to odd → half-width = size // 2
-    psf_size = int(np.ceil(6.0 * max_sigma)) | 1
+        # Default: assume 1.5px isotropic Gaussian
+        psf_size = int(np.ceil(6.0 * 1.5)) | 1
     return psf_size // 2
 
 
