@@ -185,7 +185,13 @@ def _compute_compound_kernel(v_idx, psfs, psf_type):
         The back-projection kernel2 for view *v_idx*.
     """
     n_views = len(psfs)
-    psf_type = str(psf_type)  # accept both str and PSFType enum
+    # Normalise psf_type to its string value so that both enum members and
+    # plain strings work: str(PSFType.INDEPENDENT) gives "PSFType.INDEPENDENT"
+    # (the full enum repr), not "INDEPENDENT", so we must use .value.
+    if isinstance(psf_type, PSFType):
+        psf_type = psf_type.value
+    else:
+        psf_type = str(psf_type)
     psf_v = psfs[v_idx].astype(np.float64)
 
     if n_views == 1 or psf_type == PSFType.INDEPENDENT:
@@ -328,15 +334,11 @@ def multi_view_deconvolution(
         Emission wavelength in µm, used together with *output_spacing*.
         Default ``0.5`` (500 nm, green channel).
     border_px : int or None, optional
-        Number of pixels to erode from each view's blending-weight mask before
-        the iterative update.  Pixels within *border_px* of a view boundary
-        (where ``blending_weights[v] == 0``) get their weight forced to zero,
-        preventing the border convolution artefacts that arise because
-        ``convolve`` "sees" zero-padded values outside the view domain.
-        This mirrors the border-shrinking strategy used in BigStitcher.
-        ``None`` (default) sets *border_px* automatically to half the PSF
-        width along the first spatial axis (``psf_shape[0] // 2``), which
-        is the minimum safe margin.
+        Unused — kept for API compatibility.  Border handling is now done
+        implicitly via :func:`required_overlap`: the fusion framework
+        automatically expands each chunk by the PSF half-width so that
+        view boundaries are never at chunk edges, eliminating mirror-padding
+        artefacts without explicit weight erosion.
 
     Returns
     -------
@@ -416,56 +418,8 @@ def multi_view_deconvolution(
     logger.info("PSF shape: %s", psfs_cpu[0].shape)
 
     # ------------------------------------------------------------------
-    # Border erosion of blending weights (update step only)
-    # ------------------------------------------------------------------
-    # Erode the per-view data-presence mask by border_px iterations so that
-    # pixels within one PSF-half-width of any TRUE view border get update
-    # weight 0, suppressing bright-ring convolution artefacts (BigStitcher
-    # "border" strategy).
-    #
-    # Two key choices vs a naive implementation:
-    #   1. Erode based on observed[v] == nan (hard NaN boundary), not on
-    #      blending_weights > 0, so smoothly-tapered weights don't cause
-    #      over-erosion in dark regions.
-    #   2. border_value=1: assume the view *continues* outside the current
-    #      chunk.  This prevents erosion at chunk-split edges where the view
-    #      genuinely extends beyond the chunk boundary.
-    if border_px is None:
-        border_px = psfs_cpu[0].shape[0] // 2
-    logger.info("Border erosion: border_px=%d", border_px)
-
-    if border_px > 0:
-        use_gpu = cp is not None and isinstance(blending_weights, cp.ndarray)
-        struct = _scipy_generate_binary_structure(ndim, ndim)  # full connectivity
-        eroded_weights = np.empty_like(blending_weights).astype(np.float32)
-        for v in range(n_views):
-            # Use the geometric view coverage mask (True = inside view),
-            # not intensity > 0, so dark pixels inside the view are not
-            # incorrectly treated as view boundaries.
-            data_mask = view_coverage[v]
-            # border_value=1: outside this chunk the view is assumed present
-            # → erosion only happens at internal view-border transitions
-            if use_gpu:
-                eroded_mask = _cupyx_ndimage.binary_erosion(
-                    data_mask, structure=cp.asarray(struct),
-                    iterations=border_px, border_value=1, brute_force=True,
-                )
-            else:
-                eroded_mask = _scipy_binary_erosion(
-                    data_mask, structure=struct,
-                    iterations=border_px, border_value=1, brute_force=True,
-                )
-            eroded_weights[v] = blending_weights[v] * eroded_mask
-                
-        update_weights = eroded_weights
-    else:
-        update_weights = blending_weights
-
-    # ------------------------------------------------------------------
     # Initialisation: blending-weighted average of observed views
     # ------------------------------------------------------------------
-    # Use the ORIGINAL (non-eroded) blending weights so that the starting
-    # estimate is unaffected by the border erosion.
     psi = np.nansum(observed * blending_weights, axis=0).astype(np.float32)
     psi = psi.clip(np.float32(min_value))
 
@@ -476,30 +430,43 @@ def multi_view_deconvolution(
     # ------------------------------------------------------------------
     # Iterative deconvolution (sequential per-view update)
     # ------------------------------------------------------------------
+    # The blending weight w_v is baked into the ratio *before* the
+    # back-projection (step 3), not applied after (step 4).  This ensures
+    # the total correction at every pixel sums to exactly 1 across views
+    # (since blending_weights are normalised to sum to 1), giving uniform
+    # convergence everywhere and eliminating seam artefacts at view
+    # boundaries where some views taper to zero.
     logger.info("Starting %d iteration(s) ...", n_iterations)
     for _it in range(n_iterations):
         logger.debug("Iteration %d / %d", _it + 1, n_iterations)
         for v in range(n_views):
-            w_v = update_weights[v]      # eroded weights: zero at view borders
+            w_v = blending_weights[v]    # cosine-taper weight; 0 outside view
             img_v = observed[v]          # shape: spatial
 
             # 1. Forward projection: blur current estimate with PSF_v
-            #    Boundary: mirror extension (avoids edge ringing)
+            #    Boundary: mirror extension (avoids edge ringing at chunk
+            #    boundaries; chunk halo — see required_overlap — ensures that
+            #    view boundaries are never at the chunk edge).
             blurred = _convolve(psi, kernels1[v], mode="mirror")
 
             # 2. Quotient: img_v / blurred
-            #    Where img_v == 0 (no data), set ratio to 1 (no update)
+            #    Where img_v == 0 (no data), ratio = 1 (no correction)
             ratio = np.where(
-                img_v > 0.0,
+                view_coverage[v],
                 img_v / np.maximum(blurred, np.float32(min_value)),
                 np.ones_like(blurred),
             )
 
-            # 3. Back-projection: convolve ratio with compound kernel
-            #    Boundary: constant=1 (outside psi → no correction from there)
-            integral = _convolve(ratio, kernels2[v], mode="constant", cval=1.0)
+            # 3. Back-projection with soft boundary weighting.
+            #    Multiply (ratio - 1) by w_v before convolving so that pixels
+            #    outside the view (w_v = 0) contribute zero correction to the
+            #    integral.  This avoids the sentinel-value contamination that
+            #    would otherwise occur at view borders.
+            #    Boundary: constant=1 (outside array → no correction)
+            weighted_ratio = np.float32(1.0) + w_v * (ratio - np.float32(1.0))
+            integral = _convolve(weighted_ratio, kernels2[v], mode="constant", cval=1.0)
 
-            # 4. Update step
+            # 4. Multiplicative update (weight already baked into weighted_ratio)
             value = psi * integral
 
             if lambda_reg > 0:
@@ -515,14 +482,33 @@ def multi_view_deconvolution(
             else:
                 adjusted = value
 
-            next_psi = np.where(
+            psi = np.where(
                 np.isnan(adjusted),
                 np.float32(min_value),
                 np.maximum(adjusted, np.float32(min_value)),
             )
 
-            # Weighted update: damp correction by blending weight w_v.
-            # Where w_v = 0 (view does not cover this pixel), psi is unchanged.
-            psi = psi + (next_psi - psi) * w_v
-
     return psi.astype(input_dtype)
+
+
+def _required_overlap_for_deconvolution(func_kwargs):
+    """Return the PSF half-width as the required chunk-halo size.
+
+    The RL deconvolution uses a PSF-sized convolution window.  Without a
+    halo, chunk boundaries coincide with view boundaries and the mirror
+    padding used at chunk edges creates ringing artefacts in the
+    deconvolved output.  Requesting a halo of at least ``PSF_half_width``
+    pixels ensures that the PSF window never straddles an unpadded chunk
+    edge at a view boundary.
+    """
+    psf_sigma_px = (func_kwargs or {}).get("psf_sigma_px", 1.5)
+    if hasattr(psf_sigma_px, "__iter__"):
+        max_sigma = float(max(psf_sigma_px))
+    else:
+        max_sigma = float(psf_sigma_px)
+    # PSF kernel size = ceil(6·σ) rounded up to odd → half-width = size // 2
+    psf_size = int(np.ceil(6.0 * max_sigma)) | 1
+    return psf_size // 2
+
+
+multi_view_deconvolution.required_overlap = _required_overlap_for_deconvolution

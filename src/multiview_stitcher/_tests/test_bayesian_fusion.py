@@ -148,13 +148,6 @@ def test_fuse_pipeline_mv_deconvolution(ndim):
     assert np.all(np.isfinite(result.data))
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Known regression: multi_view_deconvolution creates border-localized "
-        "seams at input-view boundaries."
-    ),
-    strict=True,
-)
 def test_fuse_pipeline_mv_deconvolution_has_no_tile_border_artefacts():
     """Joint deconvolution should not introduce seam-specific border jumps."""
     np.random.seed(0)
