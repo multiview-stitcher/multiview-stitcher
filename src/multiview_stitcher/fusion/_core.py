@@ -851,6 +851,8 @@ def fuse_np(
         fusion_method_kwargs["params"] = params
     if fusion_requires_blending_weights:
         fusion_method_kwargs["blending_weights"] = field_ws_t
+    if has_keyword(fusion_func, "output_spacing") and "output_spacing" not in fusion_method_kwargs:
+        fusion_method_kwargs["output_spacing"] = output_properties["spacing"]
 
     # calculate fusion weights if required
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
