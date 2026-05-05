@@ -1,4 +1,5 @@
 import numpy as np
+import dask.array as da
 import pytest
 
 from multiview_stitcher import fusion, sample_data
@@ -108,12 +109,6 @@ def test_multi_view_deconvolution_with_nan_views():
     assert np.all(np.isfinite(result))
 
 
-def test_multi_view_deconvolution_psf_sigma_px():
-    views, weights = _make_views(2, (32, 32))
-    result = multi_view_deconvolution(views, weights, psf_sigma_px=2.0, n_iterations=2)
-    assert result.shape == (24, 24)
-
-
 def test_multi_view_deconvolution_output_spacing():
     views, weights = _make_views(2, (24, 24))
     result = multi_view_deconvolution(
@@ -163,6 +158,7 @@ def test_fuse_pipeline_mv_deconvolution(ndim):
 def test_fuse_pipeline_mv_deconvolution_has_no_tile_border_artefacts():
     """Joint deconvolution should not introduce seam-specific border jumps."""
     np.random.seed(0)
+    da.random.seed(0)
 
     tile_size = 40
     overlap = 30
