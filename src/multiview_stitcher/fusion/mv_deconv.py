@@ -450,13 +450,13 @@ def multi_view_deconvolution(
                     data_mask, structure=cp.asarray(struct),
                     iterations=border_px, border_value=1, brute_force=True,
                 )
-                eroded_weights[v] = blending_weights[v] * eroded_mask
             else:
                 eroded_mask = _scipy_binary_erosion(
                     data_mask, structure=struct,
                     iterations=border_px, border_value=1, brute_force=True,
                 )
-                eroded_weights[v] = blending_weights[v] * eroded_mask
+            eroded_weights[v] = blending_weights[v] * eroded_mask
+                
         update_weights = eroded_weights
     else:
         update_weights = blending_weights
