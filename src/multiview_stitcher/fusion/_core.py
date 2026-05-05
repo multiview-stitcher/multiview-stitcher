@@ -398,6 +398,7 @@ def fuse(
 
     # determine overlap from weights/fusion methods and user-supplied value
     overlap_in_pixels = overlap_in_pixels or 0
+    shrink_distance = 0
     for func, func_kwargs in [
         (weights_func, weights_func_kwargs),
         (fusion_func, fusion_method_kwargs),
@@ -407,6 +408,8 @@ def fuse(
                 overlap_in_pixels,
                 func.required_overlap(func_kwargs),
             )
+        if func is not None and hasattr(func, "required_source_shrinkage"):
+            shrink_distance = func.required_source_shrinkage(func_kwargs)
 
     # calculate output chunk bounding boxes
     output_chunk_bbs, block_indices = mv_graph.get_chunk_bbs(
@@ -674,6 +677,7 @@ def fuse(
                 interpolation_order=1,
                 full_view_bbs=full_view_bbs,
                 blending_widths=blending_widths,
+                shrink_distance=shrink_distance,
             )
 
             fused_output_chunk = da.from_delayed(
@@ -747,6 +751,7 @@ def fuse_np(
     spacings: Sequence[dict[str, float]] = None,
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
+    shrink_distance=0,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -829,6 +834,7 @@ def fuse_np(
                 source_bb=full_view_bbs[iview],
                 affine=params[iview],
                 blending_widths=blending_widths,
+                shrink_distance=shrink_distance,
                 cupy=False if cp is None else
                 (True if isinstance(sims[iview].data, cp.ndarray) else False),
             )
