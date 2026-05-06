@@ -107,12 +107,11 @@ def _compute_metrics_from_arrays(
     -------
     dict[str, float]
     """
-    # fixed_np = np.asarray(fixed_arr, dtype=np.float32)
-    # moving_np = np.asarray(moving_arr, dtype=np.float32)
-    # fixed_sim
 
     fixed_np = np.asarray(fixed_sim.data, dtype=np.float32)
     moving_np = np.asarray(moving_sim.data, dtype=np.float32)
+
+    fixed_np = np.array(fixed_np) # create a copy to not modify the original array in-place
 
     if intersection_halfspace is not None:
         # Mask out the half-space of the fixed image that lies outside the
