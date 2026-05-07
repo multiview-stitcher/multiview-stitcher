@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import numpy as np
 import xarray as xr
 from scipy.spatial.transform import Rotation
@@ -122,7 +124,14 @@ def affine_from_rotation(angle, direction, point=None):
 
 
 def identity_transform(ndim, t_coords=None):
+    if t_coords is None:
+        return _identity_xaffine_cached(ndim)
     return affine_to_xaffine(np.eye(ndim + 1), t_coords=t_coords)
+
+
+@lru_cache(maxsize=8)
+def _identity_xaffine_cached(ndim):
+    return affine_to_xaffine(np.eye(ndim + 1))
 
 
 def affine_to_xaffine(affine, t_coords=None):
@@ -151,6 +160,10 @@ def affine_to_xaffine(affine, t_coords=None):
 
 
 def matmul_xparams(xparams1, xparams2):
+    # Fast path: skip apply_ufunc overhead for small eager arrays
+    if not _is_dask_backed(xparams1) and not _is_dask_backed(xparams2):
+        result = np.matmul(xparams1.values, xparams2.values)
+        return xr.DataArray(result, dims=xparams1.dims, coords=xparams1.coords)
     return xr.apply_ufunc(
         np.matmul,
         xparams1,
@@ -161,6 +174,14 @@ def matmul_xparams(xparams1, xparams2):
         vectorize=True,
         join="inner",
     )
+
+
+def _is_dask_backed(xarr):
+    try:
+        import dask.array
+        return isinstance(xarr.data, dask.array.Array)
+    except ImportError:
+        return False
 
 
 def invert_xparams(xparams):
