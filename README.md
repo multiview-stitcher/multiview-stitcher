@@ -79,6 +79,7 @@ for tile_array, tile_translation in zip(tile_arrays, tile_translations):
         dims=["c", "z", "y", "x"],
         scale=spacing,
         translation=tile_translation,
+        # affine=None, # (e.g. for rotated or sheared tiles)
         transform_key="stage_metadata",
         c_coords=channels,
     )
