@@ -283,34 +283,18 @@ def plot_positions(
 
 def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
     ndim = mv_graph.get_ndim_from_stack_props(stack_props)
-    faces = mv_graph.get_faces_from_stack_props(stack_props)
+    vertices = mv_graph.get_vertices_from_stack_props(stack_props)
 
-    # get line segments
-    line_segments = []
-
-    if ndim == 3:
-        for face in faces:
-            inds = np.argsort(np.linalg.norm(face[1:] - face[0], axis=-1))
-            line_segments.append([face[0], face[inds[0] + 1]])
-            line_segments.append([face[0], face[inds[1] + 1]])
-            line_segments.append(
-                [
-                    face[inds[0] + 1],
-                    face[inds[0] + 1] + face[inds[1] + 1] - face[0],
-                ]
-            )
-            line_segments.append(
-                [
-                    face[inds[1] + 1],
-                    face[inds[1] + 1] + face[inds[0] + 1] - face[0],
-                ]
-            )
-
-    elif ndim == 2:
-        for face in faces:
-            line_segments.append([face[0], face[1]])
-
-    line_segments = np.array(line_segments)
+    # Build box edges by topology (index hypercube), then map to transformed
+    # vertex coordinates. This is robust for arbitrary affine transforms.
+    gv = np.array(list(np.ndindex(tuple([2] * ndim))))
+    edge_pairs = [
+        (i, j)
+        for i in range(len(gv))
+        for j in range(i + 1, len(gv))
+        if np.sum(np.abs(gv[i] - gv[j])) == 1
+    ]
+    line_segments = np.array([[vertices[i], vertices[j]] for i, j in edge_pairs])
 
     if ndim == 2:
         line_segments = np.concatenate(
