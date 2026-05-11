@@ -20,6 +20,7 @@ from multiview_stitcher import (
     msi_utils,
     mv_graph,
     ngff_utils,
+    param_utils,
     spatial_image_utils,
 )
 
@@ -509,7 +510,7 @@ def plot_tile_pair_image_metrics(
                         for idim, dim in enumerate(spatial_dims)
                     },
                     "shape": {dim: 2 for dim in spatial_dims},
-                    "transform": bbox_transform,
+                    "transform": param_utils.affine_to_xaffine(bbox_transform),
                 }
                 plot_stack_props(sp, ax, color=color, linewidth=2)
 
