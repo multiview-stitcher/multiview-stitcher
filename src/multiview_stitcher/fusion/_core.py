@@ -806,6 +806,8 @@ def fuse_np(
     #             translation=origins[isim],
     #         )
 
+    input_is_cupy = cp is not None and isinstance(sims[0].data, cp.ndarray)
+
     if has_keyword(fusion_func, "blending_weights") or has_keyword(
         weights_func, "blending_weights"
     ):
@@ -814,10 +816,16 @@ def fuse_np(
         fusion_requires_blending_weights = False
 
     if fusion_func_kwargs is None:
-        fusion_func_kwargs = {}
+        fusion_method_kwargs = {}
+    else:
+        # copy to avoid mutating input dict across calls
+        fusion_func_kwargs = dict(fusion_func_kwargs)
 
     if weights_func_kwargs is None:
         weights_func_kwargs = {}
+    else:
+        # copy to avoid mutating input dict across calls
+        weights_func_kwargs = dict(weights_func_kwargs)
 
     input_dtype = sims[0].dtype
     ndim = si_utils.get_ndim_from_sim(sims[0])
@@ -845,8 +853,7 @@ def fuse_np(
                 affine=params[iview],
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
-                cupy=False if cp is None else
-                (True if isinstance(sims[iview].data, cp.ndarray) else False),
+                cupy=input_is_cupy,
             )
             for iview in range(len(sims))
         ]
@@ -897,6 +904,14 @@ def fuse_np(
         ]
 
     fused = np.nan_to_num(fused).astype(input_dtype)
+
+    # delete references to intermediate arrays to free memory    del field_ims_t
+    if fusion_requires_blending_weights:
+        del field_ws_t
+    if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
+        del fusion_weights
+
+    del fusion_method_kwargs["transformed_views"]
 
     return fused
 
@@ -1305,9 +1320,10 @@ def prepare_block_fusion(
             output_spacing={dim: osp['spacing'][dim] for dim in sdims},
             ).data
 
-        if cp is not None:
-            fused = fused.map_blocks(
-                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x)
+        input_is_cupy = cp is not None and isinstance(fused, cp.ndarray)
+
+        if input_is_cupy:
+            fused = fused.map_blocks(cp.asnumpy)
 
         # Write the fused chunk to the appropriate location in the Zarr array
         with dask_config.set(scheduler='single-threaded'):
@@ -1317,6 +1333,9 @@ def prepare_block_fusion(
                     [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims] +
                     [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
             )
+
+        if input_is_cupy:
+            misc_utils.clear_cupy_memory()
 
         return
     

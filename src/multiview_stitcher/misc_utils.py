@@ -13,6 +13,34 @@ class DisableLogger:
         logging.disable(logging.NOTSET)
 
 
+def clear_cupy_memory():
+    """Release unused CuPy allocations and FFT plan cache entries."""
+
+    try:
+        import cupy as cp
+    except ImportError:
+        cp = None
+
+    import gc
+
+    gc.collect()
+
+    if cp is None:
+        return False
+
+    cp.get_default_memory_pool().free_all_blocks()
+
+    pinned_memory_pool = cp.get_default_pinned_memory_pool()
+    if pinned_memory_pool is not None:
+        pinned_memory_pool.free_all_blocks()
+
+    fft_plan_cache = cp.fft.config.get_plan_cache()
+    if fft_plan_cache is not None:
+        fft_plan_cache.clear()
+
+    return True
+
+
 @contextmanager
 def temporary_log_level(logger, level):
     """

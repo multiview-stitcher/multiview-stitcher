@@ -7,7 +7,7 @@ from scipy.ndimage import affine_transform, distance_transform_edt, gaussian_fil
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
-from multiview_stitcher.misc_utils import requires_overlap
+from multiview_stitcher.misc_utils import clear_cupy_memory, requires_overlap
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
@@ -17,7 +17,6 @@ try:
     import cupyx.scipy.ndimage
 except ImportError:
     cp = None
-    _cupyx_fft = None
 
 
 def _clamp_overlap(overlap, output_chunksize):
@@ -100,8 +99,8 @@ def content_based_dct(
     blending_weights,
     dct_size=32,
     exponent=1.0,
+    otf_support_fraction=0.5,
     output_chunksize=None,
-    otf_support_fraction=None,
 ):
     """
     Calculate content-based fusion weights using DCT Shannon entropy.
@@ -117,7 +116,7 @@ def content_based_dct(
     Quality values are placed at chunk centres and then interpolated
     back to the full spatial resolution.
 
-    Reference: Preibisch et al., "Adaptive light-sheet microscopy for
+    Reference: Royer et al., "Adaptive light-sheet microscopy for
     long-term, high-resolution imaging in living organisms",
     https://www.nature.com/articles/nbt.3708
 
@@ -135,9 +134,6 @@ def content_based_dct(
     exponent : float
         Exponent to apply to the quality values to increase contrast
         between low and high quality regions.  Default is 1 (no exponent).
-    output_chunksize : dict or None
-        When provided, the required chunk overlap is clamped to this value
-        so that it never exceeds the actual processing tile size.
     otf_support_fraction : float or None
         Fraction of the per-axis chunk size that lies within the OTF passband.
         Equals ``r_o / N_chunk`` where ``N_chunk = min(dct_sizes)`` and
@@ -150,13 +146,17 @@ def content_based_dct(
         to the entropy, and the result is scaled by ``2 / r_o^2``.  L2-norm
         normalisation is used.  When ``None`` (default) all coefficients are
         included with L1-mean normalisation.
+    output_chunksize : dict or None
+        When provided, the required chunk overlap is clamped to this value
+        so that it never exceeds the actual processing tile size.
+
     Returns
     -------
     weights : np.ndarray of shape (n_views, *spatial_shape)
         Normalised content-based weights for each view.
     """
+
     transformed_views = transformed_views.astype(np.float32)
-    transformed_views[blending_weights < 1e-7] = np.nan
 
     if cp is not None and isinstance(transformed_views, cp.ndarray):
         dctn_func = _cupyx_fft.dctn
@@ -175,7 +175,6 @@ def content_based_dct(
     # optionally to output_chunksize so the required overlap doesn't exceed the
     # actual tile size).
     if isinstance(dct_size, dict):
-        sdims = sorted(dct_size.keys())[::-1]  # z, y, x
         dct_sizes = tuple(dct_size[d] for d in sdims)
     else:
         dct_sizes = (dct_size,) * ndim
@@ -188,6 +187,14 @@ def content_based_dct(
         dct_sizes = tuple(
             int(min(ds, s)) for ds, s in zip(dct_sizes, spatial_shape)
         )
+
+    # make sure dct_size is a factor of the spatial shape to avoid edge effects
+    assert(
+        all(
+            s % dct_sizes[i] == 0
+            for i, s in enumerate(transformed_views.shape[1:])
+        )
+    ), "dct_size must be a factor of the output_chunksize in each dim to avoid edge effects"
 
     n_chunks = tuple(
         max(1, int(np.ceil(s / dct_sizes[i])))
@@ -288,8 +295,11 @@ def content_based_dct(
             output=weights[i],
         )
 
-    weights[blending_weights < 1e-7] = 0.0
     weights = normalize_weights(weights)
+
+    if xp is cp:
+        del quality_maps
+        clear_cupy_memory()
 
     return weights
 
