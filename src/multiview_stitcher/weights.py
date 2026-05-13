@@ -90,10 +90,8 @@ def content_based(
 @requires_overlap(
     lambda kwargs: (
         _clamp_overlap(
-            max(kwargs["dct_size"].values())
-            if isinstance(kwargs["dct_size"], dict)
-            else kwargs["dct_size"],
-            kwargs.get("output_chunksize"),
+            kwargs["dct_size"],
+            kwargs["output_chunksize"],
         )
     )
 )
@@ -273,17 +271,12 @@ def content_based_dct(
     # using affine_transform (order=1).  Write directly into the output array
     # via the `output` kwarg to avoid a temporary full-spatial allocation per view.
     weights = xp.zeros_like(transformed_views)
-    # scale = 1/ds per axis so that quality-map index q maps to the centre of
-    # chunk q (output pixel q*ds + (ds-1)/2).  Using nc/s instead would be
-    # wrong whenever s is not exactly divisible by ds.
+    # Mapping from output pixel p to quality-map index q:
+    #   q = (p - (ds-1)/2) / ds
+    # so scale = 1/ds, offset = -(ds-1)/(2*ds).
     scale = tuple(1.0 / ds for ds in dct_sizes)
     matrix = xp.diag(xp.array(scale, dtype=xp.float64))
-    # offset so that quality-map index q maps to the centre of chunk q,
-    # i.e. output pixel q*ds + (ds-1)/2.  Derived from inverting
-    # p_q = q*ds + (ds-1)/2  =>  offset = (1 - ds)/(2*ds) = 0.5*scale - 0.5.
-    offset = tuple(0.5 * sc - 0.5 for sc in scale)
-    print('Offset:', offset)
-    print('Matrix:\n', matrix)
+    offset = tuple(-(ds - 1) / (2.0 * ds) for ds in dct_sizes)
     for i, qmap in enumerate(quality_maps):
         affine_transform_func(
             qmap,
