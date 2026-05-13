@@ -189,11 +189,9 @@ def content_based_dct(
         )
 
     # make sure dct_size is a factor of the spatial shape to avoid edge effects
-    assert(
-        all(
-            s % dct_sizes[i] == 0
-            for i, s in enumerate(transformed_views.shape[1:])
-        )
+    assert all(
+        s % dct_sizes[i] == 0
+        for i, s in enumerate(transformed_views.shape[1:])
     ), "dct_size must be a factor of the output_chunksize in each dim to avoid edge effects"
 
     n_chunks = tuple(
