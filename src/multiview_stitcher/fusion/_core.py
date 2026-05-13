@@ -398,16 +398,26 @@ def fuse(
 
     # determine overlap from weights/fusion methods and user-supplied value
     overlap_in_pixels = overlap_in_pixels or 0
+    # normalize to dict[str, int]
+    if not isinstance(overlap_in_pixels, dict):
+        overlap_in_pixels = {dim: overlap_in_pixels for dim in sdims}
     shrink_distance = 0
     for func, func_kwargs in [
         (weights_func, weights_func_kwargs),
         (fusion_func, fusion_func_kwargs),
     ]:
         if func is not None and hasattr(func, "required_overlap"):
-            overlap_in_pixels = max(
-                overlap_in_pixels,
-                func.required_overlap(func_kwargs),
-            )
+            # Inject output_chunksize so the overlap can be clamped to it.
+            _kwargs_with_chunksize = dict(func_kwargs or {})
+            if has_keyword(func, "output_chunksize") and output_chunksize is not None:
+                _kwargs_with_chunksize.setdefault("output_chunksize", output_chunksize)
+            curr_overlap = func.required_overlap(_kwargs_with_chunksize)
+            # normalize
+            if not isinstance(curr_overlap, dict):
+                curr_overlap = {dim: curr_overlap for dim in sdims}
+            overlap_in_pixels = {
+                dim: max(overlap_in_pixels[dim], curr_overlap[dim]) for dim in sdims
+            }
         if func is not None and hasattr(func, "required_source_shrinkage"):
             shrink_distance = func.required_source_shrinkage(func_kwargs)
 
@@ -422,13 +432,13 @@ def fuse(
         | {
             "origin": {
                 dim: output_chunk_bb["origin"][dim]
-                - overlap_in_pixels * output_stack_properties["spacing"][dim]
+                - overlap_in_pixels[dim] * output_stack_properties["spacing"][dim]
                 for dim in sdims
             }
         }
         | {
             "shape": {
-                dim: output_chunk_bb["shape"][dim] + 2 * overlap_in_pixels
+                dim: output_chunk_bb["shape"][dim] + 2 * overlap_in_pixels[dim]
                 for dim in sdims
             }
         }
@@ -523,7 +533,7 @@ def fuse(
         )
         _padding_phys = (
             _additional_extent_pixels * _osp_spacing
-            + overlap_in_pixels * _osp_spacing
+            + np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
         )
 
         _chunk_to_tiles: dict = {}
@@ -770,7 +780,7 @@ def fuse_np(
         _description_, by default None
     weights_func_kwargs : _type_, optional
         _description_, by default None
-    overlap_in_pixels : int, optional
+    overlap_in_pixels : int or dict, optional
         _description_, by default None
     interpolation_order : int, optional
         _description_, by default 1
@@ -861,6 +871,9 @@ def fuse_np(
             weights_func_kwargs["params"] = params
         if fusion_requires_blending_weights:
             weights_func_kwargs["blending_weights"] = field_ws_t
+        if has_keyword(weights_func, "output_chunksize") and "output_chunksize" not in weights_func_kwargs:
+            # Use the maximum spatial size of the output chunk being processed.
+            weights_func_kwargs["output_chunksize"] = output_properties["shape"]
 
         fusion_weights = weights_func(**weights_func_kwargs)
         fusion_func_kwargs["fusion_weights"] = fusion_weights
@@ -871,9 +884,16 @@ def fuse_np(
     )
 
     # trim overlap
-    if trim_overlap_in_pixels > 0:
+    # normalize to dict[str, int]
+    if not isinstance(trim_overlap_in_pixels, dict):
+        trim_overlap_in_pixels = {
+            dim: trim_overlap_in_pixels for dim in output_properties["shape"].keys()
+        }
+
+    if any(trim_overlap_in_pixels[dim] > 0 for dim in output_properties["shape"].keys()):
         fused = fused[
-            (slice(trim_overlap_in_pixels, -trim_overlap_in_pixels),) * ndim
+            tuple([slice(trim_overlap_in_pixels[dim], -trim_overlap_in_pixels[dim])
+                   for dim in output_properties["shape"].keys()])
         ]
 
     fused = np.nan_to_num(fused).astype(input_dtype)

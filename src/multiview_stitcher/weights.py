@@ -2,7 +2,8 @@ from typing import Union
 
 import numpy as np
 import xarray as xr
-from scipy.ndimage import distance_transform_edt, gaussian_filter
+from scipy.fftpack import dctn
+from scipy.ndimage import affine_transform, distance_transform_edt, gaussian_filter
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
@@ -12,10 +13,24 @@ BoundingBox = dict[str, dict[str, Union[float, int]]]
 
 try:
     import cupy as cp
+    import cupyx.scipy.fft as _cupyx_fft
     import cupyx.scipy.ndimage
 except ImportError:
     cp = None
+    _cupyx_fft = None
 
+
+def _clamp_overlap(overlap, output_chunksize):
+    """Clamp overlap to output_chunksize when it is provided."""
+    # import pdb; pdb.set_trace()
+    # normalize overlap to dict[str, int]
+    sdims = sorted(output_chunksize.keys())[::-1]
+    if type(overlap) is not dict:
+        overlap = {dim: int(overlap) for dim in sdims}
+    
+    return {
+        dim: min(overlap[dim], output_chunksize[dim]) for dim in sdims
+    }
 
 @requires_overlap(lambda kwargs: 2 * kwargs["sigma_2"])
 def content_based(
@@ -67,6 +82,173 @@ def content_based(
     ]
 
     weights = np.stack(weights, axis=0)
+    weights = normalize_weights(weights)
+
+    return weights
+
+
+@requires_overlap(
+    lambda kwargs: (
+        _clamp_overlap(
+            max(kwargs["dct_size"].values())
+            if isinstance(kwargs["dct_size"], dict)
+            else kwargs["dct_size"],
+            kwargs.get("output_chunksize"),
+        )
+    )
+)
+def content_based_dct(
+    transformed_views,
+    blending_weights,
+    dct_size=32,
+    exponent=1.0,
+    output_chunksize=None,
+):
+    """
+    Calculate content-based fusion weights using DCT Shannon entropy.
+
+    The volume is divided into non-overlapping chunks of size ``dct_size``.
+    For each chunk the Shannon entropy of the DCT spectrum is computed as the
+    quality measure (higher entropy = more structured content):
+
+        H = -sum(|d_i| / dsl1 * log2(|d_i| / dsl1))
+        quality = dsl1 * H
+
+    where ``d_i`` are the DCT coefficients and ``dsl1 = sum(|d_i|)``.
+    Quality values are placed at chunk centres and then interpolated
+    back to the full spatial resolution.
+
+    Reference: Preibisch et al., "Adaptive light-sheet microscopy for
+    long-term, high-resolution imaging in living organisms",
+    https://www.nature.com/articles/nbt.3708
+
+    Parameters
+    ----------
+    transformed_views : np.ndarray of shape (n_views, *spatial_shape)
+        Input images containing only spatial dimensions.
+    blending_weights : np.ndarray of shape (n_views, *spatial_shape)
+        Blending mask; pixels with weight < 1e-7 are treated as invalid.
+    dct_size : int or dict[str, int]
+        Chunk size (in pixels) per axis.  A single int is applied
+        isotropically; a dict maps spatial dimension names (e.g. "z",
+        "y", "x") to per-axis values. Each value is clamped to the
+        actual size of that axis. Also defines the required fusion chunk overlap.
+    exponent : float
+        Exponent to apply to the quality values to increase contrast
+        between low and high quality regions.  Default is 1 (no exponent).
+    output_chunksize : dict or None
+        When provided, the required chunk overlap is clamped to this value
+        so that it never exceeds the actual processing tile size.
+    Returns
+    -------
+    weights : np.ndarray of shape (n_views, *spatial_shape)
+        Normalised content-based weights for each view.
+    """
+    transformed_views = transformed_views.astype(np.float32)
+    transformed_views[blending_weights < 1e-7] = np.nan
+
+    if cp is not None and isinstance(transformed_views, cp.ndarray):
+        dctn_func = _cupyx_fft.dctn
+        affine_transform_func = cupyx.scipy.ndimage.affine_transform
+        use_cupy = True
+    else:
+        dctn_func = dctn
+        affine_transform_func = affine_transform
+        use_cupy = False
+
+    spatial_shape = transformed_views.shape[1:]
+    ndim = len(spatial_shape)
+    sdims = ['z', 'y', 'x'][-ndim:]
+
+    # Normalise dct_size to a per-axis tuple and clamp to the spatial shape.
+    if isinstance(dct_size, dict):
+        sdims = sorted(dct_size.keys())[::-1]  # z, y, x
+        dct_sizes = tuple(dct_size[d] for d in sdims)
+    else:
+        dct_sizes = (dct_size,) * ndim
+    dct_sizes = tuple(
+        int(np.min([ds, s])) for ds, s in zip(dct_sizes, [output_chunksize[dim] for dim in sdims])
+    )
+
+    n_chunks = tuple(
+        max(1, int(np.ceil(s / dct_sizes[i])))
+        for i, s in enumerate(spatial_shape)
+    )
+
+    quality_maps = []
+    for view in transformed_views:
+        if not use_cupy:
+            quality = np.zeros(n_chunks, dtype=np.float32)
+        else:
+            quality = cp.zeros(n_chunks, dtype=np.float32)
+
+        for chunk_idx in np.ndindex(n_chunks):
+            slices = tuple(
+                slice(
+                    ci * dct_sizes[i],
+                    min((ci + 1) * dct_sizes[i], spatial_shape[i]),
+                )
+                for i, ci in enumerate(chunk_idx)
+            )
+            chunk = view[slices].copy()
+
+            nan_mask = np.isnan(chunk)
+            n_valid = int(np.sum(~nan_mask))
+
+            # Skip chunks that are mostly invalid
+            if n_valid < 0.2 * chunk.size:
+                quality[chunk_idx] = 0.0
+                continue
+
+            # Fill NaNs with minimum valid value so DCT is defined
+            valid_vals = chunk[~nan_mask]
+            fill_val = float(valid_vals.min())
+            chunk[nan_mask] = fill_val if fill_val > 0.0001 else 0.0
+
+            d = dctn_func(chunk, norm="ortho").flatten()
+            dsl1 = float(np.mean(np.abs(d)))
+
+            if dsl1 == 0.0:
+                quality[chunk_idx] = 0.0
+                continue
+
+            p = np.abs(d) / dsl1
+            nonzero = p > 0
+            entropy = float(-np.sum(p[nonzero] * np.log2(p[nonzero])))
+            quality[chunk_idx] = dsl1 * entropy
+
+            # Optionally apply exponent to increase contrast between low and high quality
+            quality[chunk_idx] = quality[chunk_idx] ** exponent
+
+        quality_maps.append(quality)
+
+    # import pdb; pdb.set_trace()
+
+    quality_maps = np.stack(quality_maps, axis=0)  # (n_views, *n_chunks)
+    quality_maps = quality_maps - np.nanmin(quality_maps, axis=0)
+
+    # Interpolate each view's quality map back to the full spatial resolution
+    # using affine_transform (order=1).  The scale maps chunk-centre indices
+    # to pixel indices: pixel i corresponds to chunk (i + 0.5) / zoom - 0.5.
+    weights = np.zeros_like(transformed_views)
+    scale = tuple(nc / s for nc, s in zip(n_chunks, spatial_shape))
+    matrix = np.diag(np.array(scale, dtype=np.float64))
+    if use_cupy:
+        matrix = cp.asarray(matrix)
+    # offset so that the centre of output pixel 0 maps to chunk index 0
+    offset = tuple(0.5 * sc - 0.5 for sc in scale)
+    for i, qmap in enumerate(quality_maps):
+        weights[i] = affine_transform_func(
+            qmap,
+            matrix,
+            offset=offset,
+            output_shape=spatial_shape,
+            order=1,
+            mode="nearest",
+        )
+
+    weights[blending_weights < 1e-7] = 0.0
+
     weights = normalize_weights(weights)
 
     return weights
