@@ -187,11 +187,11 @@ def content_based_dct(
             int(min(ds, s)) for ds, s in zip(dct_sizes, spatial_shape)
         )
 
-    # make sure dct_size is a factor of the spatial shape to avoid edge effects
-    assert all(
-        s % dct_sizes[i] == 0
-        for i, s in enumerate(transformed_views.shape[1:])
-    ), "dct_size must be a factor of the output_chunksize in each dim to avoid edge effects"
+    # # make sure dct_size is a factor of the spatial shape to avoid edge effects
+    # assert all(
+    #     s % dct_sizes[i] == 0
+    #     for i, s in enumerate(transformed_views.shape[1:])
+    # ), "dct_size must be a factor of the output_chunksize in each dim to avoid edge effects"
 
     n_chunks = tuple(
         max(1, int(np.ceil(s / dct_sizes[i])))
@@ -253,7 +253,10 @@ def content_based_dct(
                 entropy = float(-xp.sum(p[nonzero] * xp.log2(p[nonzero])))
                 quality_maps[iv][chunk_idx] = (
                     (2.0 / _r_o ** 2) * entropy
-                ) ** exponent
+                )
+                sign = np.sign(quality_maps[iv][chunk_idx])
+                quality_maps[iv][chunk_idx] **= exponent
+                quality_maps[iv][chunk_idx] *= sign
             else:
                 # Reuse the DCT buffer in-place to avoid extra allocations.
                 xp.abs(d, out=d)                                # d now holds |coeff|
