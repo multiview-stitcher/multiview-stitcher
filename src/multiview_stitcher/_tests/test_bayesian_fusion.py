@@ -141,7 +141,7 @@ def test_fuse_pipeline_mv_deconvolution(ndim):
         sims,
         transform_key="affine_metadata",
         fusion_func=multi_view_deconvolution,
-        fusion_method_kwargs=dict(n_iterations=3),
+        fusion_func_kwargs=dict(n_iterations=3),
     )
     result = fused.compute(scheduler="single-threaded")
     assert result.dtype == sims[0].dtype
