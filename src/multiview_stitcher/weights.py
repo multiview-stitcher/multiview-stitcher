@@ -21,12 +21,11 @@ except ImportError:
 
 def _clamp_overlap(overlap, output_chunksize):
     """Clamp overlap to output_chunksize when it is provided."""
-    # import pdb; pdb.set_trace()
     # normalize overlap to dict[str, int]
     sdims = sorted(output_chunksize.keys())[::-1]
     if type(overlap) is not dict:
         overlap = {dim: int(overlap) for dim in sdims}
-    
+
     return {
         dim: min(overlap[dim], output_chunksize[dim]) for dim in sdims
     }
