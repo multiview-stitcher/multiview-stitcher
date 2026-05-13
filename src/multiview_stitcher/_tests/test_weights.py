@@ -1,5 +1,7 @@
+import dask.array as da
 import numpy as np
 import pytest
+from scipy.ndimage import gaussian_filter
 
 import multiview_stitcher.spatial_image_utils as si_utils
 from multiview_stitcher import (
@@ -129,3 +131,35 @@ def test_blending_weight_coverage(ndim):
     # check that weights are strictly positive where transformed images are not nan
     # (i.e. that there are no pixels that aren't contributing to the fused image but should be)
     assert np.all(ws[~np.isnan(simst)] > 0)
+
+
+def test_content_based_dct_prefers_sharp_view():
+
+    np.random.seed(0)
+    sharp = np.random.randint(0, 256, size=(64, 64)).astype(np.uint16)
+    blurred = gaussian_filter(sharp.astype(np.float32), sigma=2.0).astype(np.uint16)
+
+    sims = [
+        si_utils.get_sim_from_array(
+            da.from_array(arr, chunks=(32, 32)),
+            dims=["y", "x"],
+            transform_key=io.METADATA_TRANSFORM_KEY,
+        )
+        for arr in (sharp, blurred)
+    ]
+
+    fused = fusion.fuse(
+        sims,
+        transform_key=io.METADATA_TRANSFORM_KEY,
+        weights_func=weights.content_based_dct,
+        weights_func_kwargs={
+            "dct_size": {"y": 16, "x": 16},
+            "exponent": 1.0,
+        },
+        output_chunksize={"y": 32, "x": 32},
+    ).compute()
+
+    fused_arr = np.asarray(fused.data).squeeze()
+
+    assert fused_arr.shape == sharp.shape
+    assert np.mean((fused_arr - sharp) ** 2) < np.mean((blurred - sharp) ** 2)
