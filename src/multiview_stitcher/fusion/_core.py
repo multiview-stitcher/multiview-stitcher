@@ -816,7 +816,7 @@ def fuse_np(
         fusion_requires_blending_weights = False
 
     if fusion_func_kwargs is None:
-        fusion_method_kwargs = {}
+        fusion_func_kwargs = {}
     else:
         # copy to avoid mutating input dict across calls
         fusion_func_kwargs = dict(fusion_func_kwargs)
@@ -828,8 +828,6 @@ def fuse_np(
         weights_func_kwargs = dict(weights_func_kwargs)
 
     input_dtype = sims[0].dtype
-    ndim = si_utils.get_ndim_from_sim(sims[0])
-    si_utils.get_spatial_dims_from_sim(sims[0])
 
     # Transform input views
     field_ims_t = [
@@ -911,7 +909,7 @@ def fuse_np(
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
         del fusion_weights
 
-    del fusion_method_kwargs["transformed_views"]
+    del fusion_func_kwargs["transformed_views"]
 
     return fused
 
