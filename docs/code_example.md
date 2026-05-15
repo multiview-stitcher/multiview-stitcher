@@ -6,6 +6,9 @@ These code snippets walk you through a small stitching workflow consisting of
   2. Registering the tiles
   3. Stitching / fusing the tiles
 
+Make sure to also check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks). in the `notebooks/` directory.
+
+Note that the code snippets are minimal examples and the tile boundaries shown in the visualizations contain random image data.
 
 #### 1) Prepare data for stitching
 
@@ -66,6 +69,10 @@ with ProgressBar():
     )
 ```
 
+![alt text](images/pairwise_registration_summary_example.png)
+
+![alt text](images/global_registration_summary_example.png)
+
 #### 3) Stitch / fuse the tiles
 ```python
 from multiview_stitcher import fusion
@@ -85,7 +92,7 @@ fused_sim.data.compute()
 For large datasets (>50GB, potentially with benefits already at >5GB) consider streaming the fused result directly to a zarr file using the following way to call `fusion.fuse`:
 
 ```python
-from multiview_stitcher import fusion, misc_utils
+from multiview_stitcher import fusion
 
 fused = fusion.fuse(
     sims=[msi_utils.get_sim_from_msim(msim) for msim in msims],
@@ -96,12 +103,12 @@ fused = fusion.fuse(
         "ome_zarr": True,
         # "ngff_version": "0.4",  # optional
     },
-    # optionally, we can use ray for parallelization (`pip install "ray[default]"`)
+    # optionally, we can use joblib for parallelization (`pip install joblib` and `from multiview_stitcher import misc_utils`):
     # batch_options={
-    #     "batch_func": misc_utils.process_batch_using_ray,
-    #     "n_batch": 4,  # number of chunk fusions to schedule / submit at a time
+    #     "batch_func": misc_utils.process_batch_using_joblib,
+    #     "n_batch": 20,  # number of chunk fusions to schedule / submit at a time
     #     "batch_func_kwargs": {
-    #         'num_cpus': 4  # number of processes for parallel processing to use with ray
+    #         'n_jobs': 4  # number of parallel jobs for joblib
     #     },
     # },
 )

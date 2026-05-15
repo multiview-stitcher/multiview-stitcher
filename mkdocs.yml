@@ -46,6 +46,26 @@ nav:
   - index.md
   - installation.md
   - code_example.md
+  - Workflow steps:
+    - Defining input data: data_loading_overview.md
+    - Registration:
+      - Overview: registration_overview.md
+      - Built-in methods:
+        - Pairwise registration: built_in_methods_pairwise_registration.md
+        - Global parameter resolution: built_in_methods_global_param_resolution.md
+      - Custom extensions:
+        - Pairwise registration: extension_api_pairwise_registration.md
+        - Global parameter resolution: extension_api_global_param_resolution.md
+    - Fusion:
+      - Overview: fusion_overview.md
+      - GPU support: gpu_support.md
+      - Built-in methods: built_in_methods_fusion.md
+      - Custom extensions: extension_api_fusion.md
+    - Visualization:
+      - napari_stitcher.md
+      - neuroglancer.md
+    - Registration quality metrics: registration_metrics.md
+
   - Troubleshooting guide:
     - Registration:
       - troubleshoot_registration_accuracy.md
@@ -54,28 +74,16 @@ nav:
       - troubleshoot_fusion.md
     - General:
       - troubleshoot_multiprocessing.md
-  - Registration quality metrics: registration_metrics.md
-  - chart.md
-  - notebooks.md
-  - features.md
-  - data_formats.md
-  - gpu_support.md
-  - implementation_details.md
-  - objects.md
-  - Built-in methods:
-    - Pairwise registration: built_in_methods_pairwise_registration.md
-    - Global parameter resolution: built_in_methods_global_param_resolution.md
-    - Fusion: built_in_methods_fusion.md
-  - Extension API:
-    - extension_api_pairwise_registration.md
-    - extension_api_global_param_resolution.md
-    - extension_api_fusion.md
-  - Visualization:
-    - napari_stitcher.md
-    - neuroglancer.md
-  - stitching_in_the_browser.md
-  - related_projects.md
+  - Napari plugin: napari_stitcher.md
+  - Miscellaneous:
+    - implementation_details.md
+    - objects.md
+    - stitching_in_the_browser.md
+    - chart.md
+    - features.md
+    - data_formats.md
   - contributing.md
+  - related_projects.md
   - API:
     - api/registration.md
     - api/fusion.md

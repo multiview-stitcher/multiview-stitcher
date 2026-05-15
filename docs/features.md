@@ -25,7 +25,7 @@ Below is a list of features which are either already implemented or are on the r
 ## Transformations
 
 - [x] Chunked `dask_image.ndinterp.affine_transform`
-- [ ] Cupy-based transform
+- [x] Cupy-based transform
 - [ ] Chaining transformations instead of working with static coordinate systems
 
 ## Fusion
@@ -40,7 +40,7 @@ Below is a list of features which are either already implemented or are on the r
 
   - [x] Weighted average
   - [x] Maximum intensity projection
-  - [ ] Multi-view deconvolution
+  - [x] Multi-view deconvolution
 
 ### Supported weights:
 
@@ -72,4 +72,4 @@ See [napari-stitcher](https://github.com/multiview-stitcher/napari-stitcher).
 ## Supported usage modes
 - [x] As a library to build custom reconstruction workflows
 - [x] Napari plugin
-- [ ] Convenience function for processing on HPC
+- [x] Convenience function for processing on HPC
