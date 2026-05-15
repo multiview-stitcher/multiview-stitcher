@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#related-software" class="md-skip">
+        <a href="#related-stitching-tools" class="md-skip">
           Skip to content
         </a>
       
@@ -1354,6 +1354,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#related-stitching-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related stitching tools
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Related stitching tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rule-of-thumb" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rule of thumb
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-software" class="md-nav__link">
     <span class="md-ellipsis">
       Related software
@@ -1509,6 +1533,30 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#related-stitching-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related stitching tools
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Related stitching tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rule-of-thumb" class="md-nav__link">
+    <span class="md-ellipsis">
+      Rule of thumb
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-software" class="md-nav__link">
     <span class="md-ellipsis">
       Related software
@@ -1546,6 +1594,75 @@
 
   <h1>Related projects</h1>
 
+<h2 id="related-stitching-tools">Related stitching tools</h2>
+<p><code>multiview-stitcher</code> sits in a broader ecosystem of excellent open-source stitching software.<br />
+Rather than aiming to replace existing tools, it focuses on providing a <strong>Python-native, modular API</strong>
+that integrates well with the scientific Python ecosystem (dask/zarr/xarray, napari, etc.).</p>
+<p>The table below is a <strong>high-level orientation</strong> (features and workflows often overlap, and most tools can be combined in practice):</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Ecosystem</th>
+<th>Typical use case / focus</th>
+<th style="text-align: center;">2D</th>
+<th style="text-align: center;">3D</th>
+<th>Transform model (typical)</th>
+<th style="text-align: center;">Out-of-core / huge data*</th>
+<th>Automation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BigStitcher</td>
+<td>Fiji</td>
+<td>GUI-driven multi-view + tiled microscopy workflows</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td>rigid + affine</td>
+<td style="text-align: center;">✅</td>
+<td>ImageJ macros / batch</td>
+</tr>
+<tr>
+<td>Ashlar</td>
+<td>Python</td>
+<td>multiplexed whole-slide 2D mosaics</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td>translation/rigid mosaics</td>
+<td style="text-align: center;">limited*</td>
+<td>CLI + Python</td>
+</tr>
+<tr>
+<td>TeraStitcher</td>
+<td>C++</td>
+<td>very large tiled 3D volumes</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td>translation/rigid</td>
+<td style="text-align: center;">✅</td>
+<td>CLI</td>
+</tr>
+<tr>
+<td>multiview-stitcher</td>
+<td>Python</td>
+<td>modular registration + fusion integrated into Python workflows</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td>rigid + affine</td>
+<td style="text-align: center;">✅</td>
+<td>Jupyter notebooks / Python API + napari / neuroglancer</td>
+</tr>
+</tbody>
+</table>
+<p>* "Out-of-core / huge data" depends heavily on workflow, file formats, and output options.</p>
+<h3 id="rule-of-thumb">Rule of thumb</h3>
+<ul>
+<li>GUI-first workflow with broad microscopy stitching functionality → <strong>BigStitcher</strong></li>
+<li>Whole-slide multiplexed 2D mosaics with a simple CLI → <strong>Ashlar</strong></li>
+<li>Very large 3D tiled volumes with a dedicated toolchain → <strong>TeraStitcher</strong></li>
+<li>Stitching and fusion as a <strong>Python building block</strong> that plugs into existing analysis pipelines → <strong>multiview-stitcher</strong></li>
+</ul>
 <h2 id="related-software">Related software</h2>
 <ul>
 <li><a href="https://imagej.net/plugins/bigstitcher/">BigStitcher</a></li>
