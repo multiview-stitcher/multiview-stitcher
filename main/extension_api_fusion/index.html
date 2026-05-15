@@ -1338,15 +1338,17 @@
 <p>Custom function for calculating additional fusion weights passed to the fusion function as <code>fusion_weights</code>. This could implement e.g. a content-based weighting scheme. The function should return a list of weights, one for each view chunk.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span> <span class="nf">custom_weight_function</span><span class="p">(</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">transformed_views</span> <span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">blending_weights</span> <span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># `weights_func_kwargs` passed to `fusion.fuse`</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">)</span> <span class="o">-</span> <span class="o">&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">]:</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="c1"># Weight calculation code here</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="k">return</span> <span class="n">weights</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">blending_weights</span> <span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span> <span class="c1"># optional functional argument</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">],</span> <span class="c1"># optional functional argument</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span> <span class="c1"># `weights_func_kwargs` passed to `fusion.fuse`</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">)</span> <span class="o">-</span> <span class="o">&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Array</span><span class="o">-</span><span class="n">like</span><span class="p">]:</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="c1"># Weight calculation code here</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="k">return</span> <span class="n">weights</span>
 </span></code></pre></div>
 <p>Example implementation: <code>multiview_stitcher.weights.content_based</code>.</p>
+<p>As with custom fusion functions, optional arguments are only passed when they are declared in the function signature. In particular, <code>blending_weights</code> is only provided when the weight function accepts it.</p>
 
 
 

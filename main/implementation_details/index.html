@@ -1599,7 +1599,7 @@ fusion_weights : list of ndarrays, optional
     additional view weights for fusion, e.g. contrast weighted scores.
 params : list of xarrays, optional
 </code></pre></div>
-<p>Further fusion weights can be obtained by the weight calculation function specified in <code>fuse(..., weights_func=None, weights_func_kwargs=None)</code>. An example for such a function is <code>weights.content_based</code>, but also custom functions can be passed which accept the same (optional) input arguments as the fusion functions.</p>
+<p>Further fusion weights can be obtained by the weight calculation function specified in <code>fuse(..., weights_func=None, weights_func_kwargs=None)</code>. An example for such a function is <code>weights.content_based</code>, but custom weighting functions can also be passed. They always receive <code>transformed_views</code>, and optional inputs such as <code>blending_weights</code> and <code>params</code> are only passed when those parameters are part of the function signature.</p>
 <h3 id="content-based-fusion">Content based fusion</h3>
 <p>To improve multi-view fusion in the context of strongly scattering samples, <a href="https://preibischlab.mdc-berlin.de/assets/spim_congeal_2008.pdf">content-based fusion</a> turns out to be helpful. This fusion method is available in <code>multiview-stitcher</code> by using <code>multiview_stitcher.fusion.fuse(..., fusion_func=fusion.weighted_average_fusion, weights_method=weights.content_based)</code>.</p>
 
