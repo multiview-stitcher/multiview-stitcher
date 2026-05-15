@@ -33,6 +33,10 @@
          <lastmod>2026-05-15</lastmod>
     </url>
     <url>
+         <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/data_loading_overview/</loc>
+         <lastmod>2026-05-15</lastmod>
+    </url>
+    <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/extension_api_fusion/</loc>
          <lastmod>2026-05-15</lastmod>
     </url>
@@ -46,6 +50,10 @@
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/features/</loc>
+         <lastmod>2026-05-15</lastmod>
+    </url>
+    <url>
+         <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/fusion_overview/</loc>
          <lastmod>2026-05-15</lastmod>
     </url>
     <url>
@@ -69,15 +77,15 @@
          <lastmod>2026-05-15</lastmod>
     </url>
     <url>
-         <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/notebooks/</loc>
-         <lastmod>2026-05-15</lastmod>
-    </url>
-    <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/objects/</loc>
          <lastmod>2026-05-15</lastmod>
     </url>
     <url>
          <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/registration_metrics/</loc>
+         <lastmod>2026-05-15</lastmod>
+    </url>
+    <url>
+         <loc>https://multiview-stitcher.github.io/multiview-stitcher/main/registration_overview/</loc>
          <lastmod>2026-05-15</lastmod>
     </url>
     <url>
