@@ -1320,8 +1320,9 @@ def prepare_block_fusion(
 
         input_is_cupy = cp is not None and isinstance(fused, cp.ndarray)
 
-        if input_is_cupy:
-            fused = fused.map_blocks(cp.asnumpy)
+        if cp is not None:
+            fused = fused.map_blocks(
+                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x)
 
         # Write the fused chunk to the appropriate location in the Zarr array
         with dask_config.set(scheduler='single-threaded'):
@@ -1332,7 +1333,7 @@ def prepare_block_fusion(
                     [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
             )
 
-        if input_is_cupy:
+        if cp is not None:
             misc_utils.clear_cupy_memory()
 
         return
