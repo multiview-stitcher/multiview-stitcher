@@ -10,24 +10,34 @@ This page explains what that structure looks like, how to build it from arrays o
 
 ### `SpatialImage` (sim)
 
-A `SpatialImage` is an [`xarray.DataArray`](https://docs.xarray.dev/en/stable/) subclass that carries image data together with pixel spacing, origin coordinates, and named affine transforms. Dimensions follow the convention `(t, c, z, y, x)` — any subset is valid.
+A `SpatialImage` is an [`xarray.DataArray`](https://docs.xarray.dev/en/stable/) subclass that carries image data together with pixel spacing, origin coordinates, and one or more named affine transforms (stored under `sim.attrs["transforms"]`). Dimensions follow the convention `(t, c, z, y, x)` — any subset is valid. Each named transform is addressed by its `transform_key`.
 
 ### `MultiscaleSpatialImage` (msim)
 
 A `MultiscaleSpatialImage` is a [`DataTree`](https://datatree.readthedocs.io/) that wraps one or more resolution levels (`scale0`, `scale1`, …). Each scale contains:
 
 - an `image` data variable — the pixel data as a (lazy) dask array
-- one or more **transform** data variables — one per named coordinate system
+- one or more **transform** data variables — one per named coordinate system (`transform_key`)
 
 ```
 DataTree('None', parent=None)
 ├── DataTree('scale0')
 │       Data variables:
-│           affine_metadata  (t, x_in, x_out) float64   ← transform
+│           affine_metadata  (t, x_in, x_out) float64   ← transform (transform_key="affine_metadata")
 │           image            (t, c, z, y, x)  uint16    ← pixel data
 ├── DataTree('scale1')
 │       ...
 ```
+
+!!! note "sim vs msim: which does each function expect?"
+    Some functions (e.g. `fusion.fuse`) take a list of `SpatialImage` (sim), while others (e.g. `registration.register`) take a list of `MultiscaleSpatialImage` (msim). Converting between the two is straightforward:
+
+    ```python
+    sim  = msi_utils.get_sim_from_msim(msim)   # extract scale0 SpatialImage from an msim
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])  # wrap a sim as an msim
+    ```
+
+    When you only need the highest resolution, either representation is equivalent and you can convert freely. If you want to make use of multiple resolution levels (e.g. for faster registration at lower res), load or build an `msim` with several scales — the best way is to read it directly from OME-Zarr (see [Reading from OME-Zarr](#reading-from-ome-zarr)).
 
 ---
 
@@ -140,4 +150,4 @@ sim = ngff_utils.read_sim_from_ome_zarr("my_tile.ome.zarr", resolution_level=0, 
 ```
 
 !!! note
-    Standard OME-Zarr files do not store affine transforms, so the loaded image will have an identity transform set for the given `transform_key`. Set the correct tile position via `msi_utils.set_affine_transform` (or `si_utils.set_affine_transform` for `SpatialImage`) before registration or fusion.
+    OME-Zarr versions 0.4 and 0.5 do not store affine transforms, so the loaded image will have an identity transform set for the given `transform_key`. Set the correct tile/view transforms via `msi_utils.set_affine_transform` (or `si_utils.set_affine_transform` for `SpatialImage`) before registration or fusion.
