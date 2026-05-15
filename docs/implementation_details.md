@@ -65,7 +65,7 @@ A *registration graph* or list of registration pairs (TODO: clarify whether this
         additional view weights for fusion, e.g. contrast weighted scores.
     params : list of xarrays, optional
 
-Further fusion weights can be obtained by the weight calculation function specified in `fuse(..., weights_func=None, weights_func_kwargs=None)`. An example for such a function is `weights.content_based`, but also custom functions can be passed which accept the same (optional) input arguments as the fusion functions.
+Further fusion weights can be obtained by the weight calculation function specified in `fuse(..., weights_func=None, weights_func_kwargs=None)`. An example for such a function is `weights.content_based`, but custom weighting functions can also be passed. They always receive `transformed_views`, and optional inputs such as `blending_weights` and `params` are only passed when those parameters are part of the function signature.
 
 ### Content based fusion
 

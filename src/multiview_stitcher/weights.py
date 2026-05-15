@@ -95,7 +95,6 @@ def content_based(
 )
 def content_based_dct(
     transformed_views,
-    blending_weights,
     dct_size=32,
     exponent=1.0,
     otf_support_fraction=0.5,
@@ -123,8 +122,6 @@ def content_based_dct(
     ----------
     transformed_views : np.ndarray of shape (n_views, *spatial_shape)
         Input images containing only spatial dimensions.
-    blending_weights : np.ndarray of shape (n_views, *spatial_shape)
-        Blending mask; pixels with weight < 1e-7 are treated as invalid.
     dct_size : int or dict[str, int]
         Chunk size (in pixels) per axis.  A single int is applied
         isotropically; a dict maps spatial dimension names (e.g. "z",

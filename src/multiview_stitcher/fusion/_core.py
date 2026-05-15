@@ -229,9 +229,10 @@ def fuse(
         By default weighted_average_fusion
     fusion_func_kwargs : dict, optional
     weights_func : Callable, optional
-        Function to calculate fusion weights. This function receives the
-        following inputs: transformed_views (as spatial images), params.
-        It returns (non-normalized) fusion weights for each view.
+        Function to calculate fusion weights. This function always receives
+        transformed_views and may additionally receive params and
+        blending_weights when those parameters are declared in its
+        signature. It returns (non-normalized) fusion weights for each view.
         By default None.
     weights_func_kwargs : dict, optional
     output_spacing : dict, optional
@@ -874,10 +875,9 @@ def fuse_np(
         weights_func_kwargs["transformed_views"] = field_ims_t
         if has_keyword(weights_func, "params"):
             weights_func_kwargs["params"] = params
-        if fusion_requires_blending_weights:
+        if has_keyword(weights_func, "blending_weights"):
             weights_func_kwargs["blending_weights"] = field_ws_t
         if has_keyword(weights_func, "output_chunksize") and "output_chunksize" not in weights_func_kwargs:
-            # Use the maximum spatial size of the output chunk being processed.
             weights_func_kwargs["output_chunksize"] = output_properties["shape"]
 
         fusion_weights = weights_func(**weights_func_kwargs)
@@ -903,13 +903,15 @@ def fuse_np(
 
     fused = np.nan_to_num(fused).astype(input_dtype)
 
-    # delete references to intermediate arrays to free memory    del field_ims_t
+    # delete references to intermediate arrays to free memory
+    del field_ims_t
     if fusion_requires_blending_weights:
         del field_ws_t
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
         del fusion_weights
 
-    del fusion_func_kwargs["transformed_views"]
+    del fusion_func_kwargs
+    del weights_func_kwargs
 
     return fused
 

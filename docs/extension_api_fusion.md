@@ -41,7 +41,8 @@ Custom function for calculating additional fusion weights passed to the fusion f
 ```python
 def custom_weight_function(
     transformed_views : List[Array-like],
-    blending_weights : List[Array-like],
+    blending_weights : List[Array-like], # optional functional argument
+    params: List[Array-like], # optional functional argument
     **kwargs, # `weights_func_kwargs` passed to `fusion.fuse`
 ) - > List[Array-like]:
 
@@ -51,3 +52,5 @@ def custom_weight_function(
 ```
 
 Example implementation: `multiview_stitcher.weights.content_based`.
+
+As with custom fusion functions, optional arguments are only passed when they are declared in the function signature. In particular, `blending_weights` is only provided when the weight function accepts it.
