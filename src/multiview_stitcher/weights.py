@@ -19,16 +19,6 @@ except ImportError:
     cp = None
 
 
-def _clamp_overlap(overlap, output_chunksize):
-    """Clamp overlap to output_chunksize when it is provided."""
-    # normalize overlap to dict[str, int]
-    sdims = sorted(output_chunksize.keys())[::-1]
-    if type(overlap) is not dict:
-        overlap = {dim: int(overlap) for dim in sdims}
-
-    return {
-        dim: min(overlap[dim], output_chunksize[dim]) for dim in sdims
-    }
 
 @requires_overlap(lambda kwargs: 2 * kwargs["sigma_2"])
 def content_based(
@@ -518,3 +508,16 @@ def get_blending_weights(
     target_weights.data = cosine_weights(target_weights.data)
 
     return target_weights.data
+
+
+def _clamp_overlap(overlap, output_chunksize):
+    """Clamp overlap to output_chunksize when it is provided."""
+
+    # normalize overlap to dict[str, int]
+    sdims = sorted(output_chunksize.keys())[::-1]
+    if not isinstance(overlap, dict):
+        overlap = {dim: int(overlap) for dim in sdims}
+
+    return {
+        dim: min(overlap[dim], output_chunksize[dim]) for dim in sdims
+    }
