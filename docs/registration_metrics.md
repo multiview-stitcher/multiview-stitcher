@@ -1,6 +1,9 @@
 # Registration quality metrics
 
-After running registration it is useful to verify *how much better* (or worse) a given transform key actually aligns the tiles compared to the initial positions.
+Some registration metrics are computed as part of `registration.register` and are shown as a plot (`plot_summary=True`), as returned as a dictionary (`return_dict=True`).
+
+Next to this, it can be useful to compare different transform keys (e.g. image similarity under stage positions vs translation registration vs affine registration).
+
 `multiview_stitcher.metrics` provides two functions for this purpose:
 
 | Function | Purpose |

@@ -127,7 +127,25 @@ params = registration.register(
 
 ## Getting registration diagnostics
 
-Pass `return_dict=True` to access quality metrics and summary plots:
+Pass `plot_summary=True` to show the following summary plots (in a Jupyter Notebook):
+
+1) Pairwise image registration quality
+
+![Registration summary: Pairwise quality](images/registration_summary_pairwise.png)
+
+Colors indicate the registration quality as reported by the pairwise registration function (e.g. cross-correlation in the case of `registration.phase_correlation_registration`).
+
+2) Residual misalignment after global parameter resolution
+
+![alt text](images/registration_summary_plot_groupwise.png)
+
+Here, two types of information are shown:
+
+- Colors indicate the residual misalignment after global parameter resolution, measured as the mean remaining distance between virtual fiducial markers placed on the corners of overlap regions between connected tiles.
+- Dotted lines indicate edges that were removed by the global parameter resolution step (e.g. due to low quality or being part of a loop with high residuals).
+
+
+Pass `return_dict=True` to access quality metrics in a dictionary:
 
 ```python
 result = registration.register(
@@ -144,7 +162,9 @@ qualities = result["pairwise_registration"]["metrics"]["qualities"]
 residuals = result["groupwise_resolution"]["metrics"]["edge_residuals"]
 ```
 
-See [Registration quality metrics](registration_metrics.md) for a full description of available metrics.
+!!! tip
+    See [Registration quality metrics](registration_metrics.md) for comparing pairwise image similarity metrics under different transform keys.
+
 
 ---
 
