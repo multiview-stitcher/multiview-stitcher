@@ -149,7 +149,7 @@ fused = fusion.fuse(
         "ome_zarr": True,
         # "ngff_version": "0.4",  # optional
     },
-    # optionally, we can use joblib for parallelization (`pip install joblib`)
+    # optionally, we can use joblib for parallelization (`pip install joblib` and `from multiview_stitcher import misc_utils`):
     # batch_options={
     #     "batch_func": misc_utils.process_batch_using_joblib,
     #     "n_batch": 20,  # number of chunk fusions to schedule / submit at a time
