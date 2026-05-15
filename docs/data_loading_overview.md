@@ -1,5 +1,9 @@
 # Defining input data
 
+This section explains how to load your image data and pre-position input tiles / views in physical space just like the following example:
+
+![Visualization of input tile configuration](images/example_vis_utils.png)
+
 Before registering or fusing your dataset, you need to represent each view or tile as a `MultiscaleSpatialImage` — the core data structure of multiview-stitcher. Basically, this is a numpy-like array that also carries spatial metadata (axis labels, pixel spacing, origin, and affine transforms).
 
 This page explains what that structure looks like, how to build it from arrays or files, and how spatial metadata is stored.
@@ -131,7 +135,17 @@ for arr, translation in zip(tile_arrays, tile_translations):
     msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[2]))
 ```
 
-The resulting `msims` list is the direct input to `registration.register` and `fusion.fuse`. Continue to the [Registration overview](registration_overview.md) for the next step.
+The resulting `msims` list is the direct input to `registration.register` and `fusion.fuse`. You can sanity-check the tile layout before proceeding:
+
+```python
+from multiview_stitcher import vis_utils
+
+fig, ax = vis_utils.plot_positions(msims, transform_key="stage_metadata", use_positional_colors=False)
+```
+
+![Visualization of input tile configuration](images/example_vis_utils.png)
+
+Continue to the [Registration overview](registration_overview.md) for the next step.
 
 ---
 
@@ -151,3 +165,49 @@ sim = ngff_utils.read_sim_from_ome_zarr("my_tile.ome.zarr", resolution_level=0, 
 
 !!! note
     OME-Zarr versions 0.4 and 0.5 do not store affine transforms, so the loaded image will have an identity transform set for the given `transform_key`. Set the correct tile/view transforms via `msi_utils.set_affine_transform` (or `si_utils.set_affine_transform` for `SpatialImage`) before registration or fusion.
+
+---
+
+## Reading tiles from OME-TIFF
+
+[`ome-types`](https://ome-types.readthedocs.io/) (`pip install ome-types`) extracts per-tile positions and pixel spacing from the embedded OME-XML metadata. Pixel data is loaded **lazily** via `dask.delayed` so that only the tiles actually needed are read from disk:
+
+```python
+import numpy as np
+import dask.array as da
+from dask import delayed
+import tifffile
+import ome_types
+from multiview_stitcher import msi_utils
+from multiview_stitcher import spatial_image_utils as si_utils
+
+filepath = "my_dataset.ome.tiff"
+ome_metadata = ome_types.from_tiff(filepath)
+sdims = ["y", "x"]  # adjust to ["z", "y", "x"] for 3-D data
+
+msims = []
+for itile, image in enumerate(ome_metadata.images):
+    pixels = image.pixels
+    spacing     = {dim: getattr(pixels, f"physical_size_{dim}") for dim in sdims}
+    translation = {dim: pixels.planes[0].__dict__[f"position_{dim}"] for dim in sdims}
+    shape       = {dim: getattr(pixels, f"size_{dim}") for dim in sdims}
+    dtype       = np.dtype(pixels.type.value)
+
+    # lazy load — actual file I/O deferred until compute() is called
+    data = da.from_delayed(
+        delayed(tifffile.imread)(filepath, series=itile),
+        shape=[shape[dim] for dim in sdims],
+        dtype=dtype,
+    )
+
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=sdims, # add channel dimension here if present
+        scale=spacing,
+        translation=translation,
+        transform_key="stage_metadata",
+    )
+    msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[]))
+```
+
+See the [example notebook](https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitch_and_register_ashlar_example_dataset.ipynb) for a full worked example with multi-cycle OME-TIFF data.

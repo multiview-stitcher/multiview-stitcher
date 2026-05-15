@@ -74,6 +74,7 @@ nav:
       - troubleshoot_fusion.md
     - General:
       - troubleshoot_multiprocessing.md
+  - Napari plugin: napari_stitcher.md
   - Miscellaneous:
     - implementation_details.md
     - objects.md
