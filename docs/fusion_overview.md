@@ -83,7 +83,7 @@ See [Built-in fusion methods](built_in_methods_fusion.md) for full parameter ref
 
 ## Blending weights
 
-Smooth blending weights are automatically computed near tile edges to avoid hard seams. The transition zone is controlled by `blending_widths` (in physical units):
+Smooth cosine-falloff blending weights are automatically applied near tile edges to avoid hard seams. Control the transition zone width (in physical units) via `blending_widths`:
 
 ```python
 fused_sim = fusion.fuse(
@@ -93,13 +93,13 @@ fused_sim = fusion.fuse(
 )
 ```
 
-When `blending_widths` is `None`, a default falloff proportional to the tile size is used.
+See [Built-in fusion methods](built_in_methods_fusion.md) for details on weight normalisation.
 
 ---
 
 ## Content-based fusion weights
 
-For multi-view fluorescence data, content-based weights improve focus by up-weighting regions with high local contrast. Enable them via `weights_func`:
+For multi-view fluorescence data, content-based weights up-weight regions with high local contrast. Enable them via `weights_func`:
 
 ```python
 from multiview_stitcher import fusion, weights

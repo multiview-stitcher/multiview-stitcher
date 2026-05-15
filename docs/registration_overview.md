@@ -99,21 +99,9 @@ The overlap graph typically contains many redundant edges (e.g. diagonal neighbo
 
 ## Global parameter resolution
 
-After pairwise registration, `groupwise_resolution_method` resolves a globally consistent set of transforms.
+After pairwise registration, `groupwise_resolution_method` resolves a globally consistent set of transforms. The default is `"global_optimization"` (least-squares, supports translation through affine); alternatives are `"linear_two_pass"` (faster, translation/rigid) and `"shortest_paths"` (deterministic chain, fastest). Control the output transform type via `groupwise_resolution_kwargs={"transform": "rigid"}` (or `"affine"`, etc.).
 
-| Method | Notes |
-|--------|-------|
-| `"global_optimization"` (default) | Least-squares optimization; supports translation, rigid, similarity, affine; prunes outliers |
-| `"linear_two_pass"` | Faster sparse solve; supports translation, rigid; good for large grids |
-| `"shortest_paths"` | Deterministic chain along the highest-quality paths; fastest |
-
-Control the output transform type via `groupwise_resolution_kwargs`:
-
-```python
-groupwise_resolution_kwargs={"transform": "rigid"}
-```
-
-See [Built-in global parameter resolution methods](built_in_methods_global_param_resolution.md) for details.
+See [Built-in global parameter resolution methods](built_in_methods_global_param_resolution.md) for full details on each method and its options.
 
 ---
 
