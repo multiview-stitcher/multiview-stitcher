@@ -895,6 +895,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#multi_view_deconvolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      multi_view_deconvolution
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1351,6 +1360,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#multi_view_deconvolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      multi_view_deconvolution
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1412,6 +1430,97 @@ Custom fusion and weight functions are described in the Extension API section.</
 <li>Pixel-wise maximum across views.</li>
 <li>Useful for sparse or bright features where max intensity is preferred.</li>
 </ul>
+<h3 id="multi_view_deconvolution"><code>multi_view_deconvolution</code></h3>
+<p>Implements the efficient Bayesian multi-view deconvolution method from:</p>
+<blockquote>
+<p>Preibisch et al., <em>"Efficient Bayesian-based multiview deconvolution"</em>,
+Nature Methods 11, 645–648 (2014). <a href="https://doi.org/10.1038/nmeth.2929">https://doi.org/10.1038/nmeth.2929</a></p>
+</blockquote>
+<p>Iteratively refines a single fused estimate <em>ψ</em> by applying, for each view in
+turn, a forward blur, a ratio correction, and a back-projected multiplicative
+update.  Blending weights gate updates so that only views with genuine coverage
+contribute at each pixel.</p>
+<p><strong>Key parameters</strong> (passed via <code>fusion_func_kwargs</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>psfs</code></td>
+<td><code>None</code></td>
+<td>List of per-view PSF arrays (one per view). When <code>None</code>, a Gaussian PSF is estimated from <code>output_spacing</code>, <code>na</code>, and <code>wavelength_um</code>.</td>
+</tr>
+<tr>
+<td><code>psf_type</code></td>
+<td><code>"EFFICIENT_BAYESIAN"</code></td>
+<td>Compound back-projection kernel variant: <code>"EFFICIENT_BAYESIAN"</code> (most accurate), <code>"OPTIMIZATION_I"</code>, <code>"OPTIMIZATION_II"</code>, or <code>"INDEPENDENT"</code> (standard RL, no cross-view coupling).</td>
+</tr>
+<tr>
+<td><code>n_iterations</code></td>
+<td><code>10</code></td>
+<td>Number of deconvolution iterations.</td>
+</tr>
+<tr>
+<td><code>lambda_reg</code></td>
+<td><code>0.0</code></td>
+<td>Tikhonov regularisation strength; <code>0</code> disables it. Values in <code>1e-4</code>–<code>1e-2</code> give mild smoothing.</td>
+</tr>
+<tr>
+<td><code>output_spacing</code></td>
+<td><code>None</code></td>
+<td>Physical pixel spacing (µm) keyed by dimension, used for automatic PSF estimation.</td>
+</tr>
+<tr>
+<td><code>na</code></td>
+<td><code>0.8</code></td>
+<td>Numerical aperture for PSF estimation.</td>
+</tr>
+<tr>
+<td><code>wavelength_um</code></td>
+<td><code>0.5</code></td>
+<td>Emission wavelength in µm for PSF estimation.</td>
+</tr>
+<tr>
+<td><code>sample_boundary_erosion_px</code></td>
+<td><code>0</code></td>
+<td>Pixels to erode the union coverage mask before zeroing output; removes the bright-ring artefact at the outer sample boundary.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>GPU support:</strong> When the input arrays are <code>cupy</code> arrays, convolutions run on
+the GPU via <code>cupyx.scipy.ndimage</code>.</p>
+<p><strong>Chunk overlap:</strong> <code>multi_view_deconvolution</code> declares a
+<code>required_overlap</code> equal to the PSF half-width, ensuring chunked fusion does
+not introduce seam artefacts at block boundaries.</p>
+<p><strong>Minimal usage example:</strong></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span> <span class="nn">cupy</span> <span class="k">as</span> <span class="nn">cp</span>  <span class="c1"># optional – omit for CPU-only</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">fusion</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span> <span class="nn">multiview_stitcher.fusion</span> <span class="kn">import</span> <span class="n">multi_view_deconvolution</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># (optional) send data to GPU</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">for</span> <span class="n">sim</span> <span class="ow">in</span> <span class="n">msims</span><span class="p">:</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">sim</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">map_blocks</span><span class="p">(</span><span class="n">cp</span><span class="o">.</span><span class="n">asarray</span><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">fused</span> <span class="o">=</span> <span class="n">fusion</span><span class="o">.</span><span class="n">fuse</span><span class="p">(</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">msims</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;affine_registered&quot;</span><span class="p">,</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">fusion_func</span><span class="o">=</span><span class="n">multi_view_deconvolution</span><span class="p">,</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">fusion_func_kwargs</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">n_iterations</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">output_spacing</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;z&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mf">0.13</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.13</span><span class="p">},</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="n">na</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>        <span class="n">wavelength_um</span><span class="o">=</span><span class="mf">0.52</span><span class="p">,</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="p">),</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="p">)</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="c1"># (optional) retrieve result from GPU</span>
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="n">fused</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">fused</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">map_blocks</span><span class="p">(</span><span class="n">cp</span><span class="o">.</span><span class="n">asnumpy</span><span class="p">)</span>
+</span></code></pre></div>
 <h2 id="blending-weights">Blending weights</h2>
 <p><code>fusion.fuse</code> computes smooth blending weights using
 <code>weights.get_blending_weights</code>. The falloff is controlled by <code>blending_widths</code>
