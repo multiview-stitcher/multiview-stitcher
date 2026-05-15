@@ -1,10 +1,10 @@
 # Defining input data
 
-This section explains how to load your image data and pre-position input tiles / views in physical space just like the following example:
+This section explains how to load our image data and pre-position input tiles / views in physical space just like the following example:
 
 ![Visualization of input tile configuration](images/example_vis_utils.png)
 
-Before registering or fusing your dataset, you need to represent each view or tile as a `MultiscaleSpatialImage` — the core data structure of multiview-stitcher. Basically, this is a numpy-like array that also carries spatial metadata (axis labels, pixel spacing, origin, and affine transforms).
+Before registering or fusing our dataset, we need to represent each view or tile as a `MultiscaleSpatialImage` — the core data structure of multiview-stitcher. Basically, this is a numpy-like array that also carries spatial metadata (axis labels, pixel spacing, origin, and affine transforms).
 
 This page explains what that structure looks like, how to build it from arrays or files, and how spatial metadata is stored.
 
@@ -41,13 +41,13 @@ DataTree('None', parent=None)
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])  # wrap a sim as an msim
     ```
 
-    When you only need the highest resolution, either representation is equivalent and you can convert freely. If you want to make use of multiple resolution levels (e.g. for faster registration at lower res), load or build an `msim` with several scales — the best way is to read it directly from OME-Zarr (see [Reading from OME-Zarr](#reading-from-ome-zarr)).
+    When we only need the highest resolution, either representation is equivalent and we can convert freely. If we want to make use of multiple resolution levels (e.g. for faster registration at lower res), we load or build an `msim` with several scales — the best way is to read it directly from OME-Zarr (see [Reading from OME-Zarr](#reading-from-ome-zarr)).
 
 ---
 
 ## Coordinate systems and `transform_key`
 
-Every affine transform attached to a view has a **name** called `transform_key`. This lets you store multiple coordinate systems on the same image without confusion — for example:
+Every affine transform attached to a view has a **name** called `transform_key`. This lets us store multiple coordinate systems on the same image without confusion — for example:
 
 | `transform_key`          | Meaning |
 |--------------------------|---------|
@@ -55,10 +55,10 @@ Every affine transform attached to a view has a **name** called `transform_key`.
 | `"translation_registered"` | Positions after registration |
 | `"affine_metadata"` (default) | Pixel-spacing / origin only (identity rotation) |
 
-You pass `transform_key` to both `registration.register()` and `fusion.fuse()` to tell them which coordinate system to use.
+We pass `transform_key` to both `registration.register()` and `fusion.fuse()` to tell them which coordinate system to use.
 
 !!! tip
-    Use a descriptive `transform_key` for each processing step. The original stage positions are never overwritten — you can always fall back to them.
+    Use a descriptive `transform_key` for each processing step. The original stage positions are never overwritten — we can always fall back to them.
 
 ---
 
@@ -100,7 +100,7 @@ msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
 | `t_coords` | Time-point labels, e.g. `[0.0, 0.5, 1.0]` |
 
 !!! note "Affine transforms for rotated tiles"
-    If your tiles are rotated or sheared (e.g. light-sheet multi-view data), pass the full homogeneous affine matrix via `affine=` instead of `scale` + `translation`. The matrix maps coordinates in "physical image coordinates" (scale/spacing and translation/origin already applied) to physical coordinates.
+    If our tiles are rotated or sheared (e.g. light-sheet multi-view data), pass the full homogeneous affine matrix via `affine=` instead of `scale` + `translation`. The matrix maps coordinates in "physical image coordinates" (scale/spacing and translation/origin already applied) to physical coordinates.
 
 ---
 
@@ -135,7 +135,7 @@ for arr, translation in zip(tile_arrays, tile_translations):
     msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[2]))
 ```
 
-The resulting `msims` list is the direct input to `registration.register` and `fusion.fuse`. You can sanity-check the tile layout before proceeding:
+The resulting `msims` list is the direct input to `registration.register` and `fusion.fuse`. We can sanity-check the tile layout before proceeding:
 
 ```python
 from multiview_stitcher import vis_utils
