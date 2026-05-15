@@ -8,6 +8,8 @@ These code snippets walk you through a small stitching workflow consisting of
 
 Make sure to also check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks). in the `notebooks/` directory.
 
+Note that the code snippets are minimal examples and the tile boundaries shown in the visualizations contain random image data.
+
 #### 1) Prepare data for stitching
 
 
@@ -66,6 +68,10 @@ with ProgressBar():
         plot_summary=True,
     )
 ```
+
+![alt text](images/pairwise_registration_summary_example.png)
+
+![alt text](images/global_registration_summary_example.png)
 
 #### 3) Stitch / fuse the tiles
 ```python
