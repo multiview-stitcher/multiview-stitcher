@@ -1,3 +1,4 @@
+import inspect
 import logging
 from contextlib import contextmanager
 
@@ -35,6 +36,91 @@ def temporary_log_level(logger, level):
 
 
 from itertools import islice
+
+
+def requires_overlap(overlap_fn):
+    """
+    Decorator that attaches a required-overlap calculator to a fusion or
+    weights function.
+
+    ``overlap_fn`` receives a dict of the function's fully-resolved keyword
+    arguments (defaults merged with whatever the caller passes) and must
+    return the required overlap in pixels as an int.
+
+    Example
+    -------
+    >>> @requires_overlap(lambda kwargs: 2 * kwargs["sigma_2"])
+    ... def my_weights_func(transformed_views, blending_weights, sigma_2=11):
+    ...     ...
+
+    The decorator preserves the original function's signature and name, and
+    attaches a ``required_overlap(kwargs)`` attribute that can be called
+    from ``fuse()`` via::
+
+        if hasattr(func, "required_overlap"):
+            overlap = func.required_overlap(func_kwargs or {})
+    """
+    def decorator(func):
+        sig = inspect.signature(func)
+
+        def required_overlap(kwargs):
+            defaults = {
+                k: v.default
+                for k, v in sig.parameters.items()
+                if v.default is not inspect.Parameter.empty
+            }
+            return overlap_fn({**defaults, **(kwargs or {})})
+
+        func.required_overlap = required_overlap
+        return func
+
+    return decorator
+
+
+def requires_source_shrinkage(shrinkage_fn):
+    """
+    Decorator that attaches a source-shrinkage calculator to a fusion function.
+
+    ``shrinkage_fn`` receives a dict of the function's fully-resolved keyword
+    arguments (defaults merged with whatever the caller passes) and must
+    return the required source shrinkage as a float (isotropic, in physical
+    units) or as a dict mapping dimension names to floats (per-dimension).
+
+    The shrinkage causes blending weights to reach zero that many physical
+    units *before* the input view borders, preventing border artefacts from
+    convolution-based operations (e.g. multi-view deconvolution with a PSF).
+
+    Example
+    -------
+    >>> @requires_source_shrinkage(lambda kwargs: kwargs["border_exclusion"])
+    ... def my_fusion_func(transformed_views, blending_weights,
+    ...                    border_exclusion=5.0):
+    ...     ...
+
+    The decorator preserves the original function's signature and name, and
+    attaches a ``required_source_shrinkage(kwargs)`` attribute that can be
+    called from ``fuse()`` via::
+
+        if hasattr(func, "required_source_shrinkage"):
+            shrink_distance = func.required_source_shrinkage(func_kwargs or {})
+    """
+    def decorator(func):
+        sig = inspect.signature(func)
+
+        def required_source_shrinkage(kwargs):
+            defaults = {
+                k: v.default
+                for k, v in sig.parameters.items()
+                if v.default is not inspect.Parameter.empty
+            }
+            return shrinkage_fn({**defaults, **(kwargs or {})})
+
+        func.required_source_shrinkage = required_source_shrinkage
+        return func
+
+    return decorator
+
+
 def ndindex_batches(nblocks, batch_size):
     it = np.ndindex(*nblocks)
     while True:

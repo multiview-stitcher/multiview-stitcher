@@ -6,6 +6,7 @@ from scipy.ndimage import distance_transform_edt, gaussian_filter
 from spatial_image import to_spatial_image
 
 from multiview_stitcher import transformation
+from multiview_stitcher.misc_utils import requires_overlap
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
 
@@ -16,23 +17,7 @@ except ImportError:
     cp = None
 
 
-def calculate_required_overlap(
-    method_func=None,
-    method_func_kwargs=None,
-):
-    """
-    Calculate the required overlap for fusion given
-    - weights method and params
-    # - fusion method and params
-    """
-    if method_func is None:
-        return 0
-    elif method_func == content_based:
-        return 2 * method_func_kwargs["sigma_2"]
-    else:
-        raise ValueError(f"Unknown weights method {method_func}")
-
-
+@requires_overlap(lambda kwargs: 2 * kwargs["sigma_2"])
 def content_based(
     transformed_views,
     blending_weights,
@@ -142,11 +127,54 @@ def normalize_weights(weights):
     return weights
 
 
+def _shrink_source_bb(
+    source_bb: BoundingBox,
+    shrink_distance: Union[float, dict[str, float]],
+) -> BoundingBox:
+    """
+    Return a copy of ``source_bb`` whose physical extent has been reduced by
+    ``shrink_distance`` on *each* side along every spatial dimension.
+
+    Parameters
+    ----------
+    source_bb :
+        Original source bounding box.
+    shrink_distance :
+        Physical shrinkage per side.  A single float is applied isotropically;
+        a dict maps dimension names to individual values.
+
+    Returns
+    -------
+    BoundingBox
+        New bounding box with ``origin`` shifted inward and ``shape`` reduced
+        so that the physical extent shrinks by ``2 * shrink_distance[dim]``
+        along each dimension.
+    """
+
+    sdims = list(source_bb["origin"].keys())
+    if isinstance(shrink_distance, (int, float)):
+        shrink_distance = {dim: float(shrink_distance) for dim in sdims}
+
+    return {
+        "origin": {
+            dim: source_bb["origin"][dim] + shrink_distance.get(dim, 0)
+            for dim in sdims
+        },
+        "spacing": source_bb["spacing"],
+        "shape": {
+            dim: source_bb["shape"][dim]
+            - 2 * shrink_distance.get(dim, 0) / source_bb["spacing"][dim]
+            for dim in sdims
+        },
+    }
+
+
 def get_blending_weights(
     target_bb: BoundingBox,
     source_bb: BoundingBox,
     affine: xr.DataArray,
     blending_widths: dict[str, float] = None,
+    shrink_distance: float = 0,
     cupy=False,
 ):
     """
@@ -162,10 +190,17 @@ def get_blending_weights(
     ----------
     target_bb : Target bounding box.
     source_bb : Source bounding box.
-    params : list of xarray.DataArray
-        Transformation parameters for each view.
-    blending_widths : dict
+    affine : xr.DataArray
+        Affine transformation from source to target space.
+    blending_widths : dict, optional
         Physical blending widths for each dimension.
+    shrink_distance : float or dict[str, float], optional
+        Shrink the source bounding box inward by this many physical units on
+        each side before computing the weights.  A single float is applied
+        isotropically; a dict maps dimension names to individual values.
+        Defaults to 0 (no shrinkage).  Use this to make weights reach zero
+        *before* the actual view border, e.g. to avoid border artefacts in
+        convolution-based fusion methods such as multi-view deconvolution.
 
     Returns
     -------
@@ -177,6 +212,9 @@ def get_blending_weights(
         blending_widths = {"z": 3, "y": 10, "x": 10}
 
     sdims = sorted(source_bb["origin"].keys())[::-1]
+
+    if shrink_distance:
+        source_bb = _shrink_source_bb(source_bb, shrink_distance)
     ndim = len(sdims)
 
     mask = np.zeros([3 + 2 for dim in sdims])

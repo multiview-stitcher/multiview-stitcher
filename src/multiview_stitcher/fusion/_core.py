@@ -193,7 +193,7 @@ def fuse(
     sims: list,
     transform_key: str = None,
     fusion_func: Callable = weighted_average_fusion,
-    fusion_method_kwargs: dict = None,
+    fusion_func_kwargs: dict = None,
     weights_func: Callable = None,
     weights_func_kwargs: dict = None,
     output_spacing: dict[str, float] = None,
@@ -227,7 +227,7 @@ def fuse(
         Fusion function to be applied. This function receives the following
         inputs (as arrays if applicable): transformed_views, blending_weights, fusion_weights, params.
         By default weighted_average_fusion
-    fusion_method_kwargs : dict, optional
+    fusion_func_kwargs : dict, optional
     weights_func : Callable, optional
         Function to calculate fusion weights. This function receives the
         following inputs: transformed_views (as spatial images), params.
@@ -314,7 +314,7 @@ def fuse(
             "sims": sims,
             "transform_key": transform_key,
             "fusion_func": fusion_func,
-            "fusion_method_kwargs": fusion_method_kwargs,
+            "fusion_func_kwargs": fusion_func_kwargs,
             "weights_func": weights_func,
             "weights_func_kwargs": weights_func_kwargs,
             "output_spacing": output_spacing,
@@ -396,18 +396,20 @@ def fuse(
         for sim in sims
     ]
 
-    # determine overlap from weights method
-    # (soon: fusion methods will also require overlap)
-    overlap_in_pixels = 0
-    if weights_func is not None:
-        overlap_in_pixels = np.max(
-            [
+    # determine overlap from weights/fusion methods and user-supplied value
+    overlap_in_pixels = overlap_in_pixels or 0
+    shrink_distance = 0
+    for func, func_kwargs in [
+        (weights_func, weights_func_kwargs),
+        (fusion_func, fusion_func_kwargs),
+    ]:
+        if func is not None and hasattr(func, "required_overlap"):
+            overlap_in_pixels = max(
                 overlap_in_pixels,
-                weights.calculate_required_overlap(
-                    weights_func, weights_func_kwargs
-                ),
-            ]
-        )
+                func.required_overlap(func_kwargs),
+            )
+        if func is not None and hasattr(func, "required_source_shrinkage"):
+            shrink_distance = func.required_source_shrinkage(func_kwargs)
 
     # calculate output chunk bounding boxes
     output_chunk_bbs, block_indices = mv_graph.get_chunk_bbs(
@@ -668,13 +670,14 @@ def fuse(
                 params=tmp_params,
                 output_properties=output_chunk_bb_with_overlap,
                 fusion_func=fusion_func,
-                fusion_method_kwargs=fusion_method_kwargs,
+                fusion_func_kwargs=fusion_func_kwargs,
                 weights_func=weights_func,
                 weights_func_kwargs=weights_func_kwargs,
                 trim_overlap_in_pixels=overlap_in_pixels,
                 interpolation_order=1,
                 full_view_bbs=full_view_bbs,
                 blending_widths=blending_widths,
+                shrink_distance=shrink_distance,
             )
 
             fused_output_chunk = da.from_delayed(
@@ -739,7 +742,7 @@ def fuse_np(
     params: Sequence[xr.DataArray],
     output_properties: BoundingBox,
     fusion_func: Callable = weighted_average_fusion,
-    fusion_method_kwargs: dict = None,
+    fusion_func_kwargs: dict = None,
     weights_func: Callable = None,
     weights_func_kwargs: Callable = None,
     trim_overlap_in_pixels: int = 0,
@@ -748,6 +751,7 @@ def fuse_np(
     spacings: Sequence[dict[str, float]] = None,
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
+    shrink_distance=0,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -799,8 +803,8 @@ def fuse_np(
     else:
         fusion_requires_blending_weights = False
 
-    if fusion_method_kwargs is None:
-        fusion_method_kwargs = {}
+    if fusion_func_kwargs is None:
+        fusion_func_kwargs = {}
 
     if weights_func_kwargs is None:
         weights_func_kwargs = {}
@@ -830,6 +834,7 @@ def fuse_np(
                 source_bb=full_view_bbs[iview],
                 affine=params[iview],
                 blending_widths=blending_widths,
+                shrink_distance=shrink_distance,
                 cupy=False if cp is None else
                 (True if isinstance(sims[iview].data, cp.ndarray) else False),
             )
@@ -841,11 +846,13 @@ def fuse_np(
     else:
         field_ws_t = None
 
-    fusion_method_kwargs["transformed_views"] = field_ims_t
+    fusion_func_kwargs["transformed_views"] = field_ims_t
     if has_keyword(fusion_func, "params"):
-        fusion_method_kwargs["params"] = params
+        fusion_func_kwargs["params"] = params
     if fusion_requires_blending_weights:
-        fusion_method_kwargs["blending_weights"] = field_ws_t
+        fusion_func_kwargs["blending_weights"] = field_ws_t
+    if has_keyword(fusion_func, "output_spacing") and "output_spacing" not in fusion_func_kwargs:
+        fusion_func_kwargs["output_spacing"] = output_properties["spacing"]
 
     # calculate fusion weights if required
     if weights_func is not None and has_keyword(fusion_func, "fusion_weights"):
@@ -856,11 +863,11 @@ def fuse_np(
             weights_func_kwargs["blending_weights"] = field_ws_t
 
         fusion_weights = weights_func(**weights_func_kwargs)
-        fusion_method_kwargs["fusion_weights"] = fusion_weights
+        fusion_func_kwargs["fusion_weights"] = fusion_weights
 
     fused = func_ignore_nan_warning(
         fusion_func,
-        **fusion_method_kwargs,
+        **fusion_func_kwargs,
     )
 
     # trim overlap
