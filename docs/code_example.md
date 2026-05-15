@@ -6,6 +6,7 @@ These code snippets walk you through a small stitching workflow consisting of
   2. Registering the tiles
   3. Stitching / fusing the tiles
 
+Make sure to also check out the [example notebooks](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks). in the `notebooks/` directory.
 
 #### 1) Prepare data for stitching
 
