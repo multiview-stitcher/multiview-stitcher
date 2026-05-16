@@ -302,3 +302,60 @@ def test_msim_map_blocks_maps_every_scale_and_preserves_other_vars():
         assert "stage" in mapped[scale_key].data_vars
         assert "other_var" in mapped[scale_key].data_vars
         assert mapped[scale_key]["other_var"].item() == msim[scale_key]["other_var"].item()
+
+
+def test_msim_point_set_roundtrip_and_selection():
+    sim = si_utils.get_sim_from_array(
+        np.zeros((5, 5)),
+        dims=["y", "x"],
+    )
+    points = np.array(
+        [
+            [1.0, 1.0],
+            [2.0, 2.0],
+            [4.0, 4.0],
+        ]
+    )
+    si_utils.set_point_set(sim, points)
+
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    assert "point_sets" in list(msim.keys())
+    assert "beads" in list(msim["point_sets"].keys())
+    assert "beads" not in msi_utils.get_transforms_from_dataset_as_dict(
+        msim["scale0"]
+    )
+    assert msi_utils.get_point_set(msim)["position"].dims == (
+        "t",
+        "c",
+        "point",
+        "dim",
+    )
+    assert np.allclose(
+        msi_utils.get_point_set(msim)["position"].isel(t=0, c=0),
+        points,
+    )
+
+    sim_roundtrip = msi_utils.get_sim_from_msim(msim)
+    assert si_utils.get_point_set(sim_roundtrip)["position"].dims == (
+        "t",
+        "c",
+        "point",
+        "dim",
+    )
+    assert np.allclose(
+        si_utils.get_point_set(sim_roundtrip)["position"].isel(t=0, c=0),
+        points,
+    )
+
+    selected = msi_utils.multiscale_sel_coords(msim, {"y": slice(0.0, 2.0)})
+    assert msi_utils.get_point_set(selected)["position"].dims == (
+        "t",
+        "c",
+        "point",
+        "dim",
+    )
+    assert np.allclose(
+        msi_utils.get_point_set(selected)["position"].isel(t=0, c=0).values,
+        np.array([[1.0, 1.0], [2.0, 2.0]]),
+    )

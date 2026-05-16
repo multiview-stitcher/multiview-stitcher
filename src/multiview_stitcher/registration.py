@@ -511,6 +511,56 @@ def phase_correlation_registration(
     return reg_result
 
 
+def _get_points_array_for_registration(point_set, sdims):
+    position = point_set["position"]
+    extra_dims = [
+        dim for dim in position.dims if dim not in ["point", "dim"]
+    ]
+    for dim in extra_dims:
+        if position.sizes[dim] != 1:
+            raise ValueError(
+                "Point sets passed to pairwise registration must be selected "
+                f"to one value along dimension {dim!r}."
+            )
+        position = position.isel({dim: 0})
+
+    position = position.sel(dim=sdims).transpose("point", "dim")
+
+    points = np.asarray(position.data)
+    valid = np.all(np.isfinite(points), axis=1)
+
+    return points[valid]
+
+
+def _transform_points_for_registration(points, affine):
+    if points.size == 0:
+        return points
+    return transformation.transform_pts(points, affine)
+
+
+def registration_marker_based(
+    fixed_data,
+    moving_data,
+    *,
+    fixed_points,
+    moving_points,
+    **kwargs,
+):
+    """
+    Placeholder marker-based registration.
+
+    Point matching and transform estimation will be implemented later. For now,
+    this function only exercises the point-set registration plumbing.
+    """
+
+    ndim = fixed_data.ndim
+
+    return {
+        "affine_matrix": np.eye(ndim + 1),
+        "quality": 1.0,
+    }
+
+
 def get_affine_from_intrinsic_affine(
     data_affine,
     sim_fixed,
@@ -607,30 +657,35 @@ def get_affine_from_intrinsic_affine(
 
 
 def dispatch_pairwise_reg_func(
-    pairwise_reg_func, fixed_data, moving_data, **pairwise_reg_func_kwargs
+    pairwise_reg_func,
+    fixed_data,
+    moving_data,
+    skip_constant_check=False,
+    **pairwise_reg_func_kwargs,
 ):
     """
     Check that images are not constant and apply the registration function.
     """
-    int_extrema = [
-        [func(im) for im in [fixed_data, moving_data]]
-        for func in [np.nanmin, np.nanmax]
-    ]
+    if not skip_constant_check:
+        int_extrema = [
+            [func(im) for im in [fixed_data, moving_data]]
+            for func in [np.nanmin, np.nanmax]
+        ]
 
-    # return if no translation if images are constant
-    for i in range(2):
-        if int_extrema[0][i] == int_extrema[1][i]:
-            warnings.warn(
-                "An overlap region between tiles/views is all zero or constant. Assuming identity transform.",
-                UserWarning,
-                stacklevel=2,
-            )
-            reg_result = {}
-            reg_result["affine_matrix"] = param_utils.identity_transform(
-                fixed_data.ndim
-            )
-            reg_result["quality"] = np.nan
-            return reg_result
+        # return if no translation if images are constant
+        for i in range(2):
+            if int_extrema[0][i] == int_extrema[1][i]:
+                warnings.warn(
+                    "An overlap region between tiles/views is all zero or constant. Assuming identity transform.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                reg_result = {}
+                reg_result["affine_matrix"] = param_utils.identity_transform(
+                    fixed_data.ndim
+                )
+                reg_result["quality"] = np.nan
+                return reg_result
 
     return pairwise_reg_func(
         fixed_data, moving_data, **pairwise_reg_func_kwargs
@@ -641,6 +696,7 @@ def register_pair_of_msims(
     msim1,
     msim2,
     transform_key,
+    points_key="beads",
     registration_binning=None,
     reg_res_level=None,
     overlap_tolerance: Union[int, dict[str, int]] = None,
@@ -662,6 +718,8 @@ def register_pair_of_msims(
         Extrinsic coordinate system to consider as preregistration.
         This affects the calculation of the overlap region and is passed on to the
         registration func, by default None
+    points_key : str, optional
+        Named point set to pass to marker-aware pairwise registration functions.
     registration_binning : dict, optional
         Binning factors to apply for registration. If reg_res_level is also provided,
         the binning factors must be compatible with the resolution level.
@@ -802,12 +860,15 @@ def register_pair_of_msims(
     ]
 
     if max(registration_binning.values()) > 1:
-        reg_sims_b = [
-            sim.coarsen(registration_binning, boundary="trim")
-            .mean()
-            .astype(sim.dtype)
-            for sim in reg_sims
-        ]
+        reg_sims_b = []
+        for sim in reg_sims:
+            sim_binned = (
+                sim.coarsen(registration_binning, boundary="trim")
+                .mean()
+                .astype(sim.dtype)
+            )
+            sim_binned.attrs.update(copy.deepcopy(sim.attrs))
+            reg_sims_b.append(sim_binned)
     else:
         reg_sims_b = reg_sims
 
@@ -826,7 +887,8 @@ def register_pair_of_msims(
 
     tol = 1e-6
     reg_sims_b = [
-        sim.sel(
+        spatial_image_utils.sim_sel_coords(
+            sim,
             {
                 # add spacing to include bounding pixels
                 dim: slice(
@@ -866,8 +928,82 @@ def register_pair_of_msims(
             "initial_affine",
         ]
     }
+    pairwise_reg_func_has_point_keywords = {
+        keyword: has_keyword(pairwise_reg_func, keyword)
+        for keyword in ["fixed_points", "moving_points"]
+    }
 
-    if not np.any(list(pairwise_reg_func_has_keywords.values())):
+    if np.any(list(pairwise_reg_func_has_point_keywords.values())) and not np.all(
+        list(pairwise_reg_func_has_point_keywords.values())
+    ):
+        raise ValueError(
+            "Point-aware pairwise registration functions must accept both "
+            "'fixed_points' and 'moving_points'."
+        )
+
+    if np.all(list(pairwise_reg_func_has_point_keywords.values())):
+        registration_func_space = "transform_key_space"
+
+        fixed_data = reg_sims_b[0].data
+        moving_data = reg_sims_b[1].data
+
+        affines = [
+            spatial_image_utils.get_affine_from_sim(
+                sim, transform_key=transform_key
+            )
+            .squeeze()
+            .data
+            for sim in reg_sims_b
+        ]
+        initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+
+        fixed_point_set = spatial_image_utils.get_point_set(
+            reg_sims_b[0],
+            points_key=points_key,
+        )
+        moving_point_set = spatial_image_utils.get_point_set(
+            reg_sims_b[1],
+            points_key=points_key,
+        )
+        fixed_points = _get_points_array_for_registration(
+            fixed_point_set,
+            spatial_dims,
+        )
+        moving_points = _get_points_array_for_registration(
+            moving_point_set,
+            spatial_dims,
+        )
+
+        pairwise_reg_func_kwargs["fixed_points"] = (
+            _transform_points_for_registration(
+                fixed_points,
+                np.matmul(initial_affine, affines[0]),
+            )
+        )
+        pairwise_reg_func_kwargs["moving_points"] = (
+            _transform_points_for_registration(
+                moving_points,
+                affines[1],
+            )
+        )
+
+        for isim, sim in enumerate(reg_sims_b):
+            prefix = ["fixed", "moving"][isim]
+            if pairwise_reg_func_has_keywords[f"{prefix}_origin"]:
+                pairwise_reg_func_kwargs[
+                    f"{prefix}_origin"
+                ] = spatial_image_utils.get_origin_from_sim(sim)
+            if pairwise_reg_func_has_keywords[f"{prefix}_spacing"]:
+                pairwise_reg_func_kwargs[
+                    f"{prefix}_spacing"
+                ] = spatial_image_utils.get_spacing_from_sim(sim)
+
+        if pairwise_reg_func_has_keywords["initial_affine"]:
+            pairwise_reg_func_kwargs[
+                "initial_affine"
+            ] = param_utils.affine_to_xaffine(initial_affine)
+
+    elif not np.any(list(pairwise_reg_func_has_keywords.values())):
         registration_func_space = "pixel_space"
 
         sims_pixel_space = sims_to_intrinsic_coord_system(
@@ -916,6 +1052,7 @@ def register_pair_of_msims(
         pairwise_reg_func,
         fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
         moving_data=xr.DataArray(moving_data, dims=spatial_dims),
+        skip_constant_check=registration_func_space == "transform_key_space",
         **pairwise_reg_func_kwargs,
     )
 
@@ -943,6 +1080,8 @@ def register_pair_of_msims(
         affine_phys = np.matmul(
             affines[1], np.matmul(affine, np.linalg.inv(affines[0]))
         )
+    elif registration_func_space == "transform_key_space":
+        affine_phys = affine
 
     param_ds = xr.Dataset(
         data_vars={
@@ -1102,6 +1241,7 @@ def _plot_registration_summaries(
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key: str = None,
+    points_key: str = "beads",
     reg_channel_index: int = None,
     reg_channel: str = None,
     new_transform_key: str = None,
@@ -1142,6 +1282,8 @@ def register(
     transform_key : str, optional
         Extrinsic coordinate system to use as a starting point
         for the registration, by default None
+    points_key : str, optional
+        Named point set to use for marker-aware pairwise registration functions.
     new_transform_key : str, optional
         If set, the registration result will be registered as a new extrinsic
         coordinate system in the input views (with the given name), by default None
@@ -1327,6 +1469,7 @@ def register(
         msims_reg,
         g_reg,
         transform_key=transform_key,
+        points_key=points_key,
         registration_binning=registration_binning,
         reg_res_level=reg_res_level,
         overlap_tolerance=overlap_tolerance,

@@ -618,6 +618,103 @@ def test_constant_pairwise_reg():
         )
 
 
+def test_marker_based_pairwise_registration_plumbing():
+    transform_key = "stage"
+    fixed_affine = param_utils.affine_from_translation([1.0, 0.0])
+    moving_affine = param_utils.affine_from_translation([0.0, 2.0])
+
+    fixed_sim = spatial_image_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        affine=fixed_affine,
+        transform_key=transform_key,
+    )
+    moving_sim = spatial_image_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        affine=moving_affine,
+        transform_key=transform_key,
+    )
+
+    fixed_points = np.array([[2.0, 3.0], [4.0, 5.0]])
+    moving_points = np.array([[2.0, 3.0], [4.0, 5.0]])
+    spatial_image_utils.set_point_set(fixed_sim, fixed_points)
+    spatial_image_utils.set_point_set(moving_sim, moving_points)
+
+    fixed_msim = msi_utils.multiscale_sel_coords(
+        msi_utils.get_msim_from_sim(fixed_sim, scale_factors=[]),
+        {"t": 0, "c": 0},
+    )
+    moving_msim = msi_utils.multiscale_sel_coords(
+        msi_utils.get_msim_from_sim(moving_sim, scale_factors=[]),
+        {"t": 0, "c": 0},
+    )
+
+    captured = {}
+
+    def pairwise_func(fixed_data, moving_data, *, fixed_points, moving_points):
+        captured["fixed_points"] = fixed_points
+        captured["moving_points"] = moving_points
+        return {"affine_matrix": np.eye(3), "quality": 0.25}
+
+    result = registration.register_pair_of_msims(
+        fixed_msim,
+        moving_msim,
+        transform_key=transform_key,
+        registration_binning={"y": 1, "x": 1},
+        pairwise_reg_func=pairwise_func,
+    ).compute()
+
+    initial_affine = np.linalg.inv(moving_affine) @ fixed_affine
+
+    assert np.allclose(
+        captured["fixed_points"],
+        transformation.transform_pts(
+            fixed_points,
+            initial_affine @ fixed_affine,
+        ),
+    )
+    assert np.allclose(
+        captured["moving_points"],
+        transformation.transform_pts(moving_points, moving_affine),
+    )
+    assert np.allclose(result["transform"], np.eye(3))
+    assert float(result["quality"]) == pytest.approx(0.25)
+
+
+def test_marker_based_register_dummy_method():
+    transform_key = "stage"
+    sims = [
+        spatial_image_utils.get_sim_from_array(
+            np.zeros((10, 10)),
+            dims=["y", "x"],
+            translation={"y": 0.0, "x": x_origin},
+            transform_key=transform_key,
+        )
+        for x_origin in [0.0, 5.0]
+    ]
+
+    for sim in sims:
+        spatial_image_utils.set_point_set(
+            sim,
+            np.array([[1.0, sim.coords["x"].values[0] + 6.0]]),
+        )
+
+    out = registration.register(
+        [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims],
+        transform_key=transform_key,
+        reg_channel_index=0,
+        registration_binning={"y": 1, "x": 1},
+        pairwise_reg_func=registration.registration_marker_based,
+        pre_registration_pruning_method=None,
+        return_dict=True,
+    )
+
+    qualities = out["pairwise_registration"]["metrics"]["qualities"]
+    assert len(qualities) == 1
+    assert list(qualities.values())[0] == pytest.approx(1.0)
+
+
 @pytest.mark.parametrize(
     "ndim",
     [2, 3],

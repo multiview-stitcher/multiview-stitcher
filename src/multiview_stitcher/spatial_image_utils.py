@@ -921,6 +921,231 @@ def get_tranform_keys_from_sim(sim):
     return list(sim.attrs["transforms"].keys())
 
 
+def _get_nscoords_from_sim(sim):
+    return {
+        dim: (
+            sim.coords[dim].values
+            if dim in sim.coords
+            else np.arange(sim.sizes[dim])
+        )
+        for dim in get_nonspatial_dims_from_sim(sim)
+    }
+
+
+def _coerce_point_set(points, sdims=None, nscoords=None):
+    if isinstance(points, xr.Dataset):
+        point_set = points.copy(deep=True)
+    elif isinstance(points, xr.DataArray):
+        point_set = points.to_dataset(name="position")
+    else:
+        points = np.asarray(points)
+        if points.ndim != 2:
+            raise ValueError(
+                "Point arrays must have shape (n_points, n_spatial_dims)."
+            )
+        if sdims is None:
+            sdims = SPATIAL_DIMS[-points.shape[1] :]
+        point_set = xr.Dataset(
+            {
+                "position": xr.DataArray(
+                    points,
+                    dims=["point", "dim"],
+                    coords={"dim": sdims},
+                )
+            }
+        )
+
+    if "position" not in point_set:
+        raise ValueError("Point sets must contain a 'position' data variable.")
+
+    position = point_set["position"]
+    for dim in ["point", "dim"]:
+        if dim not in position.dims:
+            raise ValueError(
+                "Point-set 'position' must have 'point' and 'dim' dimensions."
+            )
+
+    if "dim" not in position.coords:
+        if sdims is None:
+            raise ValueError(
+                "Point-set 'position' must have a 'dim' coordinate."
+            )
+        point_set = point_set.assign_coords({"dim": sdims})
+        position = point_set["position"]
+
+    point_sdims = list(position.coords["dim"].values)
+    if sdims is not None and point_sdims != list(sdims):
+        raise ValueError(
+            "Point-set dimensions must match image spatial dimensions. "
+            f"Expected {list(sdims)}, got {point_sdims}."
+        )
+
+    if np.any(np.isinf(np.asarray(position.data))):
+        raise ValueError("Point-set positions must not contain infinite values.")
+
+    if nscoords is not None:
+        nsdims = list(nscoords.keys())
+        extra_dims = [
+            dim
+            for dim in position.dims
+            if dim not in nsdims + ["point", "dim"]
+        ]
+        if len(extra_dims):
+            raise ValueError(
+                "Point-set dimensions must match image non-spatial "
+                f"dimensions. Unexpected dimensions: {extra_dims}."
+            )
+
+        missing_dims = [
+            dim for dim in nsdims if dim not in position.dims
+        ]
+        for dim in missing_dims:
+            point_set = point_set.expand_dims({dim: nscoords[dim]})
+
+        assign_coords = {}
+        for dim, coord_values in nscoords.items():
+            coord_values = np.asarray(coord_values)
+            if dim not in point_set.dims:
+                continue
+            if dim in point_set.coords:
+                if not np.array_equal(point_set.coords[dim].values, coord_values):
+                    raise ValueError(
+                        "Point-set coordinates must match image coordinates "
+                        f"for dimension {dim!r}."
+                    )
+            else:
+                if point_set.sizes[dim] != len(coord_values):
+                    raise ValueError(
+                        "Point-set dimension size must match image coordinate "
+                        f"size for dimension {dim!r}."
+                    )
+                assign_coords[dim] = coord_values
+        if len(assign_coords):
+            point_set = point_set.assign_coords(assign_coords)
+
+        position = point_set["position"]
+        position = position.transpose(*nsdims, "point", "dim")
+    else:
+        dims_except_dim = [dim for dim in position.dims if dim != "dim"]
+        position = position.transpose(*dims_except_dim, "dim")
+
+    point_set["position"] = position
+
+    return point_set
+
+
+def set_point_set(sim, points, points_key="beads"):
+    """
+    Attach a named point set to a spatial image.
+
+    Point positions are expected in intrinsic physical coordinates, i.e. image
+    origin and spacing have already been applied.
+    """
+
+    point_set = _coerce_point_set(
+        points,
+        sdims=get_spatial_dims_from_sim(sim),
+        nscoords=_get_nscoords_from_sim(sim),
+    )
+
+    if "point_sets" not in sim.attrs:
+        sim.attrs["point_sets"] = {}
+
+    sim.attrs["point_sets"][points_key] = point_set
+
+    return
+
+
+def get_point_set(sim, points_key="beads"):
+    if "point_sets" not in sim.attrs or points_key not in sim.attrs["point_sets"]:
+        raise KeyError(f"Point set {points_key!r} not found in sim.")
+
+    return sim.attrs["point_sets"][points_key].copy(deep=True)
+
+
+def _get_point_set_spatial_selection_bounds(sel):
+    if isinstance(sel, slice):
+        lower = -np.inf if sel.start is None else sel.start
+        upper = np.inf if sel.stop is None else sel.stop
+        return float(lower), float(upper)
+
+    if isinstance(sel, xr.DataArray):
+        data = np.asarray(sel.values)
+        if data.dtype == bool:
+            if not data.any():
+                return None
+            if len(sel.dims) != 1 or sel.dims[0] not in sel.coords:
+                raise ValueError(
+                    "Boolean spatial point-set selectors must carry one "
+                    "dimension coordinate."
+                )
+            coord_values = np.asarray(sel.coords[sel.dims[0]].values)[data]
+        else:
+            coord_values = data
+    else:
+        coord_values = np.asarray(sel)
+        if coord_values.dtype == bool:
+            raise ValueError(
+                "Boolean spatial point-set selectors must be xarray.DataArray "
+                "objects with coordinates."
+            )
+
+    coord_values = np.asarray(coord_values, dtype=float)
+    if coord_values.size == 0:
+        return None
+
+    return float(np.min(coord_values)), float(np.max(coord_values))
+
+
+def point_set_sel_coords(point_set, sel_dict):
+    """
+    Select coordinates from a point set.
+
+    Non-spatial point-set dimensions are selected with xarray. Spatial
+    selections filter points using the selector coordinate bounds.
+    """
+
+    point_set = _coerce_point_set(point_set)
+
+    ns_sel = {
+        dim: val
+        for dim, val in sel_dict.items()
+        if dim in point_set.dims and dim not in SPATIAL_DIMS
+    }
+    if len(ns_sel):
+        point_set = point_set.sel(ns_sel)
+
+    point_sdims = list(point_set["position"].coords["dim"].values)
+    sdims = [
+        dim for dim in SPATIAL_DIMS if dim in sel_dict and dim in point_sdims
+    ]
+    if not len(sdims):
+        return _coerce_point_set(point_set)
+
+    position = point_set["position"]
+    mask = xr.ones_like(position.isel(dim=0, drop=True), dtype=bool)
+
+    for dim in sdims:
+        bounds = _get_point_set_spatial_selection_bounds(sel_dict[dim])
+        if bounds is None:
+            mask = mask & False
+            continue
+        lower, upper = bounds
+        dim_position = position.sel(dim=dim, drop=True)
+        mask = mask & (dim_position >= lower) & (dim_position <= upper)
+
+    point_set = point_set.where(mask, drop=False)
+    if "point" in mask.dims:
+        reduce_dims = [dim for dim in mask.dims if dim != "point"]
+        if len(reduce_dims):
+            valid_points = mask.any(dim=reduce_dims)
+        else:
+            valid_points = mask
+        point_set = point_set.isel(point=valid_points)
+
+    return _coerce_point_set(point_set)
+
+
 def set_sim_affine(sim, xaffine, transform_key, base_transform_key=None):
     if "transforms" not in sim.attrs:
         sim.attrs["transforms"] = {}
@@ -967,7 +1192,7 @@ def get_center_of_sim(sim, transform_key=None):
 
 def sim_sel_coords(sim, sel_dict):
     """
-    Select coords from sim and its transform attributes
+    Select coords from sim and its transform and point-set attributes.
     """
 
     ssim = sim.copy(deep=True)
@@ -980,6 +1205,12 @@ def sim_sel_coords(sim, sel_dict):
                 ssim.attrs["transforms"][data_var] = ssim.attrs["transforms"][
                     data_var
                 ].sel({k: v})
+
+    if "point_sets" in sim.attrs:
+        ssim.attrs["point_sets"] = {
+            points_key: point_set_sel_coords(point_set, sel_dict)
+            for points_key, point_set in sim.attrs["point_sets"].items()
+        }
 
     return ssim
 
