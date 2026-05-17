@@ -514,7 +514,7 @@ def phase_correlation_registration(
 def _get_points_array_for_registration(point_set, sdims):
     position = point_set["position"]
     extra_dims = [
-        dim for dim in position.dims if dim not in ["point", "dim"]
+        dim for dim in position.dims if dim not in ["point_id", "dim"]
     ]
     for dim in extra_dims:
         if position.sizes[dim] != 1:
@@ -524,7 +524,7 @@ def _get_points_array_for_registration(point_set, sdims):
             )
         position = position.isel({dim: 0})
 
-    position = position.sel(dim=sdims).transpose("point", "dim")
+    position = position.sel(dim=sdims).transpose("point_id", "dim")
 
     points = np.asarray(position.data)
     valid = np.all(np.isfinite(points), axis=1)

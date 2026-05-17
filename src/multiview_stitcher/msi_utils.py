@@ -447,6 +447,27 @@ def set_point_set(msim, points, points_key="beads"):
 
     Point positions are expected in intrinsic physical coordinates, i.e. image
     origin and spacing have already been applied.
+    ``points`` may be an array with shape ``(n_points, n_spatial_dims)``;
+    columns must follow the image spatial dimension order.
+
+    Examples
+    --------
+    Set points from a plain NumPy array. Columns follow the image spatial
+    dimension order:
+
+    >>> points = np.array([[10.0, 20.0], [12.0, 24.0]])
+    >>> set_point_set(msim, points, points_key="beads")
+
+    Set points from NumPy values with explicit dimension labels:
+
+    >>> dim_names = ["y", "x"]
+    >>> point_set = xr.DataArray(
+    ...     points,
+    ...     dims=["point_id", "dim"],
+    ...     coords={"dim": dim_names},
+    ...     name="position",
+    ... ).to_dataset()
+    >>> set_point_set(msim, point_set, points_key="beads")
     """
 
     point_set = si_utils._coerce_point_set(
@@ -460,13 +481,33 @@ def set_point_set(msim, points, points_key="beads"):
 
 
 def get_point_set(msim, points_key="beads"):
+    """
+    Get a named point set from a multiscale spatial image.
+
+    Examples
+    --------
+    Retrieve the stored points, their axes order, and spatial dimension
+    coordinates:
+
+    >>> position = get_point_set(msim, points_key="beads")["position"]
+    >>> position.dims
+    ('t', 'c', 'point_id', 'dim')
+    >>> list(position.coords["dim"].values)
+    ['y', 'x']
+    >>> position.isel(t=0, c=0).values
+    array([[10., 20.],
+           [12., 24.]])
+    """
+
     if (
         "point_sets" not in list(msim.keys())
         or points_key not in list(msim["point_sets"].keys())
     ):
         raise KeyError(f"Point set {points_key!r} not found in msim.")
 
-    return msim[f"point_sets/{points_key}"].to_dataset().copy(deep=True)
+    return si_utils._coerce_point_set(
+        msim[f"point_sets/{points_key}"].to_dataset()
+    )
 
 
 def set_affine_transform(

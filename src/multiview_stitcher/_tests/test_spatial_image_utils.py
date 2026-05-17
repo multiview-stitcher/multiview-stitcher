@@ -313,7 +313,7 @@ def test_point_set_helpers_and_spatial_selection():
     si_utils.set_point_set(sim, points)
 
     point_set = si_utils.get_point_set(sim)
-    assert point_set["position"].dims == ("t", "c", "point", "dim")
+    assert point_set["position"].dims == ("t", "c", "point_id", "dim")
     assert np.allclose(point_set["position"].isel(t=0, c=0), points)
 
     selected = si_utils.sim_sel_coords(
@@ -322,7 +322,7 @@ def test_point_set_helpers_and_spatial_selection():
     )
     selected_points = si_utils.get_point_set(selected)
 
-    assert selected_points["position"].dims == ("t", "c", "point", "dim")
+    assert selected_points["position"].dims == ("t", "c", "point_id", "dim")
     assert np.allclose(
         selected_points["position"].isel(t=0, c=0).values,
         np.array([[10.0, 20.0], [12.0, 24.0]]),
@@ -344,7 +344,7 @@ def test_point_set_nonspatial_selection():
                         [[3.0, 3.0], [4.0, 4.0]],
                     ]
                 ),
-                dims=["t", "point", "dim"],
+                dims=["t", "point_id", "dim"],
                 coords={"t": [0, 1], "dim": ["y", "x"]},
             )
         }
@@ -355,7 +355,7 @@ def test_point_set_nonspatial_selection():
     selected_points = si_utils.get_point_set(selected)
 
     assert "t" not in selected_points["position"].dims
-    assert selected_points["position"].dims == ("c", "point", "dim")
+    assert selected_points["position"].dims == ("c", "point_id", "dim")
     assert np.allclose(
         selected_points["position"].isel(c=0).values,
         np.array([[3.0, 3.0], [4.0, 4.0]]),
@@ -377,7 +377,7 @@ def test_point_set_spatial_selection_preserves_nonspatial_dims():
                         [[4.0, 4.0], [1.0, 1.0]],
                     ]
                 ),
-                dims=["t", "point", "dim"],
+                dims=["t", "point_id", "dim"],
                 coords={"t": [0, 1], "dim": ["y", "x"]},
             )
         }
@@ -390,7 +390,7 @@ def test_point_set_spatial_selection_preserves_nonspatial_dims():
     )
     selected_points = si_utils.get_point_set(selected)
 
-    assert selected_points["position"].dims == ("t", "c", "point", "dim")
+    assert selected_points["position"].dims == ("t", "c", "point_id", "dim")
     assert np.allclose(
         selected_points["position"].isel(c=0).values,
         np.array(

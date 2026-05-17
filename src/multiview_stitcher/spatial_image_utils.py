@@ -949,7 +949,7 @@ def _coerce_point_set(points, sdims=None, nscoords=None):
             {
                 "position": xr.DataArray(
                     points,
-                    dims=["point", "dim"],
+                    dims=["point_id", "dim"],
                     coords={"dim": sdims},
                 )
             }
@@ -959,10 +959,14 @@ def _coerce_point_set(points, sdims=None, nscoords=None):
         raise ValueError("Point sets must contain a 'position' data variable.")
 
     position = point_set["position"]
-    for dim in ["point", "dim"]:
+    if "point" in position.dims and "point_id" not in position.dims:
+        point_set = point_set.rename({"point": "point_id"})
+        position = point_set["position"]
+
+    for dim in ["point_id", "dim"]:
         if dim not in position.dims:
             raise ValueError(
-                "Point-set 'position' must have 'point' and 'dim' dimensions."
+                "Point-set 'position' must have 'point_id' and 'dim' dimensions."
             )
 
     if "dim" not in position.coords:
@@ -988,7 +992,7 @@ def _coerce_point_set(points, sdims=None, nscoords=None):
         extra_dims = [
             dim
             for dim in position.dims
-            if dim not in nsdims + ["point", "dim"]
+            if dim not in nsdims + ["point_id", "dim"]
         ]
         if len(extra_dims):
             raise ValueError(
@@ -1024,7 +1028,7 @@ def _coerce_point_set(points, sdims=None, nscoords=None):
             point_set = point_set.assign_coords(assign_coords)
 
         position = point_set["position"]
-        position = position.transpose(*nsdims, "point", "dim")
+        position = position.transpose(*nsdims, "point_id", "dim")
     else:
         dims_except_dim = [dim for dim in position.dims if dim != "dim"]
         position = position.transpose(*dims_except_dim, "dim")
@@ -1040,6 +1044,27 @@ def set_point_set(sim, points, points_key="beads"):
 
     Point positions are expected in intrinsic physical coordinates, i.e. image
     origin and spacing have already been applied.
+    ``points`` may be an array with shape ``(n_points, n_spatial_dims)``;
+    columns must follow the image spatial dimension order.
+
+    Examples
+    --------
+    Set points from a plain NumPy array. Columns follow the image spatial
+    dimension order:
+
+    >>> points = np.array([[10.0, 20.0], [12.0, 24.0]])
+    >>> set_point_set(sim, points, points_key="beads")
+
+    Set points from NumPy values with explicit dimension labels:
+
+    >>> dim_names = ["y", "x"]
+    >>> point_set = xr.DataArray(
+    ...     points,
+    ...     dims=["point_id", "dim"],
+    ...     coords={"dim": dim_names},
+    ...     name="position",
+    ... ).to_dataset()
+    >>> set_point_set(sim, point_set, points_key="beads")
     """
 
     point_set = _coerce_point_set(
@@ -1057,10 +1082,28 @@ def set_point_set(sim, points, points_key="beads"):
 
 
 def get_point_set(sim, points_key="beads"):
+    """
+    Get a named point set from a spatial image.
+
+    Examples
+    --------
+    Retrieve the stored points, their axes order, and spatial dimension
+    coordinates:
+
+    >>> position = get_point_set(sim, points_key="beads")["position"]
+    >>> position.dims
+    ('t', 'c', 'point_id', 'dim')
+    >>> list(position.coords["dim"].values)
+    ['y', 'x']
+    >>> position.isel(t=0, c=0).values
+    array([[10., 20.],
+           [12., 24.]])
+    """
+
     if "point_sets" not in sim.attrs or points_key not in sim.attrs["point_sets"]:
         raise KeyError(f"Point set {points_key!r} not found in sim.")
 
-    return sim.attrs["point_sets"][points_key].copy(deep=True)
+    return _coerce_point_set(sim.attrs["point_sets"][points_key])
 
 
 def _get_point_set_spatial_selection_bounds(sel):
@@ -1135,13 +1178,13 @@ def point_set_sel_coords(point_set, sel_dict):
         mask = mask & (dim_position >= lower) & (dim_position <= upper)
 
     point_set = point_set.where(mask, drop=False)
-    if "point" in mask.dims:
-        reduce_dims = [dim for dim in mask.dims if dim != "point"]
+    if "point_id" in mask.dims:
+        reduce_dims = [dim for dim in mask.dims if dim != "point_id"]
         if len(reduce_dims):
             valid_points = mask.any(dim=reduce_dims)
         else:
             valid_points = mask
-        point_set = point_set.isel(point=valid_points)
+        point_set = point_set.isel(point_id=valid_points)
 
     return _coerce_point_set(point_set)
 

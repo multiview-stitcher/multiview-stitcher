@@ -328,7 +328,7 @@ def test_msim_point_set_roundtrip_and_selection():
     assert msi_utils.get_point_set(msim)["position"].dims == (
         "t",
         "c",
-        "point",
+        "point_id",
         "dim",
     )
     assert np.allclose(
@@ -340,7 +340,7 @@ def test_msim_point_set_roundtrip_and_selection():
     assert si_utils.get_point_set(sim_roundtrip)["position"].dims == (
         "t",
         "c",
-        "point",
+        "point_id",
         "dim",
     )
     assert np.allclose(
@@ -352,7 +352,7 @@ def test_msim_point_set_roundtrip_and_selection():
     assert msi_utils.get_point_set(selected)["position"].dims == (
         "t",
         "c",
-        "point",
+        "point_id",
         "dim",
     )
     assert np.allclose(
