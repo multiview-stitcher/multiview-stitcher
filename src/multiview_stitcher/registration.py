@@ -871,7 +871,7 @@ def registration_marker_based(
     ransac_min_inlier_factor=3.0,
     ransac_num_iterations=1000,
     random_state=0,
-    fail_on_error=False,
+    fail_on_error=True,
 ):
     """
     Marker-based registration inspired by BigStitcher RGLDM bead matching.
