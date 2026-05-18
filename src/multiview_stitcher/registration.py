@@ -879,6 +879,42 @@ def registration_marker_based(
     The function matches local geometric descriptors computed from
     ``fixed_points`` and ``moving_points``, removes inconsistent matches with
     RANSAC, and returns a homogeneous transform from moving to fixed points.
+
+    Parameters
+    ----------
+    fixed_points, moving_points : array-like
+        Point coordinates with shape ``(n_points, n_spatial_dims)``.
+    transform_type : {"translation", "rigid", "affine"}, optional
+        Transformation model to estimate. By default "rigid".
+    num_neighbors : int, optional
+        Number of nearest neighbors used for each local descriptor.
+    redundancy : int, optional
+        Additional neighbors considered when forming descriptor subsets.
+    descriptor_ratio : float, optional
+        Best match must be this many times better than the second-best match.
+    descriptor_distance_threshold : float, optional
+        Maximum descriptor distance. If None, it is estimated from nearest
+        neighbor distances in the point sets.
+    descriptor_threshold_scale : float, optional
+        Scale factor for the automatic descriptor distance threshold.
+    ransac_max_error : float, optional
+        Maximum point residual for a correspondence to count as an inlier.
+    ransac_min_inlier_ratio : float, optional
+        Minimum fraction of candidate correspondences that must be inliers.
+    ransac_min_inlier_factor : float, optional
+        Multiplier for the model's minimum number of required matches.
+    ransac_num_iterations : int, optional
+        Number of random RANSAC samples.
+    random_state : int or numpy.random.Generator, optional
+        Seed or generator used for RANSAC sampling.
+    fail_on_error : bool, optional
+        If True, raise on failure. Otherwise warn and return identity with
+        ``quality=np.nan``.
+
+    References
+    ----------
+    BigStitcher/Fiji RGLDM bead registration:
+    https://github.com/fiji/SPIM_Registration/tree/master/src/main/java/spim/process/interestpointregistration/geometricdescriptor
     """
 
     fixed_points = np.asarray(fixed_points, dtype=float)
