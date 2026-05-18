@@ -761,13 +761,7 @@ def test_marker_based_registration_recovers_synthetic_transform(
         [moving_points, rng.uniform(-100, -50, size=(6, ndim))]
     )
 
-    data = xr.DataArray(
-        np.zeros((5,) * ndim),
-        dims=["z", "y", "x"][-ndim:],
-    )
     result = registration.registration_marker_based(
-        data,
-        data,
         fixed_points=fixed_points_with_outliers,
         moving_points=moving_points_with_outliers,
         transform_type=transform_type,

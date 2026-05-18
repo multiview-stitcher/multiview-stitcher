@@ -858,9 +858,6 @@ def _fail_marker_registration(ndim, message, fail_on_error):
 
 
 def registration_marker_based(
-    fixed_data,
-    moving_data,
-    *,
     fixed_points,
     moving_points,
     transform_type="rigid",
@@ -884,18 +881,21 @@ def registration_marker_based(
     RANSAC, and returns a homogeneous transform from moving to fixed points.
     """
 
-    ndim = fixed_data.ndim
     fixed_points = np.asarray(fixed_points, dtype=float)
     moving_points = np.asarray(moving_points, dtype=float)
+    if fixed_points.ndim == 2:
+        ndim = fixed_points.shape[1]
+    elif moving_points.ndim == 2:
+        ndim = moving_points.shape[1]
+    else:
+        ndim = 2
 
     try:
-        if moving_data.ndim != ndim:
-            raise ValueError("Fixed and moving data must have the same dimensionality.")
         if fixed_points.ndim != 2 or moving_points.ndim != 2:
             raise ValueError("Marker point arrays must be two-dimensional.")
-        if fixed_points.shape[1] != ndim or moving_points.shape[1] != ndim:
+        if fixed_points.shape[1] != moving_points.shape[1]:
             raise ValueError(
-                "Marker point dimensionality must match image dimensionality."
+                "Fixed and moving marker points must have the same dimensionality."
             )
         if not len(fixed_points) or not len(moving_points):
             raise ValueError("Marker point arrays must not be empty.")
@@ -1060,15 +1060,16 @@ def get_affine_from_intrinsic_affine(
 
 def dispatch_pairwise_reg_func(
     pairwise_reg_func,
-    fixed_data,
-    moving_data,
+    fixed_data=None,
+    moving_data=None,
     skip_constant_check=False,
     **pairwise_reg_func_kwargs,
 ):
     """
     Check that images are not constant and apply the registration function.
     """
-    if not skip_constant_check:
+    has_image_data = fixed_data is not None and moving_data is not None
+    if has_image_data and not skip_constant_check:
         int_extrema = [
             [func(im) for im in [fixed_data, moving_data]]
             for func in [np.nanmin, np.nanmax]
@@ -1089,9 +1090,11 @@ def dispatch_pairwise_reg_func(
                 reg_result["quality"] = np.nan
                 return reg_result
 
-    return pairwise_reg_func(
-        fixed_data, moving_data, **pairwise_reg_func_kwargs
-    )
+    if has_image_data:
+        pairwise_reg_func_kwargs["fixed_data"] = fixed_data
+        pairwise_reg_func_kwargs["moving_data"] = moving_data
+
+    return pairwise_reg_func(**pairwise_reg_func_kwargs)
 
 
 def register_pair_of_msims(
@@ -1330,10 +1333,26 @@ def register_pair_of_msims(
             "initial_affine",
         ]
     }
+    pairwise_reg_func_has_data_keywords = {
+        keyword: has_keyword(pairwise_reg_func, keyword)
+        for keyword in ["fixed_data", "moving_data"]
+    }
     pairwise_reg_func_has_point_keywords = {
         keyword: has_keyword(pairwise_reg_func, keyword)
         for keyword in ["fixed_points", "moving_points"]
     }
+
+    if np.any(list(pairwise_reg_func_has_data_keywords.values())) and not np.all(
+        list(pairwise_reg_func_has_data_keywords.values())
+    ):
+        raise ValueError(
+            "Image-aware pairwise registration functions must accept both "
+            "'fixed_data' and 'moving_data'."
+        )
+
+    pairwise_reg_func_has_image_data = np.all(
+        list(pairwise_reg_func_has_data_keywords.values())
+    )
 
     if np.any(list(pairwise_reg_func_has_point_keywords.values())) and not np.all(
         list(pairwise_reg_func_has_point_keywords.values())
@@ -1345,9 +1364,6 @@ def register_pair_of_msims(
 
     if np.all(list(pairwise_reg_func_has_point_keywords.values())):
         registration_func_space = "transform_key_space"
-
-        fixed_data = reg_sims_b[0].data
-        moving_data = reg_sims_b[1].data
 
         affines = [
             spatial_image_utils.get_affine_from_sim(
@@ -1405,24 +1421,33 @@ def register_pair_of_msims(
                 "initial_affine"
             ] = param_utils.affine_to_xaffine(initial_affine)
 
+        fixed_data = None
+        moving_data = None
+        if pairwise_reg_func_has_image_data:
+            fixed_data = reg_sims_b[0].data
+            moving_data = reg_sims_b[1].data
+
     elif not np.any(list(pairwise_reg_func_has_keywords.values())):
-        registration_func_space = "pixel_space"
+        fixed_data = None
+        moving_data = None
 
-        sims_pixel_space = sims_to_intrinsic_coord_system(
-            reg_sims_b[0],
-            reg_sims_b[1],
-            transform_key=transform_key,
-            overlap_bboxes=(lowers, uppers),
-        )
+        if pairwise_reg_func_has_image_data:
+            registration_func_space = "pixel_space"
 
-        fixed_data = sims_pixel_space[0].data
-        moving_data = sims_pixel_space[1].data
+            sims_pixel_space = sims_to_intrinsic_coord_system(
+                reg_sims_b[0],
+                reg_sims_b[1],
+                transform_key=transform_key,
+                overlap_bboxes=(lowers, uppers),
+            )
+
+            fixed_data = sims_pixel_space[0].data
+            moving_data = sims_pixel_space[1].data
+        else:
+            registration_func_space = "transform_key_space"
 
     elif np.all(list(pairwise_reg_func_has_keywords.values())):
         registration_func_space = "physical_space"
-
-        fixed_data = reg_sims_b[0].data
-        moving_data = reg_sims_b[1].data
 
         for isim, sim in enumerate(reg_sims_b):
             prefix = ["fixed", "moving"][isim]
@@ -1447,14 +1472,27 @@ def register_pair_of_msims(
             "initial_affine"
         ] = param_utils.affine_to_xaffine(initial_affine)
 
+        fixed_data = None
+        moving_data = None
+        if pairwise_reg_func_has_image_data:
+            fixed_data = reg_sims_b[0].data
+            moving_data = reg_sims_b[1].data
+
     else:
         raise ValueError("Unknown registration function signature")
 
+    if pairwise_reg_func_has_image_data:
+        fixed_data = xr.DataArray(fixed_data, dims=spatial_dims)
+        moving_data = xr.DataArray(moving_data, dims=spatial_dims)
+
     param_dict_d = delayed(dispatch_pairwise_reg_func, nout=1)(
         pairwise_reg_func,
-        fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
-        moving_data=xr.DataArray(moving_data, dims=spatial_dims),
-        skip_constant_check=registration_func_space == "transform_key_space",
+        fixed_data=fixed_data,
+        moving_data=moving_data,
+        skip_constant_check=(
+            not pairwise_reg_func_has_image_data
+            or registration_func_space == "transform_key_space"
+        ),
         **pairwise_reg_func_kwargs,
     )
 
