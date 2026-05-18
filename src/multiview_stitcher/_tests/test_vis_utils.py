@@ -10,6 +10,7 @@ from multiview_stitcher import (
     io,
     msi_utils,
     ngff_utils,
+    param_utils,
     sample_data,
     vis_utils,
 )
@@ -74,6 +75,49 @@ def test_plot_positions_single_coord(monkeypatch):
         use_positional_colors=False,
         spacing={"x": 1, "y": 1, "z": 1},
     )
+
+
+def test_plot_positions_point_sets(monkeypatch):
+    affine = param_utils.affine_from_translation([10.0, 20.0])
+    sim = si_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        affine=affine,
+    )
+    si_utils.set_point_set(
+        sim,
+        np.array([[1.0, 2.0], [3.0, 4.0]]),
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    point_positions = vis_utils._get_point_set_positions_for_plot(
+        sim,
+        points_key="beads",
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        sdims=["y", "x"],
+    )
+    assert np.allclose(
+        point_positions,
+        np.array([[0.0, 22.0, 11.0], [0.0, 24.0, 13.0]]),
+    )
+
+    fig, ax = vis_utils.plot_positions(
+        [sim],
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        points_key="beads",
+    )
+    assert len(ax.collections) == 2
+    plt.close(fig)
+
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    fig, ax = vis_utils.plot_positions(
+        [msim],
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        points_key="beads",
+    )
+    assert len(ax.collections) == 2
+    plt.close(fig)
 
 
 def test_neuroglancer_source_transform_matches_physical_affine():
