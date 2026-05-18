@@ -1,5 +1,7 @@
 import copy
+import itertools
 import logging
+import math
 import os
 import tempfile
 import warnings
@@ -14,6 +16,7 @@ import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
 from scipy import ndimage, stats
+from scipy.spatial import cKDTree
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 
@@ -538,26 +541,425 @@ def _transform_points_for_registration(points, affine):
     return transformation.transform_pts(points, affine)
 
 
+def _get_marker_registration_min_matches(transform_type, ndim):
+    transform_type = transform_type.lower()
+    if transform_type == "translation":
+        return 1
+    if transform_type == "rigid":
+        return ndim
+    if transform_type == "affine":
+        return ndim + 1
+    raise ValueError(
+        "Unsupported marker registration transform_type "
+        f"{transform_type!r}. Expected 'translation', 'rigid', or 'affine'."
+    )
+
+
+def _get_marker_descriptor_vector_length(num_neighbors):
+    return math.comb(num_neighbors + 1, 2)
+
+
+def _get_marker_nearest_neighbor_scale(*point_sets):
+    nearest_distances = []
+    for points in point_sets:
+        points = np.asarray(points, dtype=float)
+        if len(points) < 2:
+            continue
+        distances, _ = cKDTree(points).query(points, k=2)
+        nearest_distances.extend(distances[:, 1])
+
+    nearest_distances = np.asarray(nearest_distances, dtype=float)
+    nearest_distances = nearest_distances[np.isfinite(nearest_distances)]
+    if nearest_distances.size == 0:
+        return 0.0
+
+    return float(np.median(nearest_distances))
+
+
+def _get_marker_descriptor_distance_threshold(
+    fixed_points,
+    moving_points,
+    num_neighbors,
+    descriptor_threshold_scale,
+):
+    descriptor_vector_length = _get_marker_descriptor_vector_length(num_neighbors)
+    nn_scale = _get_marker_nearest_neighbor_scale(fixed_points, moving_points)
+    return float(
+        nn_scale * np.sqrt(descriptor_vector_length) * descriptor_threshold_scale
+    )
+
+
+def _get_marker_descriptors(points, num_neighbors, redundancy):
+    points = np.asarray(points, dtype=float)
+    required_neighbors = num_neighbors + redundancy
+    if len(points) < required_neighbors + 1:
+        raise ValueError(
+            "Not enough points to build marker descriptors. "
+            f"Need at least {required_neighbors + 1}, got {len(points)}."
+        )
+
+    tree = cKDTree(points)
+    query_k = min(len(points), required_neighbors + 2)
+    _, neighbor_indices = tree.query(points, k=query_k)
+
+    descriptors = []
+    for point_index, point_neighbor_indices in enumerate(neighbor_indices):
+        point_neighbor_indices = np.atleast_1d(point_neighbor_indices)
+        point_neighbor_indices = [
+            int(ind) for ind in point_neighbor_indices if int(ind) != point_index
+        ][:required_neighbors]
+
+        if len(point_neighbor_indices) < required_neighbors:
+            continue
+
+        for subset in itertools.combinations(point_neighbor_indices, num_neighbors):
+            descriptor_points = points[[point_index] + list(subset)]
+            distances = []
+            for i, j in itertools.combinations(
+                range(len(descriptor_points)), 2
+            ):
+                distances.append(
+                    np.linalg.norm(descriptor_points[i] - descriptor_points[j])
+                )
+            descriptors.append(
+                {
+                    "point_index": point_index,
+                    "vector": np.sort(np.asarray(distances, dtype=float)),
+                }
+            )
+
+    if len(descriptors) == 0:
+        raise ValueError("No marker descriptors could be built.")
+
+    return descriptors
+
+
+def _match_marker_descriptors(
+    fixed_descriptors,
+    moving_descriptors,
+    descriptor_ratio,
+    descriptor_distance_threshold,
+):
+    candidates_by_pair = {}
+    for fixed_descriptor in fixed_descriptors:
+        distances_by_moving_point = {}
+        for moving_descriptor in moving_descriptors:
+            distance = float(
+                np.linalg.norm(
+                    fixed_descriptor["vector"] - moving_descriptor["vector"]
+                )
+            )
+            moving_point_index = moving_descriptor["point_index"]
+            if (
+                moving_point_index not in distances_by_moving_point
+                or distance < distances_by_moving_point[moving_point_index]
+            ):
+                distances_by_moving_point[moving_point_index] = distance
+
+        if not len(distances_by_moving_point):
+            continue
+
+        sorted_matches = sorted(
+            distances_by_moving_point.items(), key=lambda item: item[1]
+        )
+        best_moving_point_index, best_distance = sorted_matches[0]
+        second_best_distance = (
+            sorted_matches[1][1] if len(sorted_matches) > 1 else np.inf
+        )
+        if (
+            best_distance < descriptor_distance_threshold
+            and best_distance * descriptor_ratio < second_best_distance
+        ):
+            pair = (fixed_descriptor["point_index"], best_moving_point_index)
+            if (
+                pair not in candidates_by_pair
+                or best_distance < candidates_by_pair[pair]
+            ):
+                candidates_by_pair[pair] = best_distance
+
+    return np.asarray(list(candidates_by_pair.keys()), dtype=int)
+
+
+def _fit_marker_transform(fixed_points, moving_points, transform_type):
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+    ndim = fixed_points.shape[1]
+    transform_type = transform_type.lower()
+
+    affine = np.eye(ndim + 1)
+    if transform_type == "translation":
+        affine[:ndim, ndim] = np.mean(fixed_points - moving_points, axis=0)
+        return affine
+
+    if transform_type == "rigid":
+        moving_center = np.mean(moving_points, axis=0)
+        fixed_center = np.mean(fixed_points, axis=0)
+        moving_centered = moving_points - moving_center
+        fixed_centered = fixed_points - fixed_center
+        min_rank = ndim - 1
+        if np.linalg.matrix_rank(moving_centered) < min_rank:
+            raise ValueError("Rigid marker registration points are degenerate.")
+        covariance = moving_centered.T @ fixed_centered
+        u, _, vt = np.linalg.svd(covariance)
+        rotation = vt.T @ u.T
+        if np.linalg.det(rotation) < 0:
+            vt[-1, :] *= -1
+            rotation = vt.T @ u.T
+        affine[:ndim, :ndim] = rotation
+        affine[:ndim, ndim] = fixed_center - rotation @ moving_center
+        return affine
+
+    if transform_type == "affine":
+        moving_h = np.concatenate(
+            [moving_points, np.ones((len(moving_points), 1))], axis=1
+        )
+        if np.linalg.matrix_rank(moving_h) < ndim + 1:
+            raise ValueError("Affine marker registration points are degenerate.")
+        linear_affine, _, _, _ = np.linalg.lstsq(
+            moving_h, fixed_points, rcond=None
+        )
+        affine[:ndim, :] = linear_affine.T
+        return affine
+
+    raise ValueError(
+        "Unsupported marker registration transform_type "
+        f"{transform_type!r}. Expected 'translation', 'rigid', or 'affine'."
+    )
+
+
+def _score_marker_transform(affine, fixed_points, moving_points, ransac_max_error):
+    transformed_moving_points = transformation.transform_pts(moving_points, affine)
+    residuals = np.linalg.norm(transformed_moving_points - fixed_points, axis=1)
+    inlier_mask = residuals <= ransac_max_error
+    return residuals, inlier_mask
+
+
+def _run_marker_ransac(
+    fixed_points,
+    moving_points,
+    candidate_pairs,
+    transform_type,
+    ransac_max_error,
+    ransac_min_inlier_ratio,
+    ransac_min_inlier_factor,
+    ransac_num_iterations,
+    random_state,
+):
+    ndim = fixed_points.shape[1]
+    min_model_matches = _get_marker_registration_min_matches(
+        transform_type, ndim
+    )
+    min_inliers = max(
+        min_model_matches,
+        int(np.round(min_model_matches * ransac_min_inlier_factor)),
+    )
+
+    if len(candidate_pairs) < min_inliers:
+        raise ValueError(
+            "Not enough marker correspondences for RANSAC. "
+            f"Need at least {min_inliers}, got {len(candidate_pairs)}."
+        )
+
+    fixed_candidates = fixed_points[candidate_pairs[:, 0]]
+    moving_candidates = moving_points[candidate_pairs[:, 1]]
+    rng = np.random.default_rng(random_state)
+    best_result = None
+    num_candidates = len(candidate_pairs)
+    num_combinations = math.comb(num_candidates, min_model_matches)
+
+    if num_combinations <= ransac_num_iterations:
+        sample_iter = itertools.combinations(
+            range(num_candidates), min_model_matches
+        )
+    else:
+        sample_iter = (
+            rng.choice(
+                num_candidates, size=min_model_matches, replace=False
+            )
+            for _ in range(ransac_num_iterations)
+        )
+
+    for sample_indices in sample_iter:
+        sample_indices = np.asarray(sample_indices, dtype=int)
+        try:
+            affine = _fit_marker_transform(
+                fixed_candidates[sample_indices],
+                moving_candidates[sample_indices],
+                transform_type,
+            )
+        except ValueError:
+            continue
+
+        residuals, inlier_mask = _score_marker_transform(
+            affine,
+            fixed_candidates,
+            moving_candidates,
+            ransac_max_error,
+        )
+        num_inliers = int(np.sum(inlier_mask))
+        if num_inliers == 0:
+            mean_residual = np.inf
+        else:
+            mean_residual = float(np.mean(residuals[inlier_mask]))
+
+        result_key = (num_inliers, -mean_residual)
+        if best_result is None or result_key > best_result["key"]:
+            best_result = {
+                "key": result_key,
+                "inlier_mask": inlier_mask,
+                "mean_residual": mean_residual,
+            }
+
+    if best_result is None:
+        raise ValueError("No marker transform model could be estimated.")
+
+    inlier_mask = best_result["inlier_mask"]
+    num_inliers = int(np.sum(inlier_mask))
+    inlier_ratio = num_inliers / num_candidates
+    if num_inliers < min_inliers or inlier_ratio < ransac_min_inlier_ratio:
+        raise ValueError(
+            "Marker RANSAC did not find enough inliers. "
+            f"Found {num_inliers}/{num_candidates} inliers."
+        )
+
+    affine = _fit_marker_transform(
+        fixed_candidates[inlier_mask],
+        moving_candidates[inlier_mask],
+        transform_type,
+    )
+    residuals, inlier_mask = _score_marker_transform(
+        affine,
+        fixed_candidates,
+        moving_candidates,
+        ransac_max_error,
+    )
+    num_inliers = int(np.sum(inlier_mask))
+    if num_inliers < min_inliers:
+        raise ValueError(
+            "Refit marker transform did not preserve enough inliers. "
+            f"Found {num_inliers}/{num_candidates} inliers."
+        )
+    mean_residual = float(np.mean(residuals[inlier_mask]))
+    inlier_ratio = float(num_inliers / num_candidates)
+    quality = inlier_ratio * max(0.0, 1.0 - mean_residual / ransac_max_error)
+
+    return affine, quality
+
+
+def _fail_marker_registration(ndim, message, fail_on_error):
+    if fail_on_error:
+        raise ValueError(message)
+
+    warnings.warn(message, UserWarning, stacklevel=2)
+    return {
+        "affine_matrix": np.eye(ndim + 1),
+        "quality": np.nan,
+    }
+
+
 def registration_marker_based(
     fixed_data,
     moving_data,
     *,
     fixed_points,
     moving_points,
-    **kwargs,
+    transform_type="rigid",
+    num_neighbors=3,
+    redundancy=1,
+    descriptor_ratio=3.0,
+    descriptor_distance_threshold=None,
+    descriptor_threshold_scale=1.0,
+    ransac_max_error=5.0,
+    ransac_min_inlier_ratio=0.1,
+    ransac_min_inlier_factor=3.0,
+    ransac_num_iterations=1000,
+    random_state=0,
+    fail_on_error=False,
 ):
     """
-    Placeholder marker-based registration.
+    Marker-based registration inspired by BigStitcher RGLDM bead matching.
 
-    Point matching and transform estimation will be implemented later. For now,
-    this function only exercises the point-set registration plumbing.
+    The function matches local geometric descriptors computed from
+    ``fixed_points`` and ``moving_points``, removes inconsistent matches with
+    RANSAC, and returns a homogeneous transform from moving to fixed points.
     """
 
     ndim = fixed_data.ndim
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+
+    try:
+        if moving_data.ndim != ndim:
+            raise ValueError("Fixed and moving data must have the same dimensionality.")
+        if fixed_points.ndim != 2 or moving_points.ndim != 2:
+            raise ValueError("Marker point arrays must be two-dimensional.")
+        if fixed_points.shape[1] != ndim or moving_points.shape[1] != ndim:
+            raise ValueError(
+                "Marker point dimensionality must match image dimensionality."
+            )
+        if not len(fixed_points) or not len(moving_points):
+            raise ValueError("Marker point arrays must not be empty.")
+        if num_neighbors < 1:
+            raise ValueError("num_neighbors must be at least 1.")
+        if redundancy < 0:
+            raise ValueError("redundancy must be non-negative.")
+        if descriptor_ratio <= 0:
+            raise ValueError("descriptor_ratio must be positive.")
+        if descriptor_threshold_scale < 0:
+            raise ValueError("descriptor_threshold_scale must be non-negative.")
+        if ransac_max_error <= 0:
+            raise ValueError("ransac_max_error must be positive.")
+        if ransac_num_iterations < 1:
+            raise ValueError("ransac_num_iterations must be at least 1.")
+
+        transform_type = str(transform_type).lower()
+        _get_marker_registration_min_matches(transform_type, ndim)
+
+        if descriptor_distance_threshold is None:
+            descriptor_distance_threshold = (
+                _get_marker_descriptor_distance_threshold(
+                    fixed_points,
+                    moving_points,
+                    num_neighbors,
+                    descriptor_threshold_scale,
+                )
+            )
+        elif descriptor_distance_threshold < 0:
+            raise ValueError("descriptor_distance_threshold must be non-negative.")
+
+        fixed_descriptors = _get_marker_descriptors(
+            fixed_points, num_neighbors, redundancy
+        )
+        moving_descriptors = _get_marker_descriptors(
+            moving_points, num_neighbors, redundancy
+        )
+        candidate_pairs = _match_marker_descriptors(
+            fixed_descriptors,
+            moving_descriptors,
+            descriptor_ratio,
+            descriptor_distance_threshold,
+        )
+        if len(candidate_pairs) == 0:
+            raise ValueError("No marker correspondence candidates found.")
+
+        affine, quality = _run_marker_ransac(
+            fixed_points,
+            moving_points,
+            candidate_pairs,
+            transform_type,
+            ransac_max_error,
+            ransac_min_inlier_ratio,
+            ransac_min_inlier_factor,
+            ransac_num_iterations,
+            random_state,
+        )
+
+    except ValueError as exc:
+        return _fail_marker_registration(ndim, str(exc), fail_on_error)
 
     return {
-        "affine_matrix": np.eye(ndim + 1),
-        "quality": 1.0,
+        "affine_matrix": affine,
+        "quality": quality,
     }
 
 

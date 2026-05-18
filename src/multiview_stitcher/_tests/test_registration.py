@@ -682,11 +682,131 @@ def test_marker_based_pairwise_registration_plumbing():
     assert float(result["quality"]) == pytest.approx(0.25)
 
 
+def _marker_test_points(ndim, scale=1.0):
+    rng = np.random.default_rng(100 + ndim)
+    return rng.uniform(0, 100 * scale, size=(36, ndim))
+
+
+def _marker_test_affine(ndim, transform_type):
+    if transform_type == "translation":
+        return param_utils.affine_from_translation(
+            np.arange(ndim, dtype=float) * 2 + 3
+        )
+
+    affine = np.eye(ndim + 1)
+    if transform_type == "rigid":
+        if ndim == 2:
+            angle = 0.35
+            affine[:2, :2] = [
+                [np.cos(angle), -np.sin(angle)],
+                [np.sin(angle), np.cos(angle)],
+            ]
+            affine[:2, 2] = [7.0, -4.0]
+        else:
+            affine = param_utils.affine_from_rotation(
+                0.25, np.array([1.0, 1.0, 1.0]) / np.sqrt(3)
+            )
+            affine[:3, 3] = [5.0, -3.0, 2.0]
+    elif transform_type == "affine":
+        if ndim == 2:
+            affine[:2, :2] = [[1.05, 0.08], [-0.04, 0.96]]
+            affine[:2, 2] = [6.0, -5.0]
+        else:
+            affine[:3, :3] = [
+                [1.03, 0.04, 0.0],
+                [-0.02, 0.97, 0.03],
+                [0.01, -0.04, 1.05],
+            ]
+            affine[:3, 3] = [4.0, -6.0, 3.0]
+    return affine
+
+
+def test_marker_descriptor_threshold_scales_with_points():
+    points = _marker_test_points(2)
+    moving_points = points + np.array([3.0, -5.0])
+
+    threshold = registration._get_marker_descriptor_distance_threshold(
+        points,
+        moving_points,
+        num_neighbors=3,
+        descriptor_threshold_scale=1.0,
+    )
+    scaled_threshold = registration._get_marker_descriptor_distance_threshold(
+        points * 10,
+        moving_points * 10,
+        num_neighbors=3,
+        descriptor_threshold_scale=1.0,
+    )
+
+    assert scaled_threshold == pytest.approx(threshold * 10)
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+@pytest.mark.parametrize(
+    "transform_type",
+    ["translation", "rigid", "affine"],
+)
+def test_marker_based_registration_recovers_synthetic_transform(
+    ndim, transform_type
+):
+    moving_points = _marker_test_points(ndim)
+    expected_affine = _marker_test_affine(ndim, transform_type)
+    fixed_points = transformation.transform_pts(moving_points, expected_affine)
+
+    rng = np.random.default_rng(10 + ndim)
+    fixed_points_with_outliers = np.vstack(
+        [fixed_points, rng.uniform(200, 250, size=(6, ndim))]
+    )
+    moving_points_with_outliers = np.vstack(
+        [moving_points, rng.uniform(-100, -50, size=(6, ndim))]
+    )
+
+    data = xr.DataArray(
+        np.zeros((5,) * ndim),
+        dims=["z", "y", "x"][-ndim:],
+    )
+    result = registration.registration_marker_based(
+        data,
+        data,
+        fixed_points=fixed_points_with_outliers,
+        moving_points=moving_points_with_outliers,
+        transform_type=transform_type,
+        random_state=1,
+        fail_on_error=True,
+    )
+
+    recovered_points = transformation.transform_pts(
+        moving_points, result["affine_matrix"]
+    )
+    rms_error = np.sqrt(
+        np.mean(np.sum((recovered_points - fixed_points) ** 2, axis=1))
+    )
+
+    assert rms_error < 1e-8
+    assert result["quality"] > 0.75
+
+
 def test_marker_based_register_dummy_method():
     transform_key = "stage"
+    base_points = np.array(
+        [
+            [2.0, 6.0],
+            [3.5, 7.2],
+            [5.0, 8.0],
+            [6.0, 10.5],
+            [8.5, 6.5],
+            [9.0, 12.0],
+            [11.5, 9.5],
+            [13.0, 7.5],
+            [14.0, 13.0],
+            [16.0, 8.8],
+            [17.5, 11.5],
+            [18.0, 6.8],
+        ]
+    )
     sims = [
         spatial_image_utils.get_sim_from_array(
-            np.zeros((10, 10)),
+            np.zeros((20, 20)),
             dims=["y", "x"],
             translation={"y": 0.0, "x": x_origin},
             transform_key=transform_key,
@@ -697,7 +817,7 @@ def test_marker_based_register_dummy_method():
     for sim in sims:
         spatial_image_utils.set_point_set(
             sim,
-            np.array([[1.0, sim.coords["x"].values[0] + 6.0]]),
+            base_points + np.array([0.0, sim.coords["x"].values[0]]),
         )
 
     out = registration.register(
@@ -712,7 +832,7 @@ def test_marker_based_register_dummy_method():
 
     qualities = out["pairwise_registration"]["metrics"]["qualities"]
     assert len(qualities) == 1
-    assert list(qualities.values())[0] == pytest.approx(1.0)
+    assert list(qualities.values())[0] > 0.75
 
 
 @pytest.mark.parametrize(
