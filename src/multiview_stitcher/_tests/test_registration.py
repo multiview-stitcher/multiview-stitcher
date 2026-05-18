@@ -682,6 +682,56 @@ def test_marker_based_pairwise_registration_plumbing():
     assert float(result["quality"]) == pytest.approx(0.25)
 
 
+def test_marker_prefiltering_controls_overlap_filtering():
+    transform_key = "stage"
+    fixed_sim = spatial_image_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        transform_key=transform_key,
+    )
+    moving_sim = spatial_image_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        translation={"y": 0.0, "x": 5.0},
+        transform_key=transform_key,
+    )
+    spatial_image_utils.set_point_set(
+        fixed_sim,
+        np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 6.0], [4.0, 8.0]]),
+    )
+    spatial_image_utils.set_point_set(
+        moving_sim,
+        np.array([[1.0, 6.0], [2.0, 7.0], [3.0, 11.0], [4.0, 13.0]]),
+    )
+
+    fixed_msim = msi_utils.get_msim_from_sim(fixed_sim, scale_factors=[])
+    moving_msim = msi_utils.get_msim_from_sim(moving_sim, scale_factors=[])
+    captured_counts = []
+
+    def pairwise_func(*, fixed_points, moving_points):
+        captured_counts.append((len(fixed_points), len(moving_points)))
+        return {"affine_matrix": np.eye(3), "quality": 1.0}
+
+    registration.register_pair_of_msims(
+        fixed_msim,
+        moving_msim,
+        transform_key=transform_key,
+        registration_binning={"y": 1, "x": 1},
+        pairwise_reg_func=pairwise_func,
+    ).compute()
+    assert captured_counts[-1] == (4, 4)
+
+    registration.register_pair_of_msims(
+        fixed_msim,
+        moving_msim,
+        transform_key=transform_key,
+        prefilter_markers=True,
+        registration_binning={"y": 1, "x": 1},
+        pairwise_reg_func=pairwise_func,
+    ).compute()
+    assert captured_counts[-1] == (2, 2)
+
+
 def _marker_test_points(ndim, scale=1.0):
     rng = np.random.default_rng(100 + ndim)
     return rng.uniform(0, 100 * scale, size=(36, ndim))
