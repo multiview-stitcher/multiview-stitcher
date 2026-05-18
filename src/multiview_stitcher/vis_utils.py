@@ -45,6 +45,7 @@ def plot_positions(
     plot_title=None,
     spacing=None,
     output_filename=None,
+    points_key=None,
 ):
     """
     Plot tile / view positions in both 2D or 3D.
@@ -86,6 +87,9 @@ def plot_positions(
         Title of the plot, by default no title
     output_filename : str, optional
         Filename where to save the plot if not None, by default None
+    points_key : str, optional
+        Name of a point set to overlay. If None, point sets are not plotted.
+        By default None.
 
     Returns
     -------
@@ -150,6 +154,25 @@ def plot_positions(
                 sp["origin"][dim] = sp["origin"][dim] - sp["spacing"][dim] / 2
 
         plot_stack_props(sp, ax, color=pos_colors[iview])
+
+        if points_key is not None:
+            point_positions = _get_point_set_positions_for_plot(
+                sim,
+                points_key=points_key,
+                transform_key=transform_key,
+                sdims=sdims,
+            )
+            if point_positions is not None and len(point_positions):
+                ax.scatter(
+                    point_positions[:, 0],
+                    point_positions[:, 1],
+                    point_positions[:, 2],
+                    c=pos_colors[iview],
+                    edgecolors="k",
+                    marker="o",
+                    s=20,
+                    depthshade=False,
+                )
 
     if display_view_indices:
         for iview, sim in enumerate(sims):
@@ -280,6 +303,57 @@ def plot_positions(
         plt.show()
 
     return fig, ax
+
+
+def _get_point_set_positions_for_plot(sim, points_key, transform_key, sdims):
+    if (
+        "point_sets" not in sim.attrs
+        or points_key not in sim.attrs["point_sets"]
+    ):
+        return None
+
+    point_set = spatial_image_utils.get_point_set(
+        sim,
+        points_key=points_key,
+    )
+    position = point_set["position"]
+    for dim in position.dims:
+        if dim not in ["point_id", "dim"]:
+            position = position.isel({dim: 0})
+
+    position = position.sel(dim=sdims).transpose("point_id", "dim")
+    positions = np.asarray(position.values, dtype=float)
+    positions = positions[np.all(np.isfinite(positions), axis=1)]
+    if not len(positions):
+        return np.empty((0, 3))
+
+    affine = spatial_image_utils.get_affine_from_sim(
+        sim,
+        transform_key=transform_key,
+    )
+    sel_dict = {
+        dim: affine.coords[dim][0].values
+        for dim in affine.dims
+        if dim not in ["x_in", "x_out"]
+    }
+    if len(sel_dict):
+        affine = affine.sel(sel_dict)
+    affine = np.asarray(affine)
+
+    positions_h = np.concatenate(
+        [positions, np.ones((len(positions), 1))],
+        axis=1,
+    )
+    positions = (affine @ positions_h.T).T[:, :-1]
+
+    if len(sdims) == 2:
+        positions = np.column_stack(
+            [np.zeros(len(positions)), positions[:, 1], positions[:, 0]]
+        )
+    else:
+        positions = positions[:, [0, 2, 1]]
+
+    return positions
 
 
 def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):
