@@ -10,8 +10,8 @@ from typing import Union
 import dask.array as da
 import networkx as nx
 import numpy as np
-import pandas as pd
 import skimage.registration
+import skimage.transform
 import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
@@ -84,6 +84,17 @@ def _format_point_bounds_for_log(points):
 
 def _get_callable_name(func):
     return getattr(func, "__name__", func.__class__.__name__)
+
+
+def _estimate_skimage_transform(transform_cls, fixed_points, moving_points, ndim):
+    if hasattr(transform_cls, "from_estimate"):
+        return transform_cls.from_estimate(fixed_points, moving_points)
+
+    transform_model = transform_cls(dimensionality=ndim)
+    if not transform_model.estimate(fixed_points, moving_points):
+        return False
+
+    return transform_model
 
 
 def apply_recursive_dict(func, d):
@@ -781,40 +792,41 @@ def _fit_marker_transform(fixed_points, moving_points, transform_type):
     ndim = fixed_points.shape[1]
     transform_type = transform_type.lower()
 
-    affine = np.eye(ndim + 1)
     if transform_type == "translation":
-        affine[:ndim, ndim] = np.mean(fixed_points - moving_points, axis=0)
-        return affine
+        translation = np.mean(moving_points - fixed_points, axis=0)
+        transform_model = skimage.transform.EuclideanTransform(
+            translation=translation,
+            dimensionality=ndim,
+        )
+        return np.asarray(transform_model.params, dtype=float)
 
     if transform_type == "rigid":
-        moving_center = np.mean(moving_points, axis=0)
-        fixed_center = np.mean(fixed_points, axis=0)
-        moving_centered = moving_points - moving_center
-        fixed_centered = fixed_points - fixed_center
-        min_rank = ndim - 1
-        if np.linalg.matrix_rank(moving_centered) < min_rank:
-            raise ValueError("Rigid marker registration points are degenerate.")
-        covariance = moving_centered.T @ fixed_centered
-        u, _, vt = np.linalg.svd(covariance)
-        rotation = vt.T @ u.T
-        if np.linalg.det(rotation) < 0:
-            vt[-1, :] *= -1
-            rotation = vt.T @ u.T
-        affine[:ndim, :ndim] = rotation
-        affine[:ndim, ndim] = fixed_center - rotation @ moving_center
-        return affine
+        transform_model = _estimate_skimage_transform(
+            skimage.transform.EuclideanTransform,
+            fixed_points,
+            moving_points,
+            ndim,
+        )
+        if not transform_model:
+            raise ValueError(
+                "Rigid marker registration points are degenerate. "
+                f"skimage.transform returned: {transform_model}"
+            )
+        return np.asarray(transform_model.params, dtype=float)
 
     if transform_type == "affine":
-        moving_h = np.concatenate(
-            [moving_points, np.ones((len(moving_points), 1))], axis=1
+        transform_model = _estimate_skimage_transform(
+            skimage.transform.AffineTransform,
+            fixed_points,
+            moving_points,
+            ndim,
         )
-        if np.linalg.matrix_rank(moving_h) < ndim + 1:
-            raise ValueError("Affine marker registration points are degenerate.")
-        linear_affine, _, _, _ = np.linalg.lstsq(
-            moving_h, fixed_points, rcond=None
-        )
-        affine[:ndim, :] = linear_affine.T
-        return affine
+        if not transform_model:
+            raise ValueError(
+                "Affine marker registration points are degenerate. "
+                f"skimage.transform returned: {transform_model}"
+            )
+        return np.asarray(transform_model.params, dtype=float)
 
     raise ValueError(
         "Unsupported marker registration transform_type "
@@ -823,8 +835,8 @@ def _fit_marker_transform(fixed_points, moving_points, transform_type):
 
 
 def _score_marker_transform(affine, fixed_points, moving_points, ransac_max_error):
-    transformed_moving_points = transformation.transform_pts(moving_points, affine)
-    residuals = np.linalg.norm(transformed_moving_points - fixed_points, axis=1)
+    transformed_fixed_points = transformation.transform_pts(fixed_points, affine)
+    residuals = np.linalg.norm(transformed_fixed_points - moving_points, axis=1)
     inlier_mask = residuals <= ransac_max_error
     return residuals, inlier_mask
 
@@ -922,15 +934,20 @@ def _run_marker_ransac(
         num_inliers = int(np.sum(inlier_mask))
         if num_inliers == 0:
             mean_residual = np.inf
+            model_quality = 0.0
         else:
             mean_residual = float(np.mean(residuals[inlier_mask]))
+            model_quality = (num_inliers / num_candidates) * max(
+                0.0, 1.0 - mean_residual / ransac_max_error
+            )
 
-        result_key = (num_inliers, -mean_residual)
+        result_key = (model_quality, num_inliers, -mean_residual)
         if best_result is None or result_key > best_result["key"]:
             best_result = {
                 "key": result_key,
                 "inlier_mask": inlier_mask,
                 "mean_residual": mean_residual,
+                "quality": model_quality,
             }
 
     if best_result is None:
@@ -942,14 +959,13 @@ def _run_marker_ransac(
     inlier_ratio = num_inliers / num_candidates
     logger.debug(
         "Marker RANSAC best model before refit: inliers=%s/%s, "
-        "inlier_ratio=%.4f, mean_inlier_residual=%.4g",
+        "inlier_ratio=%.4f, mean_inlier_residual=%.4g, quality=%.4f",
         num_inliers,
         num_candidates,
         inlier_ratio,
         best_result["mean_residual"],
+        best_result["quality"],
     )
-
-    # import pdb; pdb.set_trace()
 
     if num_inliers < min_inliers or inlier_ratio < ransac_min_inlier_ratio:
         logger.debug(
@@ -1053,7 +1069,7 @@ def registration_marker_based(
 
     The function matches local geometric descriptors computed from
     ``fixed_points`` and ``moving_points``, removes inconsistent matches with
-    RANSAC, and returns a homogeneous transform from moving to fixed points.
+    RANSAC, and returns a homogeneous transform from fixed to moving points.
 
     Parameters
     ----------
@@ -1202,7 +1218,7 @@ def registration_marker_based(
 
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "Marker registration result: quality=%.4f, affine=\n%s",
+            "Marker registration result: quality=%.4f, fixed_to_moving_affine=\n%s",
             quality,
             _format_array_for_log(affine),
         )
@@ -1712,7 +1728,7 @@ def register_pair_of_msims(
 
         fixed_points_for_registration = _transform_points_for_registration(
             fixed_points,
-            np.matmul(initial_affine, affines[0]),
+            affines[0],
         )
         moving_points_for_registration = _transform_points_for_registration(
             moving_points,

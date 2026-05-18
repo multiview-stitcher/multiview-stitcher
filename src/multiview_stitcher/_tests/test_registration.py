@@ -665,13 +665,11 @@ def test_marker_based_pairwise_registration_plumbing():
         pairwise_reg_func=pairwise_func,
     ).compute()
 
-    initial_affine = np.linalg.inv(moving_affine) @ fixed_affine
-
     assert np.allclose(
         captured["fixed_points"],
         transformation.transform_pts(
             fixed_points,
-            initial_affine @ fixed_affine,
+            fixed_affine,
         ),
     )
     assert np.allclose(
@@ -820,14 +818,56 @@ def test_marker_based_registration_recovers_synthetic_transform(
     )
 
     recovered_points = transformation.transform_pts(
-        moving_points, result["affine_matrix"]
+        fixed_points, result["affine_matrix"]
     )
     rms_error = np.sqrt(
-        np.mean(np.sum((recovered_points - fixed_points) ** 2, axis=1))
+        np.mean(np.sum((recovered_points - moving_points) ** 2, axis=1))
     )
 
     assert rms_error < 1e-8
+    np.testing.assert_allclose(
+        result["affine_matrix"], np.linalg.inv(expected_affine), atol=1e-8
+    )
     assert result["quality"] > 0.75
+
+
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_marker_based_registration_recovers_rotation_only(ndim):
+    moving_points = _marker_test_points(ndim)
+    expected_affine = np.eye(ndim + 1)
+
+    if ndim == 2:
+        angle = 0.8
+        expected_affine[:2, :2] = [
+            [np.cos(angle), -np.sin(angle)],
+            [np.sin(angle), np.cos(angle)],
+        ]
+    else:
+        direction = np.array([0.3, -0.2, 1.0])
+        direction = direction / np.linalg.norm(direction)
+        expected_affine = param_utils.affine_from_rotation(0.6, direction)
+
+    fixed_points = transformation.transform_pts(moving_points, expected_affine)
+
+    result = registration.registration_marker_based(
+        fixed_points=fixed_points,
+        moving_points=moving_points,
+        random_state=2,
+        fail_on_error=True,
+    )
+
+    recovered_points = transformation.transform_pts(
+        fixed_points, result["affine_matrix"]
+    )
+    rms_error = np.sqrt(
+        np.mean(np.sum((recovered_points - moving_points) ** 2, axis=1))
+    )
+
+    assert rms_error < 1e-8
+    np.testing.assert_allclose(
+        result["affine_matrix"], np.linalg.inv(expected_affine), atol=1e-8
+    )
+    assert result["quality"] > 0.99
 
 
 def test_marker_based_register_dummy_method():
