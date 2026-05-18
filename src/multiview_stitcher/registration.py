@@ -843,6 +843,11 @@ def _run_marker_ransac(
     inlier_ratio = float(num_inliers / num_candidates)
     quality = inlier_ratio * max(0.0, 1.0 - mean_residual / ransac_max_error)
 
+    logger.debug(
+        f"Marker RANSAC found {num_inliers}/{num_candidates} inliers "
+        f"with mean residual {mean_residual:.2f} and quality {quality:.4f}."
+    )
+
     return affine, quality
 
 
@@ -1138,6 +1143,7 @@ def register_pair_of_msims(
     msim2,
     transform_key,
     points_key="beads",
+    prefilter_markers: bool = False,
     registration_binning=None,
     reg_res_level=None,
     overlap_tolerance: Union[int, dict[str, int]] = None,
@@ -1161,6 +1167,9 @@ def register_pair_of_msims(
         registration func, by default None
     points_key : str, optional
         Named point set to pass to marker-aware pairwise registration functions.
+    prefilter_markers : bool, optional
+        If True, restrict markers to the pairwise overlap before passing them
+        to marker-aware pairwise registration functions. By default False.
     registration_binning : dict, optional
         Binning factors to apply for registration. If reg_res_level is also provided,
         the binning factors must be compatible with the resolution level.
@@ -1313,6 +1322,8 @@ def register_pair_of_msims(
     else:
         reg_sims_b = reg_sims
 
+    reg_sims_b_marker_source = reg_sims_b
+
     overlap_dict = _get_overlap_bboxes(
         reg_sims_b[0],
         reg_sims_b[1],
@@ -1411,12 +1422,13 @@ def register_pair_of_msims(
         ]
         initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
 
+        marker_sims = reg_sims_b if prefilter_markers else reg_sims_b_marker_source
         fixed_point_set = spatial_image_utils.get_point_set(
-            reg_sims_b[0],
+            marker_sims[0],
             points_key=points_key,
         )
         moving_point_set = spatial_image_utils.get_point_set(
-            reg_sims_b[1],
+            marker_sims[1],
             points_key=points_key,
         )
         fixed_points = _get_points_array_for_registration(
@@ -1718,6 +1730,7 @@ def register(
     msims: list[MultiscaleSpatialImage],
     transform_key: str = None,
     points_key: str = "beads",
+    prefilter_markers: bool = False,
     reg_channel_index: int = None,
     reg_channel: str = None,
     new_transform_key: str = None,
@@ -1760,6 +1773,9 @@ def register(
         for the registration, by default None
     points_key : str, optional
         Named point set to use for marker-aware pairwise registration functions.
+    prefilter_markers : bool, optional
+        If True, restrict markers to each pairwise overlap before marker-based
+        pairwise registration. By default False.
     new_transform_key : str, optional
         If set, the registration result will be registered as a new extrinsic
         coordinate system in the input views (with the given name), by default None
@@ -1946,6 +1962,7 @@ def register(
         g_reg,
         transform_key=transform_key,
         points_key=points_key,
+        prefilter_markers=prefilter_markers,
         registration_binning=registration_binning,
         reg_res_level=reg_res_level,
         overlap_tolerance=overlap_tolerance,
