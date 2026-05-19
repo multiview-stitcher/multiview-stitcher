@@ -61,11 +61,11 @@ from multiview_stitcher import fusion
 from multiview_stitcher.fusion import multi_view_deconvolution
 
 # (optional) send data to GPU
-for sim in msims:
+for sim in sims:
     sim.data = sim.data.map_blocks(cp.asarray)
 
 fused = fusion.fuse(
-    images=msims,
+    images=sims,
     transform_key="affine_registered",
     fusion_func=multi_view_deconvolution,
     fusion_func_kwargs=dict(
