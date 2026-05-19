@@ -133,7 +133,55 @@ def test_fuse_msims_to_zarr_uses_suitable_input_level():
             zarr_options={"ome_zarr": False},
         )
 
-        assert np.max(fused.data.compute()) == 2
+        assert msi_utils.is_msim(fused)
+        assert msi_utils.get_sorted_scale_keys(fused) == ["scale0"]
+        assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+        assert np.max(fused["scale0/image"].data.compute()) == 2
+
+
+def test_fuse_msims_to_ome_zarr_returns_msim():
+    msim = _make_distinct_level_msim()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "fused.ome.zarr")
+        fused = fusion.fuse(
+            [msim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_spacing={"y": 2, "x": 2},
+            output_origin={"y": 0.5, "x": 0.5},
+            output_shape={"y": 2, "x": 2},
+            output_chunksize=2,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": True},
+        )
+
+        assert msi_utils.is_msim(fused)
+        assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+        assert np.max(fused["scale0/image"].data.compute()) == 2
+
+
+@pytest.mark.parametrize("ome_zarr", [False, True])
+def test_fuse_sims_to_zarr_returns_sim(ome_zarr):
+    sim = msi_utils.get_sim_from_msim(_make_distinct_level_msim())
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(
+            tmpdir,
+            "fused.ome.zarr" if ome_zarr else "fused.zarr",
+        )
+        fused = fusion.fuse(
+            [sim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_shape={"y": 4, "x": 4},
+            output_chunksize=2,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": ome_zarr},
+        )
+
+        assert not msi_utils.is_msim(fused)
+        assert np.max(fused.data.compute()) == 1
 
 
 @pytest.mark.parametrize(

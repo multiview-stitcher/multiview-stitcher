@@ -81,8 +81,12 @@ call.
   output level is fused from the coarsest input level that is still fine enough
   for that output spacing.
 - If `output_zarr_url` is set, fusion streams one output image to disk and
-  returns a store-backed `SpatialImage`. For `msim` inputs, the input level is
-  selected from the requested output spacing.
+    returns a store-backed `SpatialImage`. For `msim` inputs, the input level is
+    selected from the requested output spacing, and the returned object remains
+    a `MultiscaleSpatialImage`: when writing OME-Zarr
+    (`zarr_options={"ome_zarr": True}`), it is the written multiscale image;
+    otherwise it is a single-scale multiscale wrapper around the written Zarr-backed
+    output image.
 
 Use `msi_utils.get_sim_from_msim(msim, scale="scale0")` only when you
 explicitly want to force fusion from one resolution level.

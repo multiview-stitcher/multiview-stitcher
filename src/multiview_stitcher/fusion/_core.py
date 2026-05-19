@@ -265,6 +265,9 @@ def fuse(
         with each chunk being processed independently. This allows for efficient memory usage and
         works well for very large datasets (successfully tested ~0.5PB on a macbook).
         When provided, fuse() performs eager fusion and returns a SpatialImage backed by the written store.
+        For MultiscaleSpatialImage inputs, the returned object remains multiscale:
+        OME-Zarr output returns the written MultiscaleSpatialImage, while plain Zarr output
+        returns a single-scale MultiscaleSpatialImage backed by the written store.
     zarr_options: dict, optional
         Additional (dict of) options to pass when creating the Zarr store. Keys:
         - ome_zarr : bool, optional
@@ -353,7 +356,7 @@ def fuse(
                 )
                 for msim in msims
             ]
-            return fuse(
+            fused = fuse(
                 images=selected_level_sims,
                 transform_key=transform_key,
                 fusion_func=fusion_func,
@@ -370,6 +373,18 @@ def fuse(
                 zarr_options=zarr_options,
                 batch_options=batch_options,
             )
+
+            if (zarr_options or {}).get("ome_zarr", False):
+                return ngff_utils.read_msim_from_ome_zarr(
+                    output_zarr_url,
+                    transform_key=(
+                        transform_key
+                        if transform_key is not None
+                        else si_utils.DEFAULT_TRANSFORM_KEY
+                    ),
+                )
+
+            return msi_utils.get_msim_from_sim(fused, scale_factors=[])
 
         res_shapes, _, res_abs_factors = msi_utils.calc_resolution_levels(
             scale0_output_stack_properties["shape"],
