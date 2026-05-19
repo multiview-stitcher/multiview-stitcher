@@ -23,7 +23,7 @@ def test_quickstart_code():
                 block_code = f.read()
             exec(block_code, globals())
 
-    assert len(fused_sim.data.shape)  # noqa: F821
+    assert len(fused_msim["scale0/image"].data.shape)  # noqa: F821
 
 
 def test_quickstart_code_sync():
