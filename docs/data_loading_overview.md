@@ -34,14 +34,27 @@ DataTree('None', parent=None)
 ```
 
 !!! note "sim vs msim: which does each function expect?"
-    Some functions (e.g. `fusion.fuse`) take a list of `SpatialImage` (sim), while others (e.g. `registration.register`) take a list of `MultiscaleSpatialImage` (msim). Converting between the two is straightforward:
+    `registration.register` takes a list of `MultiscaleSpatialImage` (msim).
+    `fusion.fuse` accepts either a list of `SpatialImage` (sim) or a list of
+    `MultiscaleSpatialImage` (msim), but the two input types cannot be mixed in
+    one call. Converting between the two is straightforward:
 
     ```python
     sim  = msi_utils.get_sim_from_msim(msim)   # extract scale0 SpatialImage from an msim
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])  # wrap a sim as an msim
     ```
 
-    When we only need the highest resolution, either representation is equivalent and we can convert freely. If we want to make use of multiple resolution levels (e.g. for faster registration at lower res), we load or build an `msim` with several scales — the best way is to read it directly from OME-Zarr (see [Reading from OME-Zarr](#reading-from-ome-zarr)).
+    When we only need the highest resolution, either representation is
+    equivalent and we can convert freely. If we want to make use of multiple
+    resolution levels (e.g. for faster registration at lower res, or for
+    multiscale fusion output), we load or build an `msim` with several scales —
+    the best way is to read it directly from OME-Zarr (see
+    [Reading from OME-Zarr](#reading-from-ome-zarr)).
+
+    If we already have several `SpatialImage` objects representing different
+    resolution levels of the same image, use `msi_utils.get_msim_from_sims`.
+    The helper orders levels from largest to smallest shape and copies the
+    transform keys from the highest-resolution level to the coarser levels.
 
 ---
 
@@ -135,7 +148,8 @@ for arr, translation in zip(tile_arrays, tile_translations):
     msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[2]))
 ```
 
-The resulting `msims` list is the direct input to `registration.register` and `fusion.fuse`. We can sanity-check the tile layout before proceeding:
+The resulting `msims` list is the direct input to `registration.register` and
+`fusion.fuse`. We can sanity-check the tile layout before proceeding:
 
 ```python
 from multiview_stitcher import vis_utils

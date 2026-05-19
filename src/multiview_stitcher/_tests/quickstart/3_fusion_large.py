@@ -1,7 +1,7 @@
 from multiview_stitcher import fusion
 
-fused = fusion.fuse(
-    sims=[msi_utils.get_sim_from_msim(msim) for msim in msims],
+fused_sim = fusion.fuse(
+    images=msims,
     transform_key="translation_registered",
     # ... further optional args for fusion.fuse
     output_zarr_url="fused_output.ome.zarr",

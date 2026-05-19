@@ -20,6 +20,20 @@ from multiview_stitcher import (
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
+def _make_distinct_level_msim():
+    # Give scale1 distinct values so tests verify scale selection, not downsampling.
+    sim = si_utils.get_sim_from_array(
+        np.ones((4, 4)),
+        dims=["y", "x"],
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+    msim = msi_utils.get_msim_from_sim(
+        sim, scale_factors=[{"y": 2, "x": 2}]
+    )
+    msim["scale1"]["image"] = xr.ones_like(msim["scale1"]["image"]) * 2
+    return msim
+
+
 def test_fuse_sims():
     sims = io.read_mosaic_into_sims(sample_data.get_mosaic_sample_data_path())
 
@@ -49,6 +63,125 @@ def test_fuse_sims():
     assert METADATA_TRANSFORM_KEY in si_utils.get_tranform_keys_from_sim(
         xfused
     )
+
+
+def test_fuse_rejects_mixed_sims_and_msims():
+    msim = _make_distinct_level_msim()
+    sim = msi_utils.get_sim_from_msim(msim)
+
+    with pytest.raises(ValueError, match="same kind"):
+        fusion.fuse(
+            [msim, sim],
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+
+
+def test_fuse_msims_accepts_images_keyword_and_deprecates_sims_keyword():
+    msim = _make_distinct_level_msim()
+    fuse_kwargs = {
+        "transform_key": METADATA_TRANSFORM_KEY,
+        "fusion_func": fusion.max_fusion,
+        "output_chunksize": 64,
+        "output_shape": {"y": 202, "x": 202},
+    }
+
+    fused = fusion.fuse(images=[msim], **fuse_kwargs)
+
+    with pytest.warns(DeprecationWarning, match="Use images=... instead"):
+        fused_alias = fusion.fuse(sims=[msim], **fuse_kwargs)
+
+    assert msi_utils.get_sorted_scale_keys(fused) == ["scale0", "scale1"]
+    assert msi_utils.get_sorted_scale_keys(fused_alias) == ["scale0", "scale1"]
+    assert np.max(fused["scale0/image"].data.compute()) == 1
+    assert np.max(fused_alias["scale1/image"].data.compute()) == 2
+
+
+def test_fuse_msims_returns_msim_from_suitable_input_levels():
+    msim = _make_distinct_level_msim()
+
+    # Lazy msim fusion should assemble each output level from the matching input level.
+    fused = fusion.fuse(
+        [msim],
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.max_fusion,
+        output_chunksize=64,
+        output_shape={"y": 202, "x": 202},
+    )
+
+    assert msi_utils.get_sorted_scale_keys(fused) == ["scale0", "scale1"]
+    assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+    assert METADATA_TRANSFORM_KEY in fused["scale1"].data_vars
+    assert np.max(fused["scale0/image"].data.compute()) == 1
+    assert np.max(fused["scale1/image"].data.compute()) == 2
+
+
+def test_fuse_msims_to_zarr_uses_suitable_input_level():
+    msim = _make_distinct_level_msim()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "fused.zarr")
+        # A requested spacing of 2 should select scale1, whose values are all 2.
+        fused = fusion.fuse(
+            [msim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_spacing={"y": 2, "x": 2},
+            output_origin={"y": 0.5, "x": 0.5},
+            output_shape={"y": 2, "x": 2},
+            output_chunksize=2,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": False},
+        )
+
+        assert msi_utils.is_msim(fused)
+        assert msi_utils.get_sorted_scale_keys(fused) == ["scale0"]
+        assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+        assert np.max(fused["scale0/image"].data.compute()) == 2
+
+
+def test_fuse_msims_to_ome_zarr_returns_msim():
+    msim = _make_distinct_level_msim()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "fused.ome.zarr")
+        fused = fusion.fuse(
+            [msim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_spacing={"y": 2, "x": 2},
+            output_origin={"y": 0.5, "x": 0.5},
+            output_shape={"y": 2, "x": 2},
+            output_chunksize=2,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": True},
+        )
+
+        assert msi_utils.is_msim(fused)
+        assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+        assert np.max(fused["scale0/image"].data.compute()) == 2
+
+
+@pytest.mark.parametrize("ome_zarr", [False, True])
+def test_fuse_sims_to_zarr_returns_sim(ome_zarr):
+    sim = msi_utils.get_sim_from_msim(_make_distinct_level_msim())
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(
+            tmpdir,
+            "fused.ome.zarr" if ome_zarr else "fused.zarr",
+        )
+        fused = fusion.fuse(
+            [sim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_shape={"y": 4, "x": 4},
+            output_chunksize=2,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": ome_zarr},
+        )
+
+        assert not msi_utils.is_msim(fused)
+        assert np.max(fused.data.compute()) == 1
 
 
 @pytest.mark.parametrize(

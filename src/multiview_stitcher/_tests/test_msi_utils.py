@@ -2,6 +2,7 @@ import tempfile
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -230,3 +231,74 @@ def test_get_res_level_from_spacing():
     # Requesting spacing between scale0 and scale1 → level 0 (scale1 spacing too large)
     assert msi_utils.get_res_level_from_spacing(msim, {"y": 1.5, "x": 1.5}) == 0
 
+
+def test_get_msim_from_sims_orders_shapes_and_uses_highest_res_transforms():
+    # Pass the lower-resolution sim first to check that the helper reorders levels.
+    sim_hi = si_utils.get_sim_from_array(
+        np.ones((100, 100)),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([1, 2]),
+        transform_key="hi",
+    )
+    sim_lo = si_utils.get_sim_from_array(
+        np.ones((50, 50)),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([3, 4]),
+        transform_key="lo",
+    )
+
+    msim = msi_utils.get_msim_from_sims([sim_lo, sim_hi])
+
+    assert msim["scale0/image"].shape[-2:] == (100, 100)
+    assert msim["scale1/image"].shape[-2:] == (50, 50)
+    assert "hi" in msim["scale0"].data_vars
+    assert "hi" in msim["scale1"].data_vars
+    assert "lo" not in msim["scale0"].data_vars
+    assert "lo" not in msim["scale1"].data_vars
+    assert np.allclose(msim["scale0"]["hi"], msim["scale1"]["hi"])
+
+
+def test_get_msim_from_sims_requires_monotonic_shapes():
+    # One dimension shrinks while another grows, so these cannot form one pyramid.
+    sims = [
+        si_utils.get_sim_from_array(np.ones(shape), dims=["y", "x"])
+        for shape in [(100, 50), (80, 60)]
+    ]
+
+    with pytest.raises(ValueError, match="decrease monotonically"):
+        msi_utils.get_msim_from_sims(sims)
+
+
+def test_get_msim_from_sims_requires_matching_dims():
+    sim = si_utils.get_sim_from_array(np.ones((10, 10)), dims=["y", "x"])
+
+    # Dropping a non-spatial dimension should be rejected too.
+    with pytest.raises(ValueError, match="same dimensions"):
+        msi_utils.get_msim_from_sims([sim, sim.isel(c=0, drop=True)])
+
+
+def test_msim_map_blocks_maps_every_scale_and_preserves_other_vars():
+    sim = si_utils.get_sim_from_array(
+        np.arange(64, dtype=np.float32).reshape(8, 8),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([1, 2]),
+        transform_key="stage",
+    )
+    msim = msi_utils.get_msim_from_sim(
+        sim,
+        scale_factors=[{"y": 2, "x": 2}],
+    )
+
+    for iscale, scale_key in enumerate(msi_utils.get_sorted_scale_keys(msim)):
+        msim[scale_key]["other_var"] = xr.DataArray(np.array(iscale))
+
+    mapped = msi_utils.msim_map_blocks(msim, lambda block: block + 1)
+
+    for scale_key in msi_utils.get_sorted_scale_keys(msim):
+        expected = msim[f"{scale_key}/image"].data.compute() + 1
+        actual = mapped[f"{scale_key}/image"].data.compute()
+
+        np.testing.assert_array_equal(actual, expected)
+        assert "stage" in mapped[scale_key].data_vars
+        assert "other_var" in mapped[scale_key].data_vars
+        assert mapped[scale_key]["other_var"].item() == msim[scale_key]["other_var"].item()
