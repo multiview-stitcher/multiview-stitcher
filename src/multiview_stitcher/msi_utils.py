@@ -6,9 +6,15 @@ import dask.array as da
 import multiscale_spatial_image as msi
 import numpy as np
 import xarray as xr
+from xarray import DataTree
 
 from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+
+
+def is_msim(image):
+    """Return whether ``image`` follows the multiscale DataTree layout."""
+    return isinstance(image, DataTree)
 
 
 def get_store_decorator(store_path, store_overwrite=False):
@@ -255,6 +261,76 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
             msim[sk]["image"].attrs = {}
             for transform_key, transform in sim_attrs["transforms"].items():
                 msim[sk][transform_key] = transform
+
+    return msim
+
+
+def get_msim_from_sims(sims):
+    """
+    Build a multiscale image from already-computed resolution levels.
+
+    Input sims are ordered by decreasing spatial shape. Transform metadata is
+    taken from the highest-resolution sim and copied to every output scale.
+    """
+    # Accept any iterable, then work with a local list so ordering is explicit.
+    sims = list(sims)
+    if not sims:
+        raise ValueError("sims must contain at least one image.")
+
+    # All levels must describe the same axes to form a valid pyramid.
+    dims = sims[0].dims
+    for sim in sims[1:]:
+        if sim.dims != dims:
+            raise ValueError("All sims must have the same dimensions.")
+
+    sdims = si_utils.get_spatial_dims_from_sim(sims[0])
+
+    def shape_key(sim):
+        shape = si_utils.get_shape_from_sim(sim)
+        return tuple(shape[dim] for dim in sdims)
+
+    # Put the highest-resolution image at scale0 regardless of caller order.
+    sims = sorted(sims, key=shape_key, reverse=True)
+    shapes = [si_utils.get_shape_from_sim(sim) for sim in sims]
+    for prev_shape, shape in zip(shapes, shapes[1:]):
+        if not all(shape[dim] <= prev_shape[dim] for dim in sdims):
+            # Incomparable anisotropic shapes cannot be ordered into pyramid levels.
+            raise ValueError(
+                "Spatial shapes must decrease monotonically across "
+                "resolution levels."
+            )
+
+    # Copy sims before normalizing transform attrs so caller objects are unchanged.
+    sims = [sim.copy() for sim in sims]
+    transform_keys = (
+        si_utils.get_tranform_keys_from_sim(sims[0])
+        if "transforms" in sims[0].attrs
+        else []
+    )
+
+    # Lower-resolution sims inherit exactly the transform keys from scale0.
+    for sim in sims[1:]:
+        sim.attrs["transforms"] = {}
+        for transform_key in transform_keys:
+            si_utils.set_sim_affine(
+                sim,
+                si_utils.get_affine_from_sim(sims[0], transform_key),
+                transform_key,
+            )
+
+    msim_dict = {}
+    for iscale, sim in enumerate(sims):
+        curr_msim = get_msim_from_sim(sim, scale_factors=[])
+        msim_dict[f"scale{iscale}"] = curr_msim["scale0"]
+
+    msim = DataTree.from_dict(msim_dict)
+    # Re-apply through the msim helper to keep transform storage consistent.
+    for transform_key in transform_keys:
+        set_affine_transform(
+            msim,
+            si_utils.get_affine_from_sim(sims[0], transform_key),
+            transform_key,
+        )
 
     return msim
 

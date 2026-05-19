@@ -230,3 +230,47 @@ def test_get_res_level_from_spacing():
     # Requesting spacing between scale0 and scale1 → level 0 (scale1 spacing too large)
     assert msi_utils.get_res_level_from_spacing(msim, {"y": 1.5, "x": 1.5}) == 0
 
+
+def test_get_msim_from_sims_orders_shapes_and_uses_highest_res_transforms():
+    # Pass the lower-resolution sim first to check that the helper reorders levels.
+    sim_hi = si_utils.get_sim_from_array(
+        np.ones((100, 100)),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([1, 2]),
+        transform_key="hi",
+    )
+    sim_lo = si_utils.get_sim_from_array(
+        np.ones((50, 50)),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([3, 4]),
+        transform_key="lo",
+    )
+
+    msim = msi_utils.get_msim_from_sims([sim_lo, sim_hi])
+
+    assert msim["scale0/image"].shape[-2:] == (100, 100)
+    assert msim["scale1/image"].shape[-2:] == (50, 50)
+    assert "hi" in msim["scale0"].data_vars
+    assert "hi" in msim["scale1"].data_vars
+    assert "lo" not in msim["scale0"].data_vars
+    assert "lo" not in msim["scale1"].data_vars
+    assert np.allclose(msim["scale0"]["hi"], msim["scale1"]["hi"])
+
+
+def test_get_msim_from_sims_requires_monotonic_shapes():
+    # One dimension shrinks while another grows, so these cannot form one pyramid.
+    sims = [
+        si_utils.get_sim_from_array(np.ones(shape), dims=["y", "x"])
+        for shape in [(100, 50), (80, 60)]
+    ]
+
+    with pytest.raises(ValueError, match="decrease monotonically"):
+        msi_utils.get_msim_from_sims(sims)
+
+
+def test_get_msim_from_sims_requires_matching_dims():
+    sim = si_utils.get_sim_from_array(np.ones((10, 10)), dims=["y", "x"])
+
+    # Dropping a non-spatial dimension should be rejected too.
+    with pytest.raises(ValueError, match="same dimensions"):
+        msi_utils.get_msim_from_sims([sim, sim.isel(c=0, drop=True)])

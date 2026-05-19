@@ -17,6 +17,7 @@ from dask.array.core import normalize_chunks
 from dask import config as dask_config
 
 from multiview_stitcher import (
+    msi_utils,
     mv_graph,
     ngff_utils,
     param_utils,
@@ -215,10 +216,14 @@ def fuse(
 
     This function fuses all (Z)YX views ("fields") contained in the
     input list of images, which can additionally contain C and T dimensions.
+    Inputs may be either all SpatialImages or all MultiscaleSpatialImages.
+    When fusing MultiscaleSpatialImages lazily, the returned object is also
+    multiscale and each output resolution is fused from a suitable input
+    resolution level.
 
     Parameters
     ----------
-    sims : list of SpatialImage
+    sims : list of SpatialImage or MultiscaleSpatialImage
         Input views.
     transform_key : str, optional
         Which (extrinsic coordinate system) to use as transformation parameters.
@@ -281,9 +286,124 @@ def fuse(
             Additional keyword arguments passed to batch_func.
     Returns
     -------
-    SpatialImage
+    SpatialImage or MultiscaleSpatialImage
         Fused image.
     """
+    if not sims:
+        raise ValueError("sims must contain at least one image.")
+
+    input_is_msim = [msi_utils.is_msim(sim) for sim in sims]
+    if any(input_is_msim) and not all(input_is_msim):
+        # Mixed inputs would make both scale selection and return type ambiguous.
+        raise ValueError(
+            "All input images must be of the same kind: either all sims or "
+            "all msims."
+        )
+
+    if all(input_is_msim):
+        # Scale 0 defines the finest output geometry; coarser outputs derive from it.
+        scale0_sims = [
+            msi_utils.get_sim_from_msim(msim, scale="scale0")
+            for msim in sims
+        ]
+
+        scale0_output_stack_properties = process_output_stack_properties(
+            sims=scale0_sims,
+            output_spacing=output_spacing,
+            output_origin=output_origin,
+            output_shape=output_shape,
+            output_stack_properties=output_stack_properties,
+            output_stack_mode=output_stack_mode,
+            transform_key=transform_key,
+        )
+
+        if output_zarr_url is not None:
+            # The Zarr path writes one sim, so choose the input level
+            # matching that output spacing.
+            sims = [
+                msi_utils.get_sim_from_msim(
+                    msim,
+                    scale="scale%s"
+                    % msi_utils.get_res_level_from_spacing(
+                        msim, scale0_output_stack_properties["spacing"]
+                    ),
+                )
+                for msim in sims
+            ]
+            return fuse(
+                sims=sims,
+                transform_key=transform_key,
+                fusion_func=fusion_func,
+                fusion_func_kwargs=fusion_func_kwargs,
+                weights_func=weights_func,
+                weights_func_kwargs=weights_func_kwargs,
+                output_stack_mode=output_stack_mode,
+                output_stack_properties=scale0_output_stack_properties,
+                output_chunksize=output_chunksize,
+                overlap_in_pixels=overlap_in_pixels,
+                interpolation_order=interpolation_order,
+                blending_widths=blending_widths,
+                output_zarr_url=output_zarr_url,
+                zarr_options=zarr_options,
+                batch_options=batch_options,
+            )
+
+        res_shapes, _, res_abs_factors = msi_utils.calc_resolution_levels(
+            scale0_output_stack_properties["shape"],
+        )
+
+        fused_sims = []
+        for shape, abs_factors in zip(res_shapes, res_abs_factors):
+            # Match the center-of-pixel origin convention used by OME-Zarr
+            # output for downsampled levels.
+            curr_output_stack_properties = {
+                "shape": shape,
+                "spacing": {
+                    dim: scale0_output_stack_properties["spacing"][dim]
+                    * abs_factors[dim]
+                    for dim in shape
+                },
+                "origin": {
+                    dim: scale0_output_stack_properties["origin"][dim]
+                    + (abs_factors[dim] - 1)
+                    * scale0_output_stack_properties["spacing"][dim]
+                    / 2
+                    for dim in shape
+                },
+            }
+            # Fuse each output level from the coarsest input data that is
+            # still fine enough.
+            curr_sims = [
+                msi_utils.get_sim_from_msim(
+                    msim,
+                    scale="scale%s"
+                    % msi_utils.get_res_level_from_spacing(
+                        msim, curr_output_stack_properties["spacing"]
+                    ),
+                )
+                for msim in sims
+            ]
+            fused_sims.append(
+                fuse(
+                    sims=curr_sims,
+                    transform_key=transform_key,
+                    fusion_func=fusion_func,
+                    fusion_func_kwargs=fusion_func_kwargs,
+                    weights_func=weights_func,
+                    weights_func_kwargs=weights_func_kwargs,
+                    output_stack_mode=output_stack_mode,
+                    output_stack_properties=curr_output_stack_properties,
+                    output_chunksize=output_chunksize,
+                    overlap_in_pixels=overlap_in_pixels,
+                    interpolation_order=interpolation_order,
+                    blending_widths=blending_widths,
+                )
+            )
+
+        # The levels have already been fused; assemble them without further
+        # downsampling.
+        return msi_utils.get_msim_from_sims(fused_sims)
+
     # If writing directly to Zarr/OME-Zarr, run chunked fusion path and return eagerly.
     if output_zarr_url is not None:
         # Collect batch options with defaults
