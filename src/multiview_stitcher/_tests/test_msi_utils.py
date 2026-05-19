@@ -2,6 +2,7 @@ import tempfile
 
 import numpy as np
 import pytest
+import xarray as xr
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -274,3 +275,30 @@ def test_get_msim_from_sims_requires_matching_dims():
     # Dropping a non-spatial dimension should be rejected too.
     with pytest.raises(ValueError, match="same dimensions"):
         msi_utils.get_msim_from_sims([sim, sim.isel(c=0, drop=True)])
+
+
+def test_msim_map_blocks_maps_every_scale_and_preserves_other_vars():
+    sim = si_utils.get_sim_from_array(
+        np.arange(64, dtype=np.float32).reshape(8, 8),
+        dims=["y", "x"],
+        affine=param_utils.affine_from_translation([1, 2]),
+        transform_key="stage",
+    )
+    msim = msi_utils.get_msim_from_sim(
+        sim,
+        scale_factors=[{"y": 2, "x": 2}],
+    )
+
+    for iscale, scale_key in enumerate(msi_utils.get_sorted_scale_keys(msim)):
+        msim[scale_key]["other_var"] = xr.DataArray(np.array(iscale))
+
+    mapped = msi_utils.msim_map_blocks(msim, lambda block: block + 1)
+
+    for scale_key in msi_utils.get_sorted_scale_keys(msim):
+        expected = msim[f"{scale_key}/image"].data.compute() + 1
+        actual = mapped[f"{scale_key}/image"].data.compute()
+
+        np.testing.assert_array_equal(actual, expected)
+        assert "stage" in mapped[scale_key].data_vars
+        assert "other_var" in mapped[scale_key].data_vars
+        assert mapped[scale_key]["other_var"].item() == msim[scale_key]["other_var"].item()

@@ -335,6 +335,30 @@ def get_msim_from_sims(sims):
     return msim
 
 
+def msim_map_blocks(msim, func, *args, **kwargs):
+    """
+    Apply ``dask.array.Array.map_blocks`` to the image data in every scale.
+
+    This keeps coordinates and non-image data variables intact while lazily
+    transforming each image chunk. For example,
+    ``msim_map_blocks(msim, cupy.asarray)`` makes computed chunks CuPy-backed.
+    Additional positional and keyword arguments are forwarded to
+    ``dask.array.Array.map_blocks``.
+    """
+
+    def _map_dataset(ds):
+        if "image" not in ds.data_vars:
+            return ds
+
+        return ds.assign(
+            image=ds.image.copy(
+                data=ds.image.data.map_blocks(func, *args, **kwargs)
+            )
+        )
+
+    return msim.map_over_datasets(_map_dataset)
+
+
 def set_affine_transform(
     msim, xaffine=None, transform_key=None, base_transform_key=None
 ):
