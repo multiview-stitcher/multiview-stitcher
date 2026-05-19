@@ -1697,11 +1697,23 @@
 </span></code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">sim vs msim: which does each function expect?</p>
-<p>Some functions (e.g. <code>fusion.fuse</code>) take a list of <code>SpatialImage</code> (sim), while others (e.g. <code>registration.register</code>) take a list of <code>MultiscaleSpatialImage</code> (msim). Converting between the two is straightforward:</p>
+<p><code>registration.register</code> takes a list of <code>MultiscaleSpatialImage</code> (msim).
+<code>fusion.fuse</code> accepts either a list of <code>SpatialImage</code> (sim) or a list of
+<code>MultiscaleSpatialImage</code> (msim), but the two input types cannot be mixed in
+one call. Converting between the two is straightforward:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">sim</span>  <span class="o">=</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">)</span>   <span class="c1"># extract scale0 SpatialImage from an msim</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[])</span>  <span class="c1"># wrap a sim as an msim</span>
 </span></code></pre></div>
-<p>When we only need the highest resolution, either representation is equivalent and we can convert freely. If we want to make use of multiple resolution levels (e.g. for faster registration at lower res), we load or build an <code>msim</code> with several scales — the best way is to read it directly from OME-Zarr (see <a href="#reading-from-ome-zarr">Reading from OME-Zarr</a>).</p>
+<p>When we only need the highest resolution, either representation is
+equivalent and we can convert freely. If we want to make use of multiple
+resolution levels (e.g. for faster registration at lower res, or for
+multiscale fusion output), we load or build an <code>msim</code> with several scales —
+the best way is to read it directly from OME-Zarr (see
+<a href="#reading-from-ome-zarr">Reading from OME-Zarr</a>).</p>
+<p>If we already have several <code>SpatialImage</code> objects representing different
+resolution levels of the same image, use <code>msi_utils.get_msim_from_sims</code>.
+The helper orders levels from largest to smallest shape and copies the
+transform keys from the highest-resolution level to the coarser levels.</p>
 </div>
 <hr />
 <h2 id="coordinate-systems-and-transform_key">Coordinate systems and <code>transform_key</code></h2>
@@ -1829,7 +1841,8 @@
 </span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    <span class="p">)</span>
 </span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>    <span class="n">msims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
 </span></code></pre></div>
-<p>The resulting <code>msims</code> list is the direct input to <code>registration.register</code> and <code>fusion.fuse</code>. We can sanity-check the tile layout before proceeding:</p>
+<p>The resulting <code>msims</code> list is the direct input to <code>registration.register</code> and
+<code>fusion.fuse</code>. We can sanity-check the tile layout before proceeding:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">vis_utils</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">vis_utils</span><span class="o">.</span><span class="n">plot_positions</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span> <span class="n">use_positional_colors</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
