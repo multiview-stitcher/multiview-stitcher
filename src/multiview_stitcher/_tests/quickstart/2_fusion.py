@@ -1,12 +1,12 @@
 from multiview_stitcher import fusion
 
-fused_sim = fusion.fuse(
-    [msi_utils.get_sim_from_msim(msim) for msim in msims],
+fused_msim = fusion.fuse(
+    images=msims,
     transform_key="translation_registered",
 )
 
-# get fused array as a dask array
-fused_sim.data
+# get fused array at the highest output resolution as a dask array
+fused_msim["scale0/image"].data
 
-# get fused array as a numpy array
-fused_sim.data.compute()
+# get fused array at the highest output resolution as a numpy array
+fused_msim["scale0/image"].data.compute()

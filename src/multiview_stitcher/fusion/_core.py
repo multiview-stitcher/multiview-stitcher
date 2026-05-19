@@ -191,7 +191,7 @@ def process_output_stack_properties(
 
 
 def fuse(
-    sims: list,
+    images: list = None,
     transform_key: str = None,
     fusion_func: Callable = weighted_average_fusion,
     fusion_func_kwargs: dict = None,
@@ -209,10 +209,11 @@ def fuse(
     output_zarr_url: str | None = None,
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
+    sims: list | None = None,
 ):
     """
 
-    Fuse input views.
+    Fuse input images.
 
     This function fuses all (Z)YX views ("fields") contained in the
     input list of images, which can additionally contain C and T dimensions.
@@ -223,8 +224,10 @@ def fuse(
 
     Parameters
     ----------
-    sims : list of SpatialImage or MultiscaleSpatialImage
-        Input views.
+    images : list of SpatialImage or MultiscaleSpatialImage
+        Input images.
+    sims : list of SpatialImage or MultiscaleSpatialImage, optional
+        Deprecated alias for ``images``. Kept for backwards compatibility.
     transform_key : str, optional
         Which (extrinsic coordinate system) to use as transformation parameters.
         By default None (intrinsic coordinate system).
@@ -289,22 +292,42 @@ def fuse(
     SpatialImage or MultiscaleSpatialImage
         Fused image.
     """
-    if not sims:
-        raise ValueError("sims must contain at least one image.")
+    if images is None:
+        if sims is None:
+            raise TypeError(
+                "fuse() missing 1 required positional argument: 'images'"
+            )
 
-    input_is_msim = [msi_utils.is_msim(sim) for sim in sims]
+        warnings.warn(
+            "The fuse(..., sims=...) parameter is deprecated and will be removed "
+            "in a future version. Use images=... instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        images = sims
+    elif sims is not None:
+        raise TypeError(
+            "fuse() got both 'images' and deprecated 'sims'. Use only 'images'."
+        )
+
+    if not images:
+        raise ValueError("images must contain at least one image.")
+
+    input_is_msim = [msi_utils.is_msim(image) for image in images]
     if any(input_is_msim) and not all(input_is_msim):
         # Mixed inputs would make both scale selection and return type ambiguous.
         raise ValueError(
-            "All input images must be of the same kind: either all sims or "
-            "all msims."
+            "All input images must be of the same kind: either all SpatialImages "
+            "or all MultiscaleSpatialImages."
         )
 
     if all(input_is_msim):
+        msims = images
+
         # Scale 0 defines the finest output geometry; coarser outputs derive from it.
         scale0_sims = [
             msi_utils.get_sim_from_msim(msim, scale="scale0")
-            for msim in sims
+            for msim in msims
         ]
 
         scale0_output_stack_properties = process_output_stack_properties(
@@ -320,7 +343,7 @@ def fuse(
         if output_zarr_url is not None:
             # The Zarr path writes one sim, so choose the input level
             # matching that output spacing.
-            sims = [
+            selected_level_sims = [
                 msi_utils.get_sim_from_msim(
                     msim,
                     scale="scale%s"
@@ -328,10 +351,10 @@ def fuse(
                         msim, scale0_output_stack_properties["spacing"]
                     ),
                 )
-                for msim in sims
+                for msim in msims
             ]
             return fuse(
-                sims=sims,
+                images=selected_level_sims,
                 transform_key=transform_key,
                 fusion_func=fusion_func,
                 fusion_func_kwargs=fusion_func_kwargs,
@@ -381,11 +404,11 @@ def fuse(
                         msim, curr_output_stack_properties["spacing"]
                     ),
                 )
-                for msim in sims
+                for msim in msims
             ]
             fused_sims.append(
                 fuse(
-                    sims=curr_sims,
+                    images=curr_sims,
                     transform_key=transform_key,
                     fusion_func=fusion_func,
                     fusion_func_kwargs=fusion_func_kwargs,
@@ -403,6 +426,8 @@ def fuse(
         # The levels have already been fused; assemble them without further
         # downsampling.
         return msi_utils.get_msim_from_sims(fused_sims)
+
+    sims = images
 
     # If writing directly to Zarr/OME-Zarr, run chunked fusion path and return eagerly.
     if output_zarr_url is not None:
@@ -432,7 +457,7 @@ def fuse(
 
         # Build kwargs for per-chunk fuse() calls (exclude zarr-specific args to avoid recursion)
         per_chunk_fuse_kwargs = {
-            "sims": sims,
+            "images": sims,
             "transform_key": transform_key,
             "fusion_func": fusion_func,
             "fusion_func_kwargs": fusion_func_kwargs,
@@ -1339,7 +1364,9 @@ def prepare_block_fusion(
     for embarrassingly parallel fusion
     """
 
-    sims = fuse_kwargs.get("sims")
+    sims = fuse_kwargs.get("images")
+    if sims is None:
+        sims = fuse_kwargs.get("sims")
 
     output_stack_properties = process_output_stack_properties(
         sims=sims,
@@ -1420,7 +1447,9 @@ def prepare_block_fusion(
                     for idim, b in enumerate(spatial_chunk_ind)}
 
 
-        sims = fuse_kwargs.get("sims")
+        sims = fuse_kwargs.get("images")
+        if sims is None:
+            sims = fuse_kwargs.get("sims")
         # restrict sims to relevant non-spatial coordinates
         sims = [si_utils.sim_sel_coords(
             sim,
@@ -1433,8 +1462,12 @@ def prepare_block_fusion(
             spatial_chunk_ind,
         )
         fused = fuse(
-            sims=sims,
-            **{k: v for k, v in fuse_kwargs.items() if k != "sims"},
+            images=sims,
+            **{
+                k: v
+                for k, v in fuse_kwargs.items()
+                if k not in {"images", "sims"}
+            },
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
             output_spacing={dim: osp['spacing'][dim] for dim in sdims},

@@ -19,7 +19,7 @@ for i in range(len(sims)):
     sims[i].data = sims[i].data.map_blocks(cp.asarray)
 
 fused_sim = fusion.fuse(
-    sims,
+    images=sims,
     transform_key="stage_metadata",
 )
 

@@ -4,6 +4,7 @@ Custom functions can be passed to the `fusion.fuse` function. `multiview-stitche
 
 ```python
 def fuse(
+    images: list,
     ...
     transform_key: str = None,
     fusion_func: Callable = weighted_average_fusion,

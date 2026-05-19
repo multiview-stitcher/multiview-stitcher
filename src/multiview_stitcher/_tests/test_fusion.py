@@ -69,11 +69,31 @@ def test_fuse_rejects_mixed_sims_and_msims():
     msim = _make_distinct_level_msim()
     sim = msi_utils.get_sim_from_msim(msim)
 
-    with pytest.raises(ValueError, match="either all sims or all msims"):
+    with pytest.raises(ValueError, match="same kind"):
         fusion.fuse(
             [msim, sim],
             transform_key=METADATA_TRANSFORM_KEY,
         )
+
+
+def test_fuse_msims_accepts_images_keyword_and_deprecates_sims_keyword():
+    msim = _make_distinct_level_msim()
+    fuse_kwargs = {
+        "transform_key": METADATA_TRANSFORM_KEY,
+        "fusion_func": fusion.max_fusion,
+        "output_chunksize": 64,
+        "output_shape": {"y": 202, "x": 202},
+    }
+
+    fused = fusion.fuse(images=[msim], **fuse_kwargs)
+
+    with pytest.warns(DeprecationWarning, match="Use images=... instead"):
+        fused_alias = fusion.fuse(sims=[msim], **fuse_kwargs)
+
+    assert msi_utils.get_sorted_scale_keys(fused) == ["scale0", "scale1"]
+    assert msi_utils.get_sorted_scale_keys(fused_alias) == ["scale0", "scale1"]
+    assert np.max(fused["scale0/image"].data.compute()) == 1
+    assert np.max(fused_alias["scale1/image"].data.compute()) == 2
 
 
 def test_fuse_msims_returns_msim_from_suitable_input_levels():

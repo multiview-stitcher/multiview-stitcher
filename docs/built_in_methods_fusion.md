@@ -65,7 +65,7 @@ for sim in msims:
     sim.data = sim.data.map_blocks(cp.asarray)
 
 fused = fusion.fuse(
-    msims,
+    images=msims,
     transform_key="affine_registered",
     fusion_func=multi_view_deconvolution,
     fusion_func_kwargs=dict(
