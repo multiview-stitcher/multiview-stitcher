@@ -285,9 +285,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
         scale_factors = scale_factors[1:]  # remove input scale
 
     if chunks is None:
-        if isinstance(sim.data, da.Array):
+        sim_backend = getattr(sim.variable, "_data", None)
+        if isinstance(sim_backend, da.Array):
             chunks = {
-                dim: sim.data.chunksize[idim]
+                dim: sim_backend.chunksize[idim]
                 for idim, dim in enumerate(sim.dims)
             }
         else:
@@ -297,7 +298,13 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
                 for dim in sim.dims
             }
 
-    sims = [_chunk_sim(sim, chunks)]
+    if si_utils.is_xarray_zarr_backed(sim):
+        sims = [
+            sim if len(scale_factors) == 0 else si_utils.ensure_dask_backed_dataarray(sim)
+        ]
+    else:
+        sims = [_chunk_sim(sim, chunks)]
+
     for scale_factor in scale_factors:
         sims.append(_downsample_sim(sims[-1], scale_factor, chunks))
 

@@ -78,24 +78,29 @@ def transform_sim(
         "order": 1,
     } | affine_transform_kwargs
 
-    if isinstance(sim.data, da.core.Array):
+    if spatial_image_utils.is_xarray_zarr_backed(sim):
+        sim = spatial_image_utils.ensure_dask_backed_dataarray(sim)
+
+    backend_data = spatial_image_utils._get_backend_data(sim)
+
+    if spatial_image_utils.is_dask_backed_dataarray(sim):
         out_data = dask_image_affine_transform(
-            sim.data,
+            backend_data,
             **affine_transform_kwargs,
         )
     else:
         # check if sim.data is a cupy array
-        if cp is not None and isinstance(sim.data, cp.ndarray):
+        if cp is not None and isinstance(backend_data, cp.ndarray):
             # use cupyx.scipy.ndimage for affine transform
             matrix = cp.asarray(affine_transform_kwargs.pop("matrix"))
             out_data = cupyx.scipy.ndimage.affine_transform(
-                sim.data,
+                backend_data,
                 matrix=matrix,
                 **affine_transform_kwargs,
             )
         else:
             out_data = affine_transform(
-                sim.data,
+                backend_data,
                 **affine_transform_kwargs,
             )
 

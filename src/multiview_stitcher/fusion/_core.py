@@ -136,9 +136,16 @@ def process_output_chunksize(sims, output_chunksize):
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
 
     if output_chunksize is None:
-        if isinstance(sims[0].data, da.Array):
+        if si_utils.is_xarray_zarr_backed(sims[0]):
+            # For zarr-backed sims, preserve the source chunk grid without
+            # converting the full input to dask first.
+            preferred_chunks = si_utils._get_preferred_chunks(sims[0])
+            output_chunksize = {dim: preferred_chunks[dim] for dim in sdims}
+        elif si_utils.is_dask_backed_dataarray(sims[0]):
             # if first tile is a chunked dask array, use its chunksize
-            output_chunksize = dict(zip(sdims, sims[0].data.chunksize[-ndim:]))
+            output_chunksize = dict(
+                zip(sdims, si_utils._get_backend_data(sims[0]).chunksize[-ndim:])
+            )
         else:
             # if first tile is not a chunked dask array, use default chunksize
             # defined in spatial_image_utils.py
@@ -256,9 +263,10 @@ def fuse(
         'spacing', 'origin', 'shape'. Other output_* are ignored
         if this argument is present.
     output_chunksize : int or dict, optional
-        Chunksize of the dask data array of the fused image. If the first tile is a chunked dask array,
-        its chunksize is used as the default. If the first tile is not a chunked dask array,
-        the default chunksize defined in spatial_image_utils.py is used.
+        Chunksize of the dask data array of the fused image. If the first tile is a
+        chunked dask array or a zarr-backed sim with stored chunk hints, its chunk grid
+        is used as the default. Otherwise, the default chunksize defined in
+        spatial_image_utils.py is used.
     output_zarr_url : str or None, optional
         If not None, fuse directly into a Zarr store at this location and do so in batches of chunks,
         with each chunk being processed independently. This allows for efficient memory usage and
@@ -801,7 +809,10 @@ def fuse(
             ):
                 fuse_planewise = True
 
-                sims_slices = [sim.isel(z=0) for sim in sims_slices]
+                sims_slices = [
+                    si_utils.ensure_dask_backed_dataarray(sim.isel(z=0))
+                    for sim in sims_slices
+                ]
                 tmp_params = [
                     sparams[iview].sel(
                         x_in=["y", "x", "1"],
@@ -821,6 +832,10 @@ def fuse(
 
             else:
                 fuse_planewise = False
+                sims_slices = [
+                    si_utils.ensure_dask_backed_dataarray(sim)
+                    for sim in sims_slices
+                ]
                 tmp_params = [
                     sparams[iview] for iview in relevant_view_indices
                 ]

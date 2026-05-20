@@ -1,6 +1,10 @@
+import os
+import tempfile
+
 import dask.array as da
 import numpy as np
 import pytest
+import zarr
 
 from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -19,6 +23,32 @@ def test_sim_array_input_backends(xp, ndim):
     )
 
     assert isinstance(sim.data, da.Array)
+
+
+def test_sim_zarr_array_input_backend_is_preserved():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(8, 8),
+            chunks=(4, 4),
+            dtype=np.uint16,
+        )
+        zarray[:] = 1
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+        )
+
+        assert si_utils.is_xarray_zarr_backed(sim)
+
+        sim_slice = sim.sel(y=slice(0.0, 3.0), x=slice(0.0, 3.0))
+        sim_slice = si_utils.ensure_dask_backed_dataarray(sim_slice)
+
+        assert isinstance(sim_slice.data, da.Array)
 
 
 def test_max_project():

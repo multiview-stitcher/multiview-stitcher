@@ -4,7 +4,10 @@ from typing import Optional, Union
 import dask.array as da
 import numpy as np
 import xarray as xr
+import zarr
 from numpy._typing import ArrayLike
+from xarray.backends import BackendArray
+from xarray.core import indexing
 
 from multiview_stitcher import param_utils
 
@@ -15,6 +18,238 @@ SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
 DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
 DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 2048, "x": 2048}
+
+
+class ZarrLazyBackendArray(BackendArray):
+    # Wrap a raw zarr array in xarray's BackendArray protocol so xarray can
+    # keep reads lazy until we explicitly chunk the selected region with dask.
+    def __init__(self, zarray):
+        self.zarray = zarray
+        self.shape = zarray.shape
+        self.dtype = np.dtype(zarray.dtype)
+
+    def _raw_indexing_method(self, key):
+        return self.zarray[key]
+
+    def __getitem__(self, key):
+        return indexing.explicit_indexing_adapter(
+            key,
+            self.shape,
+            indexing.IndexingSupport.BASIC,
+            self._raw_indexing_method,
+        )
+
+
+class SingletonExpandedBackendArray(BackendArray):
+    # xarray.expand_dims materializes some backend arrays. This wrapper presents
+    # leading singleton axes virtually, so we can add missing t/c dims without
+    # touching the underlying zarr-backed payload.
+    def __init__(self, array, singleton_axes):
+        self.array = array
+        self.singleton_axes = tuple(singleton_axes)
+        self.dtype = np.dtype(array.dtype)
+
+        inner_shape = iter(array.shape)
+        self.shape = tuple(
+            1 if axis in self.singleton_axes else next(inner_shape)
+            for axis in range(len(array.shape) + len(self.singleton_axes))
+        )
+
+    def _raw_indexing_method(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+
+        key = key + (slice(None),) * (len(self.shape) - len(key))
+
+        inner_key = []
+        expand_axes = []
+        output_axis = 0
+
+        for axis, item in enumerate(key):
+            if axis in self.singleton_axes:
+                if not isinstance(item, (int, np.integer)):
+                    expand_axes.append(output_axis)
+                    output_axis += 1
+                continue
+
+            inner_key.append(item)
+            if not isinstance(item, (int, np.integer)):
+                output_axis += 1
+
+        inner_key = tuple(inner_key)
+        if hasattr(self.array, "_updated_key"):
+            result = np.asarray(self.array[indexing.BasicIndexer(inner_key)])
+        else:
+            result = np.asarray(self.array[inner_key])
+
+        for axis in expand_axes:
+            result = np.expand_dims(result, axis=axis)
+
+        return result
+
+    def __getitem__(self, key):
+        return indexing.explicit_indexing_adapter(
+            key,
+            self.shape,
+            indexing.IndexingSupport.BASIC,
+            self._raw_indexing_method,
+        )
+
+
+def _zarr_array_to_dataarray(
+    zarray,
+    dims,
+    coords=None,
+    name=None,
+    attrs=None,
+):
+    # Preserve zarr-backed laziness when constructing an xarray.DataArray from a
+    # plain zarr.Array, and propagate chunk hints for the later dask conversion.
+    backend = ZarrLazyBackendArray(zarray)
+    lazy_data = indexing.LazilyIndexedArray(backend)
+    var = xr.Variable(
+        dims,
+        lazy_data,
+        attrs={} if attrs is None else dict(attrs),
+    )
+    xim = xr.DataArray(var, coords=coords, name=name)
+
+    zchunks = getattr(zarray, "chunks", None)
+    if zchunks is not None:
+        xim.attrs["_zarr_chunks"] = tuple(zchunks)
+        xim.encoding["preferred_chunks"] = {
+            dim: chunk for dim, chunk in zip(dims, zchunks)
+        }
+
+    return xim
+
+
+def _iter_backend_arrays(array):
+    current = array
+    seen = set()
+
+    while current is not None and id(current) not in seen:
+        yield current
+        seen.add(id(current))
+
+        next_current = None
+        for attr in ("array", "_array", "zarray"):
+            candidate = getattr(current, attr, None)
+            if candidate is not None and candidate is not current:
+                next_current = candidate
+                break
+
+        current = next_current
+
+
+def is_xarray_zarr_backed(xim):
+    if not isinstance(xim, xr.DataArray):
+        return False
+
+    internal = getattr(xim.variable, "_data", None)
+    if internal is None:
+        return False
+
+    for candidate in _iter_backend_arrays(internal):
+        if isinstance(candidate, zarr.Array):
+            return True
+
+        candidate_type = type(candidate)
+        if candidate_type.__module__.startswith("xarray.backends.zarr"):
+            return True
+
+        if hasattr(candidate, "zarray") and isinstance(candidate.zarray, zarr.Array):
+            return True
+
+    return False
+
+
+def _get_backend_data(xim):
+    internal = getattr(xim.variable, "_data", None)
+    if internal is not None:
+        return internal
+
+    return xim.data
+
+
+def is_dask_backed_dataarray(xim):
+    return isinstance(_get_backend_data(xim), da.Array)
+
+
+def _get_preferred_chunks(xim):
+    preferred_chunks = xim.encoding.get("preferred_chunks")
+
+    if preferred_chunks is None:
+        zarr_chunks = xim.attrs.get("_zarr_chunks")
+        if zarr_chunks is not None:
+            preferred_chunks = {
+                dim: chunk for dim, chunk in zip(xim.dims, zarr_chunks)
+            }
+
+    if preferred_chunks is None:
+        spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
+        spatial_chunks = get_default_spatial_chunksizes(len(spatial_dims))
+        preferred_chunks = {
+            dim: (1 if dim in ["c", "t"] else spatial_chunks[dim])
+            for dim in xim.dims
+        }
+
+    return {
+        dim: min(int(preferred_chunks[dim]), xim.sizes[dim])
+        for dim in xim.dims
+        if dim in preferred_chunks
+    }
+
+
+def _expand_with_singleton_dims_lazily(xim, missing_dims):
+    # Add missing non-spatial dims without forcing xarray to realize the zarr
+    # backend; registration/fusion convert to dask only after slicing.
+    backend = SingletonExpandedBackendArray(
+        _get_backend_data(xim),
+        singleton_axes=tuple(range(len(missing_dims))),
+    )
+    lazy_data = indexing.LazilyIndexedArray(backend)
+    dims = tuple(missing_dims) + tuple(xim.dims)
+    expanded = xr.DataArray(
+        xr.Variable(dims, lazy_data),
+        coords={dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims},
+        name=xim.name,
+    )
+
+    preferred_chunks = dict(xim.encoding.get("preferred_chunks", {}))
+    preferred_chunks.update({dim: 1 for dim in missing_dims})
+    if preferred_chunks:
+        expanded.encoding["preferred_chunks"] = {
+            dim: preferred_chunks[dim]
+            for dim in expanded.dims
+            if dim in preferred_chunks
+        }
+
+    if "_zarr_chunks" in xim.attrs:
+        expanded.attrs["_zarr_chunks"] = xim.attrs["_zarr_chunks"]
+
+    return expanded
+
+
+def ensure_dask_backed_dataarray(xim):
+    if is_xarray_zarr_backed(xim):
+        # Convert only the already-selected region into dask to avoid building a
+        # large graph from slicing the full input array first.
+        return xim.chunk(_get_preferred_chunks(xim))
+
+    if is_dask_backed_dataarray(xim):
+        return xim
+
+    return xim
+
+
+def _copy_chunk_hints(source, target):
+    preferred_chunks = source.encoding.get("preferred_chunks")
+    if preferred_chunks is not None:
+        target.encoding["preferred_chunks"] = dict(preferred_chunks)
+
+    if "_zarr_chunks" in source.attrs:
+        target.attrs["_zarr_chunks"] = source.attrs["_zarr_chunks"]
 
 
 def _get_axis_coords(dim, size, scale, translation):
@@ -34,7 +269,7 @@ def to_spatial_image(
 
     if isinstance(data, xr.DataArray):
         name = data.name
-        data = data.data
+        data = _get_backend_data(data)
     else:
         name = None
 
@@ -67,7 +302,11 @@ def to_spatial_image(
                 else np.arange(size)
             )
 
-    return xr.DataArray(data, dims=dims, coords=coords, name=name)
+    return xr.DataArray(
+        xr.Variable(dims, data),
+        coords=coords,
+        name=name,
+    )
 
 
 def get_default_spatial_chunksizes(ndim: int):
@@ -118,20 +357,44 @@ def get_sim_from_array(
         (SpatialImage + affine transform attributes)
     """
 
-    if dims is None:
-        dims = ["t", "c", "z", "y", "x"][-array.ndim :]
+    if isinstance(array, xr.DataArray):
+        xim = array.copy(deep=False)
+        if dims is None:
+            dims = list(xim.dims)
+        else:
+            assert len(dims) == xim.ndim
+            if tuple(dims) != tuple(xim.dims):
+                xim = xim.transpose(*dims)
     else:
-        assert len(dims) == array.ndim
+        if dims is None:
+            dims = ["t", "c", "z", "y", "x"][-array.ndim :]
+        else:
+            assert len(dims) == array.ndim
 
-    xim = xr.DataArray(
-        array,
-        dims=dims,
-    )
+        if isinstance(array, zarr.Array):
+            xim = _zarr_array_to_dataarray(array, dims=dims)
+        else:
+            xim = xr.DataArray(
+                array,
+                dims=dims,
+            )
+
+    if c_coords is None and "c" in xim.coords:
+        c_coords = xim.coords["c"].values
+
+    if t_coords is None and "t" in xim.coords:
+        t_coords = xim.coords["t"].values
 
     nsdims = ["c", "t"]
-    for nsdim in nsdims:
-        if nsdim not in xim.dims:
-            xim = xim.expand_dims([nsdim])
+    missing_nsdims = [nsdim for nsdim in reversed(nsdims) if nsdim not in xim.dims]
+    if missing_nsdims:
+        if is_xarray_zarr_backed(xim):
+            # Keep missing singleton axes virtual for zarr-backed inputs.
+            xim = _expand_with_singleton_dims_lazily(xim, missing_nsdims)
+        else:
+            for nsdim in nsdims:
+                if nsdim not in xim.dims:
+                    xim = xim.expand_dims([nsdim])
 
     # transpose to dim order supported by spatial-image
     new_dims = [dim for dim in SPATIAL_IMAGE_DIMS if dim in xim.dims]
@@ -141,7 +404,10 @@ def get_sim_from_array(
     spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
     ndim = len(spatial_dims)
 
-    if not isinstance(array, da.Array):
+    if (
+        not isinstance(getattr(xim.variable, "_data", None), da.Array)
+        and not is_xarray_zarr_backed(xim)
+    ):
         xim = xim.chunk(
             {dim: 1 for dim in nsdims} | get_default_spatial_chunksizes(ndim)
         )
@@ -153,13 +419,15 @@ def get_sim_from_array(
         translation = {dim: 0 for dim in spatial_dims}
 
     sim = to_spatial_image(
-        xim.data,
+        xim,
         dims=xim.dims,
         scale=scale,
         translation=translation,
         c_coords=c_coords,
         t_coords=t_coords,
     )
+
+    _copy_chunk_hints(xim, sim)
 
     if affine is None:
         affine_xr = param_utils.identity_transform(ndim, t_coords=None)

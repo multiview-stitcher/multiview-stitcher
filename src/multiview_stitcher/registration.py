@@ -832,6 +832,11 @@ def register_pair_of_msims(
         for isim, sim in enumerate(reg_sims_b)
     ]
 
+    reg_sims_b = [
+        spatial_image_utils.ensure_dask_backed_dataarray(sim)
+        for sim in reg_sims_b
+    ]
+
     # # Optionally perform CLAHE before registration
     # for i in range(2):
     #     # reg_sims_b[i].data = da.from_delayed(
