@@ -78,10 +78,11 @@ def transform_sim(
         "order": 1,
     } | affine_transform_kwargs
 
-    if spatial_image_utils.is_xarray_zarr_backed(sim):
-        sim = spatial_image_utils.ensure_dask_backed_dataarray(sim)
-
     backend_data = spatial_image_utils._get_backend_data(sim)
+    if spatial_image_utils.is_xarray_zarr_backed(sim):
+        # Materialize the already-selected zarr slice inside this task so the
+        # outer graph does not inherit an inner dask slicing graph.
+        backend_data = np.asarray(backend_data)
 
     if spatial_image_utils.is_dask_backed_dataarray(sim):
         out_data = dask_image_affine_transform(

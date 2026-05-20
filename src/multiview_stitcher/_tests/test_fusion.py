@@ -15,6 +15,7 @@ from multiview_stitcher import (
     ngff_utils,
     param_utils,
     sample_data,
+    transformation,
     weights,
 )
 from multiview_stitcher.fusion import _core as fusion_core
@@ -82,7 +83,7 @@ def test_fuse_sims():
     )
 
 
-def test_fuse_zarr_backed_input_is_converted_to_dask_after_selection(monkeypatch):
+def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypatch):
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
         N_c=1,
@@ -94,20 +95,33 @@ def test_fuse_zarr_backed_input_is_converted_to_dask_after_selection(monkeypatch
     )[0]
 
     observed = []
-    original_ensure = fusion_core.si_utils.ensure_dask_backed_dataarray
+    original_fuse_np = fusion_core.fuse_np
 
-    def wrapped_ensure(xim):
-        result = original_ensure(xim)
+    def wrapped_fuse_np(*args, **kwargs):
+        sims = kwargs["sims"] if "sims" in kwargs else args[0]
         observed.append(
-            si_utils.is_xarray_zarr_backed(xim)
-            and isinstance(result.variable._data, da.Array)
+            all(
+                si_utils.is_xarray_zarr_backed(sim)
+                and not si_utils.is_dask_backed_dataarray(sim)
+                for sim in sims
+            )
         )
-        return result
+        return original_fuse_np(*args, **kwargs)
+
+    def fail_dask_affine_transform(*args, **kwargs):
+        raise AssertionError(
+            "zarr-backed fusion slices should be materialized to NumPy inside the delayed chunk task"
+        )
 
     monkeypatch.setattr(
-        fusion_core.si_utils,
-        "ensure_dask_backed_dataarray",
-        wrapped_ensure,
+        fusion_core,
+        "fuse_np",
+        wrapped_fuse_np,
+    )
+    monkeypatch.setattr(
+        transformation,
+        "dask_image_affine_transform",
+        fail_dask_affine_transform,
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:

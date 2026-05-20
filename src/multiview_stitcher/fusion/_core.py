@@ -809,10 +809,7 @@ def fuse(
             ):
                 fuse_planewise = True
 
-                sims_slices = [
-                    si_utils.ensure_dask_backed_dataarray(sim.isel(z=0))
-                    for sim in sims_slices
-                ]
+                sims_slices = [sim.isel(z=0) for sim in sims_slices]
                 tmp_params = [
                     sparams[iview].sel(
                         x_in=["y", "x", "1"],
@@ -832,10 +829,6 @@ def fuse(
 
             else:
                 fuse_planewise = False
-                sims_slices = [
-                    si_utils.ensure_dask_backed_dataarray(sim)
-                    for sim in sims_slices
-                ]
                 tmp_params = [
                     sparams[iview] for iview in relevant_view_indices
                 ]
@@ -981,7 +974,8 @@ def fuse_np(
     #             translation=origins[isim],
     #         )
 
-    input_is_cupy = cp is not None and isinstance(sims[0].data, cp.ndarray)
+    input_backend = si_utils._get_backend_data(sims[0])
+    input_is_cupy = cp is not None and isinstance(input_backend, cp.ndarray)
 
     if has_keyword(fusion_func, "blending_weights") or has_keyword(
         weights_func, "blending_weights"
