@@ -752,25 +752,20 @@ def fuse(
             candidate_view_indices = _chunk_to_tiles.get(tuple(block_index), [])
 
             views_overlap_bb = [None] * len(sims)
-            for iview in candidate_view_indices:
-                views_overlap_bb[iview] = mv_graph.get_overlap_for_bbs(
+
+            views_overlap_bb = mv_graph.get_overlap_for_bbs(
                     target_bb=output_chunk_bb_with_overlap,
-                    query_bbs=[views_bb[iview]],
+                    query_bbs=views_bb,
                     param=inv_sparams[iview],
                     additional_extent_in_pixels={
                         dim: 0 if dim in fix_dims else int(interpolation_order)
                         for dim in sdims
                     },
                     param_is_inverse=True,
-                )[0]
-
-            # append to output
-            relevant_view_indices = np.where(
-                [
-                    view_overlap_bb is not None
-                    for view_overlap_bb in views_overlap_bb
-                ]
-            )[0]
+                )
+            
+            relevant_view_indices = [iview for iview in candidate_view_indices
+                if views_overlap_bb[iview] is not None]
 
             if not len(relevant_view_indices):
                 fused_output_chunks[tuple(block_index)] = da.zeros(
