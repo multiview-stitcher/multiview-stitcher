@@ -235,7 +235,7 @@ def test_fuse_msims_to_ome_zarr_returns_msim():
 
         assert msi_utils.is_msim(fused)
         assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
-        assert np.max(fused["scale0/image"].data.compute()) == 2
+        assert np.max(np.asarray(fused["scale0/image"].data)) == 2
 
 
 @pytest.mark.parametrize("ome_zarr", [False, True])

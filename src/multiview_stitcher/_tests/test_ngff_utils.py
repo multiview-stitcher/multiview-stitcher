@@ -195,6 +195,66 @@ def test_read_msim_from_ome_zarr():
             )
 
 
+def test_read_sim_from_ome_zarr_backends():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=32,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.1,
+        spacing_y=0.1,
+        spacing_z=2,
+    )[0]
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        sim_zarr = ngff_utils.read_sim_from_ome_zarr(zarr_path)
+        sim_dask = ngff_utils.read_sim_from_ome_zarr(
+            zarr_path, use_dask=True
+        )
+
+        assert si_utils.is_xarray_zarr_backed(sim_zarr)
+        assert not si_utils.is_dask_backed_dataarray(sim_zarr)
+        assert si_utils.is_dask_backed_dataarray(sim_dask)
+
+
+def test_read_msim_from_ome_zarr_backends():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=202,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.1,
+        spacing_y=0.1,
+        spacing_z=2,
+        random_data=True,
+    )[1]
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+        msim_zarr = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        msim_dask = ngff_utils.read_msim_from_ome_zarr(
+            zarr_path, use_dask=True
+        )
+
+        sim_zarr = msi_utils.get_sim_from_msim(msim_zarr, scale="scale0")
+        sim_dask = msi_utils.get_sim_from_msim(msim_dask, scale="scale0")
+
+        assert si_utils.is_xarray_zarr_backed(sim_zarr)
+        assert not si_utils.is_dask_backed_dataarray(sim_zarr)
+        assert si_utils.is_dask_backed_dataarray(sim_dask)
+
+
 def test_multiscales_completion():
     """Check that writing without overwrite completes a partially deleted pyramid:
     after removing a resolution level on disk, re-writing fills it in and the

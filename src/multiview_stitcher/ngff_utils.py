@@ -113,23 +113,21 @@ def msim_to_ngff_multiscales(msim, transform_key):
     return ngff_multiscales
 
 
-def ngff_image_to_sim(ngff_im, transform_key):
+def ngff_image_to_sim(ngff_im, transform_key, data=None):
     """
     Convert a ngff_image in-memory representation compatible with NGFF v0.4
     into a spatial_image (multiview-stitcher flavor).
     """
 
-    sim = si_utils.to_spatial_image(
-        ngff_im.data,
+    # Reuse the general sim constructor so zarr-backed reads preserve chunk
+    # hints and singleton t/c axes lazily.
+    sim = si_utils.get_sim_from_array(
+        ngff_im.data if data is None else data,
         dims=ngff_im.dims,
         scale=ngff_im.scale,
         translation=ngff_im.translation,
+        transform_key=transform_key,
     )
-
-    sim = si_utils.ensure_dim(sim, "t")
-
-    if "c" not in sim.dims:
-        sim = sim.expand_dims(["c"])
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
@@ -144,21 +142,39 @@ def ngff_image_to_sim(ngff_im, transform_key):
     return sim
 
 
-def ngff_multiscales_to_msim(ngff_multiscales, transform_key):
+def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
     """
     Convert a list of ngff_image in-memory representations compatible with NGFF v0.4
     into a multiscale_spatial_image (multiview-stitcher flavor).
     """
 
+    if data_arrays is None:
+        data_arrays = [None] * len(ngff_multiscales.images)
+
     msim_dict = {}
-    for iscale, ngff_im in enumerate(ngff_multiscales.images):
-        sim = ngff_image_to_sim(ngff_im, transform_key=transform_key)
+    for iscale, (ngff_im, data_array) in enumerate(
+        zip(ngff_multiscales.images, data_arrays)
+    ):
+        sim = ngff_image_to_sim(
+            ngff_im,
+            transform_key=transform_key,
+            data=data_array,
+        )
         curr_scale_msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
 
     msim = DataTree.from_dict(msim_dict)
 
     return msim
+
+
+def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
+    # ngff_zarr currently reads image data as dask arrays. For the zarr-backed
+    # default path, reuse its parsed metadata but reopen the on-disk arrays.
+    return [
+        zarr.open_array(os.path.join(zarr_path, dataset.path), mode="r")
+        for dataset in ngff_multiscales.metadata.datasets
+    ]
 
 
 def update_zarr_array_creation_kwargs_for_ngff_version(
@@ -642,6 +658,7 @@ def read_sim_from_ome_zarr(
     zarr_path,
     resolution_level=0,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+    use_dask=False,
 ):
     """
     Read a multiscale NGFF zarr file (v0.4/v0.5) into a spatial_image
@@ -658,6 +675,9 @@ def read_sim_from_ome_zarr(
         Resolution level to read, by default 0 (highest resolution)
     transform_key : str, optional
         By default si_utils.DEFAULT_TRANSFORM_KEY
+    use_dask : bool, optional
+        If True, keep the image data dask-backed as returned by ngff_zarr.
+        By default False, which reopens the on-disk array as a zarr-backed sim.
 
     Returns
     -------
@@ -670,8 +690,16 @@ def read_sim_from_ome_zarr(
             f"Resolution level {resolution_level} not found in {zarr_path}"
         )
 
+    data = None
+    if not use_dask:
+        data = _open_ngff_dataset_arrays(zarr_path, ngff_multiscales)[
+            resolution_level
+        ]
+
     sim = ngff_image_to_sim(
-        ngff_multiscales.images[resolution_level], transform_key=transform_key
+        ngff_multiscales.images[resolution_level],
+        transform_key=transform_key,
+        data=data,
     )
 
     # get channel names from omero metadata if available
@@ -786,6 +814,7 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
 def read_msim_from_ome_zarr(
     zarr_path,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+    use_dask=False,
 ):
     """
     Read a multiscale NGFF zarr file (v0.4/v0.5) into a multiscale_spatial_image
@@ -800,14 +829,24 @@ def read_msim_from_ome_zarr(
         Path to the zarr file
     transform_key : str, optional
         By default si_utils.DEFAULT_TRANSFORM_KEY
+    use_dask : bool, optional
+        If True, keep the multiscale image data dask-backed as returned by
+        ngff_zarr. By default False, which reopens every scale as zarr-backed.
 
     Returns
     -------
     multiscale_spatial_image with transform_key set
     """
     ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+
+    data_arrays = None
+    if not use_dask:
+        data_arrays = _open_ngff_dataset_arrays(zarr_path, ngff_multiscales)
+
     msim = ngff_multiscales_to_msim(
-        ngff_multiscales, transform_key=transform_key
+        ngff_multiscales,
+        transform_key=transform_key,
+        data_arrays=data_arrays,
     )
 
     # get channel names from omero metadata if available
