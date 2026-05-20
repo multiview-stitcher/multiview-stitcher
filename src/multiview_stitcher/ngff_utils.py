@@ -5,7 +5,6 @@ import dask
 import ngff_zarr
 import numpy as np
 import xarray as xr
-import spatial_image as si
 import zarr
 from tqdm import tqdm
 from dask import array as da
@@ -120,7 +119,7 @@ def ngff_image_to_sim(ngff_im, transform_key):
     into a spatial_image (multiview-stitcher flavor).
     """
 
-    sim = si.to_spatial_image(
+    sim = si_utils.to_spatial_image(
         ngff_im.data,
         dims=ngff_im.dims,
         scale=ngff_im.scale,

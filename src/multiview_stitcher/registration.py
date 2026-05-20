@@ -13,7 +13,6 @@ import skimage.registration
 import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
-from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
@@ -39,6 +38,8 @@ from multiview_stitcher import (
 )
 
 logger = logging.getLogger(__name__)
+
+MultiscaleSpatialImage = xr.DataTree
 
 
 def apply_recursive_dict(func, d):

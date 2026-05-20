@@ -9,7 +9,6 @@ from tqdm import tqdm
 import dask.array as da
 import numpy as np
 import zarr
-import spatial_image as si
 import xarray as xr
 from dask import delayed
 from dask.utils import has_keyword
@@ -861,7 +860,7 @@ def fuse(
 
         fused = da.block(fused_output_chunks.tolist())
 
-        merge = si.to_spatial_image(
+        merge = si_utils.to_spatial_image(
             fused,
             dims=sdims,
             scale=output_stack_properties["spacing"],

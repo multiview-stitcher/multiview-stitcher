@@ -4,9 +4,8 @@ import numpy as np
 import xarray as xr
 from scipy.fftpack import dctn
 from scipy.ndimage import affine_transform, distance_transform_edt, gaussian_filter
-from spatial_image import to_spatial_image
 
-from multiview_stitcher import transformation
+from multiview_stitcher import spatial_image_utils as si_utils, transformation
 from multiview_stitcher.misc_utils import clear_cupy_memory, requires_overlap
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
@@ -462,8 +461,9 @@ def get_blending_weights(
             edt_support_spacing[dim] / blending_widths[dim] for dim in sdims
         ],
     )
-    edt_support = to_spatial_image(
+    edt_support = si_utils.to_spatial_image(
         edt_support,
+        dims=sdims,
         scale=edt_support_spacing,
         translation=edt_support_origin,
     )

@@ -3,7 +3,6 @@ from typing import Optional, Union
 
 import dask.array as da
 import numpy as np
-import spatial_image as si
 import xarray as xr
 from numpy._typing import ArrayLike
 
@@ -16,6 +15,59 @@ SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
 DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
 DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 2048, "x": 2048}
+
+
+def _get_axis_coords(dim, size, scale, translation):
+    return translation + scale * np.arange(size, dtype=float)
+
+
+def to_spatial_image(
+    data,
+    dims=None,
+    scale=None,
+    translation=None,
+    c_coords=None,
+    t_coords=None,
+):
+    if scale is None or translation is None:
+        raise ValueError("scale and translation must be provided")
+
+    if isinstance(data, xr.DataArray):
+        name = data.name
+        data = data.data
+    else:
+        name = None
+
+    if dims is None:
+        dims = SPATIAL_DIMS[-data.ndim :]
+
+    dims = tuple(dims)
+    shape = data.shape
+    coords = {}
+
+    for axis, dim in enumerate(dims):
+        size = shape[axis]
+        if dim in SPATIAL_DIMS:
+            coords[dim] = _get_axis_coords(
+                dim,
+                size,
+                scale=scale[dim],
+                translation=translation[dim],
+            )
+        elif dim == "c":
+            coords[dim] = (
+                np.asarray(c_coords)
+                if c_coords is not None
+                else np.arange(size)
+            )
+        elif dim == "t":
+            coords[dim] = (
+                np.asarray(t_coords)
+                if t_coords is not None
+                else np.arange(size)
+            )
+
+    return xr.DataArray(data, dims=dims, coords=coords, name=name)
 
 
 def get_default_spatial_chunksizes(ndim: int):
@@ -100,7 +152,7 @@ def get_sim_from_array(
     if translation is None:
         translation = {dim: 0 for dim in spatial_dims}
 
-    sim = si.to_spatial_image(
+    sim = to_spatial_image(
         xim.data,
         dims=xim.dims,
         scale=scale,
@@ -236,13 +288,13 @@ def get_sim_from_xim(xim):
     spacing = get_spacing_from_sim(xim)
     origin = get_origin_from_sim(xim)
 
-    sim = si.to_spatial_image(
+    sim = to_spatial_image(
         xim,
         dims=xim.dims,
         scale=spacing,
         translation=origin,
-        t_coords=xim.coords["t"] if "t" in xim.dims else None,
-        c_coords=xim.coords["c"] if "c" in xim.dims else None,
+        t_coords=xim.coords["t"] if "t" in xim.coords else None,
+        c_coords=xim.coords["c"] if "c" in xim.coords else None,
     )
 
     sim.attrs.update(copy.deepcopy(xim.attrs))

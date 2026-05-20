@@ -1,6 +1,5 @@
 import dask.array as da
 import numpy as np
-import spatial_image as si
 from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 from scipy.ndimage import affine_transform
 
@@ -100,7 +99,7 @@ def transform_sim(
                 **affine_transform_kwargs,
             )
 
-    sim = si.to_spatial_image(
+    sim = spatial_image_utils.to_spatial_image(
         out_data,
         dims=sim.dims,
         scale=output_stack_properties["spacing"],
