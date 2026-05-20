@@ -1,4 +1,5 @@
 import copy
+import threading
 from typing import Optional, Union
 
 import dask.array as da
@@ -18,6 +19,11 @@ SPATIAL_IMAGE_DIMS = ["t", "c"] + SPATIAL_DIMS
 
 DEFAULT_SPATIAL_CHUNKSIZES_3D = {"z": 256, "y": 256, "x": 256}
 DEFAULT_SPATIAL_CHUNKSIZES_2D = {"y": 2048, "x": 2048}
+HTTP_ZARR_ASYNC_CONCURRENCY = 4
+HTTP_ZARR_MAX_SIMULTANEOUS_MATERIALIZATIONS = 1
+_HTTP_ZARR_MATERIALIZATION_SEMAPHORE = threading.BoundedSemaphore(
+    HTTP_ZARR_MAX_SIMULTANEOUS_MATERIALIZATIONS
+)
 
 
 class ZarrLazyBackendArray(BackendArray):
@@ -162,6 +168,63 @@ def is_xarray_zarr_backed(xim):
             return True
 
     return False
+
+
+def _get_xarray_zarr_array(xim):
+    if not isinstance(xim, xr.DataArray):
+        return None
+
+    internal = getattr(xim.variable, "_data", None)
+    if internal is None:
+        return None
+
+    for candidate in _iter_backend_arrays(internal):
+        if isinstance(candidate, zarr.Array):
+            return candidate
+
+        if hasattr(candidate, "zarray") and isinstance(candidate.zarray, zarr.Array):
+            return candidate.zarray
+
+    return None
+
+
+def _zarr_array_uses_http_store(zarray):
+    if zarray is None:
+        return False
+
+    store = getattr(zarray, "store", None)
+    fs = getattr(store, "fs", None)
+    protocol = getattr(fs, "protocol", ())
+
+    if isinstance(protocol, str):
+        protocol = (protocol,)
+
+    return any(proto in {"http", "https"} for proto in protocol)
+
+
+def _materialize_xarray_zarr_backend(xim, max_retries=3):
+    # Public HTTP-backed stores have been prone to disconnects when one slice
+    # fans out into several concurrent chunk fetches inside zarr.
+    from aiohttp.client_exceptions import ServerDisconnectedError
+
+    zarray = _get_xarray_zarr_array(xim)
+    backend_data = _get_backend_data(xim)
+
+    if _zarr_array_uses_http_store(zarray):
+        last_error = None
+        for _ in range(max_retries):
+            try:
+                with _HTTP_ZARR_MATERIALIZATION_SEMAPHORE:
+                    with zarr.config.set(
+                        {"async.concurrency": HTTP_ZARR_ASYNC_CONCURRENCY}
+                    ):
+                        return np.asarray(backend_data)
+            except ServerDisconnectedError as exc:
+                last_error = exc
+
+        raise last_error
+
+    return np.asarray(backend_data)
 
 
 def _get_backend_data(xim):

@@ -1,7 +1,9 @@
+import contextlib
 import os
 import tempfile
 import warnings
 
+from aiohttp.client_exceptions import ServerDisconnectedError
 import dask.array as da
 import numpy as np
 import pytest
@@ -95,7 +97,9 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
     )[0]
 
     observed = []
+    serial_read_configs = []
     original_fuse_np = fusion_core.fuse_np
+    original_astype = xr.DataArray.astype
 
     def wrapped_fuse_np(*args, **kwargs):
         sims = kwargs["sims"] if "sims" in kwargs else args[0]
@@ -113,6 +117,11 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
             "zarr-backed fusion slices should be materialized to NumPy inside the delayed chunk task"
         )
 
+    @contextlib.contextmanager
+    def record_serial_read_config(config):
+        serial_read_configs.append(dict(config))
+        yield
+
     monkeypatch.setattr(
         fusion_core,
         "fuse_np",
@@ -122,6 +131,16 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
         transformation,
         "dask_image_affine_transform",
         fail_dask_affine_transform,
+    )
+    monkeypatch.setattr(
+        si_utils,
+        "_zarr_array_uses_http_store",
+        lambda zarray: True,
+    )
+    monkeypatch.setattr(
+        si_utils.zarr.config,
+        "set",
+        record_serial_read_config,
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +159,88 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
         fused.data.compute()
 
     assert observed and all(observed)
+
+
+def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=24,
+        tiles_x=1,
+        tiles_y=1,
+        overlap=0,
+    )[0]
+
+    recorded_configs = []
+    semaphore_entries = []
+    attempt_count = 0
+    original_asarray = si_utils.np.asarray
+
+    @contextlib.contextmanager
+    def record_read_config(config):
+        recorded_configs.append(dict(config))
+        yield
+
+    class RecordingSemaphore:
+        def __enter__(self):
+            semaphore_entries.append(True)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def flaky_asarray(arg, *args, **kwargs):
+        nonlocal attempt_count
+        attempt_count += 1
+
+        if attempt_count == 1:
+            raise ServerDisconnectedError()
+
+        return original_asarray(arg, *args, **kwargs)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zsim = _sim_to_zarr_backed_sim(
+            sim,
+            os.path.join(tmpdir, "view.zarr"),
+            METADATA_TRANSFORM_KEY,
+        )
+
+        monkeypatch.setattr(
+            si_utils,
+            "_zarr_array_uses_http_store",
+            lambda zarray: True,
+        )
+        monkeypatch.setattr(
+            si_utils.zarr.config,
+            "set",
+            record_read_config,
+        )
+        monkeypatch.setattr(
+            si_utils,
+            "_HTTP_ZARR_MATERIALIZATION_SEMAPHORE",
+            RecordingSemaphore(),
+        )
+        monkeypatch.setattr(
+            si_utils.np,
+            "asarray",
+            flaky_asarray,
+        )
+
+        result = si_utils._materialize_xarray_zarr_backend(
+            zsim,
+            max_retries=2,
+        )
+
+    assert isinstance(result, np.ndarray)
+    assert len(recorded_configs) == 2
+    assert attempt_count >= 2
+    assert len(semaphore_entries) == 2
+    assert all(
+        config.get("async.concurrency")
+        == si_utils.HTTP_ZARR_ASYNC_CONCURRENCY
+        for config in recorded_configs
+    )
 
 
 def test_fuse_rejects_mixed_sims_and_msims():
