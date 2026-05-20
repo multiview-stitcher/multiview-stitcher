@@ -753,9 +753,9 @@ def fuse(
 
             views_overlap_bb = [None] * len(sims)
 
-            views_overlap_bb = mv_graph.get_overlap_for_bbs(
+            views_overlap_bb_relevant = mv_graph.get_overlap_for_bbs(
                     target_bb=output_chunk_bb_with_overlap,
-                    query_bbs=views_bb,
+                    query_bbs=[views_bb[iview] for iview in candidate_view_indices],
                     param=inv_sparams[iview],
                     additional_extent_in_pixels={
                         dim: 0 if dim in fix_dims else int(interpolation_order)
@@ -764,8 +764,8 @@ def fuse(
                     param_is_inverse=True,
                 )
             
-            relevant_view_indices = [iview for iview in candidate_view_indices
-                if views_overlap_bb[iview] is not None]
+            relevant_view_indices = [iview for iiview, iview in enumerate(candidate_view_indices)
+                if views_overlap_bb_relevant[iiview] is not None]
 
             if not len(relevant_view_indices):
                 fused_output_chunks[tuple(block_index)] = da.zeros(
@@ -780,17 +780,17 @@ def fuse(
                     sim_coord_dict
                     | {
                         dim: slice(
-                            views_overlap_bb[iview]["origin"][dim] - tol,
-                            views_overlap_bb[iview]["origin"][dim]
-                            + (views_overlap_bb[iview]["shape"][dim] - 1)
-                            * views_overlap_bb[iview]["spacing"][dim]
+                            views_overlap_bb_relevant[iiview]["origin"][dim] - tol,
+                            views_overlap_bb_relevant[iiview]["origin"][dim]
+                            + (views_overlap_bb_relevant[iiview]["shape"][dim] - 1)
+                            * views_overlap_bb_relevant[iiview]["spacing"][dim]
                             + tol,
                         )
                         for dim in sdims
                     },
                     drop=True,
                 )
-                for iview in relevant_view_indices
+                for iiview, iview in enumerate(relevant_view_indices)
             ]
 
             # determine whether to fuse plany by plane
