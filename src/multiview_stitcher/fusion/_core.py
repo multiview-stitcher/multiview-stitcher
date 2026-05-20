@@ -130,6 +130,176 @@ def simple_average_fusion(
     ).astype(transformed_views[0].dtype)
 
 
+def _fuse_block_zarr_backed(
+    dummy_block,
+    block_info=None,
+    *,
+    chunk_to_tiles,
+    sims,
+    out_chunk_bb_by_idx,
+    out_chunk_bb_overlap_by_idx,
+    sparams,
+    inv_sparams,
+    views_bb,
+    sdims,
+    fix_dims,
+    sim_coord_dict,
+    additional_extent_in_pixels,
+    fusion_func,
+    fusion_func_kwargs,
+    weights_func,
+    weights_func_kwargs,
+    overlap_in_pixels,
+    interpolation_order,
+    blending_widths,
+    shrink_distance,
+):
+    """
+    Compute fused output for a single chunk from zarr-backed input sims.
+
+    Called by ``da.map_blocks`` at dask compute time. Slice lookup, zarr
+    materialisation and fusion all happen here, keeping the dask graph thin
+    (one task per output block instead of one per-chunk delayed task).
+
+    Parameters
+    ----------
+    dummy_block : np.ndarray
+        Dummy input block injected by map_blocks; used only for shape context.
+    block_info : list of dict, optional
+        Injected by map_blocks; ``block_info[0]["chunk-location"]`` is the
+        per-dimension block-index tuple for this chunk.
+    chunk_to_tiles : dict
+        Maps block-index tuple -> list of candidate tile indices.
+        Precomputed at graph-build time.
+    sims : list of xr.DataArray
+        Full zarr-backed input sims (all ns-dim coords included).
+    out_chunk_bb_by_idx : dict
+        Maps block-index tuple -> output chunk bounding box (no overlap).
+    out_chunk_bb_overlap_by_idx : dict
+        Maps block-index tuple -> output chunk bounding box (with overlap).
+    sparams : list of xr.DataArray
+        Per-tile affine transforms for the current ns-coord slice.
+    inv_sparams : list of xr.DataArray
+        Pre-inverted per-tile affine transforms (for overlap projection).
+    views_bb : list of dict
+        Per-tile bounding boxes (spacing/origin/shape).
+    sdims : list of str
+        Spatial dimension names.
+    fix_dims : list of str
+        Dims that are axis-aligned and grid-aligned (no interpolation needed).
+    sim_coord_dict : dict
+        Non-spatial coordinate selection dict (e.g. ``{'c': ..., 't': ...}``).
+    additional_extent_in_pixels : dict
+        Per-dim extra pixels to expand the back-projected overlap region.
+    fusion_func : callable
+        Fusion function.
+    fusion_func_kwargs : dict or None
+    weights_func : callable or None
+    weights_func_kwargs : dict or None
+    overlap_in_pixels : dict
+        Per-dim output overlap to trim after fusion.
+    interpolation_order : int
+    blending_widths : dict or None
+    shrink_distance : float
+
+    Returns
+    -------
+    np.ndarray
+        Fused output chunk (same shape as dummy_block).
+    """
+    # Identify this chunk's position in the output grid.
+    chunk_location = tuple(block_info[0]["chunk-location"])
+    output_chunk_bb = out_chunk_bb_by_idx[chunk_location]
+    output_chunk_bb_with_overlap = out_chunk_bb_overlap_by_idx[chunk_location]
+    out_shape = tuple(output_chunk_bb["shape"][dim] for dim in sdims)
+
+    # Look up candidate tiles that may overlap this chunk.
+    candidate_view_indices = chunk_to_tiles.get(chunk_location, [])
+    if not candidate_view_indices:
+        return np.zeros(out_shape, dtype=sims[0].dtype)
+
+    # Determine which candidates actually overlap using each tile's own transform.
+    # (Called once per candidate tile to get its slice region at compute time.)
+    relevant_view_indices = []
+    views_overlap_bbs = []
+    for iview in candidate_view_indices:
+        overlap = mv_graph.get_overlap_for_bbs(
+            target_bb=output_chunk_bb_with_overlap,
+            query_bbs=[views_bb[iview]],
+            param=inv_sparams[iview],
+            additional_extent_in_pixels=additional_extent_in_pixels,
+            param_is_inverse=True,
+        )
+        if overlap[0] is not None:
+            relevant_view_indices.append(iview)
+            views_overlap_bbs.append(overlap[0])
+
+    if not relevant_view_indices:
+        return np.zeros(out_shape, dtype=sims[0].dtype)
+
+    # Slice each relevant zarr sim to its overlap region.
+    # Slices remain zarr-backed; actual zarr reads happen inside
+    # transform_sim -> _materialize_xarray_zarr_backend.
+    tol = 1e-6
+    sims_slices = [
+        sims[iview].sel(
+            sim_coord_dict
+            | {
+                dim: slice(
+                    views_overlap_bbs[iiview]["origin"][dim] - tol,
+                    views_overlap_bbs[iiview]["origin"][dim]
+                    + (views_overlap_bbs[iiview]["shape"][dim] - 1)
+                    * views_overlap_bbs[iiview]["spacing"][dim]
+                    + tol,
+                )
+                for dim in sdims
+            },
+            drop=True,
+        )
+        for iiview, iview in enumerate(relevant_view_indices)
+    ]
+
+    # Fuse plane-by-plane when z is axis-aligned to avoid z-edge weighting
+    # artifacts (same logic as the dask path).
+    fuse_planewise = "z" in fix_dims and output_chunk_bb_with_overlap["shape"]["z"] == 1
+    if fuse_planewise:
+        sims_slices = [sim.isel(z=0) for sim in sims_slices]
+        tmp_params = [
+            sparams[iview].sel(x_in=["y", "x", "1"], x_out=["y", "x", "1"])
+            for iview in relevant_view_indices
+        ]
+        output_props = mv_graph.project_bb_along_dim(output_chunk_bb_with_overlap, dim="z")
+        full_view_bbs = [
+            mv_graph.project_bb_along_dim(views_bb[iview], dim="z")
+            for iview in relevant_view_indices
+        ]
+    else:
+        tmp_params = [sparams[iview] for iview in relevant_view_indices]
+        output_props = output_chunk_bb_with_overlap
+        full_view_bbs = [views_bb[iview] for iview in relevant_view_indices]
+
+    result = fuse_np(
+        sims=sims_slices,
+        params=tmp_params,
+        output_properties=output_props,
+        fusion_func=fusion_func,
+        fusion_func_kwargs=fusion_func_kwargs,
+        weights_func=weights_func,
+        weights_func_kwargs=weights_func_kwargs,
+        trim_overlap_in_pixels=overlap_in_pixels,
+        interpolation_order=interpolation_order,
+        full_view_bbs=full_view_bbs,
+        blending_widths=blending_widths,
+        shrink_distance=shrink_distance,
+    )
+
+    # Restore the z-axis removed for planewise fusion.
+    if fuse_planewise:
+        result = result[np.newaxis]
+
+    return result
+
+
 def process_output_chunksize(sims, output_chunksize):
 
     ndim = si_utils.get_ndim_from_sim(sims[0])
@@ -619,6 +789,9 @@ def fuse(
 
     views_bb = [si_utils.get_stack_properties_from_sim(sim) for sim in sims]
 
+    # All-zarr inputs use map_blocks (thin graph); dask inputs use per-chunk delayed.
+    input_is_zarr = all(si_utils.is_xarray_zarr_backed(sim) for sim in sims)
+
     merges = []
     for ns_coords in itertools.product(
         *tuple([sims[0].coords[nsdim] for nsdim in nsdims])
@@ -741,131 +914,179 @@ def fuse(
             for chunk_idx in product(*idx_ranges):
                 _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
 
-        fused_output_chunks = np.empty(
-            np.max(block_indices, 0) + 1, dtype=object
-        )
-
-        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
-            output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
-        ):
-            # Look up candidate tiles via the pre-built mapping (O(1) per chunk).
-            candidate_view_indices = _chunk_to_tiles.get(tuple(block_index), [])
-
-            views_overlap_bb = [None] * len(sims)
-
-            views_overlap_bb_relevant = mv_graph.get_overlap_for_bbs(
-                    target_bb=output_chunk_bb_with_overlap,
-                    query_bbs=[views_bb[iview] for iview in candidate_view_indices],
-                    param=inv_sparams[iview],
-                    additional_extent_in_pixels={
-                        dim: 0 if dim in fix_dims else int(interpolation_order)
-                        for dim in sdims
-                    },
-                    param_is_inverse=True,
-                )
-            
-            relevant_view_indices = [iview for iiview, iview in enumerate(candidate_view_indices)
-                if views_overlap_bb_relevant[iiview] is not None]
-
-            if not len(relevant_view_indices):
-                fused_output_chunks[tuple(block_index)] = da.zeros(
-                    tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
-                    dtype=sims[0].dtype,
-                )
-                continue
-
-            tol = 1e-6
-            sims_slices = [
-                sims[iview].sel(
-                    sim_coord_dict
-                    | {
-                        dim: slice(
-                            views_overlap_bb_relevant[iiview]["origin"][dim] - tol,
-                            views_overlap_bb_relevant[iiview]["origin"][dim]
-                            + (views_overlap_bb_relevant[iiview]["shape"][dim] - 1)
-                            * views_overlap_bb_relevant[iiview]["spacing"][dim]
-                            + tol,
-                        )
-                        for dim in sdims
-                    },
-                    drop=True,
-                )
-                for iiview, iview in enumerate(relevant_view_indices)
-            ]
-
-            # determine whether to fuse plany by plane
-            #  to avoid weighting edge artifacts
-            # fuse planewise if:
-            # - z dimension is present
-            # - params don't affect z dimension
-            # - shape in z dimension is 1 (i.e. only one plane)
-            # (the last criterium above could be dropped if we find a way
-            # (to propagate metadata through xr.apply_ufunc)
-
-            if (
-                "z" in fix_dims
-                and output_chunk_bb_with_overlap["shape"]["z"] == 1
-            ):
-                fuse_planewise = True
-
-                sims_slices = [sim.isel(z=0) for sim in sims_slices]
-                tmp_params = [
-                    sparams[iview].sel(
-                        x_in=["y", "x", "1"],
-                        x_out=["y", "x", "1"],
-                    )
-                    for iview in relevant_view_indices
-                ]
-
-                output_chunk_bb_with_overlap = mv_graph.project_bb_along_dim(
-                    output_chunk_bb_with_overlap, dim="z"
-                )
-
-                full_view_bbs = [
-                    mv_graph.project_bb_along_dim(views_bb[iview], dim="z")
-                    for iview in relevant_view_indices
-                ]
-
-            else:
-                fuse_planewise = False
-                tmp_params = [
-                    sparams[iview] for iview in relevant_view_indices
-                ]
-                full_view_bbs = [
-                    views_bb[iview] for iview in relevant_view_indices
-                ]
-
-            fused_output_chunk = delayed(
-                lambda append_leading_axis, **kwargs: fuse_np(**kwargs)[
-                    np.newaxis
-                ]
-                if append_leading_axis
-                else fuse_np(**kwargs),
-            )(
-                append_leading_axis=fuse_planewise,
-                sims=sims_slices,
-                params=tmp_params,
-                output_properties=output_chunk_bb_with_overlap,
+        if input_is_zarr:
+            # === zarr path: thin dask graph via map_blocks ===
+            # Precompute chunk-location -> bounding-box lookups for compute time.
+            out_chunk_bb_by_idx = {
+                tuple(bi): bb for bi, bb in zip(block_indices, output_chunk_bbs)
+            }
+            out_chunk_bb_overlap_by_idx = {
+                tuple(bi): bb
+                for bi, bb in zip(block_indices, output_chunk_bbs_with_overlap)
+            }
+            # Dummy array drives map_blocks: defines output shape and chunk grid.
+            dummy = da.empty(
+                tuple(output_stack_properties["shape"][dim] for dim in sdims),
+                dtype=sims[0].dtype,
+                chunks=tuple(output_chunksize[dim] for dim in sdims),
+            )
+            fused = da.map_blocks(
+                _fuse_block_zarr_backed,
+                dummy,
+                dtype=sims[0].dtype,
+                # Precomputed lookup structures (built above, used at compute time)
+                chunk_to_tiles=_chunk_to_tiles,
+                sims=sims,
+                out_chunk_bb_by_idx=out_chunk_bb_by_idx,
+                out_chunk_bb_overlap_by_idx=out_chunk_bb_overlap_by_idx,
+                # Per-tile transform data for this ns-coord
+                sparams=sparams,
+                inv_sparams=inv_sparams,
+                views_bb=views_bb,
+                sdims=sdims,
+                fix_dims=fix_dims,
+                sim_coord_dict=sim_coord_dict,
+                additional_extent_in_pixels={
+                    dim: 0 if dim in fix_dims else int(interpolation_order)
+                    for dim in sdims
+                },
+                # Fusion parameters
                 fusion_func=fusion_func,
                 fusion_func_kwargs=fusion_func_kwargs,
                 weights_func=weights_func,
                 weights_func_kwargs=weights_func_kwargs,
-                trim_overlap_in_pixels=overlap_in_pixels,
-                interpolation_order=1,
-                full_view_bbs=full_view_bbs,
+                overlap_in_pixels=overlap_in_pixels,
+                interpolation_order=interpolation_order,
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
             )
-
-            fused_output_chunk = da.from_delayed(
-                fused_output_chunk,
-                shape=tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
-                dtype=sims[0].dtype,
+        else:
+            # === dask path: per-chunk delayed tasks (unchanged) ===
+            fused_output_chunks = np.empty(
+                np.max(block_indices, 0) + 1, dtype=object
             )
 
-            fused_output_chunks[tuple(block_index)] = fused_output_chunk
+            for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
+                output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
+            ):
+                # Look up candidate tiles via the pre-built mapping (O(1) per chunk).
+                candidate_view_indices = _chunk_to_tiles.get(tuple(block_index), [])
 
-        fused = da.block(fused_output_chunks.tolist())
+                views_overlap_bb = [None] * len(sims)
+
+                views_overlap_bb_relevant = mv_graph.get_overlap_for_bbs(
+                        target_bb=output_chunk_bb_with_overlap,
+                        query_bbs=[views_bb[iview] for iview in candidate_view_indices],
+                        param=inv_sparams[iview],
+                        additional_extent_in_pixels={
+                            dim: 0 if dim in fix_dims else int(interpolation_order)
+                            for dim in sdims
+                        },
+                        param_is_inverse=True,
+                    )
+
+                relevant_view_indices = [iview for iiview, iview in enumerate(candidate_view_indices)
+                    if views_overlap_bb_relevant[iiview] is not None]
+
+                if not len(relevant_view_indices):
+                    fused_output_chunks[tuple(block_index)] = da.zeros(
+                        tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
+                        dtype=sims[0].dtype,
+                    )
+                    continue
+
+                tol = 1e-6
+                sims_slices = [
+                    sims[iview].sel(
+                        sim_coord_dict
+                        | {
+                            dim: slice(
+                                views_overlap_bb_relevant[iiview]["origin"][dim] - tol,
+                                views_overlap_bb_relevant[iiview]["origin"][dim]
+                                + (views_overlap_bb_relevant[iiview]["shape"][dim] - 1)
+                                * views_overlap_bb_relevant[iiview]["spacing"][dim]
+                                + tol,
+                            )
+                            for dim in sdims
+                        },
+                        drop=True,
+                    )
+                    for iiview, iview in enumerate(relevant_view_indices)
+                ]
+
+                # determine whether to fuse plane by plane
+                #  to avoid weighting edge artifacts
+                # fuse planewise if:
+                # - z dimension is present
+                # - params don't affect z dimension
+                # - shape in z dimension is 1 (i.e. only one plane)
+                # (the last criterium above could be dropped if we find a way
+                # (to propagate metadata through xr.apply_ufunc)
+
+                if (
+                    "z" in fix_dims
+                    and output_chunk_bb_with_overlap["shape"]["z"] == 1
+                ):
+                    fuse_planewise = True
+
+                    sims_slices = [sim.isel(z=0) for sim in sims_slices]
+                    tmp_params = [
+                        sparams[iview].sel(
+                            x_in=["y", "x", "1"],
+                            x_out=["y", "x", "1"],
+                        )
+                        for iview in relevant_view_indices
+                    ]
+
+                    output_chunk_bb_with_overlap = mv_graph.project_bb_along_dim(
+                        output_chunk_bb_with_overlap, dim="z"
+                    )
+
+                    full_view_bbs = [
+                        mv_graph.project_bb_along_dim(views_bb[iview], dim="z")
+                        for iview in relevant_view_indices
+                    ]
+
+                else:
+                    fuse_planewise = False
+                    tmp_params = [
+                        sparams[iview] for iview in relevant_view_indices
+                    ]
+                    full_view_bbs = [
+                        views_bb[iview] for iview in relevant_view_indices
+                    ]
+
+                fused_output_chunk = delayed(
+                    lambda append_leading_axis, **kwargs: fuse_np(**kwargs)[
+                        np.newaxis
+                    ]
+                    if append_leading_axis
+                    else fuse_np(**kwargs),
+                )(
+                    append_leading_axis=fuse_planewise,
+                    sims=sims_slices,
+                    params=tmp_params,
+                    output_properties=output_chunk_bb_with_overlap,
+                    fusion_func=fusion_func,
+                    fusion_func_kwargs=fusion_func_kwargs,
+                    weights_func=weights_func,
+                    weights_func_kwargs=weights_func_kwargs,
+                    trim_overlap_in_pixels=overlap_in_pixels,
+                    interpolation_order=1,
+                    full_view_bbs=full_view_bbs,
+                    blending_widths=blending_widths,
+                    shrink_distance=shrink_distance,
+                )
+
+                fused_output_chunk = da.from_delayed(
+                    fused_output_chunk,
+                    shape=tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
+                    dtype=sims[0].dtype,
+                )
+
+                fused_output_chunks[tuple(block_index)] = fused_output_chunk
+
+            fused = da.block(fused_output_chunks.tolist())
 
         merge = si_utils.to_spatial_image(
             fused,
