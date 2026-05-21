@@ -139,15 +139,9 @@ def _reconstruct_zarr_sim_slice(tile_info, overlap_bb, sdims, sim_coord_dict):
     lightweight.  The returned sim slice remains zarr-backed; actual data reads
     happen inside transform_sim -> _materialize_xarray_zarr_backend.
     """
-    # Rebuild full sim from zarr array (spatial coords created here, not serialised)
-    sim = si_utils.get_sim_from_array(
-        tile_info["zarr_array"],
-        dims=tile_info["dims"],
-        scale=tile_info["spacing"],
-        translation=tile_info["origin"],
-        c_coords=tile_info["c_coords"],
-        t_coords=tile_info["t_coords"],
-    )
+    # Rebuild full sim from zarr array (spatial coords created here, not serialised).
+    # deserialize_zarr_backed_sim also replays any dropped-dim selections.
+    sim = si_utils.deserialize_zarr_backed_sim(tile_info)
     # Select the current ns coord (e.g. c=0, t=0); sim stays zarr-backed
     if sim_coord_dict:
         sim = sim.sel(sim_coord_dict, drop=True)
@@ -791,17 +785,9 @@ def fuse(
         # Precompute lightweight tile representations once (outside the ns_coords loop).
         # Spatial coordinate arrays are excluded — they are rebuilt cheaply from
         # spacing + origin at compute time, avoiding large coord array serialisation.
-        tile_series = [
-            {
-                "zarr_array": si_utils._get_xarray_zarr_array(sim),
-                "dims": list(sim.dims),
-                "spacing": si_utils.get_spacing_from_sim(sim),
-                "origin": si_utils.get_origin_from_sim(sim),
-                "c_coords": sim.coords["c"].values if "c" in sim.dims else None,
-                "t_coords": sim.coords["t"].values if "t" in sim.dims else None,
-            }
-            for sim in sims
-        ]
+        # serialize_zarr_backed_sim also captures any dropped-dim selections so
+        # that sims pre-filtered with sim_sel_coords are handled correctly.
+        tile_series = [si_utils.serialize_zarr_backed_sim(sim) for sim in sims]
 
     merges = []
     for ns_coords in itertools.product(

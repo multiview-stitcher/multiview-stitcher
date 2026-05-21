@@ -51,6 +51,109 @@ def test_sim_zarr_array_input_backend_is_preserved():
         assert isinstance(sim_slice.data, da.Array)
 
 
+def test_serialize_deserialize_zarr_backed_sim_roundtrip():
+    """Roundtrip: serialize then deserialize preserves dims and zarr-backed status."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(3, 2, 8, 8),
+            chunks=(1, 1, 4, 4),
+            dtype=np.uint16,
+        )
+        zarray[:] = 1
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["t", "c", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[0.0, 1.0, 2.0],
+            c_coords=[0, 1],
+        )
+
+        info = si_utils.serialize_zarr_backed_sim(sim)
+        sim2 = si_utils.deserialize_zarr_backed_sim(info)
+
+        assert list(sim2.dims) == list(sim.dims)
+        assert si_utils.is_xarray_zarr_backed(sim2)
+
+
+def test_serialize_deserialize_zarr_backed_sim_with_dropped_dim():
+    """Roundtrip after sim_sel_coords({'t': t_val}) preserves zarr-backed status."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(3, 2, 8, 8),
+            chunks=(1, 1, 4, 4),
+            dtype=np.uint16,
+        )
+        zarray[:] = 1
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["c", "t", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[10.0, 20.0],
+            c_coords=[0, 1, 2],
+        )
+
+        # Simulate the sim_sel_coords({'t': 10.0}) pattern (no drop=True)
+        sim_sel = sim.sel({"t": 10.0})
+
+        assert "t" not in sim_sel.dims
+
+        info = si_utils.serialize_zarr_backed_sim(sim_sel)
+        sim2 = si_utils.deserialize_zarr_backed_sim(info)
+
+        assert info["zarr_dims"] == ["c", "t", "y", "x"]
+        assert info["isel_dropped"] == {"t": 0}
+        assert list(sim2.dims) == list(sim_sel.dims)
+        assert si_utils.is_xarray_zarr_backed(sim2)
+        # Spatial coords are preserved
+        assert sim2.coords["y"].values == pytest.approx(sim_sel.coords["y"].values)
+        assert sim2.coords["x"].values == pytest.approx(sim_sel.coords["x"].values)
+
+
+def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
+    """Roundtrip works when zarr dims are a subset of the expanded sim dims."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sim = si_utils.get_sim_from_array(
+            np.ones((1, 8, 8), dtype=np.uint16),
+            dims=["c", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+        )
+        sim = si_utils.sim_sel_coords(sim, {"t": 0})
+
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=sim.shape,
+            chunks=(1, 4, 4),
+            dtype=np.uint16,
+        )
+        zarray[:] = 1
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=sim.dims,
+            scale=si_utils.get_spacing_from_sim(sim),
+            translation=si_utils.get_origin_from_sim(sim),
+        )
+        sim_sel = si_utils.sim_sel_coords(sim, {"t": 0, "c": 0})
+
+        info = si_utils.serialize_zarr_backed_sim(sim_sel)
+        sim2 = si_utils.deserialize_zarr_backed_sim(info)
+
+        assert info["zarr_dims"] == ["c", "y", "x"]
+        assert info["isel_dropped"] == {"t": 0, "c": 0}
+        assert list(sim2.dims) == list(sim_sel.dims)
+        assert si_utils.is_xarray_zarr_backed(sim2)
+
+
 def test_max_project():
     ndim = 3
     dim = "z"

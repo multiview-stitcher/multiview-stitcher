@@ -109,16 +109,19 @@ def _zarr_array_to_dataarray(
     name=None,
     attrs=None,
 ):
+    """Wrap a zarr array in an xarray DataArray without materializing it."""
     # Preserve zarr-backed laziness when constructing an xarray.DataArray from a
     # plain zarr.Array, and propagate chunk hints for the later dask conversion.
     backend = ZarrLazyBackendArray(zarray)
     lazy_data = indexing.LazilyIndexedArray(backend)
+    var_attrs = {} if attrs is None else dict(attrs)
     var = xr.Variable(
         dims,
         lazy_data,
-        attrs={} if attrs is None else dict(attrs),
+        attrs=var_attrs,
     )
     xim = xr.DataArray(var, coords=coords, name=name)
+    xim.attrs["_zarr_dims"] = tuple(dims)
 
     zchunks = getattr(zarray, "chunks", None)
     if zchunks is not None:
@@ -131,6 +134,7 @@ def _zarr_array_to_dataarray(
 
 
 def _iter_backend_arrays(array):
+    """Yield backend wrappers from outermost xarray layer to the raw payload."""
     current = array
     seen = set()
 
@@ -149,6 +153,7 @@ def _iter_backend_arrays(array):
 
 
 def is_xarray_zarr_backed(xim):
+    """Return True when a DataArray is still backed by a zarr array."""
     if not isinstance(xim, xr.DataArray):
         return False
 
@@ -171,6 +176,7 @@ def is_xarray_zarr_backed(xim):
 
 
 def _get_xarray_zarr_array(xim):
+    """Return the raw zarr array underlying a DataArray, if present."""
     if not isinstance(xim, xr.DataArray):
         return None
 
@@ -240,6 +246,7 @@ def is_dask_backed_dataarray(xim):
 
 
 def _get_preferred_chunks(xim):
+    """Get chunk sizes to use when converting an array to dask."""
     preferred_chunks = xim.encoding.get("preferred_chunks")
 
     if preferred_chunks is None:
@@ -265,6 +272,7 @@ def _get_preferred_chunks(xim):
 
 
 def _expand_with_singleton_dims_lazily(xim, missing_dims):
+    """Add leading singleton dims without materializing the zarr-backed data."""
     # Add missing non-spatial dims without forcing xarray to realize the zarr
     # backend; registration/fusion convert to dask only after slicing.
     backend = SingletonExpandedBackendArray(
@@ -274,7 +282,7 @@ def _expand_with_singleton_dims_lazily(xim, missing_dims):
     lazy_data = indexing.LazilyIndexedArray(backend)
     dims = tuple(missing_dims) + tuple(xim.dims)
     expanded = xr.DataArray(
-        xr.Variable(dims, lazy_data),
+        xr.Variable(dims, lazy_data, attrs=dict(xim.attrs)),
         coords={dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims},
         name=xim.name,
     )
@@ -307,12 +315,16 @@ def ensure_dask_backed_dataarray(xim):
 
 
 def _copy_chunk_hints(source, target):
+    """Copy chunking and backing-zarr metadata between DataArrays."""
     preferred_chunks = source.encoding.get("preferred_chunks")
     if preferred_chunks is not None:
         target.encoding["preferred_chunks"] = dict(preferred_chunks)
 
     if "_zarr_chunks" in source.attrs:
         target.attrs["_zarr_chunks"] = source.attrs["_zarr_chunks"]
+
+    if "_zarr_dims" in source.attrs:
+        target.attrs["_zarr_dims"] = tuple(source.attrs["_zarr_dims"])
 
 
 def _get_axis_coords(dim, size, scale, translation):
@@ -548,6 +560,123 @@ def get_spacing_from_sim(sim, asarray=False):
         spacing = np.array([spacing[sd] for sd in spatial_dims])
 
     return spacing
+
+
+def _get_backing_zarr_dims(sim, zarr_array):
+    """Recover the raw zarr dimension order stored on a zarr-backed sim."""
+    zarr_dims = sim.attrs.get("_zarr_dims")
+    if zarr_dims is None:
+        zarr_dims = sim.variable.attrs.get("_zarr_dims")
+    if zarr_dims is not None:
+        zarr_dims = list(zarr_dims)
+        if len(zarr_dims) == zarr_array.ndim:
+            return zarr_dims
+
+    preferred_chunks = sim.encoding.get("preferred_chunks", {})
+    if len(preferred_chunks) == zarr_array.ndim:
+        return list(preferred_chunks)
+
+    if zarr_array.ndim <= len(sim.dims):
+        return list(sim.dims)[-zarr_array.ndim :]
+
+    raise ValueError("Could not determine the backing zarr dimension order.")
+
+
+def _get_indexed_dims(sim, zarr_dims):
+    """Return the dimension order seen by the current xarray indexer."""
+    preferred_chunks = sim.encoding.get("preferred_chunks", {})
+    if preferred_chunks:
+        indexed_dims = list(preferred_chunks)
+        if len(indexed_dims) >= len(zarr_dims):
+            return indexed_dims
+
+    return zarr_dims
+
+
+def _get_scalar_indexer_value(indexer):
+    """Return the integer value for a scalar lazy indexer entry, if any."""
+    if isinstance(indexer, (int, np.integer)):
+        return int(indexer)
+
+    indexer_array = np.asarray(indexer)
+    if not indexer_array.size or not np.issubdtype(indexer_array.dtype, np.integer):
+        return None
+
+    flat = indexer_array.reshape(-1)
+    if np.all(flat == flat[0]):
+        return int(flat[0])
+
+    return None
+
+
+def _extract_isel_dropped(sim, indexed_dims):
+    """
+    Recover dropped-dimension ``isel`` indices from xarray's lazy key.
+
+    Returns ``{dim: int_index}`` for dims removed by scalar selection.
+    """
+    # Walk the _data chain to find the lazy indexer holding the selection key.
+    data = sim.variable._data
+    while True:
+        key = getattr(data, "key", None)
+        if hasattr(key, "tuple") and len(key.tuple) == len(indexed_dims):
+            break
+
+        if hasattr(data, "array"):
+            data = data.array
+        elif hasattr(data, "_array"):
+            data = data._array
+        else:
+            return {}
+
+    isel_dropped = {}
+    for dim, idx in zip(indexed_dims, key.tuple):
+        scalar_idx = _get_scalar_indexer_value(idx)
+        if dim not in sim.dims and scalar_idx is not None:
+            isel_dropped[dim] = scalar_idx
+
+    return isel_dropped
+
+
+def serialize_zarr_backed_sim(sim):
+    """
+    Serialize a zarr-backed sim to lightweight metadata for task graphs.
+
+    Large coordinate arrays are omitted and rebuilt during deserialization.
+    """
+    zarr_array = _get_xarray_zarr_array(sim)
+    zarr_dims = _get_backing_zarr_dims(sim, zarr_array)
+    indexed_dims = _get_indexed_dims(sim, zarr_dims)
+    isel_dropped = _extract_isel_dropped(sim, indexed_dims)
+
+    return {
+        "zarr_array": zarr_array,
+        "zarr_dims": zarr_dims,
+        "isel_dropped": isel_dropped,
+        "spacing": get_spacing_from_sim(sim),
+        "origin": get_origin_from_sim(sim),
+        "c_coords": sim.coords["c"].values if "c" in sim.dims else None,
+        "t_coords": sim.coords["t"].values if "t" in sim.dims else None,
+    }
+
+
+def deserialize_zarr_backed_sim(info):
+    """
+    Rebuild a zarr-backed sim from ``serialize_zarr_backed_sim`` output.
+
+    Reapplies any scalar selections that dropped dims from the original sim.
+    """
+    sim = get_sim_from_array(
+        info["zarr_array"],
+        dims=info["zarr_dims"],
+        scale=info["spacing"],
+        translation=info["origin"],
+        c_coords=info["c_coords"],
+        t_coords=info["t_coords"],
+    )
+    if info["isel_dropped"]:
+        sim = sim.isel(info["isel_dropped"], drop=True)
+    return sim
 
 
 def get_stack_properties_from_sim(sim, transform_key=None, asarray=False):
