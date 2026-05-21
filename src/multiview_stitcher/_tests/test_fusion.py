@@ -161,6 +161,66 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
     assert observed and all(observed)
 
 
+def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=32,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1.0,
+        spacing_y=1.0,
+        spacing_z=1.0,
+        random_data=True,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        msims_zarr = []
+        msims_dask = []
+
+        for isim, sim in enumerate(sims):
+            zarr_path = os.path.join(tmpdir, f"sim_{isim}.ome.zarr")
+            affine = si_utils.get_affine_from_sim(sim, METADATA_TRANSFORM_KEY)
+
+            ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+            msim_zarr = ngff_utils.read_msim_from_ome_zarr(
+                zarr_path, use_dask=False
+            )
+            msim_dask = ngff_utils.read_msim_from_ome_zarr(
+                zarr_path, use_dask=True
+            )
+
+            msi_utils.set_affine_transform(
+                msim_zarr, affine, transform_key=METADATA_TRANSFORM_KEY
+            )
+            msi_utils.set_affine_transform(
+                msim_dask, affine, transform_key=METADATA_TRANSFORM_KEY
+            )
+
+            msims_zarr.append(msim_zarr)
+            msims_dask.append(msim_dask)
+
+        fused_zarr = fusion.fuse(
+            msims_zarr, transform_key=METADATA_TRANSFORM_KEY
+        )
+        fused_dask = fusion.fuse(
+            msims_dask, transform_key=METADATA_TRANSFORM_KEY
+        )
+
+        sim_zarr = msi_utils.get_sim_from_msim(fused_zarr, scale="scale0")
+        sim_dask = msi_utils.get_sim_from_msim(fused_dask, scale="scale0")
+
+        fused_zarr_data = np.asarray(sim_zarr.data.compute())
+        fused_dask_data = np.asarray(sim_dask.data.compute())
+
+        assert fused_zarr_data.max() > 0
+        np.testing.assert_array_equal(fused_dask_data, fused_zarr_data)
+
+
 def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
     sim = sample_data.generate_tiled_dataset(
         ndim=2,

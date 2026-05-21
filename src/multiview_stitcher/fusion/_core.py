@@ -911,44 +911,43 @@ def fuse(
             for chunk_idx in product(*idx_ranges):
                 _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
 
+        # Pre-compute per-chunk relevant-view data once and reuse it in both
+        # fusion paths. For each output chunk, determine which tiles truly
+        # overlap and store their tile-slice bounding boxes.
+        additional_extent = {
+            dim: 0 if dim in fix_dims else int(interpolation_order)
+            for dim in sdims
+        }
+        per_chunk_view_data = []
+        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
+            output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
+        ):
+            chunk_views = []
+            for iview in _chunk_to_tiles.get(tuple(block_index), []):
+                overlap = mv_graph.get_overlap_for_bbs(
+                    target_bb=output_chunk_bb_with_overlap,
+                    query_bbs=[views_bb[iview]],
+                    param=inv_sparams[iview],
+                    additional_extent_in_pixels=additional_extent,
+                    param_is_inverse=True,
+                )
+                if overlap[0] is not None:
+                    chunk_views.append((iview, overlap[0]))
+            fuse_planewise = (
+                "z" in fix_dims
+                and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
+            )
+            per_chunk_view_data.append(
+                {
+                    "views": chunk_views,
+                    "output_bb": output_chunk_bb,
+                    "output_bb_overlap": output_chunk_bb_with_overlap,
+                    "fuse_planewise": fuse_planewise,
+                }
+            )
+
         if input_is_zarr:
             # === zarr path: thin dask graph via map_blocks ===
-            # Pre-compute per-chunk view data at graph-build time: for each output
-            # chunk, run get_overlap_for_bbs to determine which tiles truly overlap
-            # and store their tile-slice bbs.  This removes the per-tile overlap
-            # computation from compute time.
-            additional_extent = {
-                dim: 0 if dim in fix_dims else int(interpolation_order)
-                for dim in sdims
-            }
-            per_chunk_view_data = []
-            for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
-                output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
-            ):
-                chunk_views = []
-                for iview in _chunk_to_tiles.get(tuple(block_index), []):
-                    overlap = mv_graph.get_overlap_for_bbs(
-                        target_bb=output_chunk_bb_with_overlap,
-                        query_bbs=[views_bb[iview]],
-                        param=inv_sparams[iview],
-                        additional_extent_in_pixels=additional_extent,
-                        param_is_inverse=True,
-                    )
-                    if overlap[0] is not None:
-                        chunk_views.append((iview, overlap[0]))
-                fuse_planewise = (
-                    "z" in fix_dims
-                    and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
-                )
-                per_chunk_view_data.append(
-                    {
-                        "views": chunk_views,
-                        "output_bb": output_chunk_bb,
-                        "output_bb_overlap": output_chunk_bb_with_overlap,
-                        "fuse_planewise": fuse_planewise,
-                    }
-                )
-
             # Dummy array drives map_blocks: defines output shape and chunk grid.
             dummy = da.empty(
                 tuple(output_stack_properties["shape"][dim] for dim in sdims),
@@ -976,32 +975,19 @@ def fuse(
                 shrink_distance=shrink_distance,
             )
         else:
-            # === dask path: per-chunk delayed tasks (unchanged) ===
+            # === dask path: per-chunk delayed tasks ===
             fused_output_chunks = np.empty(
                 np.max(block_indices, 0) + 1, dtype=object
             )
 
-            for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
-                output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
+            for block_index, entry in zip(
+                block_indices, per_chunk_view_data
             ):
-                # Look up candidate tiles via the pre-built mapping (O(1) per chunk).
-                candidate_view_indices = _chunk_to_tiles.get(tuple(block_index), [])
-
-                views_overlap_bb = [None] * len(sims)
-
-                views_overlap_bb_relevant = mv_graph.get_overlap_for_bbs(
-                        target_bb=output_chunk_bb_with_overlap,
-                        query_bbs=[views_bb[iview] for iview in candidate_view_indices],
-                        param=inv_sparams[iview],
-                        additional_extent_in_pixels={
-                            dim: 0 if dim in fix_dims else int(interpolation_order)
-                            for dim in sdims
-                        },
-                        param_is_inverse=True,
-                    )
-
-                relevant_view_indices = [iview for iiview, iview in enumerate(candidate_view_indices)
-                    if views_overlap_bb_relevant[iiview] is not None]
+                output_chunk_bb = entry["output_bb"]
+                output_chunk_bb_with_overlap = entry["output_bb_overlap"]
+                fuse_planewise = entry["fuse_planewise"]
+                chunk_views = entry["views"]
+                relevant_view_indices = [iview for iview, _ in chunk_views]
 
                 if not len(relevant_view_indices):
                     fused_output_chunks[tuple(block_index)] = da.zeros(
@@ -1016,17 +1002,17 @@ def fuse(
                         sim_coord_dict
                         | {
                             dim: slice(
-                                views_overlap_bb_relevant[iiview]["origin"][dim] - tol,
-                                views_overlap_bb_relevant[iiview]["origin"][dim]
-                                + (views_overlap_bb_relevant[iiview]["shape"][dim] - 1)
-                                * views_overlap_bb_relevant[iiview]["spacing"][dim]
+                                tile_overlap_bb["origin"][dim] - tol,
+                                tile_overlap_bb["origin"][dim]
+                                + (tile_overlap_bb["shape"][dim] - 1)
+                                * tile_overlap_bb["spacing"][dim]
                                 + tol,
                             )
                             for dim in sdims
                         },
                         drop=True,
                     )
-                    for iiview, iview in enumerate(relevant_view_indices)
+                    for iview, tile_overlap_bb in chunk_views
                 ]
 
                 # determine whether to fuse plane by plane
@@ -1038,12 +1024,7 @@ def fuse(
                 # (the last criterium above could be dropped if we find a way
                 # (to propagate metadata through xr.apply_ufunc)
 
-                if (
-                    "z" in fix_dims
-                    and output_chunk_bb_with_overlap["shape"]["z"] == 1
-                ):
-                    fuse_planewise = True
-
+                if fuse_planewise:
                     sims_slices = [sim.isel(z=0) for sim in sims_slices]
                     tmp_params = [
                         sparams[iview].sel(
@@ -1063,7 +1044,6 @@ def fuse(
                     ]
 
                 else:
-                    fuse_planewise = False
                     tmp_params = [
                         sparams[iview] for iview in relevant_view_indices
                     ]
