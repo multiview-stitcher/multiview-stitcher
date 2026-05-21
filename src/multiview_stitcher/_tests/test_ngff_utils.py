@@ -101,11 +101,12 @@ def test_round_trip(ndim, ngff_version, n_batch):
         )
 
 
+@pytest.mark.parametrize("use_dask", [False, True])
 @pytest.mark.parametrize(
     "ndim, N_t, N_c",
     [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
 )
-def test_ome_zarr_read_write(ndim, N_t, N_c):
+def test_ome_zarr_read_write(ndim, N_t, N_c, use_dask):
     """Write a sim to OME-Zarr and read it back, checking that dims, channel
     names and omero window metadata are preserved for various t/c combinations."""
     sim = sample_data.generate_tiled_dataset(
@@ -139,8 +140,11 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
             assert "window" in metadata["omero"]["channels"][0]
 
         sim_read = ngff_utils.read_sim_from_ome_zarr(
-            zarr_path
+            zarr_path,
+            use_dask=use_dask,
         )  # , resolution_level=0)
+
+        assert si_utils.is_dask_backed_dataarray(sim_read) == use_dask
 
         # check dims and channel names are the same
         # assert np.equal(sim.data, sim_read.data).all()
@@ -152,7 +156,8 @@ def test_ome_zarr_read_write(ndim, N_t, N_c):
         )
 
 
-def test_read_msim_from_ome_zarr():
+@pytest.mark.parametrize("use_dask", [False, True])
+def test_read_msim_from_ome_zarr(use_dask):
     """Verify that read_msim_from_ome_zarr returns a multiscale image with
     correct pixel data, channel names and more than one resolution level."""
     sim = sample_data.generate_tiled_dataset(
@@ -173,8 +178,12 @@ def test_read_msim_from_ome_zarr():
     with tempfile.TemporaryDirectory() as zarr_path:
         sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
 
-        msim_read = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        msim_read = ngff_utils.read_msim_from_ome_zarr(
+            zarr_path, use_dask=use_dask
+        )
         sim_read = msi_utils.get_sim_from_msim(msim_read, scale="scale0")
+
+        assert si_utils.is_dask_backed_dataarray(sim_read) == use_dask
 
         assert np.array_equal(sim.dims, sim_read.dims)
         assert np.allclose(sim.data, sim_read.data)
@@ -253,6 +262,10 @@ def test_read_msim_from_ome_zarr_backends():
         assert si_utils.is_xarray_zarr_backed(sim_zarr)
         assert not si_utils.is_dask_backed_dataarray(sim_zarr)
         assert si_utils.is_dask_backed_dataarray(sim_dask)
+
+        for scale_key in msi_utils.get_sorted_scale_keys(msim_zarr):
+            sim_scale = msi_utils.get_sim_from_msim(msim_zarr, scale=scale_key)
+            assert sim_scale.attrs.get("_zarr_chunks") is not None
 
 
 def test_multiscales_completion():

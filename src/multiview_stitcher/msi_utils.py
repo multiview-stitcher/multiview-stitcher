@@ -28,7 +28,11 @@ def _chunk_sim(sim, chunks):
 def _sim_to_dataset(sim):
     dataset = sim.to_dataset(name="image")
     dataset.attrs = {}
-    dataset["image"].attrs = {}
+    dataset["image"].attrs = {
+        key: copy.deepcopy(dataset["image"].attrs[key])
+        for key in ["_zarr_chunks", "_zarr_dims"]
+        if key in dataset["image"].attrs
+    }
     return dataset
 
 
