@@ -130,37 +130,6 @@ def simple_average_fusion(
     ).astype(transformed_views[0].dtype)
 
 
-def _reconstruct_zarr_sim_slice(tile_info, overlap_bb, sdims, sim_coord_dict):
-    """
-    Reconstruct a zarr-backed SpatialImage slice from lightweight tile metadata.
-
-    Called at dask compute time.  Large spatial coordinate arrays are built
-    here (not serialised into the task graph), keeping graph serialisation
-    lightweight.  The returned sim slice remains zarr-backed; actual data reads
-    happen inside transform_sim -> _materialize_xarray_zarr_backend.
-    """
-    # Rebuild full sim from zarr array (spatial coords created here, not serialised).
-    # deserialize_zarr_backed_sim also replays any dropped-dim selections.
-    sim = si_utils.deserialize_zarr_backed_sim(tile_info)
-    # Select the current ns coord (e.g. c=0, t=0); sim stays zarr-backed
-    if sim_coord_dict:
-        sim = sim.sel(sim_coord_dict, drop=True)
-    # Slice to the precomputed overlap region
-    tol = 1e-6
-    return sim.sel(
-        {
-            dim: slice(
-                overlap_bb["origin"][dim] - tol,
-                overlap_bb["origin"][dim]
-                + (overlap_bb["shape"][dim] - 1) * overlap_bb["spacing"][dim]
-                + tol,
-            )
-            for dim in sdims
-        },
-        drop=True,
-    )
-
-
 def _fuse_block_zarr_backed(
     chunk_params_block,
     *,
@@ -214,14 +183,13 @@ def _fuse_block_zarr_backed(
     if not chunk_views:
         return np.zeros(out_shape, dtype=output_dtype)
 
-    # Reconstruct relevant zarr-backed sim slices at compute time.
-    # Large spatial coordinate arrays are built here (not serialised).
+    # Materialize only the raw zarr region needed for each relevant view.
     sims_slices = [
-        _reconstruct_zarr_sim_slice(
+        si_utils.deserialize_zarr_backed_sim(
             view["tile_info"],
-            view["tile_overlap_bb"],
-            sdims,
-            sim_coord_dict,
+            reconstruct_slice=True,
+            overlap_bb=view["tile_overlap_bb"],
+            sim_coord_dict=sim_coord_dict,
         )
         for view in chunk_views
     ]

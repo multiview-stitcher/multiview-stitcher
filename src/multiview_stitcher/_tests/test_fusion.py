@@ -105,7 +105,7 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
         sims = kwargs["sims"] if "sims" in kwargs else args[0]
         observed.append(
             all(
-                si_utils.is_xarray_zarr_backed(sim)
+                not si_utils.is_xarray_zarr_backed(sim)
                 and not si_utils.is_dask_backed_dataarray(sim)
                 for sim in sims
             )

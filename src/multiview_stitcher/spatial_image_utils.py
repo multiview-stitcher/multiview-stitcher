@@ -638,6 +638,29 @@ def _extract_isel_dropped(sim, indexed_dims):
     return isel_dropped
 
 
+def _coord_value_to_index(coords, value):
+    """Return the integer index for a non-spatial coordinate value."""
+    value_array = np.asarray(value)
+    if value_array.size == 1:
+        value = value_array.reshape(()).item()
+
+    coords_array = np.asarray(coords)
+    matches = np.flatnonzero(coords_array == value)
+
+    if not len(matches) and np.issubdtype(coords_array.dtype, np.number):
+        try:
+            matches = np.flatnonzero(
+                np.isclose(coords_array.astype(float), float(value))
+            )
+        except (TypeError, ValueError):
+            pass
+
+    if not len(matches):
+        raise KeyError(f"Coordinate value {value!r} not found.")
+
+    return int(matches[0])
+
+
 def serialize_zarr_backed_sim(sim):
     """
     Serialize a zarr-backed sim to lightweight metadata for task graphs.
@@ -660,12 +683,83 @@ def serialize_zarr_backed_sim(sim):
     }
 
 
-def deserialize_zarr_backed_sim(info):
+def deserialize_zarr_backed_sim(
+    info,
+    reconstruct_slice=False,
+    overlap_bb=None,
+    sim_coord_dict=None,
+):
     """
     Rebuild a zarr-backed sim from ``serialize_zarr_backed_sim`` output.
 
     Reapplies any scalar selections that dropped dims from the original sim.
+    When ``reconstruct_slice=True``, only the requested raw zarr region is
+    materialized and wrapped as an in-memory sim.
     """
+    if reconstruct_slice:
+        if overlap_bb is None:
+            raise ValueError(
+                "overlap_bb must be provided when reconstruct_slice=True."
+            )
+
+        sim_coord_dict = {} if sim_coord_dict is None else dict(sim_coord_dict)
+        zarr_dims = info["zarr_dims"]
+        selected = _zarr_array_to_dataarray(info["zarr_array"], dims=zarr_dims)
+
+        # Keep dropped dims scalar so only the requested slab is selected.
+        indexer = {}
+        for dim in zarr_dims:
+            if dim in info["isel_dropped"]:
+                indexer[dim] = info["isel_dropped"][dim]
+                continue
+
+            if dim in sim_coord_dict:
+                coord_values = info.get(f"{dim}_coords")
+                if coord_values is None:
+                    raise ValueError(
+                        f"Missing coordinate values for selected dimension {dim!r}."
+                    )
+                indexer[dim] = (
+                    _coord_value_to_index(coord_values, sim_coord_dict[dim])
+                )
+                continue
+
+            if dim in SPATIAL_DIMS:
+                start = int(
+                    np.rint(
+                        (overlap_bb["origin"][dim] - info["origin"][dim])
+                        / info["spacing"][dim]
+                    )
+                )
+                indexer[dim] = slice(
+                    start, start + int(overlap_bb["shape"][dim])
+                )
+
+        # Materialize the lazily selected region through the shared helper.
+        selected = selected.isel(indexer, drop=True)
+        data = _materialize_xarray_zarr_backend(selected)
+        result_dims = list(selected.dims)
+
+        spatial_dims = [dim for dim in result_dims if dim in SPATIAL_DIMS]
+
+        # Rebuild a small in-memory sim around the materialized chunk.
+        sim = to_spatial_image(
+            data,
+            dims=result_dims,
+            scale={dim: info["spacing"][dim] for dim in spatial_dims},
+            translation={
+                dim: overlap_bb["origin"][dim] for dim in spatial_dims
+            },
+            c_coords=info["c_coords"] if "c" in result_dims else None,
+            t_coords=info["t_coords"] if "t" in result_dims else None,
+        )
+        set_sim_affine(
+            sim,
+            param_utils.identity_transform(len(spatial_dims), t_coords=None),
+            transform_key=DEFAULT_TRANSFORM_KEY,
+        )
+        return sim
+
     sim = get_sim_from_array(
         info["zarr_array"],
         dims=info["zarr_dims"],

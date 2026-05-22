@@ -154,6 +154,70 @@ def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
         assert si_utils.is_xarray_zarr_backed(sim2)
 
 
+def test_deserialize_zarr_backed_sim_reconstruct_slice_reads_requested_region():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(3 * 2 * 8 * 8, dtype=np.uint16).reshape(3, 2, 8, 8)
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=data.shape,
+            chunks=(1, 1, 4, 4),
+            dtype=data.dtype,
+        )
+        zarray[:] = data
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["t", "c", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 10.0, "x": 20.0},
+            t_coords=[0.0, 1.0, 2.0],
+            c_coords=[10, 20],
+        )
+        sim_sel = sim.sel({"t": 1.0})
+
+        helper_calls = []
+        original_materialize = si_utils._materialize_xarray_zarr_backend
+
+        def record_materialize(xim, *args, **kwargs):
+            helper_calls.append(
+                {
+                    "dims": list(xim.dims),
+                    "is_zarr_backed": si_utils.is_xarray_zarr_backed(xim),
+                }
+            )
+            return original_materialize(xim, *args, **kwargs)
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(
+            si_utils,
+            "_materialize_xarray_zarr_backend",
+            record_materialize,
+        )
+
+        try:
+            sim2 = si_utils.deserialize_zarr_backed_sim(
+                si_utils.serialize_zarr_backed_sim(sim_sel),
+                reconstruct_slice=True,
+                overlap_bb={
+                    "origin": {"y": 12.0, "x": 23.0},
+                    "shape": {"y": 3, "x": 2},
+                    "spacing": {"y": 1.0, "x": 1.0},
+                },
+                sim_coord_dict={"c": 20},
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert list(sim2.dims) == ["y", "x"]
+        assert not si_utils.is_xarray_zarr_backed(sim2)
+        assert not si_utils.is_dask_backed_dataarray(sim2)
+        assert helper_calls == [{"dims": ["y", "x"], "is_zarr_backed": True}]
+        np.testing.assert_array_equal(np.asarray(sim2.data), data[1, 1, 2:5, 3:5])
+        assert sim2.coords["y"].values == pytest.approx([12.0, 13.0, 14.0])
+        assert sim2.coords["x"].values == pytest.approx([23.0, 24.0])
+
+
 def test_max_project():
     ndim = 3
     dim = "z"
