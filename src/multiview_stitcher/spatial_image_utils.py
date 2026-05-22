@@ -46,6 +46,52 @@ class ZarrLazyBackendArray(BackendArray):
         )
 
 
+class ZarrReprLazilyIndexedArray(indexing.LazilyIndexedArray):
+    from html import escape
+    # Let xarray's notebook repr reuse Dask's existing array display.
+    _repr_note = "Zarr-backed; using Dask-style repr."
+
+    def _repr_target(self):
+        for candidate in _iter_backend_arrays(self.array):
+            if isinstance(candidate, zarr.Array):
+                return da.from_zarr(candidate)
+
+            if hasattr(candidate, "zarray") and isinstance(
+                candidate.zarray, zarr.Array
+            ):
+                return da.from_zarr(candidate.zarray)
+
+        return self.array
+
+    def _repr_html_(self):
+        target = self._repr_target()
+        repr_html = getattr(target, "_repr_html_", None)
+        if repr_html is not None:
+            return (
+                f"<div><em>{escape(self._repr_note)}</em></div>"
+                + repr_html()
+            )
+
+        return (
+            f"<div><em>{escape(self._repr_note)}</em></div>"
+            f"<pre>{escape(repr(target))}</pre>"
+        )
+
+    def _repr_inline_(self, max_width):
+        target = self._repr_target()
+        repr_inline = getattr(target, "_repr_inline_", None)
+        if repr_inline is not None:
+            text = f"{self._repr_note} {repr_inline(max_width)}"
+        else:
+            text = f"{self._repr_note} {repr(target)}"
+
+        if max_width is None or len(text) <= max_width:
+            return text
+        if max_width <= 3:
+            return text[:max_width]
+        return text[: max_width - 3] + "..."
+
+
 class SingletonExpandedBackendArray(BackendArray):
     # xarray.expand_dims materializes some backend arrays. This wrapper presents
     # leading singleton axes virtually, so we can add missing t/c dims without
@@ -113,7 +159,7 @@ def _zarr_array_to_dataarray(
     # Preserve zarr-backed laziness when constructing an xarray.DataArray from a
     # plain zarr.Array, and propagate chunk hints for the later dask conversion.
     backend = ZarrLazyBackendArray(zarray)
-    lazy_data = indexing.LazilyIndexedArray(backend)
+    lazy_data = ZarrReprLazilyIndexedArray(backend)
     var_attrs = {} if attrs is None else dict(attrs)
     var = xr.Variable(
         dims,
@@ -279,7 +325,7 @@ def _expand_with_singleton_dims_lazily(xim, missing_dims):
         _get_backend_data(xim),
         singleton_axes=tuple(range(len(missing_dims))),
     )
-    lazy_data = indexing.LazilyIndexedArray(backend)
+    lazy_data = ZarrReprLazilyIndexedArray(backend)
     dims = tuple(missing_dims) + tuple(xim.dims)
     expanded = xr.DataArray(
         xr.Variable(dims, lazy_data, attrs=dict(xim.attrs)),

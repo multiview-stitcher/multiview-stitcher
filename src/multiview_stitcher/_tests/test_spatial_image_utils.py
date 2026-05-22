@@ -51,6 +51,35 @@ def test_sim_zarr_array_input_backend_is_preserved():
         assert isinstance(sim_slice.data, da.Array)
 
 
+def test_sim_zarr_array_html_repr_reuses_zarr_repr():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(8, 8),
+            chunks=(4, 4),
+            dtype=np.uint16,
+        )
+        zarray[:] = 1
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+        )
+
+        assert hasattr(sim.variable._data, "_repr_html_")
+        assert hasattr(sim.variable._data, "_repr_inline_")
+        html_repr = sim.variable._data._repr_html_().lower()
+        inline_repr = sim.variable._data._repr_inline_(120).lower()
+
+        assert "zarr-backed; using dask-style repr." in html_repr
+        assert "dask" in html_repr
+        assert "zarr-backed; using dask-style repr." in inline_repr
+        assert "dask" in inline_repr
+
+
 def test_serialize_deserialize_zarr_backed_sim_roundtrip():
     """Roundtrip: serialize then deserialize preserves dims and zarr-backed status."""
     with tempfile.TemporaryDirectory() as tmpdir:
