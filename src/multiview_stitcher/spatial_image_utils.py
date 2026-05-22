@@ -68,13 +68,13 @@ class ZarrReprLazilyIndexedArray(indexing.LazilyIndexedArray):
         repr_html = getattr(target, "_repr_html_", None)
         if repr_html is not None:
             return (
-                f"<div><em>{escape(self._repr_note)}</em></div>"
+                f"<div><em>{type(self).escape(self._repr_note)}</em></div>"
                 + repr_html()
             )
 
         return (
-            f"<div><em>{escape(self._repr_note)}</em></div>"
-            f"<pre>{escape(repr(target))}</pre>"
+            f"<div><em>{type(self).escape(self._repr_note)}</em></div>"
+            f"<pre>{type(self).escape(repr(target))}</pre>"
         )
 
     def _repr_inline_(self, max_width):
