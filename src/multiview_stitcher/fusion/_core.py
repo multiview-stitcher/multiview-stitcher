@@ -827,8 +827,6 @@ def fuse(
             + np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
         )
 
-        import time
-        t0 = time.time()
         _chunk_to_tiles: dict = {}
         for iview in range(len(sims)):
             # Forward-project tile corners through the affine to get its AABB
@@ -862,8 +860,6 @@ def fuse(
             for chunk_idx in product(*idx_ranges):
                 _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
 
-        t1 = time.time()
-        print(f"Built chunk-to-tile mapping in {t1 - t0:.2f} seconds.")
         # Pre-compute per-chunk relevant-view data once and reuse it in both
         # fusion paths. For each output chunk, determine which tiles truly
         # overlap and store their tile-slice bounding boxes.
@@ -899,9 +895,6 @@ def fuse(
                     "fuse_planewise": fuse_planewise,
                 }
             )
-
-        t2 = time.time()
-        print(f"Computed per-chunk relevant views in {t2 - t1:.2f} seconds.")
 
         if input_is_zarr:
             chunk_params_np = np.empty(nblocks_per_dim, dtype=object)
