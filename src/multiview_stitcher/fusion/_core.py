@@ -1027,7 +1027,7 @@ def fuse(
                     weights_func=weights_func,
                     weights_func_kwargs=weights_func_kwargs,
                     trim_overlap_in_pixels=overlap_in_pixels,
-                    interpolation_order=1,
+                    interpolation_order=interpolation_order,
                     full_view_bbs=full_view_bbs,
                     blending_widths=blending_widths,
                     shrink_distance=shrink_distance,
