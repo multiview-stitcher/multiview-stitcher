@@ -50,7 +50,8 @@ dependencies = [
     "matplotlib",
     "scikit-image >=0.21.0",
     "ngff-zarr >=0.12.2",
-    "ome-zarr >=0.10.2"
+    "ome-zarr >=0.10.2",
+    "aiohttp"
 ]
 dynamic = [
     "version",
