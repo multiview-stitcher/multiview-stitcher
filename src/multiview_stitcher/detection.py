@@ -106,19 +106,21 @@ def _compute_point_indices_from_label_blocks(label_blocks, depth):
 def _normalize_target_size_physical(target_size_physical, ndim):
     if isinstance(target_size_physical, bool):
         raise TypeError(
-            "target_size_physical must be an int or dict[str, float]."
+            "target_size_physical must be a float or dict[str, float]."
         )
-    if isinstance(target_size_physical, (int, np.integer)):
+    if isinstance(target_size_physical, (int, float, np.integer, np.floating)):
         return tuple(float(target_size_physical) for _ in range(ndim))
     if isinstance(target_size_physical, dict):
         if len(target_size_physical) != ndim or not all(
             isinstance(dim, str) for dim in target_size_physical
         ):
             raise TypeError(
-                "target_size_physical must be an int or dict[str, float]."
+                "target_size_physical must be a float or dict[str, float]."
             )
         return tuple(float(size) for size in target_size_physical.values())
-    raise TypeError("target_size_physical must be an int or dict[str, float].")
+    raise TypeError(
+        "target_size_physical must be a float or dict[str, float]."
+    )
 
 
 def _target_size_pixels(target_size_physical, spacing):
@@ -170,9 +172,9 @@ def log_detect(
         Input image. Only spatial dimensions should be present.
     spacing : tuple[float, ...]
         Pixel spacing for each image axis.
-    target_size_physical : int or dict[str, float]
-        Expected bead diameter in physical units. An int is applied to every
-        axis; a dict can provide axis-specific values in insertion order.
+    target_size_physical : float or dict[str, float]
+        Expected bead diameter in physical units. A float is applied to every
+        axis; a dict can provide axis-specific values.
     threshold_rel : float, optional
         Relative threshold applied to the maximum LoG response when
         ``threshold_abs`` is not provided. Defaults to ``0.2``.

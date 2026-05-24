@@ -63,7 +63,7 @@ def test_detect_beads_returns_intrinsic_physical_positions():
         positions = detection.detect_beads(
             msim,
             detection_func_kwargs={
-                "target_size_physical": 2,
+                "target_size_physical": 2.0,
                 "threshold_rel": 0.3,
             },
         )
@@ -200,7 +200,7 @@ def test_detect_beads_cupy_backend_matches_numpy():
     )
     kwargs = {
         "detection_func_kwargs": {
-            "target_size_physical": 2,
+            "target_size_physical": 2.0,
             "threshold_rel": 0.3,
         },
     }
