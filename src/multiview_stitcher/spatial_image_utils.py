@@ -894,7 +894,9 @@ def extend_stack_props(stack_props, extend_by):
         for sdim in SPATIAL_DIMS
         if sdim in list(stack_props["spacing"].keys())
     ]
-    extend_by = normalize_to_spatial_dict(extend_by, sdims, "extend_by")
+
+    if not isinstance(extend_by, dict):
+        extend_by = {dim: extend_by for dim in sdims}
 
     for dim, val in extend_by.items():
         stack_props["shape"][dim] += int(

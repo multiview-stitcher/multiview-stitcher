@@ -370,9 +370,9 @@ def _shrink_source_bb(
     """
 
     sdims = list(source_bb["origin"].keys())
-    shrink_distance = si_utils.normalize_to_spatial_dict(
-        shrink_distance, sdims, "shrink_distance"
-    )
+
+    if isinstance(shrink_distance, (int, float)):
+        shrink_distance = {dim: float(shrink_distance) for dim in sdims}
 
     return {
         "origin": {
