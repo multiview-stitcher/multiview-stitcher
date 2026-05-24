@@ -4,41 +4,14 @@ import numpy as np
 import xarray as xr
 from scipy import ndimage
 
-from multiview_stitcher import msi_utils
+from multiview_stitcher import msi_utils, fusion, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
-
-
-def _validate_label_array(labels, expected_shape=None):
-    labels = np.asarray(labels)
-    if expected_shape is not None and labels.shape != tuple(expected_shape):
-        raise ValueError(
-            "detection_func must return an integer label array with the same "
-            "shape as its input block."
-        )
-
-    if labels.dtype == np.dtype(bool) or not np.issubdtype(
-        labels.dtype, np.integer
-    ):
-        raise TypeError(
-            "detection_func must return an integer label array where 0 is "
-            "background and positive values are object labels."
-        )
-
-    if np.any(labels < 0):
-        raise ValueError(
-            "detection_func returned negative labels. Use 0 for background "
-            "and positive values for objects."
-        )
-
-    return labels.astype(np.int64, copy=False)
 
 
 def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
     chunk_start = np.asarray(chunk_start, dtype=float)
     chunk_shape = np.asarray(chunk_shape, dtype=float)
     depth = np.asarray(depth, dtype=float)
-    expected_shape = tuple((chunk_shape + 2 * depth).astype(int))
-    labels = _validate_label_array(labels, expected_shape)
 
     label_ids = np.unique(labels)
     label_ids = label_ids[label_ids > 0]
@@ -62,8 +35,8 @@ def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
 def _compute_point_indices_from_label_blocks(label_blocks, depth):
     delayed_blocks = np.asarray(label_blocks.to_delayed(), dtype=object)
     starts_by_dim = [
-        np.concatenate([[0], np.cumsum(dim_chunks[:-1])])
-        for dim_chunks in label_blocks.chunks
+        np.concatenate([[0], np.cumsum(np.array(dim_chunks[:-1]) - 2 * depth[idim])])
+        for idim, dim_chunks in enumerate(label_blocks.chunks)
     ]
 
     centroid_tasks = []
@@ -73,7 +46,7 @@ def _compute_point_indices_from_label_blocks(label_blocks, depth):
             for idim, ichunk in enumerate(chunk_index)
         )
         chunk_shape = tuple(
-            label_blocks.chunks[idim][ichunk]
+            label_blocks.chunks[idim][ichunk] - 2 * depth[idim]
             for idim, ichunk in enumerate(chunk_index)
         )
         centroid_tasks.append(
@@ -273,9 +246,6 @@ def detect_beads(
     # Load the chosen level as a single spatial field (drop t/c if present).
     sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
     sim = si_utils.get_sim_field(sim)
-    sim = si_utils.ensure_dask_backed_dataarray(sim)
-    if not isinstance(sim.data, da.Array):
-        sim.data = da.from_array(sim.data)
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
@@ -322,19 +292,29 @@ def detect_beads(
         int(np.ceil(detection_overlap[dim])) for dim in sdims
     )
 
-    # Run detection with chunk overlap. Label values are local to each chunk;
-    # centroids are filtered to the non-overlapped chunk core.
-    label_blocks = da.map_overlap(
-        detection_func,
-        sim.data,
-        depth=detection_overlap,
-        boundary="reflect",
-        trim=False,
-        dtype=np.int64,
-        meta=np.empty((0,) * len(sdims), dtype=np.int64),
-        target_size=target_size_pixels,
-        **detection_func_kwargs,
+
+    # Set a dummy identity affine on the input SIM so that fusion applies no
+    # transformation to the image blocks before passing them to detection_func.
+    si_utils.set_sim_affine(
+        sim,
+        param_utils.identity_transform(len(sim.dims)),
+        transform_key="identity",
     )
+
+    # Use fusion.fuse to apply detection_func to each dask block.
+    # This allows dealing with both dask-backed and zarr-backed sims,
+    # the latter more efficiently.
+    label_blocks = fusion.fuse(
+        [sim],
+        transform_key="identity",
+        fusion_func=lambda transformed_views, *args, **kwargs: detection_func(
+            transformed_views[0], target_size_pixels, **kwargs
+        ),
+        fusion_func_kwargs=detection_func_kwargs,
+        trim_overlap=False,
+        overlap_in_pixels={dim: detection_overlap[idim] for idim, dim in enumerate(sdims)},
+    ).data.astype(np.int64)
+
     point_indices = _compute_point_indices_from_label_blocks(
         label_blocks, detection_overlap
     )

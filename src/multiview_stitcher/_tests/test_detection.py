@@ -1,3 +1,4 @@
+import dask
 import dask.array as da
 import numpy as np
 from scipy.ndimage import gaussian_filter, label
@@ -56,11 +57,12 @@ def test_detect_beads_returns_intrinsic_physical_positions():
         scale_factors=[{"y": 2, "x": 2}],
     )
 
-    positions = detection.detect_beads(
-        msim,
-        target_size_physical=2.0,
-        detection_func_kwargs={"threshold_rel": 0.3},
-    )
+    with dask.config.set(scheduler="synchronous"):
+        positions = detection.detect_beads(
+            msim,
+            target_size_physical=2.0,
+            detection_func_kwargs={"threshold_rel": 0.3},
+        )
 
     expected = np.column_stack(
         [
