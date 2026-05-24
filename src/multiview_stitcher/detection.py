@@ -13,17 +13,6 @@ except ImportError:
     cp = None
 
 
-def _normalize_pixel_value(value, ndim, name):
-    if np.isscalar(value):
-        return tuple(float(value) for _ in range(ndim))
-
-    value = tuple(value)
-    if len(value) != ndim:
-        raise ValueError(f"{name} must have {ndim} values, got {len(value)}.")
-
-    return tuple(float(v) for v in value)
-
-
 def _compute_point_indices(mask):
     if isinstance(mask, da.Array):
         arr = da.argwhere(mask).compute()
@@ -62,18 +51,19 @@ def _run_detection_func(
 
 
 def _log_detect_required_overlap(target_size, **_kwargs):
-    target_size = tuple(target_size)
     ndim = len(target_size)
-    target_size = _normalize_pixel_value(target_size, ndim, "target_size")
-    sigma_pixels = tuple(
-        max(0.5, size / (2.0 * np.sqrt(ndim))) for size in target_size
-    )
-    min_distance_pixels = tuple(max(1.0, size / 2.0) for size in target_size)
-
-    return tuple(
-        max(1, int(np.ceil(4 * sigma + distance)))
-        for sigma, distance in zip(sigma_pixels, min_distance_pixels)
-    )
+    sigma_pixels = {
+        dim: max(0.5, float(size) / (2.0 * np.sqrt(ndim)))
+        for dim, size in target_size.items()
+    }
+    min_distance_pixels = {
+        dim: max(1.0, float(size) / 2.0)
+        for dim, size in target_size.items()
+    }
+    return {
+        dim: max(1, int(np.ceil(4 * sigma_pixels[dim] + min_distance_pixels[dim])))
+        for dim in target_size
+    }
 
 
 def log_detect(
@@ -90,7 +80,7 @@ def log_detect(
     ----------
     image : numpy.ndarray or cupy.ndarray
         Input image. Only spatial dimensions should be present.
-    target_size : float or sequence[float]
+    target_size : float or dict[str, float]
         Expected bead diameter in pixels. A scalar is applied to every axis.
     threshold_rel : float, optional
         Relative threshold applied to the maximum LoG response when
@@ -126,11 +116,14 @@ def log_detect(
         ndi = ndimage
         float_dtype = np.float32
 
-    target_size = _normalize_pixel_value(
-        target_size,
-        image.ndim,
-        "target_size",
-    )
+    if isinstance(target_size, dict):
+        target_size = tuple(float(v) for v in target_size.values())
+    elif np.isscalar(target_size):
+        target_size = tuple(float(target_size) for _ in range(image.ndim))
+    else:
+        raise TypeError(
+            f"target_size must be a float or dict, got {type(target_size).__name__}."
+        )
     sigma_pixels = tuple(
         max(0.5, size / (2.0 * np.sqrt(image.ndim)))
         for size in target_size
@@ -262,9 +255,7 @@ def detect_beads(
     target_size = si_utils.normalize_to_spatial_dict(
         target_size_physical, sdims, "target_size_physical"
     )
-    target_size_pixels = tuple(
-        target_size[dim] / spacing[dim] for dim in sdims
-    )
+    target_size_pixels = {dim: target_size[dim] / spacing[dim] for dim in sdims}
 
     detection_func_kwargs = dict(detection_func_kwargs) if detection_func_kwargs is not None else {}
 
@@ -277,12 +268,13 @@ def detect_beads(
     # Determine how many pixels of overlap are needed between dask chunks so
     # that detection results near chunk boundaries are not clipped.
     if detection_overlap is None and hasattr(detection_func, "required_overlap"):
-        detection_overlap = dict(zip(sdims, detection_func.required_overlap(
+        required = detection_func.required_overlap(
             target_size_pixels,
             **detection_func_kwargs,
-        )))
+        )
+        detection_overlap = required if isinstance(required, dict) else dict(zip(sdims, required))
     if detection_overlap is None:
-        detection_overlap = dict(zip(sdims, target_size_pixels))
+        detection_overlap = target_size_pixels
     detection_overlap = si_utils.normalize_to_spatial_dict(
         detection_overlap, sdims, "detection_overlap"
     )
