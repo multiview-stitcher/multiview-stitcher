@@ -27,47 +27,16 @@ def _normalize_pixel_value(value, ndim, name):
     return tuple(float(v) for v in value)
 
 
-def _get_detection_scale_key(
-    msim,
-    target_size_physical,
-    segmentation_res_level,
-):
-    if segmentation_res_level is not None:
-        if isinstance(segmentation_res_level, str):
-            scale_key = segmentation_res_level
-        else:
-            scale_key = f"scale{segmentation_res_level}"
-
-        if scale_key not in msi_utils.get_sorted_scale_keys(msim):
-            raise ValueError(
-                f"Resolution level {segmentation_res_level!r} does not exist "
-                f"in the multiscale image."
-            )
-        return scale_key
-
-    sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
-    sdims = si_utils.get_spatial_dims_from_sim(sim0)
-    target_size = si_utils.normalize_to_spatial_dict(
-        target_size_physical, sdims, "target_size_physical"
-    )
-
-    target_spacing = {dim: target_size[dim] / 4.0 for dim in sdims}
-    res_level = msi_utils.get_res_level_from_spacing(msim, target_spacing)
-
-    return f"scale{res_level}"
-
-
-def _as_numpy(array):
-    if cp is not None and isinstance(array, cp.ndarray):
-        return cp.asnumpy(array)
-    return np.asarray(array)
-
-
 def _compute_point_indices(mask):
     if isinstance(mask, da.Array):
-        return _as_numpy(da.argwhere(mask).compute())
+        arr = da.argwhere(mask).compute()
+        if cp is not None and isinstance(arr, cp.ndarray):
+            return cp.asnumpy(arr)
+        return np.asarray(arr)
 
-    return np.argwhere(_as_numpy(mask))
+    if cp is not None and isinstance(mask, cp.ndarray):
+        return np.argwhere(cp.asnumpy(mask))
+    return np.argwhere(np.asarray(mask))
 
 
 def _function_accepts_kwarg(func, kwarg):
@@ -326,8 +295,8 @@ def detect_beads(
         If ``None`` and the detection function exposes a ``required_overlap``
         attribute, that value is used. Otherwise the bead size in pixels is
         used as a conservative default.
-    segmentation_res_level : int, str, or None, optional
-        Resolution level used for segmentation, e.g. ``0`` or ``"scale0"``.
+    segmentation_res_level : int or None, optional
+        Resolution level used for segmentation, e.g. ``0``.
         When ``None``, the coarsest level whose spacing is no larger than one
         quarter of ``target_size_physical`` is used.
     threshold_rel : float, optional
@@ -352,11 +321,23 @@ def detect_beads(
             "cupy=True was requested, but CuPy is not installed."
         )
 
-    scale_key = _get_detection_scale_key(
-        msim,
-        target_size_physical,
-        segmentation_res_level,
-    )
+    if segmentation_res_level is not None:
+        scale_key = f"scale{segmentation_res_level}"
+
+        if scale_key not in msi_utils.get_sorted_scale_keys(msim):
+            raise ValueError(
+                f"Resolution level {segmentation_res_level!r} does not exist "
+                f"in the multiscale image."
+            )
+    else:
+        sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
+        sdims0 = si_utils.get_spatial_dims_from_sim(sim0)
+        target_size0 = si_utils.normalize_to_spatial_dict(
+            target_size_physical, sdims0, "target_size_physical"
+        )
+        target_spacing = {dim: target_size0[dim] / 4.0 for dim in sdims0}
+        res_level = msi_utils.get_res_level_from_spacing(msim, target_spacing)
+        scale_key = f"scale{res_level}"
     sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
     sim = si_utils.get_sim_field(sim)
     sim = si_utils.ensure_dask_backed_dataarray(sim)
