@@ -8,6 +8,7 @@ import matplotlib.pyplot
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 from scipy import ndimage
 from skimage.exposure import rescale_intensity
 
@@ -27,6 +28,22 @@ ITK_ELASTIX_MARK = pytest.mark.skipif(
     registration.itk is None,
     reason="itk-elastix is not installed",
 )
+
+
+def _sim_to_zarr_backed_sim(sim, path, transform_key):
+    sim.data.to_zarr(path, overwrite=True, compute=True)
+    zarray = zarr.open_array(path, mode="r")
+
+    return spatial_image_utils.get_sim_from_array(
+        zarray,
+        dims=sim.dims,
+        scale=spatial_image_utils.get_spacing_from_sim(sim),
+        translation=spatial_image_utils.get_origin_from_sim(sim),
+        affine=spatial_image_utils.get_affine_from_sim(sim, transform_key),
+        transform_key=transform_key,
+        c_coords=sim.coords["c"].values if "c" in sim.coords else None,
+        t_coords=sim.coords["t"].values if "t" in sim.coords else None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -151,6 +168,74 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
                 gt_shift,
                 atol=1.5,
             )
+
+
+def test_register_pair_of_msims_zarr_backed_input_is_converted_to_dask_after_selection(monkeypatch):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=30,
+        tiles_x=2,
+        tiles_y=1,
+        overlap=10,
+    )
+
+    sims = [sim.isel(c=0, t=0, drop=True) for sim in sims[:2]]
+
+    observed = []
+
+    original_ensure = registration.spatial_image_utils.ensure_dask_backed_dataarray
+
+    def wrapped_ensure(xim):
+        result = original_ensure(xim)
+        observed.append(
+            spatial_image_utils.is_xarray_zarr_backed(xim)
+            and isinstance(result.variable._data, da.Array)
+        )
+        return result
+
+    def pairwise_reg_func(
+        fixed_data,
+        moving_data,
+        fixed_origin=None,
+        moving_origin=None,
+        fixed_spacing=None,
+        moving_spacing=None,
+        initial_affine=None,
+    ):
+        return {
+            "affine_matrix": param_utils.identity_transform(fixed_data.ndim),
+            "quality": 1.0,
+        }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(
+            registration.spatial_image_utils,
+            "ensure_dask_backed_dataarray",
+            wrapped_ensure,
+        )
+
+        zarr_sims = [
+            _sim_to_zarr_backed_sim(
+                sim,
+                os.path.join(tmpdir, f"view_{iview}.zarr"),
+                METADATA_TRANSFORM_KEY,
+            ).isel(c=0, t=0, drop=True)
+            for iview, sim in enumerate(sims)
+        ]
+
+        msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in zarr_sims]
+
+        registration.register_pair_of_msims(
+            msims[0],
+            msims[1],
+            registration_binning={"y": 1, "x": 1},
+            transform_key=METADATA_TRANSFORM_KEY,
+            pairwise_reg_func=pairwise_reg_func,
+        ).compute()
+
+    assert observed and all(observed)
 
 
 @pytest.mark.parametrize(

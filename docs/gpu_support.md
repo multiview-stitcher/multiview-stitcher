@@ -1,6 +1,6 @@
 # GPU support
 
-Fusion supports GPU acceleration via [CuPy](https://cupy.dev/). When input arrays are dask arrays backed by CuPy, `multiview-stitcher` automatically dispatches methods used within the fusion process to their `cupyx.scipy.ndimage` equivalents.
+Fusion supports GPU acceleration via [CuPy](https://cupy.dev/). Pass `use_cupy=True` to `fusion.fuse` and `multiview-stitcher` will transfer each input chunk to the GPU, run resampling, blending, and the fusion function there, and return a regular NumPy-backed output.
 
 ## Installation
 
@@ -8,47 +8,39 @@ Install CuPy following the [official instructions](https://docs.cupy.dev/en/stab
 
 ## Usage
 
-To run fusion on the GPU, convert dask array chunks to CuPy before calling `fuse`, and convert back afterwards.
-
-If you work with `SpatialImage` objects, map each image's chunks directly:
-
 ```python
-import cupy as cp
 from multiview_stitcher import fusion
 
-# send chunks to GPU
-for i in range(len(sims)):
-    sims[i].data = sims[i].data.map_blocks(cp.asarray)
-
 fused_sim = fusion.fuse(
-    images=sims,
+    images=sims, # or msims for multiscale
     transform_key="stage_metadata",
+    use_cupy=True,
 )
-
-# retrieve fused chunks from GPU
-fused_sim.data = fused_sim.data.map_blocks(cp.asnumpy)
 
 fused_sim.data.compute()
 ```
 
-If you work with `MultiscaleSpatialImage` objects, use `msi_utils.msim_map_blocks` to apply the chunk conversion across every scale while preserving transforms and other metadata:
+`use_cupy=True` also works with `output_zarr_url` for large datasets. In this case, setting `n_jobs` as in the example below allows limiting the number of parallel GPU batch processes, which can help manage GPU memory usage:
 
 ```python
-import cupy as cp
-from multiview_stitcher import fusion, msi_utils
+from multiview_stitcher import fusion, misc_utils
 
-# send all multiscale chunks to GPU
-msims = [msi_utils.msim_map_blocks(msim, cp.asarray) for msim in msims]
-
-fused_msim = fusion.fuse(
+fused_sim = fusion.fuse(
     images=msims,
     transform_key="stage_metadata",
+    use_cupy=True,
+    output_zarr_url="fused.ome.zarr",
+    zarr_options={
+        "ome_zarr": True
+    },
+    batch_options={
+        "batch_func": misc_utils.process_batch_using_joblib,
+        "n_batch": 20, # number of jobs to be scheduled at a time
+        "batch_func_kwargs": {
+            "n_jobs": 4 # number of jobs to be processed in parallel. allows limiting GPU batch processing to e.g. 4 parallel jobs
+            },
+    },
 )
-
-# retrieve all fused multiscale chunks from GPU
-fused_msim = msi_utils.msim_map_blocks(fused_msim, cp.asnumpy)
-
-fused_msim["scale0/image"].data.compute()
 ```
 
 ## What is dispatched to the GPU

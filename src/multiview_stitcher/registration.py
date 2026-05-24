@@ -13,7 +13,6 @@ import skimage.registration
 import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
-from multiscale_spatial_image import MultiscaleSpatialImage
 from scipy import ndimage, stats
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
@@ -39,6 +38,8 @@ from multiview_stitcher import (
 )
 
 logger = logging.getLogger(__name__)
+
+MultiscaleSpatialImage = xr.DataTree
 
 
 def apply_recursive_dict(func, d):
@@ -792,6 +793,13 @@ def register_pair_of_msims(
     # logging without use of %s
     logger.info("Registration resolution level: %s", scale_key)
     logger.info("Registration binning applied at loaded scale: %s", str(registration_binning))
+
+    # Ensure dask-backed up front so that all subsequent operations
+    # (coarsen, sel, transform) stay lazy for zarr-backed inputs.
+    reg_sims = [
+        spatial_image_utils.ensure_dask_backed_dataarray(sim)
+        for sim in reg_sims
+    ]
 
     if max(registration_binning.values()) > 1:
         reg_sims_b = [

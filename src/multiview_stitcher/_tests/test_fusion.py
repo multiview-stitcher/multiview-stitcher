@@ -1,12 +1,14 @@
+import contextlib
 import os
 import tempfile
 import warnings
 
+from aiohttp.client_exceptions import ServerDisconnectedError
 import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
-
+import zarr
 import multiview_stitcher.spatial_image_utils as si_utils
 from multiview_stitcher import (
     fusion,
@@ -15,9 +17,27 @@ from multiview_stitcher import (
     ngff_utils,
     param_utils,
     sample_data,
+    transformation,
     weights,
 )
+from multiview_stitcher.fusion import _core as fusion_core
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
+
+
+def _sim_to_zarr_backed_sim(sim, path, transform_key):
+    sim.data.to_zarr(path, overwrite=True, compute=True)
+    zarray = zarr.open_array(path, mode="r")
+
+    return si_utils.get_sim_from_array(
+        zarray,
+        dims=sim.dims,
+        scale=si_utils.get_spacing_from_sim(sim),
+        translation=si_utils.get_origin_from_sim(sim),
+        affine=si_utils.get_affine_from_sim(sim, transform_key),
+        transform_key=transform_key,
+        c_coords=sim.coords["c"].values if "c" in sim.coords else None,
+        t_coords=sim.coords["t"].values if "t" in sim.coords else None,
+    )
 
 
 def _make_distinct_level_msim():
@@ -62,6 +82,224 @@ def test_fuse_sims():
     assert xfused.dtype == sims[0].dtype
     assert METADATA_TRANSFORM_KEY in si_utils.get_tranform_keys_from_sim(
         xfused
+    )
+
+
+def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypatch):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=24,
+        tiles_x=1,
+        tiles_y=1,
+        overlap=0,
+    )[0]
+
+    observed = []
+    serial_read_configs = []
+    original_fuse_np = fusion_core.fuse_np
+    original_astype = xr.DataArray.astype
+
+    def wrapped_fuse_np(*args, **kwargs):
+        sims = kwargs["sims"] if "sims" in kwargs else args[0]
+        observed.append(
+            all(
+                not si_utils.is_xarray_zarr_backed(sim)
+                and not si_utils.is_dask_backed_dataarray(sim)
+                for sim in sims
+            )
+        )
+        return original_fuse_np(*args, **kwargs)
+
+    def fail_dask_affine_transform(*args, **kwargs):
+        raise AssertionError(
+            "zarr-backed fusion slices should be materialized to NumPy inside the delayed chunk task"
+        )
+
+    @contextlib.contextmanager
+    def record_serial_read_config(config):
+        serial_read_configs.append(dict(config))
+        yield
+
+    monkeypatch.setattr(
+        fusion_core,
+        "fuse_np",
+        wrapped_fuse_np,
+    )
+    monkeypatch.setattr(
+        transformation,
+        "dask_image_affine_transform",
+        fail_dask_affine_transform,
+    )
+    monkeypatch.setattr(
+        si_utils,
+        "_zarr_array_uses_http_store",
+        lambda zarray: True,
+    )
+    monkeypatch.setattr(
+        si_utils.zarr.config,
+        "set",
+        record_serial_read_config,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zsim = _sim_to_zarr_backed_sim(
+            sim,
+            os.path.join(tmpdir, "view.zarr"),
+            METADATA_TRANSFORM_KEY,
+        )
+
+        fused = fusion.fuse(
+            [zsim],
+            transform_key=METADATA_TRANSFORM_KEY,
+            fusion_func=fusion.max_fusion,
+            output_chunksize={"y": 8, "x": 8},
+        )
+        fused.data.compute()
+
+    assert observed and all(observed)
+
+
+def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=32,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1.0,
+        spacing_y=1.0,
+        spacing_z=1.0,
+        random_data=True,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        msims_zarr = []
+        msims_dask = []
+
+        for isim, sim in enumerate(sims):
+            zarr_path = os.path.join(tmpdir, f"sim_{isim}.ome.zarr")
+            affine = si_utils.get_affine_from_sim(sim, METADATA_TRANSFORM_KEY)
+
+            ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+            msim_zarr = ngff_utils.read_msim_from_ome_zarr(
+                zarr_path, use_dask=False
+            )
+            msim_dask = ngff_utils.read_msim_from_ome_zarr(
+                zarr_path, use_dask=True
+            )
+
+            msi_utils.set_affine_transform(
+                msim_zarr, affine, transform_key=METADATA_TRANSFORM_KEY
+            )
+            msi_utils.set_affine_transform(
+                msim_dask, affine, transform_key=METADATA_TRANSFORM_KEY
+            )
+
+            msims_zarr.append(msim_zarr)
+            msims_dask.append(msim_dask)
+
+        fused_zarr = fusion.fuse(
+            msims_zarr, transform_key=METADATA_TRANSFORM_KEY
+        )
+        fused_dask = fusion.fuse(
+            msims_dask, transform_key=METADATA_TRANSFORM_KEY
+        )
+
+        sim_zarr = msi_utils.get_sim_from_msim(fused_zarr, scale="scale0")
+        sim_dask = msi_utils.get_sim_from_msim(fused_dask, scale="scale0")
+
+        fused_zarr_data = np.asarray(sim_zarr.data.compute())
+        fused_dask_data = np.asarray(sim_dask.data.compute())
+
+        assert fused_zarr_data.max() > 0
+        np.testing.assert_array_equal(fused_dask_data, fused_zarr_data)
+
+
+def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=24,
+        tiles_x=1,
+        tiles_y=1,
+        overlap=0,
+    )[0]
+
+    recorded_configs = []
+    semaphore_entries = []
+    attempt_count = 0
+    original_asarray = si_utils.np.asarray
+
+    @contextlib.contextmanager
+    def record_read_config(config):
+        recorded_configs.append(dict(config))
+        yield
+
+    class RecordingSemaphore:
+        def __enter__(self):
+            semaphore_entries.append(True)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def flaky_asarray(arg, *args, **kwargs):
+        nonlocal attempt_count
+        attempt_count += 1
+
+        if attempt_count == 1:
+            raise ServerDisconnectedError()
+
+        return original_asarray(arg, *args, **kwargs)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zsim = _sim_to_zarr_backed_sim(
+            sim,
+            os.path.join(tmpdir, "view.zarr"),
+            METADATA_TRANSFORM_KEY,
+        )
+
+        monkeypatch.setattr(
+            si_utils,
+            "_zarr_array_uses_http_store",
+            lambda zarray: True,
+        )
+        monkeypatch.setattr(
+            si_utils.zarr.config,
+            "set",
+            record_read_config,
+        )
+        monkeypatch.setattr(
+            si_utils,
+            "_HTTP_ZARR_MATERIALIZATION_SEMAPHORE",
+            RecordingSemaphore(),
+        )
+        monkeypatch.setattr(
+            si_utils.np,
+            "asarray",
+            flaky_asarray,
+        )
+
+        result = si_utils._materialize_xarray_zarr_backend(
+            zsim,
+            max_retries=2,
+        )
+
+    assert isinstance(result, np.ndarray)
+    assert len(recorded_configs) == 2
+    assert attempt_count >= 2
+    assert len(semaphore_entries) == 2
+    assert all(
+        config.get("async.concurrency")
+        == si_utils.HTTP_ZARR_ASYNC_CONCURRENCY
+        for config in recorded_configs
     )
 
 
@@ -158,6 +396,7 @@ def test_fuse_msims_to_ome_zarr_returns_msim():
 
         assert msi_utils.is_msim(fused)
         assert METADATA_TRANSFORM_KEY in fused["scale0"].data_vars
+        assert si_utils.is_dask_backed_dataarray(fused["scale0/image"])
         assert np.max(fused["scale0/image"].data.compute()) == 2
 
 
@@ -412,61 +651,82 @@ def test_large_shape_fusion():
     assert fused.data.shape[-1] > 60000
 
 
+@pytest.mark.parametrize("backend", ["dask", "zarr", "numpy"])
 @pytest.mark.parametrize(
     "input_chunksize",
     [
         {"y": 5, "x": 5},
         {"z": 4, "y": 5, "x": 5},
         {"z": 1, "y": 5, "x": 5},
-        {"y": None, "x": None},  # numpy input
+        {"y": None, "x": None},
     ],
 )
-def test_fusion_chunksizes(input_chunksize):
+def test_fusion_chunksizes(input_chunksize, backend):
     ndim = len(input_chunksize)
     output_chunksize = {
         dim: cs * 2 if cs is not None else 5
         for dim, cs in input_chunksize.items()
     }
 
-    sims = [
-        si_utils.get_sim_from_array(
-            da.zeros(
-                [2] + [10] * len(input_chunksize),
-                chunks=[1] + list(input_chunksize.values()),
-            )
-            if input_chunksize["x"] is not None
-            else np.zeros([2] + [10] * ndim),
-            dims=["c"] + list(input_chunksize.keys()),
-        )
-        for _ in range(2)
-    ]
+    if backend == "numpy" and input_chunksize["x"] is not None:
+        pytest.skip("numpy backend only applies to non-chunked input")
 
-    for set_output_chunksize in [True, False]:
-        fused = fusion.fuse(
-            sims,
-            transform_key=METADATA_TRANSFORM_KEY,
-            output_chunksize=output_chunksize
-            if set_output_chunksize
-            else None,
-        )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sims = []
+        for isim in range(2):
+            shape = [2] + [10] * len(input_chunksize)
+            dims = ["c"] + list(input_chunksize.keys())
 
-        if set_output_chunksize:
-            expected_chunksize = output_chunksize
-        else:
-            if input_chunksize["x"] is not None:
-                expected_chunksize = input_chunksize
+            if backend == "dask":
+                array = da.zeros(
+                    shape,
+                    chunks=[1] + list(input_chunksize.values()),
+                )
+                sim = si_utils.get_sim_from_array(array, dims=dims)
+            elif backend == "zarr":
+                if input_chunksize["x"] is None:
+                    pytest.skip("zarr backend requires explicit source chunks")
+
+                zarray = zarr.open_array(
+                    os.path.join(tmpdir, f"input_{isim}.zarr"),
+                    mode="w",
+                    shape=tuple(shape),
+                    chunks=tuple([1] + list(input_chunksize.values())),
+                    dtype=np.float32,
+                )
+                sim = si_utils.get_sim_from_array(zarray, dims=dims)
             else:
-                expected_chunksize = {
-                    dim: min(
-                        fused.shape[-ndim + idim],
-                        si_utils.get_default_spatial_chunksizes(ndim)[dim],
-                    )
-                    for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
-                }
-        assert all(
-            fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
-            for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
-        )
+                array = np.zeros(shape)
+                sim = si_utils.get_sim_from_array(array, dims=dims)
+
+            sims.append(sim)
+
+        for set_output_chunksize in [True, False]:
+            fused = fusion.fuse(
+                sims,
+                transform_key=METADATA_TRANSFORM_KEY,
+                output_chunksize=output_chunksize
+                if set_output_chunksize
+                else None,
+            )
+
+            if set_output_chunksize:
+                expected_chunksize = output_chunksize
+            else:
+                if backend in ["dask", "zarr"] and input_chunksize["x"] is not None:
+                    expected_chunksize = input_chunksize
+                else:
+                    expected_chunksize = {
+                        dim: min(
+                            fused.shape[-ndim + idim],
+                            si_utils.get_default_spatial_chunksizes(ndim)[dim],
+                        )
+                        for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
+                    }
+            assert all(
+                fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
+                for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
+            )
 
 
 def test_fuse_to_zarr():
@@ -476,7 +736,7 @@ def test_fuse_to_zarr():
         )
     
     fuse_kwargs = {
-        "sims": sims,
+        "images": sims,
         "transform_key": METADATA_TRANSFORM_KEY,
     }
 
@@ -535,3 +795,41 @@ def test_fuse_to_zarr():
         )
 
         assert fused.max().compute() > 0
+
+
+@pytest.mark.parametrize("backend", ["dask", "zarr"])
+def test_fuse_use_cupy(backend):
+    try:
+        import cupy as cp
+    except ImportError:
+        pytest.skip("CuPy not available")
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=20,
+        tiles_x=2,
+        tiles_y=1,
+        overlap=5,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if backend == "zarr":
+            sims = [
+                _sim_to_zarr_backed_sim(
+                    sim,
+                    os.path.join(tmpdir, f"view_{i}.zarr"),
+                    METADATA_TRANSFORM_KEY,
+                )
+                for i, sim in enumerate(sims)
+            ]
+
+        fused = fusion.fuse(
+            sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            use_cupy=True,
+        ).compute(scheduler="single-threaded")
+
+    assert fused.dtype == sims[0].dtype
+    assert isinstance(fused.data, np.ndarray)

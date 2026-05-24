@@ -49,10 +49,9 @@ dependencies = [
     "tqdm",
     "matplotlib",
     "scikit-image >=0.21.0",
-    "spatial_image ==1.2.3",
-    "multiscale_spatial_image ==2.0.3",
     "ngff-zarr >=0.12.2",
-    "ome-zarr >=0.10.2"
+    "ome-zarr >=0.10.2",
+    "aiohttp"
 ]
 dynamic = [
     "version",

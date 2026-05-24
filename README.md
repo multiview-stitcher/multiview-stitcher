@@ -24,7 +24,7 @@ Documentation available [here](https://multiview-stitcher.github.io/multiview-st
 
   - easily integrate into existing Python-based workflows (within Jupyter notebooks, scripts, etc.) 🐍
   - scale to very large datasets using mature Python tooling (using `dask`, `zarr-python`, `ray`) 🚀
-  - make use of community-developed data representations (`xarray`, `spatial-image`, `multiscale-spatial-image`, `spatialdata`) 🤓
+  - make use of community-developed data representations (`xarray.DataArray`, `xarray.DataTree`, `spatialdata`) 🤓
   - ensure compatibility with and optimal usage of modern file formats and standards, e.g. [OME-Zarr](https://ome-ngff.readthedocs.io/en/latest/)
   - swap in custom methods for registration and fusion that are readily available in the Python ecosystem (e.g. from `scikit-image`, `ANTs`, `elastix`, `SimpleITK`) 🔧
   

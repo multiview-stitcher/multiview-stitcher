@@ -115,6 +115,30 @@ msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
 !!! note "Affine transforms for rotated tiles"
     If our tiles are rotated or sheared (e.g. light-sheet multi-view data), pass the full homogeneous affine matrix via `affine=` instead of `scale` + `translation`. The matrix maps coordinates in "physical image coordinates" (scale/spacing and translation/origin already applied) to physical coordinates.
 
+### Loading directly from a Zarr array
+
+If our data already lives in a plain Zarr array, we can pass that array directly to `si_utils.get_sim_from_array`:
+
+```python
+import zarr
+from multiview_stitcher import spatial_image_utils as si_utils
+
+zarray = zarr.open("my_tile.zarr", mode="r")
+
+sim = si_utils.get_sim_from_array(
+    zarray,
+    dims=["c", "z", "y", "x"],
+    scale={"z": 2.0, "y": 0.5, "x": 0.5},
+    translation={"z": 0.0, "y": 100.0, "x": 200.0},
+    transform_key="stage_metadata",
+)
+```
+
+This keeps the `sim` **zarr-backed**. In practice, this means the image data stays in the Zarr store and is only read when needed.
+
+!!! tip
+    If our main goal is fusion and the input data is already stored as Zarr, this is often a very good option. Both zarr-backed and dask-backed inputs are read on demand and only from the needed regions, but the zarr-backed path avoids an extra zarr-to-dask layer and can therefore keep the dask graph and computation lighter.
+
 ---
 
 ## Putting it all together
@@ -171,11 +195,26 @@ Continue to the [Registration overview](registration_overview.md) for the next s
 from multiview_stitcher import ngff_utils
 
 # Read all resolution levels → MultiscaleSpatialImage
-msim = ngff_utils.read_msim_from_ome_zarr("my_tile.ome.zarr", transform_key="stage_metadata")
+msim = ngff_utils.read_msim_from_ome_zarr(
+    "my_tile.ome.zarr",
+    transform_key="stage_metadata",
+    use_dask=False,
+)
 
 # Read a single resolution level → SpatialImage
-sim = ngff_utils.read_sim_from_ome_zarr("my_tile.ome.zarr", resolution_level=0, transform_key="stage_metadata")
+sim = ngff_utils.read_sim_from_ome_zarr(
+    "my_tile.ome.zarr",
+    resolution_level=0,
+    transform_key="stage_metadata",
+    use_dask=False,
+)
 ```
+
+By default, `use_dask=False`, so the returned image data stays **zarr-backed** (without wrapping in Dask arrays).
+Set `use_dask=True` if we explicitly want Dask arrays instead.
+
+!!! tip
+    For fusion, the default `use_dask=False` mode is often the best starting point for OME-Zarr inputs. Both `use_dask=False` and `use_dask=True` read data on demand and only from the needed regions, but `use_dask=False` avoids an extra zarr-to-dask layer and often keeps the dask graph smaller.
 
 !!! note
     OME-Zarr versions 0.4 and 0.5 do not store affine transforms, so the loaded image will have an identity transform set for the given `transform_key`. Set the correct tile/view transforms via `msi_utils.set_affine_transform` (or `si_utils.set_affine_transform` for `SpatialImage`) before registration or fusion.

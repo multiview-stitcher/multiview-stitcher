@@ -666,6 +666,11 @@ def tile_pair_image_metrics(
             sim_fixed = sims_t0[fixed_idx]
             sim_moving = sims_t0[moving_idx]
 
+        # Ensure dask-backed up front so that all subsequent operations
+        # (astype, transform_sim) stay lazy for zarr-backed inputs.
+        sim_fixed = spatial_image_utils.ensure_dask_backed_dataarray(sim_fixed)
+        sim_moving = spatial_image_utils.ensure_dask_backed_dataarray(sim_moving)
+
         lower_intrinsic = comparison_bbox["lower"]
         upper_intrinsic = comparison_bbox["upper"]
 

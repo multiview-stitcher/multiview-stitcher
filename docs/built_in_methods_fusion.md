@@ -47,7 +47,8 @@ contribute at each pixel.
 | `sample_boundary_erosion_px` | `0` | Pixels to erode the union coverage mask before zeroing output; removes the bright-ring artefact at the outer sample boundary. |
 
 **GPU support:** When the input arrays are `cupy` arrays, convolutions run on
-the GPU via `cupyx.scipy.ndimage`.
+the GPU via `cupyx.scipy.ndimage`. Use `use_cupy=True` in `fusion.fuse` to
+enable this automatically.
 
 **Chunk overlap:** `multi_view_deconvolution` declares a
 `required_overlap` equal to the PSF half-width, ensuring chunked fusion does
@@ -56,13 +57,8 @@ not introduce seam artefacts at block boundaries.
 **Minimal usage example:**
 
 ```python
-import cupy as cp  # optional – omit for CPU-only
 from multiview_stitcher import fusion
 from multiview_stitcher.fusion import multi_view_deconvolution
-
-# (optional) send data to GPU
-for sim in sims:
-    sim.data = sim.data.map_blocks(cp.asarray)
 
 fused = fusion.fuse(
     images=sims,
@@ -74,10 +70,8 @@ fused = fusion.fuse(
         na=0.8,
         wavelength_um=0.52,
     ),
+    use_cupy=True,  # optional – omit for CPU-only
 )
-
-# (optional) retrieve result from GPU
-fused.data = fused.data.map_blocks(cp.asnumpy)
 ```
 
 ## Blending weights

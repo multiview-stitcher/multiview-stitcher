@@ -1,6 +1,5 @@
 import dask.array as da
 import numpy as np
-import spatial_image as si
 from dask_image.ndinterp import affine_transform as dask_image_affine_transform
 from scipy.ndimage import affine_transform
 
@@ -79,28 +78,30 @@ def transform_sim(
         "order": 1,
     } | affine_transform_kwargs
 
-    if isinstance(sim.data, da.core.Array):
+    backend_data = spatial_image_utils._get_backend_data(sim)
+
+    if spatial_image_utils.is_dask_backed_dataarray(sim):
         out_data = dask_image_affine_transform(
-            sim.data,
+            backend_data,
             **affine_transform_kwargs,
         )
     else:
         # check if sim.data is a cupy array
-        if cp is not None and isinstance(sim.data, cp.ndarray):
+        if cp is not None and isinstance(backend_data, cp.ndarray):
             # use cupyx.scipy.ndimage for affine transform
             matrix = cp.asarray(affine_transform_kwargs.pop("matrix"))
             out_data = cupyx.scipy.ndimage.affine_transform(
-                sim.data,
+                backend_data,
                 matrix=matrix,
                 **affine_transform_kwargs,
             )
         else:
             out_data = affine_transform(
-                sim.data,
+                backend_data,
                 **affine_transform_kwargs,
             )
 
-    sim = si.to_spatial_image(
+    sim = spatial_image_utils.to_spatial_image(
         out_data,
         dims=sim.dims,
         scale=output_stack_properties["spacing"],

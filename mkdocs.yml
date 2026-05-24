@@ -78,6 +78,7 @@ nav:
   - Miscellaneous:
     - implementation_details.md
     - objects.md
+    - zarr_backed_vs_dask_backed_fusion.md
     - stitching_in_the_browser.md
     - chart.md
     - features.md

@@ -1,9 +1,9 @@
+import copy
 import os
 from functools import wraps
 from pathlib import Path
 
 import dask.array as da
-import multiscale_spatial_image as msi
 import numpy as np
 import xarray as xr
 from xarray import DataTree
@@ -15,6 +15,58 @@ from multiview_stitcher import spatial_image_utils as si_utils
 def is_msim(image):
     """Return whether ``image`` follows the multiscale DataTree layout."""
     return isinstance(image, DataTree)
+
+
+def _mean_dtype(array, axis=None):
+    return array.mean(axis=axis).astype(array.dtype)
+
+
+def _chunk_sim(sim, chunks):
+    return sim.chunk({dim: chunks[dim] for dim in sim.dims if dim in chunks})
+
+
+def _sim_to_dataset(sim):
+    dataset = sim.to_dataset(name="image")
+    dataset.attrs = {}
+    dataset["image"].attrs = {
+        key: copy.deepcopy(dataset["image"].attrs[key])
+        for key in ["_zarr_chunks", "_zarr_dims"]
+        if key in dataset["image"].attrs
+    }
+    return dataset
+
+
+def _downsample_sim(sim, scale_factor, chunks):
+    spatial_dims = si_utils.get_spatial_dims_from_sim(sim)
+    if not isinstance(scale_factor, dict):
+        scale_factor = {dim: int(scale_factor) for dim in spatial_dims}
+
+    scale_factor = {
+        dim: int(scale_factor.get(dim, 1)) for dim in spatial_dims
+    }
+
+    downsampled = sim.coarsen(
+        {dim: scale_factor[dim] for dim in spatial_dims},
+        boundary="trim",
+    ).reduce(_mean_dtype)
+
+    spacing = si_utils.get_spacing_from_sim(sim)
+    origin = si_utils.get_origin_from_sim(sim)
+
+    downsampled_sim = si_utils.to_spatial_image(
+        downsampled.data,
+        dims=sim.dims,
+        scale={dim: spacing[dim] * scale_factor[dim] for dim in spatial_dims},
+        translation={
+            dim: origin[dim] + (scale_factor[dim] - 1) * spacing[dim] / 2
+            for dim in spatial_dims
+        },
+        t_coords=sim.coords["t"].values if "t" in sim.coords else None,
+        c_coords=sim.coords["c"].values if "c" in sim.coords else None,
+    )
+    downsampled_sim.attrs.update(copy.deepcopy(sim.attrs))
+
+    return _chunk_sim(downsampled_sim, chunks)
 
 
 def get_store_decorator(store_path, store_overwrite=False):
@@ -227,7 +279,8 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
     ndim = si_utils.get_ndim_from_sim(sim)
 
-    sim_attrs = sim.attrs.copy()
+    sim = sim.copy()
+    sim_attrs = copy.deepcopy(sim.attrs)
 
     spatial_shape = si_utils.get_shape_from_sim(sim)
 
@@ -236,9 +289,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
         scale_factors = scale_factors[1:]  # remove input scale
 
     if chunks is None:
-        if isinstance(sim.data, da.Array):
+        sim_backend = getattr(sim.variable, "_data", None)
+        if isinstance(sim_backend, da.Array):
             chunks = {
-                dim: sim.data.chunksize[idim]
+                dim: sim_backend.chunksize[idim]
                 for idim, dim in enumerate(sim.dims)
             }
         else:
@@ -248,17 +302,26 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
                 for dim in sim.dims
             }
 
-    msim = msi.to_multiscale(
-        sim,
-        chunks=chunks,
-        scale_factors=scale_factors,
+    if si_utils.is_xarray_zarr_backed(sim):
+        sims = [
+            sim if len(scale_factors) == 0 else si_utils.ensure_dask_backed_dataarray(sim)
+        ]
+    else:
+        sims = [_chunk_sim(sim, chunks)]
+
+    for scale_factor in scale_factors:
+        sims.append(_downsample_sim(sims[-1], scale_factor, chunks))
+
+    msim = DataTree.from_dict(
+        {
+            f"scale{iscale}": _sim_to_dataset(curr_sim)
+            for iscale, curr_sim in enumerate(sims)
+        }
     )
 
     if "transforms" in sim_attrs:
         scale_keys = get_sorted_scale_keys(msim)
         for sk in scale_keys:
-            msim[sk].attrs = {}
-            msim[sk]["image"].attrs = {}
             for transform_key, transform in sim_attrs["transforms"].items():
                 msim[sk][transform_key] = transform
 
