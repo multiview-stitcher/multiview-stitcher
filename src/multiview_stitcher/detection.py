@@ -1,5 +1,3 @@
-import inspect
-
 import dask.array as da
 import numpy as np
 import xarray as xr
@@ -7,7 +5,6 @@ from scipy import ndimage
 
 from multiview_stitcher import msi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
-from multiview_stitcher.misc_utils import clear_cupy_memory
 
 try:
     import cupy as cp
@@ -39,83 +36,6 @@ def _compute_point_indices(mask):
     return np.argwhere(np.asarray(mask))
 
 
-def _function_accepts_kwarg(func, kwarg):
-    try:
-        signature = inspect.signature(func)
-    except (TypeError, ValueError):
-        return False
-
-    if kwarg in signature.parameters:
-        return True
-
-    return any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in signature.parameters.values()
-    )
-
-
-def _prepare_detection_func_kwargs(
-    detection_func,
-    detection_func_kwargs,
-    threshold_rel,
-    threshold_abs,
-    cupy,
-):
-    if detection_func_kwargs is None:
-        detection_func_kwargs = {}
-    else:
-        detection_func_kwargs = dict(detection_func_kwargs)
-
-    optional_kwargs = {
-        "threshold_rel": threshold_rel,
-        "threshold_abs": threshold_abs,
-        "cupy": cupy,
-    }
-    for key, value in optional_kwargs.items():
-        if (
-            key not in detection_func_kwargs
-            and _function_accepts_kwarg(detection_func, key)
-        ):
-            detection_func_kwargs[key] = value
-
-    return detection_func_kwargs
-
-
-def _normalize_overlap(overlap, sdims):
-    if isinstance(overlap, dict):
-        return tuple(int(np.ceil(overlap[dim])) for dim in sdims)
-
-    if np.isscalar(overlap):
-        return tuple(int(np.ceil(overlap)) for _ in sdims)
-
-    overlap = tuple(overlap)
-    if len(overlap) != len(sdims):
-        raise ValueError(
-            f"detection_overlap must have {len(sdims)} values, "
-            f"got {len(overlap)}."
-        )
-
-    return tuple(int(np.ceil(value)) for value in overlap)
-
-
-def _get_detection_overlap(
-    detection_func,
-    target_size_pixels,
-    detection_func_kwargs,
-    detection_overlap,
-    sdims,
-):
-    has_overlap = hasattr(detection_func, "required_overlap")
-    if detection_overlap is None and has_overlap:
-        detection_overlap = detection_func.required_overlap(
-            target_size_pixels,
-            **detection_func_kwargs,
-        )
-
-    if detection_overlap is None:
-        detection_overlap = target_size_pixels
-
-    return _normalize_overlap(detection_overlap, sdims)
 
 
 def _run_detection_func(
@@ -261,9 +181,6 @@ def detect_beads(
     detection_func_kwargs=None,
     detection_overlap=None,
     segmentation_res_level=None,
-    threshold_rel=0.2,
-    threshold_abs=None,
-    cupy=False,
 ):
     """
     Detect bright fiducial beads in a multiscale spatial image.
@@ -290,7 +207,7 @@ def detect_beads(
         with the same shape as ``image``. By default, ``log_detect`` is used.
     detection_func_kwargs : dict or None, optional
         Additional keyword arguments passed to ``detection_func``.
-    detection_overlap : int, sequence[int], dict[str, int], or None, optional
+    detection_overlap : int, dict[str, int], or None, optional
         Pixel overlap used when mapping ``detection_func`` over dask chunks.
         If ``None`` and the detection function exposes a ``required_overlap``
         attribute, that value is used. Otherwise the bead size in pixels is
@@ -299,12 +216,6 @@ def detect_beads(
         Resolution level used for segmentation, e.g. ``0``.
         When ``None``, the coarsest level whose spacing is no larger than one
         quarter of ``target_size_physical`` is used.
-    threshold_rel : float, optional
-        Passed to ``detection_func`` if it accepts a ``threshold_rel`` keyword.
-    threshold_abs : float or None, optional
-        Passed to ``detection_func`` if it accepts a ``threshold_abs`` keyword.
-    cupy : bool, optional
-        Passed to ``detection_func`` if it accepts a ``cupy`` keyword.
 
     Returns
     -------
@@ -316,11 +227,8 @@ def detect_beads(
         ``spatial_image_utils.set_point_set``.
     """
 
-    if cupy and cp is None:
-        raise ImportError(
-            "cupy=True was requested, but CuPy is not installed."
-        )
-
+    # Pick the multiscale resolution level to run detection on.
+    # A finer level than necessary wastes memory; a coarser one may miss beads.
     if segmentation_res_level is not None:
         scale_key = f"scale{segmentation_res_level}"
 
@@ -330,6 +238,8 @@ def detect_beads(
                 f"in the multiscale image."
             )
     else:
+        # Auto-select: find the coarsest level whose voxel spacing is still
+        # ≤ target_size / 4, so each bead spans at least ~4 pixels per axis.
         sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
         sdims0 = si_utils.get_spatial_dims_from_sim(sim0)
         target_size0 = si_utils.normalize_to_spatial_dict(
@@ -338,6 +248,8 @@ def detect_beads(
         target_spacing = {dim: target_size0[dim] / 4.0 for dim in sdims0}
         res_level = msi_utils.get_res_level_from_spacing(msim, target_spacing)
         scale_key = f"scale{res_level}"
+
+    # Load the chosen level as a single spatial field (drop t/c if present).
     sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
     sim = si_utils.get_sim_field(sim)
     sim = si_utils.ensure_dask_backed_dataarray(sim)
@@ -345,27 +257,38 @@ def detect_beads(
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
     origin = si_utils.get_origin_from_sim(sim)
+
+    # Convert physical bead size to pixels for detection_func.
     target_size = si_utils.normalize_to_spatial_dict(
         target_size_physical, sdims, "target_size_physical"
     )
     target_size_pixels = tuple(
         target_size[dim] / spacing[dim] for dim in sdims
     )
-    detection_func_kwargs = _prepare_detection_func_kwargs(
-        detection_func,
-        detection_func_kwargs,
-        threshold_rel,
-        threshold_abs,
-        cupy,
-    )
-    detection_overlap = _get_detection_overlap(
-        detection_func,
-        target_size_pixels,
-        detection_func_kwargs,
-        detection_overlap,
-        sdims,
-    )
 
+    detection_func_kwargs = dict(detection_func_kwargs) if detection_func_kwargs is not None else {}
+
+    if detection_overlap is not None and not isinstance(detection_overlap, (int, dict)):
+        raise TypeError(
+            f"detection_overlap must be an int, a dict, or None; "
+            f"got {type(detection_overlap).__name__}."
+        )
+
+    # Determine how many pixels of overlap are needed between dask chunks so
+    # that detection results near chunk boundaries are not clipped.
+    if detection_overlap is None and hasattr(detection_func, "required_overlap"):
+        detection_overlap = dict(zip(sdims, detection_func.required_overlap(
+            target_size_pixels,
+            **detection_func_kwargs,
+        )))
+    if detection_overlap is None:
+        detection_overlap = dict(zip(sdims, target_size_pixels))
+    detection_overlap = si_utils.normalize_to_spatial_dict(
+        detection_overlap, sdims, "detection_overlap"
+    )
+    detection_overlap = tuple(int(np.ceil(detection_overlap[dim])) for dim in sdims)
+
+    # Run detection, with chunk overlap for dask arrays.
     if isinstance(sim.data, da.Array):
         mask = da.map_overlap(
             _run_detection_func,
@@ -386,6 +309,7 @@ def detect_beads(
             detection_func_kwargs=detection_func_kwargs,
         )
 
+    # Collect pixel indices of detected beads and convert to physical coords.
     point_indices = _compute_point_indices(mask)
 
     positions = np.empty((len(point_indices), len(sdims)), dtype=float)
@@ -393,9 +317,6 @@ def detect_beads(
         positions[:, idim] = (
             origin[dim] + point_indices[:, idim] * spacing[dim]
         )
-
-    if cupy and cp is not None:
-        clear_cupy_memory()
 
     return xr.DataArray(
         positions,

@@ -59,7 +59,7 @@ def test_detect_beads_returns_intrinsic_physical_positions():
     positions = detection.detect_beads(
         msim,
         target_size_physical=2.0,
-        threshold_rel=0.3,
+        detection_func_kwargs={"threshold_rel": 0.3},
     )
 
     expected = np.column_stack(
