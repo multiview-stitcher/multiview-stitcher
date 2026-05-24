@@ -64,6 +64,7 @@ fused_msim["scale0/image"].data.compute()
 | `output_zarr_url` | `None` | If set, fuse directly to a Zarr store and return a store-backed `SpatialImage` (recommended for large datasets) |
 | `zarr_options` | `None` | Options for Zarr output (see below) |
 | `batch_options` | `None` | Options for parallel batch processing of chunks when `output_zarr_url` is set |
+| `backend` | `None` | Compute backend: `None` or `"numpy"` for CPU, `"cupy"` for GPU (requires CuPy) |
 
 ---
 
@@ -205,13 +206,13 @@ fused_sim = fusion.fuse(
 
 ## GPU acceleration
 
-Pass `use_cupy=True` to run resampling, blending weight calculation and fusion on the GPU.
+Pass `backend="cupy"` to run resampling, blending weight calculation and fusion on the GPU.
 
 ```python
 fused_sim = fusion.fuse(
     images=sims,
     transform_key="translation_registered",
-    use_cupy=True,
+    backend="cupy",
 )
 ```
 
