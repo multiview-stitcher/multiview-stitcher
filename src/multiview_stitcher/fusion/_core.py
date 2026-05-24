@@ -144,7 +144,7 @@ def _fuse_block_zarr_backed(
     interpolation_order,
     blending_widths,
     shrink_distance,
-    use_cupy=False,
+    backend=None,
 ):
     """
     Compute fused output for a single chunk from zarr-backed input sims.
@@ -227,7 +227,7 @@ def _fuse_block_zarr_backed(
         full_view_bbs=full_view_bbs,
         blending_widths=blending_widths,
         shrink_distance=shrink_distance,
-        use_cupy=use_cupy,
+        backend=backend,
     )
 
     # Restore the z-axis removed for planewise fusion.
@@ -322,7 +322,7 @@ def fuse(
     output_zarr_url: str | None = None,
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
-    use_cupy: bool = False,
+    backend: str | None = None,
     sims: list | None = None,
 ):
     """
@@ -405,14 +405,14 @@ def fuse(
             (n_batch>1 only compatible with a provided batch_func). By default 1.
         - batch_func_kwargs: dict, optional
             Additional keyword arguments passed to batch_func.
-    use_cupy : bool, optional
-        If True, each input tile chunk is transferred to the GPU (via
-        ``cupy.asarray``) immediately before fusion and the result is moved
-        back to NumPy with ``cupy.asnumpy`` before it is returned.  This
-        means resampling (affine transform), blending-weight computation, and
-        the fusion function all run on the GPU (for fusion functions that support
-        cupy array input). Requires CuPy to be installed; raises ``ImportError``
-        if CuPy is not available.  By default False.
+    backend : str or None, optional
+        Compute backend to use for fusion. "numpy" (default) runs on the
+        CPU. "cupy" transfers each input chunk to the GPU via
+        cupy.asarray, runs resampling, blending-weight computation, and
+        the fusion function on the GPU, then returns a NumPy-backed result via
+        cupy.asnumpy. Requires CuPy to be installed; raises
+        ImportError if CuPy is not available. None is equivalent to
+        "numpy".
     Returns
     -------
     SpatialImage or MultiscaleSpatialImage
@@ -495,7 +495,7 @@ def fuse(
                 output_zarr_url=output_zarr_url,
                 zarr_options=zarr_options,
                 batch_options=batch_options,
-                use_cupy=use_cupy,
+                backend=backend,
             )
 
             if (zarr_options or {}).get("ome_zarr", False):
@@ -563,7 +563,7 @@ def fuse(
                     overlap_in_pixels=overlap_in_pixels,
                     interpolation_order=interpolation_order,
                     blending_widths=blending_widths,
-                    use_cupy=use_cupy,
+                    backend=backend,
                 )
             )
 
@@ -616,7 +616,7 @@ def fuse(
             "overlap_in_pixels": overlap_in_pixels,
             "interpolation_order": interpolation_order,
             "blending_widths": blending_widths,
-            "use_cupy": use_cupy,
+            "backend": backend,
         }
 
         # Prepare block fusion and process in batches
@@ -949,7 +949,7 @@ def fuse(
                 interpolation_order=interpolation_order,
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
-                use_cupy=use_cupy,
+                backend=backend,
             )
         else:
             # === dask path: per-chunk delayed tasks ===
@@ -1046,7 +1046,7 @@ def fuse(
                     full_view_bbs=full_view_bbs,
                     blending_widths=blending_widths,
                     shrink_distance=shrink_distance,
-                    use_cupy=use_cupy,
+                    backend=backend,
                 )
 
                 fused_output_chunk = da.from_delayed(
@@ -1121,7 +1121,7 @@ def fuse_np(
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
     shrink_distance=0,
-    use_cupy: bool = False,
+    backend: str | None = None,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -1166,10 +1166,10 @@ def fuse_np(
     #             translation=origins[isim],
     #         )
 
-    if use_cupy:
+    if backend == "cupy":
         if cp is None:
             raise ImportError(
-                "CuPy is not installed. Install it to use use_cupy=True."
+                "CuPy is not installed. Install it to use backend='cupy'."
             )
         sims = [
             sim.copy(data=cp.asarray(si_utils._get_backend_data(sim)))
@@ -1219,7 +1219,7 @@ def fuse_np(
                 affine=params[iview],
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
-                cupy=use_cupy,
+                cupy=(backend == "cupy"),
             )
             for iview in range(len(sims))
         ]

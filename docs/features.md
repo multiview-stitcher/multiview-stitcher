@@ -34,7 +34,7 @@ Below is a list of features which are either already implemented or are on the r
 
 - [x] Modular API to plug in different fusion and weight functions
 - [ ] Support for fusion label maps
-- [x] GPU-accelerated fusion via `use_cupy=True`
+- [x] GPU-accelerated fusion via `backend="cupy"`
 
 ### Supported fusion methods:
 

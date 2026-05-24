@@ -798,7 +798,7 @@ def test_fuse_to_zarr():
 
 
 @pytest.mark.parametrize("backend", ["dask", "zarr"])
-def test_fuse_use_cupy(backend):
+def test_fuse_with_cupy_backend(data_backend):
     try:
         import cupy as cp
     except ImportError:
@@ -815,7 +815,7 @@ def test_fuse_use_cupy(backend):
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        if backend == "zarr":
+        if data_backend == "zarr":
             sims = [
                 _sim_to_zarr_backed_sim(
                     sim,
@@ -828,7 +828,7 @@ def test_fuse_use_cupy(backend):
         fused = fusion.fuse(
             sims,
             transform_key=METADATA_TRANSFORM_KEY,
-            use_cupy=True,
+            backend="cupy",
         ).compute(scheduler="single-threaded")
 
     assert fused.dtype == sims[0].dtype

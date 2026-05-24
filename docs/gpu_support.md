@@ -1,6 +1,6 @@
 # GPU support
 
-Fusion supports GPU acceleration via [CuPy](https://cupy.dev/). Pass `use_cupy=True` to `fusion.fuse` and `multiview-stitcher` will transfer each input chunk to the GPU, run resampling, blending, and the fusion function there, and return a regular NumPy-backed output.
+Fusion supports GPU acceleration via [CuPy](https://cupy.dev/). Pass `backend="cupy"` to `fusion.fuse` and `multiview-stitcher` will transfer each input chunk to the GPU, run resampling, blending, and the fusion function there, and return a regular NumPy-backed output.
 
 ## Installation
 
@@ -14,13 +14,13 @@ from multiview_stitcher import fusion
 fused_sim = fusion.fuse(
     images=sims, # or msims for multiscale
     transform_key="stage_metadata",
-    use_cupy=True,
+    backend="cupy",
 )
 
 fused_sim.data.compute()
 ```
 
-`use_cupy=True` also works with `output_zarr_url` for large datasets. In this case, setting `n_jobs` as in the example below allows limiting the number of parallel GPU batch processes, which can help manage GPU memory usage:
+`backend="cupy"` also works with `output_zarr_url` for large datasets. In this case, setting `n_jobs` as in the example below allows limiting the number of parallel GPU batch processes, which can help manage GPU memory usage:
 
 ```python
 from multiview_stitcher import fusion, misc_utils
@@ -28,7 +28,7 @@ from multiview_stitcher import fusion, misc_utils
 fused_sim = fusion.fuse(
     images=msims,
     transform_key="stage_metadata",
-    use_cupy=True,
+    backend="cupy",
     output_zarr_url="fused.ome.zarr",
     zarr_options={
         "ome_zarr": True

@@ -58,6 +58,6 @@ As with custom fusion functions, optional arguments are only passed when they ar
 
 ## CuPy support
 
-If `fuse(..., use_cupy=True)` is passed, the fusion and weight functions receive CuPy arrays as input and should return a CuPy array as output. The built-in fusion and weight functions support CuPy arrays (in large part by using the NumPy Array API which transparently dispatches functions to their numpy or cupy implementations based on the input array type).
+If `fuse(..., backend="cupy")` is passed, the fusion and weight functions receive CuPy arrays as input and should return a CuPy array as output. The built-in fusion and weight functions support CuPy arrays (in large part by using the NumPy Array API which transparently dispatches functions to their numpy or cupy implementations based on the input array type).
 
 See [GPU support](gpu_support.md) for further details and examples.

@@ -47,7 +47,7 @@ contribute at each pixel.
 | `sample_boundary_erosion_px` | `0` | Pixels to erode the union coverage mask before zeroing output; removes the bright-ring artefact at the outer sample boundary. |
 
 **GPU support:** When the input arrays are `cupy` arrays, convolutions run on
-the GPU via `cupyx.scipy.ndimage`. Use `use_cupy=True` in `fusion.fuse` to
+the GPU via `cupyx.scipy.ndimage`. Use `backend="cupy"` in `fusion.fuse` to
 enable this automatically.
 
 **Chunk overlap:** `multi_view_deconvolution` declares a
@@ -70,7 +70,7 @@ fused = fusion.fuse(
         na=0.8,
         wavelength_um=0.52,
     ),
-    use_cupy=True,  # optional – omit for CPU-only
+    backend="cupy",  # optional – omit for CPU-only
 )
 ```
 
