@@ -450,6 +450,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Building input from NumPy / Dask arrays">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loading-directly-from-a-zarr-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      Loading directly from a Zarr array
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1321,6 +1336,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../zarr_backed_vs_dask_backed_fusion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Zarr-backed vs Dask-backed fusion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stitching_in_the_browser/" class="md-nav__link">
         
   
@@ -1625,6 +1661,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Building input from NumPy / Dask arrays">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loading-directly-from-a-zarr-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      Loading directly from a Zarr array
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1813,53 +1864,88 @@ transform keys from the highest-resolution level to the coarser levels.</p>
 <p class="admonition-title">Affine transforms for rotated tiles</p>
 <p>If our tiles are rotated or sheared (e.g. light-sheet multi-view data), pass the full homogeneous affine matrix via <code>affine=</code> instead of <code>scale</code> + <code>translation</code>. The matrix maps coordinates in "physical image coordinates" (scale/spacing and translation/origin already applied) to physical coordinates.</p>
 </div>
+<h3 id="loading-directly-from-a-zarr-array">Loading directly from a Zarr array</h3>
+<p>If our data already lives in a plain Zarr array, we can pass that array directly to <code>si_utils.get_sim_from_array</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span> <span class="nn">zarr</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">zarray</span> <span class="o">=</span> <span class="n">zarr</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;my_tile.zarr&quot;</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">zarray</span><span class="p">,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">dims</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;z&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">],</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">scale</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;z&quot;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">},</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">translation</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;z&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mf">100.0</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">200.0</span><span class="p">},</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>This keeps the <code>sim</code> <strong>zarr-backed</strong>. In practice, this means the image data stays in the Zarr store and is only read when needed.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>If our main goal is fusion and the input data is already stored as Zarr, this is often a very good option. Both zarr-backed and dask-backed inputs are read on demand and only from the needed regions, but the zarr-backed path avoids an extra zarr-to-dask layer and can therefore keep the dask graph and computation lighter.</p>
+</div>
 <hr />
 <h2 id="putting-it-all-together">Putting it all together</h2>
 <p>A minimal end-to-end data loading snippet for a 3-tile 2-D dataset:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">msi_utils</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">tile_arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">))</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">)]</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">tile_translations</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">450</span><span class="p">},</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">900</span><span class="p">},</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">]</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">spacing</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">}</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="n">msims</span> <span class="o">=</span> <span class="p">[]</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="k">for</span> <span class="n">arr</span><span class="p">,</span> <span class="n">translation</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">tile_arrays</span><span class="p">,</span> <span class="n">tile_translations</span><span class="p">):</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>        <span class="n">arr</span><span class="p">,</span>
-</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>        <span class="n">dims</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">],</span>
-</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>        <span class="n">scale</span><span class="o">=</span><span class="n">spacing</span><span class="p">,</span>
-</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>        <span class="n">translation</span><span class="o">=</span><span class="n">translation</span><span class="p">,</span>
-</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
-</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>        <span class="n">c_coords</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;DAPI&quot;</span><span class="p">,</span> <span class="s2">&quot;GFP&quot;</span><span class="p">],</span>
-</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    <span class="p">)</span>
-</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>    <span class="n">msims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">msi_utils</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">tile_arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">))</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">)]</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">tile_translations</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">450</span><span class="p">},</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>   <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mi">900</span><span class="p">},</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">]</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">spacing</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">}</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="n">msims</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="k">for</span> <span class="n">arr</span><span class="p">,</span> <span class="n">translation</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">tile_arrays</span><span class="p">,</span> <span class="n">tile_translations</span><span class="p">):</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>    <span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>        <span class="n">arr</span><span class="p">,</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>        <span class="n">dims</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">],</span>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>        <span class="n">scale</span><span class="o">=</span><span class="n">spacing</span><span class="p">,</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>        <span class="n">translation</span><span class="o">=</span><span class="n">translation</span><span class="p">,</span>
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>        <span class="n">c_coords</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;DAPI&quot;</span><span class="p">,</span> <span class="s2">&quot;GFP&quot;</span><span class="p">],</span>
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>    <span class="p">)</span>
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="n">msims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
 </span></code></pre></div>
 <p>The resulting <code>msims</code> list is the direct input to <code>registration.register</code> and
 <code>fusion.fuse</code>. We can sanity-check the tile layout before proceeding:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">vis_utils</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">vis_utils</span><span class="o">.</span><span class="n">plot_positions</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span> <span class="n">use_positional_colors</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">vis_utils</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">vis_utils</span><span class="o">.</span><span class="n">plot_positions</span><span class="p">(</span><span class="n">msims</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span> <span class="n">use_positional_colors</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </span></code></pre></div>
 <p><img alt="Visualization of input tile configuration" src="../images/example_vis_utils.png" /></p>
 <p>Continue to the <a href="../registration_overview/">Registration overview</a> for the next step.</p>
 <hr />
 <h2 id="reading-from-ome-zarr">Reading from OME-Zarr</h2>
 <p><code>ngff_utils</code> provides two helpers to read OME-Zarr files (NGFF v0.4 / v0.5):</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">ngff_utils</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Read all resolution levels → MultiscaleSpatialImage</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_msim_from_ome_zarr</span><span class="p">(</span><span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">)</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Read a single resolution level → SpatialImage</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">sim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_sim_from_ome_zarr</span><span class="p">(</span><span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span> <span class="n">resolution_level</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">ngff_utils</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># Read all resolution levels → MultiscaleSpatialImage</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_msim_from_ome_zarr</span><span class="p">(</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">use_dask</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">)</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># Read a single resolution level → SpatialImage</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="n">sim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_sim_from_ome_zarr</span><span class="p">(</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="n">resolution_level</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">use_dask</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="p">)</span>
 </span></code></pre></div>
+<p>By default, <code>use_dask=False</code>, so the returned image data stays <strong>zarr-backed</strong> (without wrapping in Dask arrays).
+Set <code>use_dask=True</code> if we explicitly want Dask arrays instead.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>For fusion, the default <code>use_dask=False</code> mode is often the best starting point for OME-Zarr inputs. Both <code>use_dask=False</code> and <code>use_dask=True</code> read data on demand and only from the needed regions, but <code>use_dask=False</code> avoids an extra zarr-to-dask layer and often keeps the dask graph smaller.</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>OME-Zarr versions 0.4 and 0.5 do not store affine transforms, so the loaded image will have an identity transform set for the given <code>transform_key</code>. Set the correct tile/view transforms via <code>msi_utils.set_affine_transform</code> (or <code>si_utils.set_affine_transform</code> for <code>SpatialImage</code>) before registration or fusion.</p>
@@ -1867,41 +1953,41 @@ transform keys from the highest-resolution level to the coarser levels.</p>
 <hr />
 <h2 id="reading-tiles-from-ome-tiff">Reading tiles from OME-TIFF</h2>
 <p><a href="https://ome-types.readthedocs.io/"><code>ome-types</code></a> (<code>pip install ome-types</code>) extracts per-tile positions and pixel spacing from the embedded OME-XML metadata. Pixel data is loaded <strong>lazily</strong> via <code>dask.delayed</code> so that only the tiles actually needed are read from disk:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">import</span> <span class="nn">dask.array</span> <span class="k">as</span> <span class="nn">da</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">delayed</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="kn">import</span> <span class="nn">tifffile</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="kn">import</span> <span class="nn">ome_types</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">msi_utils</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">filepath</span> <span class="o">=</span> <span class="s2">&quot;my_dataset.ome.tiff&quot;</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">ome_metadata</span> <span class="o">=</span> <span class="n">ome_types</span><span class="o">.</span><span class="n">from_tiff</span><span class="p">(</span><span class="n">filepath</span><span class="p">)</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="n">sdims</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">]</span>  <span class="c1"># adjust to [&quot;z&quot;, &quot;y&quot;, &quot;x&quot;] for 3-D data</span>
-</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
-</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="n">msims</span> <span class="o">=</span> <span class="p">[]</span>
-</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="k">for</span> <span class="n">itile</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ome_metadata</span><span class="o">.</span><span class="n">images</span><span class="p">):</span>
-</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">pixels</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">pixels</span>
-</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="n">spacing</span>     <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">pixels</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;physical_size_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
-</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="n">translation</span> <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="n">pixels</span><span class="o">.</span><span class="n">planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;position_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
-</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="n">shape</span>       <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">pixels</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;size_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
-</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>    <span class="n">dtype</span>       <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">pixels</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
-</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>
-</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="c1"># lazy load — actual file I/O deferred until compute() is called</span>
-</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
-</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        <span class="n">delayed</span><span class="p">(</span><span class="n">tifffile</span><span class="o">.</span><span class="n">imread</span><span class="p">)(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">series</span><span class="o">=</span><span class="n">itile</span><span class="p">),</span>
-</span><span id="__span-6-24"><a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        <span class="n">shape</span><span class="o">=</span><span class="p">[</span><span class="n">shape</span><span class="p">[</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">],</span>
-</span><span id="__span-6-25"><a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span>
-</span><span id="__span-6-26"><a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>    <span class="p">)</span>
-</span><span id="__span-6-27"><a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>
-</span><span id="__span-6-28"><a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>    <span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
-</span><span id="__span-6-29"><a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>        <span class="n">data</span><span class="p">,</span>
-</span><span id="__span-6-30"><a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>        <span class="n">dims</span><span class="o">=</span><span class="n">sdims</span><span class="p">,</span> <span class="c1"># add channel dimension here if present</span>
-</span><span id="__span-6-31"><a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>        <span class="n">scale</span><span class="o">=</span><span class="n">spacing</span><span class="p">,</span>
-</span><span id="__span-6-32"><a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>        <span class="n">translation</span><span class="o">=</span><span class="n">translation</span><span class="p">,</span>
-</span><span id="__span-6-33"><a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
-</span><span id="__span-6-34"><a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>    <span class="p">)</span>
-</span><span id="__span-6-35"><a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a>    <span class="n">msims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[]))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">import</span> <span class="nn">dask.array</span> <span class="k">as</span> <span class="nn">da</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span> <span class="nn">dask</span> <span class="kn">import</span> <span class="n">delayed</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="kn">import</span> <span class="nn">tifffile</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="kn">import</span> <span class="nn">ome_types</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">msi_utils</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">filepath</span> <span class="o">=</span> <span class="s2">&quot;my_dataset.ome.tiff&quot;</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">ome_metadata</span> <span class="o">=</span> <span class="n">ome_types</span><span class="o">.</span><span class="n">from_tiff</span><span class="p">(</span><span class="n">filepath</span><span class="p">)</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="n">sdims</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">]</span>  <span class="c1"># adjust to [&quot;z&quot;, &quot;y&quot;, &quot;x&quot;] for 3-D data</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="n">msims</span> <span class="o">=</span> <span class="p">[]</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="k">for</span> <span class="n">itile</span><span class="p">,</span> <span class="n">image</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ome_metadata</span><span class="o">.</span><span class="n">images</span><span class="p">):</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">pixels</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">pixels</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>    <span class="n">spacing</span>     <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">pixels</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;physical_size_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>    <span class="n">translation</span> <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="n">pixels</span><span class="o">.</span><span class="n">planes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;position_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>    <span class="n">shape</span>       <span class="o">=</span> <span class="p">{</span><span class="n">dim</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">pixels</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;size_</span><span class="si">{</span><span class="n">dim</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">}</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>    <span class="n">dtype</span>       <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">pixels</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>    <span class="c1"># lazy load — actual file I/O deferred until compute() is called</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>        <span class="n">delayed</span><span class="p">(</span><span class="n">tifffile</span><span class="o">.</span><span class="n">imread</span><span class="p">)(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">series</span><span class="o">=</span><span class="n">itile</span><span class="p">),</span>
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="n">shape</span><span class="o">=</span><span class="p">[</span><span class="n">shape</span><span class="p">[</span><span class="n">dim</span><span class="p">]</span> <span class="k">for</span> <span class="n">dim</span> <span class="ow">in</span> <span class="n">sdims</span><span class="p">],</span>
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>        <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span>
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>    <span class="p">)</span>
+</span><span id="__span-7-27"><a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>
+</span><span id="__span-7-28"><a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>    <span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
+</span><span id="__span-7-29"><a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>        <span class="n">data</span><span class="p">,</span>
+</span><span id="__span-7-30"><a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>        <span class="n">dims</span><span class="o">=</span><span class="n">sdims</span><span class="p">,</span> <span class="c1"># add channel dimension here if present</span>
+</span><span id="__span-7-31"><a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>        <span class="n">scale</span><span class="o">=</span><span class="n">spacing</span><span class="p">,</span>
+</span><span id="__span-7-32"><a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>        <span class="n">translation</span><span class="o">=</span><span class="n">translation</span><span class="p">,</span>
+</span><span id="__span-7-33"><a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
+</span><span id="__span-7-34"><a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a>    <span class="p">)</span>
+</span><span id="__span-7-35"><a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a>    <span class="n">msims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[]))</span>
 </span></code></pre></div>
 <p>See the <a href="https://github.com/multiview-stitcher/multiview-stitcher/blob/main/notebooks/stitch_and_register_ashlar_example_dataset.ipynb">example notebook</a> for a full worked example with multi-cycle OME-TIFF data.</p>
 

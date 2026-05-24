@@ -774,6 +774,15 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#cupy-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      CuPy support
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1263,6 +1272,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../zarr_backed_vs_dask_backed_fusion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Zarr-backed vs Dask-backed fusion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stitching_in_the_browser/" class="md-nav__link">
         
   
@@ -1536,6 +1566,15 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#cupy-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      CuPy support
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1596,6 +1635,9 @@
 </span></code></pre></div>
 <p>Example implementation: <code>multiview_stitcher.weights.content_based</code>.</p>
 <p>As with custom fusion functions, optional arguments are only passed when they are declared in the function signature. In particular, <code>blending_weights</code> is only provided when the weight function accepts it.</p>
+<h2 id="cupy-support">CuPy support</h2>
+<p>If <code>fuse(..., use_cupy=True)</code> is passed, the fusion and weight functions receive CuPy arrays as input and should return a CuPy array as output. The built-in fusion and weight functions support CuPy arrays (in large part by using the NumPy Array API which transparently dispatches functions to their numpy or cupy implementations based on the input array type).</p>
+<p>See <a href="../gpu_support/">GPU support</a> for further details and examples.</p>
 
 
 

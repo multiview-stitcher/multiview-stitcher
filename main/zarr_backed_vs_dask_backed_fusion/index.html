@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/troubleshoot_fusion/">
+        <link rel="canonical" href="https://multiview-stitcher.github.io/multiview-stitcher/main/zarr_backed_vs_dask_backed_fusion/">
       
       
-        <link rel="prev" href="../troubleshoot_registration_OOM/">
+        <link rel="prev" href="../objects/">
       
       
-        <link rel="next" href="../troubleshoot_multiprocessing/">
+        <link rel="next" href="../stitching_in_the_browser/">
       
       
       <link rel="icon" href="../images/logo_color.svg">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Large data - multiview-stitcher</title>
+        <title>Zarr-backed vs Dask-backed fusion - multiview-stitcher</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#large-data" class="md-skip">
+        <a href="#zarr-backed-vs-dask-backed-fusion" class="md-skip">
           Skip to content
         </a>
       
@@ -117,7 +117,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Large data
+              Zarr-backed vs Dask-backed fusion
             
           </span>
         </div>
@@ -846,19 +846,17 @@
       
   
   
-    
   
   
-  
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
@@ -872,7 +870,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             Troubleshooting guide
@@ -968,19 +966,17 @@
                 
   
   
-    
   
   
-  
     
     
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
         
           
           <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
@@ -994,7 +990,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_2">
             <span class="md-nav__icon md-icon"></span>
             Fusion
@@ -1005,30 +1001,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Large data
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../troubleshoot_fusion/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1037,44 +1013,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#fusing-large-datasets" class="md-nav__link">
-    <span class="md-ellipsis">
-      Fusing large datasets
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#gpu-memory-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      GPU memory issues
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1183,17 +1121,19 @@
       
   
   
+    
   
   
+  
     
     
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
           <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
@@ -1207,7 +1147,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             Miscellaneous
@@ -1260,10 +1200,30 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../zarr_backed_vs_dask_backed_fusion/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Zarr-backed vs Dask-backed fusion
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -1272,6 +1232,53 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#zarr-backed-fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Zarr-backed fusion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dask-backed-fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Dask-backed fusion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-one-should-i-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      Which one should I use?
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1540,18 +1547,27 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#fusing-large-datasets" class="md-nav__link">
+  <a href="#zarr-backed-fusion" class="md-nav__link">
     <span class="md-ellipsis">
-      Fusing large datasets
+      Zarr-backed fusion
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#gpu-memory-issues" class="md-nav__link">
+  <a href="#dask-backed-fusion" class="md-nav__link">
     <span class="md-ellipsis">
-      GPU memory issues
+      Dask-backed fusion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-one-should-i-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      Which one should I use?
     </span>
   </a>
   
@@ -1575,21 +1591,40 @@
   
 
 
-<h1 id="large-data">Large data</h1>
-<h2 id="fusing-large-datasets">Fusing large datasets</h2>
-<p>When working with very large(r) datasets (e.g. &gt;50GB), using <code>fusion.fuse</code> to create a dask array and then computing it (either fully into memory or writing to disk) can lead to memory issues or take a very long time. This is because the underlying dask graph for fusing large datasets can become very large and complex, leading to high overhead in task scheduling and execution.</p>
-<p>For fusing large datasets, it is recommended to stream the fused result directly to a zarr file using the <code>output_zarr_url</code> parameter of <code>fusion.fuse</code>. This approach processes the fusion in manageable chunks, writing each chunk directly to disk, which helps to avoid building up a large dask graph in memory. See the <a href="../code_example/">code example</a>.</p>
-<h2 id="gpu-memory-issues">GPU memory issues</h2>
-<p>When using <code>use_cupy=True</code> for GPU acceleration, the dask scheduler may dispatch too many tasks to the GPU in parallel, which can lead to out-of-memory errors on the GPU. To mitigate this, you can</p>
-<p>1) Fuse to zarr directly <code>fuse(..., output_zarr_url=)</code> and limit the number of parallel tasks (see <a href="../gpu_support/">GPU support</a> for an example of how to do this or
-2) Limit the number of parallel dask tasks when fusing to an in-memory dask array by setting e.g.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">with</span> <span class="n">dask</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">set</span><span class="p">({</span><span class="s2">&quot;scheduler&quot;</span><span class="p">:</span> <span class="s2">&quot;single-threaded&quot;</span><span class="p">}):</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">fused_sim</span> <span class="o">=</span> <span class="n">fusion</span><span class="o">.</span><span class="n">fuse</span><span class="p">(</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        <span class="n">images</span><span class="o">=</span><span class="n">sims</span><span class="p">,</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="n">use_cupy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="p">)</span>
-</span></code></pre></div>
+<h1 id="zarr-backed-vs-dask-backed-fusion">Zarr-backed vs Dask-backed fusion</h1>
+<p>If our input data already lives in Zarr, there are two simple ways to load it before fusion:</p>
+<ul>
+<li><strong>zarr-backed</strong>: keep the input connected directly to the Zarr store</li>
+<li><strong>dask-backed</strong>: wrap the same data as Dask arrays first</li>
+</ul>
+<p>Both approaches are supported, and both give the same fused result. The difference is mainly how the input is represented before fusion starts.</p>
+<p>In both cases, image data is read on demand and only from the regions needed for the current fusion step. The main practical difference is that <strong>zarr-backed</strong> fusion avoids an extra zarr-to-dask layer, which can keep the dask graph and computation more efficient.</p>
+<h2 id="zarr-backed-fusion">Zarr-backed fusion</h2>
+<p>Typical ways to get zarr-backed inputs:</p>
+<ul>
+<li><code>si_utils.get_sim_from_array(zarr.open(...))</code></li>
+<li><code>ngff_utils.read_sim_from_ome_zarr(..., use_dask=False)</code></li>
+<li><code>ngff_utils.read_msim_from_ome_zarr(..., use_dask=False)</code></li>
+</ul>
+<p>This is the default for the OME-Zarr helpers.</p>
+<p>For fusion, this is often the best choice when our data is already stored in Zarr.</p>
+<h2 id="dask-backed-fusion">Dask-backed fusion</h2>
+<p>Typical ways to get dask-backed inputs:</p>
+<ul>
+<li><code>si_utils.get_sim_from_array(da.from_zarr(...))</code></li>
+<li><code>ngff_utils.read_sim_from_ome_zarr(..., use_dask=True)</code></li>
+<li><code>ngff_utils.read_msim_from_ome_zarr(..., use_dask=True)</code></li>
+</ul>
+<p>Here, <code>da.from_zarr(...)</code> is just the Zarr-specific example. More generally, <code>si_utils.get_sim_from_array(...)</code> can also be used with other NumPy or Dask arrays.</p>
+<p>This is a good option when we already want to keep the data inside a larger Dask workflow before fusion.</p>
+<h2 id="which-one-should-i-use">Which one should I use?</h2>
+<p>If our input data is already in Zarr and we mainly want to fuse it, start with <strong>zarr-backed</strong> loading.</p>
+<p>Use <strong>dask-backed</strong> loading when we specifically want Dask arrays for other processing steps before fusion.</p>
+<p>In short:</p>
+<ul>
+<li>choose <strong>zarr-backed</strong> for the simplest and often most efficient path from Zarr input to fusion</li>
+<li>choose <strong>dask-backed</strong> when a Dask-native workflow is the main goal</li>
+</ul>
 
 
 
@@ -1621,7 +1656,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../troubleshoot_registration_OOM/" class="md-footer__link md-footer__link--prev" aria-label="Previous: MemoryError">
+          <a href="../objects/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Objects">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1631,20 +1666,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                MemoryError
+                Objects
               </div>
             </div>
           </a>
         
         
           
-          <a href="../troubleshoot_multiprocessing/" class="md-footer__link md-footer__link--next" aria-label="Next: RuntimeError: multiprocessing freeze_support">
+          <a href="../stitching_in_the_browser/" class="md-footer__link md-footer__link--next" aria-label="Next: Stitching in the browser">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                RuntimeError: multiprocessing freeze_support
+                Stitching in the browser
               </div>
             </div>
             <div class="md-footer__button md-icon">
