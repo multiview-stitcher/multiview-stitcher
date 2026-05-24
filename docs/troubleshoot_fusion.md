@@ -11,7 +11,6 @@ For fusing large datasets, it is recommended to stream the fused result directly
 When using `use_cupy=True` for GPU acceleration, the dask scheduler may dispatch too many tasks to the GPU in parallel, which can lead to out-of-memory errors on the GPU. To mitigate this, you can
 
 1) Fuse to zarr directly `fuse(..., output_zarr_url=)` and limit the number of parallel tasks (see [GPU support](gpu_support.md) for an example of how to do this or
-```
 2) Limit the number of parallel dask tasks when fusing to an in-memory dask array by setting e.g.
 
 ```python

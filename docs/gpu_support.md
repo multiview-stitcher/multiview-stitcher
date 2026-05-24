@@ -23,6 +23,8 @@ fused_sim.data.compute()
 `use_cupy=True` also works with `output_zarr_url` for large datasets. In this case, setting `n_jobs` as in the example below allows limiting the number of parallel GPU batch processes, which can help manage GPU memory usage:
 
 ```python
+from multiview_stitcher import fusion, misc_utils
+
 fused_sim = fusion.fuse(
     images=msims,
     transform_key="stage_metadata",
