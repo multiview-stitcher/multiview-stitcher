@@ -1,14 +1,21 @@
 import dask
-import dask.array as da
 import numpy as np
 import xarray as xr
 from scipy import ndimage
 
-from multiview_stitcher import msi_utils, fusion, param_utils
+from multiview_stitcher import fusion, msi_utils, param_utils
+from multiview_stitcher.misc_utils import requires_overlap
 from multiview_stitcher import spatial_image_utils as si_utils
 
 
+def _validate_label_array(labels):
+    if not np.issubdtype(np.asarray(labels).dtype, np.integer):
+        raise TypeError("detection_func must return an integer label array.")
+
+
 def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
+    _validate_label_array(labels)
+    labels = np.asarray(labels)
     chunk_start = np.asarray(chunk_start, dtype=float)
     chunk_shape = np.asarray(chunk_shape, dtype=float)
     depth = np.asarray(depth, dtype=float)
@@ -35,7 +42,9 @@ def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
 def _compute_point_indices_from_label_blocks(label_blocks, depth):
     delayed_blocks = np.asarray(label_blocks.to_delayed(), dtype=object)
     starts_by_dim = [
-        np.concatenate([[0], np.cumsum(np.array(dim_chunks[:-1]) - 2 * depth[idim])])
+        np.concatenate(
+            [[0], np.cumsum(np.array(dim_chunks[:-1]) - 2 * depth[idim])]
+        )
         for idim, dim_chunks in enumerate(label_blocks.chunks)
     ]
 
@@ -69,28 +78,61 @@ def _compute_point_indices_from_label_blocks(label_blocks, depth):
     return np.concatenate(point_indices, axis=0)
 
 
-def _log_detect_required_overlap(target_size, **_kwargs):
+def _normalize_target_size_physical(target_size_physical, ndim):
+    if isinstance(target_size_physical, bool):
+        raise TypeError(
+            "target_size_physical must be an int or dict[str, float]."
+        )
+    if isinstance(target_size_physical, (int, np.integer)):
+        return tuple(float(target_size_physical) for _ in range(ndim))
+    if isinstance(target_size_physical, dict):
+        if len(target_size_physical) != ndim or not all(
+            isinstance(dim, str) for dim in target_size_physical
+        ):
+            raise TypeError(
+                "target_size_physical must be an int or dict[str, float]."
+            )
+        return tuple(float(size) for size in target_size_physical.values())
+    raise TypeError("target_size_physical must be an int or dict[str, float].")
+
+
+def _target_size_pixels(target_size_physical, spacing):
+    spacing = tuple(float(sp) for sp in spacing)
+    target_size_physical = _normalize_target_size_physical(
+        target_size_physical, len(spacing)
+    )
+    return tuple(
+        size / sp for size, sp in zip(target_size_physical, spacing)
+    )
+
+
+def _log_detect_required_overlap(kwargs):
+    target_size = _target_size_pixels(
+        kwargs["target_size_physical"], kwargs["spacing"]
+    )
     ndim = len(target_size)
     sigma_pixels = {
-        dim: max(0.5, float(size) / (2.0 * np.sqrt(ndim)))
-        for dim, size in target_size.items()
+        idim: max(0.5, float(size) / (2.0 * np.sqrt(ndim)))
+        for idim, size in enumerate(target_size)
     }
     min_distance_pixels = {
-        dim: max(1.0, float(size) / 2.0)
-        for dim, size in target_size.items()
+        idim: max(1.0, float(size) / 2.0)
+        for idim, size in enumerate(target_size)
     }
-    return {
-        dim: max(
+    return tuple(
+        max(
             1,
-            int(np.ceil(4 * sigma_pixels[dim] + min_distance_pixels[dim])),
+            int(np.ceil(4 * sigma_pixels[idim] + min_distance_pixels[idim])),
         )
-        for dim in target_size
-    }
+        for idim in range(ndim)
+    )
 
 
+@requires_overlap(_log_detect_required_overlap)
 def log_detect(
     image,
-    target_size,
+    spacing,
+    target_size_physical,
     threshold_rel=0.2,
     threshold_abs=None,
 ):
@@ -101,8 +143,11 @@ def log_detect(
     ----------
     image : numpy.ndarray
         Input image. Only spatial dimensions should be present.
-    target_size : float or dict[str, float]
-        Expected bead diameter in pixels. A scalar is applied to every axis.
+    spacing : tuple[float, ...]
+        Pixel spacing for each image axis.
+    target_size_physical : int or dict[str, float]
+        Expected bead diameter in physical units. An int is applied to every
+        axis; a dict can provide axis-specific values in insertion order.
     threshold_rel : float, optional
         Relative threshold applied to the maximum LoG response when
         ``threshold_abs`` is not provided. Defaults to ``0.2``.
@@ -117,14 +162,10 @@ def log_detect(
     """
 
     image = np.asarray(image)
-
-    if isinstance(target_size, dict):
-        target_size = tuple(float(v) for v in target_size.values())
-    elif np.isscalar(target_size):
-        target_size = tuple(float(target_size) for _ in range(image.ndim))
-    else:
-        raise TypeError(
-            f"target_size must be a float or dict, got {type(target_size).__name__}."
+    target_size = _target_size_pixels(target_size_physical, spacing)
+    if len(target_size) != image.ndim:
+        raise ValueError(
+            "spacing and target_size_physical must match image.ndim."
         )
     sigma_pixels = tuple(
         max(0.5, size / (2.0 * np.sqrt(image.ndim)))
@@ -162,17 +203,12 @@ def log_detect(
 
     return ndimage.label(detections)[0]
 
-
-log_detect.required_overlap = _log_detect_required_overlap
-
-
 def detect_beads(
     msim,
-    target_size_physical,
     detection_func=log_detect,
     detection_func_kwargs=None,
     detection_overlap=None,
-    segmentation_res_level=None,
+    max_detection_spacing=None,
 ):
     """
     Detect bright fiducial beads in a multiscale spatial image.
@@ -190,26 +226,22 @@ def detect_beads(
         ``t`` or ``c`` are present, the first coordinate of each is used.
         Select a channel or time point before calling this function to process
         another field.
-    target_size_physical : float or dict[str, float]
-        Expected bead diameter in physical units. A scalar is applied to every
-        spatial dimension; a dict can provide dimension-specific values.
     detection_func : callable, optional
         Function applied to in-memory image blocks. It must accept
-        ``image`` and a ``target_size`` keyword argument in pixels, and return
-        an integer label array with the same shape as ``image``. ``0`` is
-        background and positive values identify objects. By default,
-        ``log_detect`` is used.
+        ``image``, ``spacing`` as a tuple of floats, and additional keyword
+        arguments, and return an integer label array. ``0`` is background and
+        positive values identify objects. By default, ``log_detect`` is used.
     detection_func_kwargs : dict or None, optional
         Additional keyword arguments passed to ``detection_func``.
     detection_overlap : int, dict[str, int], or None, optional
         Pixel overlap used when mapping ``detection_func`` over dask chunks.
         If ``None`` and the detection function exposes a ``required_overlap``
-        attribute, that value is used. Otherwise the bead size in pixels is
-        used as a conservative default.
-    segmentation_res_level : int or None, optional
-        Resolution level used for segmentation, e.g. ``0``.
-        When ``None``, the coarsest level whose spacing is no larger than one
-        quarter of ``target_size_physical`` is used.
+        attribute, that value is used. Otherwise no overlap is used.
+    max_detection_spacing : float, dict[str, float], or None, optional
+        Maximum spacing used to select the detection resolution level. If
+        ``None``, ``scale0`` is used. Otherwise ``get_res_level_from_spacing``
+        selects the coarsest resolution level whose spacing does not exceed
+        this value.
 
     Returns
     -------
@@ -221,26 +253,17 @@ def detect_beads(
         ``spatial_image_utils.set_point_set``.
     """
 
-    # Pick the multiscale resolution level to run detection on.
-    # A finer level than necessary wastes memory; a coarser one may miss beads.
-    if segmentation_res_level is not None:
-        scale_key = f"scale{segmentation_res_level}"
-
-        if scale_key not in msi_utils.get_sorted_scale_keys(msim):
-            raise ValueError(
-                f"Resolution level {segmentation_res_level!r} does not exist "
-                f"in the multiscale image."
-            )
+    if max_detection_spacing is None:
+        scale_key = "scale0"
     else:
-        # Auto-select: find the coarsest level whose voxel spacing is still
-        # ≤ target_size / 4, so each bead spans at least ~4 pixels per axis.
         sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
         sdims0 = si_utils.get_spatial_dims_from_sim(sim0)
-        target_size0 = si_utils.normalize_to_spatial_dict(
-            target_size_physical, sdims0, "target_size_physical"
+        max_detection_spacing = si_utils.normalize_to_spatial_dict(
+            max_detection_spacing, sdims0, "max_detection_spacing"
         )
-        target_spacing = {dim: target_size0[dim] / 4.0 for dim in sdims0}
-        res_level = msi_utils.get_res_level_from_spacing(msim, target_spacing)
+        res_level = msi_utils.get_res_level_from_spacing(
+            msim, max_detection_spacing
+        )
         scale_key = f"scale{res_level}"
 
     # Load the chosen level as a single spatial field (drop t/c if present).
@@ -249,13 +272,8 @@ def detect_beads(
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
+    spacing_tuple = tuple(spacing[dim] for dim in sdims)
     origin = si_utils.get_origin_from_sim(sim)
-
-    # Convert physical bead size to pixels for detection_func.
-    target_size = si_utils.normalize_to_spatial_dict(
-        target_size_physical, sdims, "target_size_physical"
-    )
-    target_size_pixels = {dim: target_size[dim] / spacing[dim] for dim in sdims}
 
     detection_func_kwargs = (
         dict(detection_func_kwargs)
@@ -273,10 +291,11 @@ def detect_beads(
 
     # Determine how many pixels of overlap are needed between dask chunks so
     # that detection results near chunk boundaries are not clipped.
-    if detection_overlap is None and hasattr(detection_func, "required_overlap"):
+    if detection_overlap is None and hasattr(
+        detection_func, "required_overlap"
+    ):
         required = detection_func.required_overlap(
-            target_size_pixels,
-            **detection_func_kwargs,
+            detection_func_kwargs | {"spacing": spacing_tuple}
         )
         detection_overlap = (
             required
@@ -284,7 +303,7 @@ def detect_beads(
             else dict(zip(sdims, required))
         )
     if detection_overlap is None:
-        detection_overlap = target_size_pixels
+        detection_overlap = 0
     detection_overlap = si_utils.normalize_to_spatial_dict(
         detection_overlap, sdims, "detection_overlap"
     )
@@ -292,6 +311,10 @@ def detect_beads(
         int(np.ceil(detection_overlap[dim])) for dim in sdims
     )
 
+    def _detect(transformed_views, spacing, **kwargs):
+        labels = detection_func(transformed_views[0], spacing, **kwargs)
+        _validate_label_array(labels)
+        return labels
 
     # Set a dummy identity affine on the input SIM so that fusion applies no
     # transformation to the image blocks before passing them to detection_func.
@@ -307,12 +330,13 @@ def detect_beads(
     label_blocks = fusion.fuse(
         [sim],
         transform_key="identity",
-        fusion_func=lambda transformed_views, *args, **kwargs: detection_func(
-            transformed_views[0], target_size_pixels, **kwargs
-        ),
-        fusion_func_kwargs=detection_func_kwargs,
+        fusion_func=_detect,
+        fusion_func_kwargs=detection_func_kwargs
+        | {"spacing": spacing_tuple},
         trim_overlap=False,
-        overlap_in_pixels={dim: detection_overlap[idim] for idim, dim in enumerate(sdims)},
+        overlap_in_pixels={
+            dim: detection_overlap[idim] for idim, dim in enumerate(sdims)
+        },
     ).data.astype(np.int64)
 
     point_indices = _compute_point_indices_from_label_blocks(
@@ -332,7 +356,6 @@ def detect_beads(
         name="position",
         attrs={
             "segmentation_scale": scale_key,
-            "target_size_physical": target_size,
             "detection_func": getattr(
                 detection_func,
                 "__name__",

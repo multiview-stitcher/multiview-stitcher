@@ -24,7 +24,8 @@ def test_log_detect_detects_numpy_beads():
 
     labels = detection.log_detect(
         image,
-        target_size=4.0,
+        spacing=(1.0, 1.0),
+        target_size_physical=4,
         threshold_rel=0.3,
     )
     detected = np.argwhere(labels > 0)
@@ -60,8 +61,10 @@ def test_detect_beads_returns_intrinsic_physical_positions():
     with dask.config.set(scheduler="synchronous"):
         positions = detection.detect_beads(
             msim,
-            target_size_physical=2.0,
-            detection_func_kwargs={"threshold_rel": 0.3},
+            detection_func_kwargs={
+                "target_size_physical": 2,
+                "threshold_rel": 0.3,
+            },
         )
 
     expected = np.column_stack(
@@ -80,7 +83,7 @@ def test_detect_beads_returns_intrinsic_physical_positions():
 
 
 def test_detect_beads_accepts_custom_detection_func():
-    def threshold_detect(image, target_size, threshold):
+    def threshold_detect(image, spacing, threshold):
         return label(image > threshold)[0]
 
     bead_pixels = np.array(
@@ -104,11 +107,9 @@ def test_detect_beads_accepts_custom_detection_func():
 
     positions = detection.detect_beads(
         msim,
-        target_size_physical=6.0,
         detection_func=threshold_detect,
         detection_func_kwargs={"threshold": 1.0},
         detection_overlap=0,
-        segmentation_res_level=0,
     )
 
     expected = np.column_stack(
@@ -125,7 +126,7 @@ def test_detect_beads_accepts_custom_detection_func():
 
 
 def test_detect_beads_keeps_chunk_boundary_label_once():
-    def threshold_detect(image, target_size, threshold):
+    def threshold_detect(image, spacing, threshold):
         return label(image > threshold)[0]
 
     image = np.zeros((32, 32), dtype=np.float32)
@@ -141,12 +142,35 @@ def test_detect_beads_keeps_chunk_boundary_label_once():
 
     positions = detection.detect_beads(
         msim,
-        target_size_physical=4.0,
         detection_func=threshold_detect,
         detection_func_kwargs={"threshold": 1.0},
         detection_overlap=4,
-        segmentation_res_level=0,
     )
 
     assert positions.shape == (1, 2)
     assert np.allclose(positions.values[0], [15.5, 11.5])
+
+
+def test_detect_beads_uses_max_detection_spacing_for_scale_selection():
+    def empty_detect(image, spacing):
+        return np.zeros_like(image, dtype=np.int64)
+
+    sim = si_utils.get_sim_from_array(
+        da.from_array(np.zeros((32, 32), dtype=np.float32), chunks=(16, 16)),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    msim = msi_utils.get_msim_from_sim(
+        sim,
+        scale_factors=[{"y": 2, "x": 2}],
+    )
+
+    positions = detection.detect_beads(
+        msim,
+        detection_func=empty_detect,
+        max_detection_spacing={"y": 2.0, "x": 2.0},
+    )
+
+    assert positions.attrs["segmentation_scale"] == "scale1"
+    assert positions.shape == (0, 2)
