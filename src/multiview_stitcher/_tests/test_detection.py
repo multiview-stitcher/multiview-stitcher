@@ -177,43 +177,55 @@ def test_detect_beads_uses_max_detection_spacing_for_scale_selection():
     assert positions.shape == (0, 2)
 
 
-@pytest.mark.parametrize(
-    "backend, expected",
-    [(None, "numpy"), ("cupy", "cupy")],
-)
-def test_detect_beads_passes_backend_to_fuse(monkeypatch, backend, expected):
-    seen = {}
+def test_detect_beads_cupy_backend_matches_numpy():
+    pytest.importorskip("cupy")
 
-    def fake_fuse(*args, **kwargs):
-        seen["backend"] = kwargs["backend"]
-        labels = np.zeros((4, 4), dtype=np.int64)
-        labels[1, 2] = 1
-        return type(
-            "FusedLabels",
-            (),
-            {"data": da.from_array(labels, chunks=labels.shape)},
-        )()
-
-    def empty_detect(image, spacing):
-        return np.zeros_like(image, dtype=np.int64)
+    bead_pixels = np.array(
+        [
+            [20, 22],
+            [43, 41],
+        ]
+    )
+    image = _make_bead_image(bead_pixels)
 
     sim = si_utils.get_sim_from_array(
-        np.zeros((4, 4), dtype=np.float32),
+        da.from_array(image, chunks=(16, 16)),
         dims=["y", "x"],
-        scale={"y": 1.0, "x": 1.0},
-        translation={"y": 0.0, "x": 0.0},
+        scale={"y": 0.5, "x": 0.5},
+        translation={"y": 5.0, "x": -2.0},
     )
-    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    msim = msi_utils.get_msim_from_sim(
+        sim,
+        scale_factors=[],
+    )
+    kwargs = {
+        "detection_func_kwargs": {
+            "target_size_physical": 2,
+            "threshold_rel": 0.3,
+        },
+    }
 
-    monkeypatch.setattr(detection.fusion, "fuse", fake_fuse)
-
-    kwargs = {} if backend is None else {"backend": backend}
-    positions = detection.detect_beads(
+    numpy_positions = detection.detect_beads(
         msim,
-        detection_func=empty_detect,
-        detection_overlap=0,
+        backend="numpy",
+        **kwargs,
+    )
+    cupy_positions = detection.detect_beads(
+        msim,
+        backend="cupy",
         **kwargs,
     )
 
-    assert seen["backend"] == expected
-    assert np.allclose(positions.values, [[1.0, 2.0]])
+    numpy_values = numpy_positions.values[
+        np.argsort(numpy_positions.values[:, 0])
+    ]
+    cupy_values = cupy_positions.values[
+        np.argsort(cupy_positions.values[:, 0])
+    ]
+
+    assert cupy_positions.dims == numpy_positions.dims
+    assert list(cupy_positions.coords["dim"].values) == list(
+        numpy_positions.coords["dim"].values
+    )
+    assert cupy_values.shape == numpy_values.shape
+    assert np.allclose(cupy_values, numpy_values)
