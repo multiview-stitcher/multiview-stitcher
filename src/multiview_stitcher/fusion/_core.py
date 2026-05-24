@@ -144,6 +144,7 @@ def _fuse_block_zarr_backed(
     interpolation_order,
     blending_widths,
     shrink_distance,
+    use_cupy=False,
 ):
     """
     Compute fused output for a single chunk from zarr-backed input sims.
@@ -226,6 +227,7 @@ def _fuse_block_zarr_backed(
         full_view_bbs=full_view_bbs,
         blending_widths=blending_widths,
         shrink_distance=shrink_distance,
+        use_cupy=use_cupy,
     )
 
     # Restore the z-axis removed for planewise fusion.
@@ -320,6 +322,7 @@ def fuse(
     output_zarr_url: str | None = None,
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
+    use_cupy: bool = False,
     sims: list | None = None,
 ):
     """
@@ -484,6 +487,7 @@ def fuse(
                 output_zarr_url=output_zarr_url,
                 zarr_options=zarr_options,
                 batch_options=batch_options,
+                use_cupy=use_cupy,
             )
 
             if (zarr_options or {}).get("ome_zarr", False):
@@ -551,6 +555,7 @@ def fuse(
                     overlap_in_pixels=overlap_in_pixels,
                     interpolation_order=interpolation_order,
                     blending_widths=blending_widths,
+                    use_cupy=use_cupy,
                 )
             )
 
@@ -603,6 +608,7 @@ def fuse(
             "overlap_in_pixels": overlap_in_pixels,
             "interpolation_order": interpolation_order,
             "blending_widths": blending_widths,
+            "use_cupy": use_cupy,
         }
 
         # Prepare block fusion and process in batches
@@ -935,6 +941,7 @@ def fuse(
                 interpolation_order=interpolation_order,
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
+                use_cupy=use_cupy,
             )
         else:
             # === dask path: per-chunk delayed tasks ===
@@ -1031,6 +1038,7 @@ def fuse(
                     full_view_bbs=full_view_bbs,
                     blending_widths=blending_widths,
                     shrink_distance=shrink_distance,
+                    use_cupy=use_cupy,
                 )
 
                 fused_output_chunk = da.from_delayed(
@@ -1105,6 +1113,7 @@ def fuse_np(
     origins: Sequence[dict[str, float]] = None,
     blending_widths: dict[float] = None,
     shrink_distance=0,
+    use_cupy: bool = False,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -1149,8 +1158,15 @@ def fuse_np(
     #             translation=origins[isim],
     #         )
 
-    input_backend = si_utils._get_backend_data(sims[0])
-    input_is_cupy = cp is not None and isinstance(input_backend, cp.ndarray)
+    if use_cupy:
+        if cp is None:
+            raise ImportError(
+                "CuPy is not installed. Install it to use use_cupy=True."
+            )
+        sims = [
+            sim.copy(data=cp.asarray(si_utils._get_backend_data(sim)))
+            for sim in sims
+        ]
 
     if has_keyword(fusion_func, "blending_weights") or has_keyword(
         weights_func, "blending_weights"
@@ -1196,7 +1212,7 @@ def fuse_np(
                 affine=params[iview],
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
-                cupy=input_is_cupy,
+                cupy=use_cupy,
             )
             for iview in range(len(sims))
         ]
@@ -1246,6 +1262,8 @@ def fuse_np(
         ]
 
     fused = np.nan_to_num(fused).astype(input_dtype)
+    if cp is not None and isinstance(fused, cp.ndarray):
+        fused = cp.asnumpy(fused)
 
     # delete references to intermediate arrays to free memory
     del field_ims_t

@@ -795,3 +795,41 @@ def test_fuse_to_zarr():
         )
 
         assert fused.max().compute() > 0
+
+
+@pytest.mark.parametrize("backend", ["dask", "zarr"])
+def test_fuse_use_cupy(backend):
+    try:
+        import cupy as cp
+    except ImportError:
+        pytest.skip("CuPy not available")
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        N_c=1,
+        N_t=1,
+        tile_size=20,
+        tiles_x=2,
+        tiles_y=1,
+        overlap=5,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if backend == "zarr":
+            sims = [
+                _sim_to_zarr_backed_sim(
+                    sim,
+                    os.path.join(tmpdir, f"view_{i}.zarr"),
+                    METADATA_TRANSFORM_KEY,
+                )
+                for i, sim in enumerate(sims)
+            ]
+
+        fused = fusion.fuse(
+            sims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            use_cupy=True,
+        ).compute(scheduler="single-threaded")
+
+    assert fused.dtype == sims[0].dtype
+    assert isinstance(fused.data, np.ndarray)
