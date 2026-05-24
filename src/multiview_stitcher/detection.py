@@ -48,7 +48,8 @@ def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
     # The delayed label blocks may be backed by NumPy or CuPy chunks,
     # depending on the requested fusion backend.
     center_output = ndi.center_of_mass(
-        labels > 0, labels=labels, index=label_ids
+        labels, # passing the integer label array prevents cupy from complaining about slow implementation
+        labels=labels, index=label_ids
     )
     centroids = _as_numpy_array(center_output, dtype=float)
     if centroids.ndim == 1:
@@ -378,6 +379,7 @@ def detect_beads(
             dim: detection_overlap[idim] for idim, dim in enumerate(sdims)
         },
         backend=backend,
+        output_on_backend=True,
     ).data.astype(np.int32)
 
     point_indices = _compute_point_indices_from_label_blocks(
