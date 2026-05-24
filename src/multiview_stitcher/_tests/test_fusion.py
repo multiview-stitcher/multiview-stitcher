@@ -221,6 +221,50 @@ def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
         np.testing.assert_array_equal(fused_dask_data, fused_zarr_data)
 
 
+@pytest.mark.parametrize("backend", ["numpy", "dask", "zarr"])
+def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend, tmp_path):
+    data = np.ones((10, 10), dtype=np.float32)
+
+    if backend == "numpy":
+        array = data
+    if backend == "dask":
+        array = da.from_array(data, chunks=(5, 5))
+    else:
+        array = zarr.open_array(
+            str(tmp_path / "input.zarr"),
+            mode="w",
+            shape=data.shape,
+            chunks=(5, 5),
+            dtype=data.dtype,
+        )
+        array[:] = data
+
+    sim = si_utils.get_sim_from_array(
+        array,
+        dims=["y", "x"],
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    fuse_kwargs = {
+        "images": [sim],
+        "transform_key": METADATA_TRANSFORM_KEY,
+        "fusion_func": fusion.max_fusion,
+        "output_chunksize": {"y": 5, "x": 5},
+        "overlap_in_pixels": 1,
+    }
+
+    trimmed = fusion.fuse(**fuse_kwargs)
+    untrimmed = fusion.fuse(**fuse_kwargs, trim_overlap=False)
+
+    assert trimmed.data.shape[-2:] == (10, 10)
+    assert untrimmed.data.shape[-2:] == (14, 14)
+    assert untrimmed.data.chunks[-2:] == ((7, 7), (7, 7))
+    assert untrimmed.data.compute(scheduler="single-threaded").shape[-2:] == (
+        14,
+        14,
+    )
+
+
 def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
