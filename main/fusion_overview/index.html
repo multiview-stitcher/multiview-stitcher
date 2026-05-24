@@ -907,6 +907,11 @@
 <td><code>None</code></td>
 <td>Options for parallel batch processing of chunks when <code>output_zarr_url</code> is set</td>
 </tr>
+<tr>
+<td><code>backend</code></td>
+<td><code>None</code></td>
+<td>Compute backend: <code>None</code> or <code>"numpy"</code> for CPU, <code>"cupy"</code> for GPU (requires CuPy)</td>
+</tr>
 </tbody>
 </table>
 <hr/>
@@ -1032,11 +1037,11 @@ explicitly want to force fusion from one resolution level.</p>
 </span></code></pre></div>
 <hr/>
 <h2 id="gpu-acceleration">GPU acceleration</h2>
-<p>Pass <code>use_cupy=True</code> to run resampling, blending weight calculation and fusion on the GPU.</p>
+<p>Pass <code>backend="cupy"</code> to run resampling, blending weight calculation and fusion on the GPU.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a><span class="n">fused_sim</span> <span class="o">=</span> <span class="n">fusion</span><span class="o">.</span><span class="n">fuse</span><span class="p">(</span>
 </span><span id="__span-7-2"><a href="#__codelineno-7-2" id="__codelineno-7-2" name="__codelineno-7-2"></a>    <span class="n">images</span><span class="o">=</span><span class="n">sims</span><span class="p">,</span>
 </span><span id="__span-7-3"><a href="#__codelineno-7-3" id="__codelineno-7-3" name="__codelineno-7-3"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">"translation_registered"</span><span class="p">,</span>
-</span><span id="__span-7-4"><a href="#__codelineno-7-4" id="__codelineno-7-4" name="__codelineno-7-4"></a>    <span class="n">use_cupy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-7-4"><a href="#__codelineno-7-4" id="__codelineno-7-4" name="__codelineno-7-4"></a>    <span class="n">backend</span><span class="o">=</span><span class="s2">"cupy"</span><span class="p">,</span>
 </span><span id="__span-7-5"><a href="#__codelineno-7-5" id="__codelineno-7-5" name="__codelineno-7-5"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>See <a href="../gpu_support/">GPU support</a> for setup instructions.</p>

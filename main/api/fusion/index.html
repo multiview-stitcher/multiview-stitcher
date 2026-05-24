@@ -1627,7 +1627,7 @@
 
 
 <h2 id="multiview_stitcher.fusion.fuse" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">fuse</span><span class="p">(</span><span class="n">images</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fusion_func</span><span class="o">=</span><span class="n">weighted_average_fusion</span><span class="p">,</span> <span class="n">fusion_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weights_func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_spacing</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_mode</span><span class="o">=</span><span class="s1">&#39;union&#39;</span><span class="p">,</span> <span class="n">output_origin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_properties</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">blending_widths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_zarr_url</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">zarr_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">use_cupy</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">sims</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">fuse</span><span class="p">(</span><span class="n">images</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fusion_func</span><span class="o">=</span><span class="n">weighted_average_fusion</span><span class="p">,</span> <span class="n">fusion_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weights_func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">weights_func_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_spacing</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_mode</span><span class="o">=</span><span class="s1">&#39;union&#39;</span><span class="p">,</span> <span class="n">output_origin</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_shape</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stack_properties</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_chunksize</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">interpolation_order</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">blending_widths</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_zarr_url</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">zarr_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">sims</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
@@ -1709,14 +1709,14 @@ batch_options : dict, optional
         (n_batch&gt;1 only compatible with a provided batch_func). By default 1.
     - batch_func_kwargs: dict, optional
         Additional keyword arguments passed to batch_func.
-use_cupy : bool, optional
-    If True, each input tile chunk is transferred to the GPU (via
-    <code>cupy.asarray</code>) immediately before fusion and the result is moved
-    back to NumPy with <code>cupy.asnumpy</code> before it is returned.  This
-    means resampling (affine transform), blending-weight computation, and
-    the fusion function all run on the GPU (for fusion functions that support
-    cupy array input). Requires CuPy to be installed; raises <code>ImportError</code>
-    if CuPy is not available.  By default False.
+backend : str or None, optional
+    Compute backend to use for fusion. "numpy" (default) runs on the
+    CPU. "cupy" transfers each input chunk to the GPU via
+    cupy.asarray, runs resampling, blending-weight computation, and
+    the fusion function on the GPU, then returns a NumPy-backed result via
+    cupy.asnumpy. Requires CuPy to be installed; raises
+    ImportError if CuPy is not available. None is equivalent to
+    "numpy".
 Returns</p>
 <hr />
 <p>SpatialImage or MultiscaleSpatialImage
@@ -2534,7 +2534,7 @@ Returns</p>
 </span><span id="__span-0-322"><a id="__codelineno-0-322" name="__codelineno-0-322"></a>    <span class="n">output_zarr_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-323"><a id="__codelineno-0-323" name="__codelineno-0-323"></a>    <span class="n">zarr_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-324"><a id="__codelineno-0-324" name="__codelineno-0-324"></a>    <span class="n">batch_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-</span><span id="__span-0-325"><a id="__codelineno-0-325" name="__codelineno-0-325"></a>    <span class="n">use_cupy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-325"><a id="__codelineno-0-325" name="__codelineno-0-325"></a>    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-326"><a id="__codelineno-0-326" name="__codelineno-0-326"></a>    <span class="n">sims</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-327"><a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="p">):</span>
 </span><span id="__span-0-328"><a id="__codelineno-0-328" name="__codelineno-0-328"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
@@ -2617,14 +2617,14 @@ Returns</p>
 </span><span id="__span-0-405"><a id="__codelineno-0-405" name="__codelineno-0-405"></a><span class="sd">            (n_batch&gt;1 only compatible with a provided batch_func). By default 1.</span>
 </span><span id="__span-0-406"><a id="__codelineno-0-406" name="__codelineno-0-406"></a><span class="sd">        - batch_func_kwargs: dict, optional</span>
 </span><span id="__span-0-407"><a id="__codelineno-0-407" name="__codelineno-0-407"></a><span class="sd">            Additional keyword arguments passed to batch_func.</span>
-</span><span id="__span-0-408"><a id="__codelineno-0-408" name="__codelineno-0-408"></a><span class="sd">    use_cupy : bool, optional</span>
-</span><span id="__span-0-409"><a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="sd">        If True, each input tile chunk is transferred to the GPU (via</span>
-</span><span id="__span-0-410"><a id="__codelineno-0-410" name="__codelineno-0-410"></a><span class="sd">        ``cupy.asarray``) immediately before fusion and the result is moved</span>
-</span><span id="__span-0-411"><a id="__codelineno-0-411" name="__codelineno-0-411"></a><span class="sd">        back to NumPy with ``cupy.asnumpy`` before it is returned.  This</span>
-</span><span id="__span-0-412"><a id="__codelineno-0-412" name="__codelineno-0-412"></a><span class="sd">        means resampling (affine transform), blending-weight computation, and</span>
-</span><span id="__span-0-413"><a id="__codelineno-0-413" name="__codelineno-0-413"></a><span class="sd">        the fusion function all run on the GPU (for fusion functions that support</span>
-</span><span id="__span-0-414"><a id="__codelineno-0-414" name="__codelineno-0-414"></a><span class="sd">        cupy array input). Requires CuPy to be installed; raises ``ImportError``</span>
-</span><span id="__span-0-415"><a id="__codelineno-0-415" name="__codelineno-0-415"></a><span class="sd">        if CuPy is not available.  By default False.</span>
+</span><span id="__span-0-408"><a id="__codelineno-0-408" name="__codelineno-0-408"></a><span class="sd">    backend : str or None, optional</span>
+</span><span id="__span-0-409"><a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="sd">        Compute backend to use for fusion. &quot;numpy&quot; (default) runs on the</span>
+</span><span id="__span-0-410"><a id="__codelineno-0-410" name="__codelineno-0-410"></a><span class="sd">        CPU. &quot;cupy&quot; transfers each input chunk to the GPU via</span>
+</span><span id="__span-0-411"><a id="__codelineno-0-411" name="__codelineno-0-411"></a><span class="sd">        cupy.asarray, runs resampling, blending-weight computation, and</span>
+</span><span id="__span-0-412"><a id="__codelineno-0-412" name="__codelineno-0-412"></a><span class="sd">        the fusion function on the GPU, then returns a NumPy-backed result via</span>
+</span><span id="__span-0-413"><a id="__codelineno-0-413" name="__codelineno-0-413"></a><span class="sd">        cupy.asnumpy. Requires CuPy to be installed; raises</span>
+</span><span id="__span-0-414"><a id="__codelineno-0-414" name="__codelineno-0-414"></a><span class="sd">        ImportError if CuPy is not available. None is equivalent to</span>
+</span><span id="__span-0-415"><a id="__codelineno-0-415" name="__codelineno-0-415"></a><span class="sd">        &quot;numpy&quot;.</span>
 </span><span id="__span-0-416"><a id="__codelineno-0-416" name="__codelineno-0-416"></a><span class="sd">    Returns</span>
 </span><span id="__span-0-417"><a id="__codelineno-0-417" name="__codelineno-0-417"></a><span class="sd">    -------</span>
 </span><span id="__span-0-418"><a id="__codelineno-0-418" name="__codelineno-0-418"></a><span class="sd">    SpatialImage or MultiscaleSpatialImage</span>
@@ -2707,7 +2707,7 @@ Returns</p>
 </span><span id="__span-0-495"><a id="__codelineno-0-495" name="__codelineno-0-495"></a>                <span class="n">output_zarr_url</span><span class="o">=</span><span class="n">output_zarr_url</span><span class="p">,</span>
 </span><span id="__span-0-496"><a id="__codelineno-0-496" name="__codelineno-0-496"></a>                <span class="n">zarr_options</span><span class="o">=</span><span class="n">zarr_options</span><span class="p">,</span>
 </span><span id="__span-0-497"><a id="__codelineno-0-497" name="__codelineno-0-497"></a>                <span class="n">batch_options</span><span class="o">=</span><span class="n">batch_options</span><span class="p">,</span>
-</span><span id="__span-0-498"><a id="__codelineno-0-498" name="__codelineno-0-498"></a>                <span class="n">use_cupy</span><span class="o">=</span><span class="n">use_cupy</span><span class="p">,</span>
+</span><span id="__span-0-498"><a id="__codelineno-0-498" name="__codelineno-0-498"></a>                <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
 </span><span id="__span-0-499"><a id="__codelineno-0-499" name="__codelineno-0-499"></a>            <span class="p">)</span>
 </span><span id="__span-0-500"><a id="__codelineno-0-500" name="__codelineno-0-500"></a>
 </span><span id="__span-0-501"><a id="__codelineno-0-501" name="__codelineno-0-501"></a>            <span class="k">if</span> <span class="p">(</span><span class="n">zarr_options</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ome_zarr&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
@@ -2775,7 +2775,7 @@ Returns</p>
 </span><span id="__span-0-563"><a id="__codelineno-0-563" name="__codelineno-0-563"></a>                    <span class="n">overlap_in_pixels</span><span class="o">=</span><span class="n">overlap_in_pixels</span><span class="p">,</span>
 </span><span id="__span-0-564"><a id="__codelineno-0-564" name="__codelineno-0-564"></a>                    <span class="n">interpolation_order</span><span class="o">=</span><span class="n">interpolation_order</span><span class="p">,</span>
 </span><span id="__span-0-565"><a id="__codelineno-0-565" name="__codelineno-0-565"></a>                    <span class="n">blending_widths</span><span class="o">=</span><span class="n">blending_widths</span><span class="p">,</span>
-</span><span id="__span-0-566"><a id="__codelineno-0-566" name="__codelineno-0-566"></a>                    <span class="n">use_cupy</span><span class="o">=</span><span class="n">use_cupy</span><span class="p">,</span>
+</span><span id="__span-0-566"><a id="__codelineno-0-566" name="__codelineno-0-566"></a>                    <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
 </span><span id="__span-0-567"><a id="__codelineno-0-567" name="__codelineno-0-567"></a>                <span class="p">)</span>
 </span><span id="__span-0-568"><a id="__codelineno-0-568" name="__codelineno-0-568"></a>            <span class="p">)</span>
 </span><span id="__span-0-569"><a id="__codelineno-0-569" name="__codelineno-0-569"></a>
@@ -2828,7 +2828,7 @@ Returns</p>
 </span><span id="__span-0-616"><a id="__codelineno-0-616" name="__codelineno-0-616"></a>            <span class="s2">&quot;overlap_in_pixels&quot;</span><span class="p">:</span> <span class="n">overlap_in_pixels</span><span class="p">,</span>
 </span><span id="__span-0-617"><a id="__codelineno-0-617" name="__codelineno-0-617"></a>            <span class="s2">&quot;interpolation_order&quot;</span><span class="p">:</span> <span class="n">interpolation_order</span><span class="p">,</span>
 </span><span id="__span-0-618"><a id="__codelineno-0-618" name="__codelineno-0-618"></a>            <span class="s2">&quot;blending_widths&quot;</span><span class="p">:</span> <span class="n">blending_widths</span><span class="p">,</span>
-</span><span id="__span-0-619"><a id="__codelineno-0-619" name="__codelineno-0-619"></a>            <span class="s2">&quot;use_cupy&quot;</span><span class="p">:</span> <span class="n">use_cupy</span><span class="p">,</span>
+</span><span id="__span-0-619"><a id="__codelineno-0-619" name="__codelineno-0-619"></a>            <span class="s2">&quot;backend&quot;</span><span class="p">:</span> <span class="n">backend</span><span class="p">,</span>
 </span><span id="__span-0-620"><a id="__codelineno-0-620" name="__codelineno-0-620"></a>        <span class="p">}</span>
 </span><span id="__span-0-621"><a id="__codelineno-0-621" name="__codelineno-0-621"></a>
 </span><span id="__span-0-622"><a id="__codelineno-0-622" name="__codelineno-0-622"></a>        <span class="c1"># Prepare block fusion and process in batches</span>
@@ -3161,7 +3161,7 @@ Returns</p>
 </span><span id="__span-0-949"><a id="__codelineno-0-949" name="__codelineno-0-949"></a>                <span class="n">interpolation_order</span><span class="o">=</span><span class="n">interpolation_order</span><span class="p">,</span>
 </span><span id="__span-0-950"><a id="__codelineno-0-950" name="__codelineno-0-950"></a>                <span class="n">blending_widths</span><span class="o">=</span><span class="n">blending_widths</span><span class="p">,</span>
 </span><span id="__span-0-951"><a id="__codelineno-0-951" name="__codelineno-0-951"></a>                <span class="n">shrink_distance</span><span class="o">=</span><span class="n">shrink_distance</span><span class="p">,</span>
-</span><span id="__span-0-952"><a id="__codelineno-0-952" name="__codelineno-0-952"></a>                <span class="n">use_cupy</span><span class="o">=</span><span class="n">use_cupy</span><span class="p">,</span>
+</span><span id="__span-0-952"><a id="__codelineno-0-952" name="__codelineno-0-952"></a>                <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
 </span><span id="__span-0-953"><a id="__codelineno-0-953" name="__codelineno-0-953"></a>            <span class="p">)</span>
 </span><span id="__span-0-954"><a id="__codelineno-0-954" name="__codelineno-0-954"></a>        <span class="k">else</span><span class="p">:</span>
 </span><span id="__span-0-955"><a id="__codelineno-0-955" name="__codelineno-0-955"></a>            <span class="c1"># === dask path: per-chunk delayed tasks ===</span>
@@ -3258,7 +3258,7 @@ Returns</p>
 </span><span id="__span-0-1046"><a id="__codelineno-0-1046" name="__codelineno-0-1046"></a>                    <span class="n">full_view_bbs</span><span class="o">=</span><span class="n">full_view_bbs</span><span class="p">,</span>
 </span><span id="__span-0-1047"><a id="__codelineno-0-1047" name="__codelineno-0-1047"></a>                    <span class="n">blending_widths</span><span class="o">=</span><span class="n">blending_widths</span><span class="p">,</span>
 </span><span id="__span-0-1048"><a id="__codelineno-0-1048" name="__codelineno-0-1048"></a>                    <span class="n">shrink_distance</span><span class="o">=</span><span class="n">shrink_distance</span><span class="p">,</span>
-</span><span id="__span-0-1049"><a id="__codelineno-0-1049" name="__codelineno-0-1049"></a>                    <span class="n">use_cupy</span><span class="o">=</span><span class="n">use_cupy</span><span class="p">,</span>
+</span><span id="__span-0-1049"><a id="__codelineno-0-1049" name="__codelineno-0-1049"></a>                    <span class="n">backend</span><span class="o">=</span><span class="n">backend</span><span class="p">,</span>
 </span><span id="__span-0-1050"><a id="__codelineno-0-1050" name="__codelineno-0-1050"></a>                <span class="p">)</span>
 </span><span id="__span-0-1051"><a id="__codelineno-0-1051" name="__codelineno-0-1051"></a>
 </span><span id="__span-0-1052"><a id="__codelineno-0-1052" name="__codelineno-0-1052"></a>                <span class="n">fused_output_chunk</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">from_delayed</span><span class="p">(</span>

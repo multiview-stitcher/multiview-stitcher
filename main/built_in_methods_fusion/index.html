@@ -1760,7 +1760,7 @@ contribute at each pixel.</p>
 </tbody>
 </table>
 <p><strong>GPU support:</strong> When the input arrays are <code>cupy</code> arrays, convolutions run on
-the GPU via <code>cupyx.scipy.ndimage</code>. Use <code>use_cupy=True</code> in <code>fusion.fuse</code> to
+the GPU via <code>cupyx.scipy.ndimage</code>. Use <code>backend="cupy"</code> in <code>fusion.fuse</code> to
 enable this automatically.</p>
 <p><strong>Chunk overlap:</strong> <code>multi_view_deconvolution</code> declares a
 <code>required_overlap</code> equal to the PSF half-width, ensuring chunked fusion does
@@ -1779,7 +1779,7 @@ not introduce seam artefacts at block boundaries.</p>
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="n">na</span><span class="o">=</span><span class="mf">0.8</span><span class="p">,</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="n">wavelength_um</span><span class="o">=</span><span class="mf">0.52</span><span class="p">,</span>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="p">),</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">use_cupy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># optional – omit for CPU-only</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;cupy&quot;</span><span class="p">,</span>  <span class="c1"># optional – omit for CPU-only</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="blending-weights">Blending weights</h2>
