@@ -290,6 +290,8 @@ def detect_beads(
 
     if backend is None:
         backend = "numpy"
+    elif backend not in ("numpy", "cupy"):
+        raise ValueError(f"Unsupported backend: {backend}")
 
     if max_detection_spacing is None:
         scale_key = "scale0"
@@ -376,7 +378,7 @@ def detect_beads(
             dim: detection_overlap[idim] for idim, dim in enumerate(sdims)
         },
         backend=backend,
-    ).data.astype(np.int64)
+    ).data.astype(np.int32)
 
     point_indices = _compute_point_indices_from_label_blocks(
         label_blocks, detection_overlap
