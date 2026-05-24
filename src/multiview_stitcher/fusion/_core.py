@@ -146,6 +146,7 @@ def _fuse_block_zarr_backed(
     blending_widths,
     shrink_distance,
     backend=None,
+    output_on_backend=False,
 ):
     """
     Compute fused output for a single chunk from zarr-backed input sims.
@@ -167,7 +168,7 @@ def _fuse_block_zarr_backed(
         Spatial dimension names.
     fusion_func, fusion_func_kwargs, weights_func, weights_func_kwargs,
     overlap_in_pixels, trim_overlap, interpolation_order, blending_widths,
-    shrink_distance
+    shrink_distance, backend, output_on_backend
         Fusion parameters forwarded to ``fuse_np``.
 
     Returns
@@ -233,6 +234,7 @@ def _fuse_block_zarr_backed(
         blending_widths=blending_widths,
         shrink_distance=shrink_distance,
         backend=backend,
+        output_on_backend=output_on_backend,
     )
 
     # Restore the z-axis removed for planewise fusion.
@@ -349,6 +351,7 @@ def fuse(
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
     backend: str | None = None,
+    output_on_backend: bool = False,
     sims: list | None = None,
 ):
     """
@@ -446,6 +449,10 @@ def fuse(
         cupy.asnumpy. Requires CuPy to be installed; raises
         ImportError if CuPy is not available. None is equivalent to
         "numpy".
+    output_on_backend : bool, optional
+        If True, keep each fused chunk on the selected compute backend for
+        lazy, non-Zarr output. By default False, which converts CuPy-backed
+        results to NumPy before returning them.
     Returns
     -------
     SpatialImage or MultiscaleSpatialImage
@@ -599,6 +606,7 @@ def fuse(
                     interpolation_order=interpolation_order,
                     blending_widths=blending_widths,
                     backend=backend,
+                    output_on_backend=output_on_backend,
                 )
             )
 
@@ -653,6 +661,8 @@ def fuse(
             "interpolation_order": interpolation_order,
             "blending_widths": blending_widths,
             "backend": backend,
+            # Direct Zarr writes require host arrays, so output_on_backend is
+            # intentionally not forwarded into these per-chunk fuse calls.
         }
 
         # Prepare block fusion and process in batches
@@ -998,6 +1008,7 @@ def fuse(
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
                 backend=backend,
+                output_on_backend=output_on_backend,
             )
         else:
             # === dask path: per-chunk delayed tasks ===
@@ -1104,6 +1115,7 @@ def fuse(
                     blending_widths=blending_widths,
                     shrink_distance=shrink_distance,
                     backend=backend,
+                    output_on_backend=output_on_backend,
                 )
 
                 fused_output_chunk = da.from_delayed(
@@ -1184,6 +1196,7 @@ def fuse_np(
     blending_widths: dict[float] = None,
     shrink_distance=0,
     backend: str | None = None,
+    output_on_backend: bool = False,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -1214,6 +1227,9 @@ def fuse_np(
         _description_, by default None
     origins : Sequence[dict[str, float]], optional
         _description_, by default None
+    output_on_backend : bool, optional
+        If True, leave backend-native outputs (for example CuPy arrays) on
+        that backend. By default False.
 
     Returns a delayed object.
     """
@@ -1340,7 +1356,9 @@ def fuse_np(
         ]
 
     fused = np.nan_to_num(fused).astype(input_dtype)
-    if cp is not None and isinstance(fused, cp.ndarray):
+    # Keep the historical behavior unless requested otherwise: chunks computed
+    # on CuPy are copied back to host memory before they leave fuse_np.
+    if cp is not None and isinstance(fused, cp.ndarray) and not output_on_backend:
         fused = cp.asnumpy(fused)
 
     # delete references to intermediate arrays to free memory
