@@ -736,7 +736,7 @@ def test_fuse_to_zarr():
         )
     
     fuse_kwargs = {
-        "sims": sims,
+        "images": sims,
         "transform_key": METADATA_TRANSFORM_KEY,
     }
 
