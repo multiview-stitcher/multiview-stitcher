@@ -16,18 +16,6 @@ except ImportError:
     cp = None
 
 
-def _normalize_spatial_value(value, sdims, name):
-    if isinstance(value, dict):
-        missing = [dim for dim in sdims if dim not in value]
-        if len(missing):
-            raise ValueError(
-                f"{name} is missing values for spatial dimensions {missing}."
-            )
-        return {dim: float(value[dim]) for dim in sdims}
-
-    return {dim: float(value) for dim in sdims}
-
-
 def _normalize_pixel_value(value, ndim, name):
     if np.isscalar(value):
         return tuple(float(value) for _ in range(ndim))
@@ -59,7 +47,7 @@ def _get_detection_scale_key(
 
     sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
     sdims = si_utils.get_spatial_dims_from_sim(sim0)
-    target_size = _normalize_spatial_value(
+    target_size = si_utils.normalize_to_spatial_dict(
         target_size_physical, sdims, "target_size_physical"
     )
 
@@ -376,7 +364,7 @@ def detect_beads(
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
     origin = si_utils.get_origin_from_sim(sim)
-    target_size = _normalize_spatial_value(
+    target_size = si_utils.normalize_to_spatial_dict(
         target_size_physical, sdims, "target_size_physical"
     )
     target_size_pixels = tuple(

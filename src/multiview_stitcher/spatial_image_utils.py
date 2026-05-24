@@ -438,6 +438,41 @@ def get_default_spatial_chunksizes(ndim: int):
         return DEFAULT_SPATIAL_CHUNKSIZES_3D
 
 
+def normalize_to_spatial_dict(value, sdims, name="value"):
+    """
+    Normalize a scalar or per-dimension mapping to a dict keyed by spatial dims.
+
+    Parameters
+    ----------
+    value : float or dict[str, float]
+        A scalar applied to every dimension, or a dict with one entry per
+        spatial dimension.
+    sdims : sequence[str]
+        Ordered spatial dimension names, e.g. ``["z", "y", "x"]``.
+    name : str, optional
+        Human-readable name of the parameter used in error messages.
+
+    Returns
+    -------
+    dict[str, float]
+        ``{dim: float(value)}`` for each dim in *sdims*.
+
+    Raises
+    ------
+    ValueError
+        If *value* is a dict that is missing entries for one or more dims.
+    """
+    if isinstance(value, dict):
+        missing = [dim for dim in sdims if dim not in value]
+        if missing:
+            raise ValueError(
+                f"{name} is missing values for spatial dimensions {missing}."
+            )
+        return {dim: float(value[dim]) for dim in sdims}
+
+    return {dim: float(value) for dim in sdims}
+
+
 def get_sim_from_array(
     array: ArrayLike,
     dims: Optional[Union[list, tuple]] = None,
@@ -859,8 +894,7 @@ def extend_stack_props(stack_props, extend_by):
         for sdim in SPATIAL_DIMS
         if sdim in list(stack_props["spacing"].keys())
     ]
-    if not isinstance(extend_by, dict):
-        extend_by = {dim: extend_by for dim in sdims}
+    extend_by = normalize_to_spatial_dict(extend_by, sdims, "extend_by")
 
     for dim, val in extend_by.items():
         stack_props["shape"][dim] += int(
