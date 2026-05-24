@@ -1,6 +1,6 @@
 import dask.array as da
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, label
 
 from multiview_stitcher import detection, msi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -21,15 +21,15 @@ def test_log_detect_detects_numpy_beads():
     )
     image = _make_bead_image(bead_pixels)
 
-    mask = detection.log_detect(
+    labels = detection.log_detect(
         image,
         target_size=4.0,
         threshold_rel=0.3,
     )
-    detected = np.argwhere(mask)
+    detected = np.argwhere(labels > 0)
     detected = detected[np.argsort(detected[:, 0])]
 
-    assert mask.dtype == bool
+    assert np.issubdtype(labels.dtype, np.integer)
     assert detected.shape == bead_pixels.shape
     assert np.allclose(detected, bead_pixels, atol=1)
 
@@ -79,7 +79,7 @@ def test_detect_beads_returns_intrinsic_physical_positions():
 
 def test_detect_beads_accepts_custom_detection_func():
     def threshold_detect(image, target_size, threshold):
-        return image > threshold
+        return label(image > threshold)[0]
 
     bead_pixels = np.array(
         [
@@ -120,3 +120,31 @@ def test_detect_beads_accepts_custom_detection_func():
     assert positions.attrs["detection_func"] == "threshold_detect"
     assert detected.shape == expected.shape
     assert np.allclose(detected, expected)
+
+
+def test_detect_beads_keeps_chunk_boundary_label_once():
+    def threshold_detect(image, target_size, threshold):
+        return label(image > threshold)[0]
+
+    image = np.zeros((32, 32), dtype=np.float32)
+    image[14:18, 10:14] = 5.0
+
+    sim = si_utils.get_sim_from_array(
+        da.from_array(image, chunks=(16, 16)),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    positions = detection.detect_beads(
+        msim,
+        target_size_physical=4.0,
+        detection_func=threshold_detect,
+        detection_func_kwargs={"threshold": 1.0},
+        detection_overlap=4,
+        segmentation_res_level=0,
+    )
+
+    assert positions.shape == (1, 2)
+    assert np.allclose(positions.values[0], [15.5, 11.5])
