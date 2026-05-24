@@ -794,6 +794,13 @@ def register_pair_of_msims(
     logger.info("Registration resolution level: %s", scale_key)
     logger.info("Registration binning applied at loaded scale: %s", str(registration_binning))
 
+    # Ensure dask-backed up front so that all subsequent operations
+    # (coarsen, sel, transform) stay lazy for zarr-backed inputs.
+    reg_sims = [
+        spatial_image_utils.ensure_dask_backed_dataarray(sim)
+        for sim in reg_sims
+    ]
+
     if max(registration_binning.values()) > 1:
         reg_sims_b = [
             sim.coarsen(registration_binning, boundary="trim")
@@ -830,11 +837,6 @@ def register_pair_of_msims(
             },
         )
         for isim, sim in enumerate(reg_sims_b)
-    ]
-
-    reg_sims_b = [
-        spatial_image_utils.ensure_dask_backed_dataarray(sim)
-        for sim in reg_sims_b
     ]
 
     # # Optionally perform CLAHE before registration
