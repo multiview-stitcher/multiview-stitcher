@@ -473,9 +473,9 @@ def get_sim_from_array(
 
     Returns
     -------
-    spatial_image.SpatialImage
-        spatial-image with multiview-stitcher flavor
-        (SpatialImage + affine transform attributes)
+    xarray.DataArray
+        xarray.DataArray with multiview-stitcher spatial metadata and
+        affine transform attributes
     """
 
     if isinstance(array, xr.DataArray):
@@ -1046,7 +1046,7 @@ def concat(sims, dim, **kwargs):
 
     Parameters
     ----------
-    sims : spatial_image.SpatialImage
+    sims : xarray.DataArray
         multiview-stitcher flavor spatial images
     dim : str
         dim to concatenate over
@@ -1065,7 +1065,7 @@ def combine_by_coords(sims, **kwargs):
 
     Parameters
     ----------
-    sims : spatial_image.SpatialImage
+    sims : xarray.DataArray
         multiview-stitcher flavor spatial images
     """
 
@@ -1080,14 +1080,14 @@ def max_project_sim(sim, dim="z"):
 
     Parameters
     ----------
-    sim : spatial_image.SpatialImage
+    sim : xarray.DataArray
         multiview-stitcher flavor spatial image
     dim : str, optional
         dimension to project over, by default "z"
 
     Returns
     -------
-    spatial_image.SpatialImage
+    xarray.DataArray
         maximum projected spatial image
     """
 
