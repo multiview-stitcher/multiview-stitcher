@@ -884,6 +884,33 @@ def test_marker_based_registration_recovers_synthetic_transform(
     assert result["quality"] > 0.75
 
 
+def test_marker_icp_refines_nearest_neighbor_transform():
+    ys, xs = np.meshgrid(np.arange(5) * 10.0, np.arange(5) * 10.0, indexing="ij")
+    moving_points = np.column_stack([ys.ravel(), xs.ravel()])
+    true_affine = param_utils.affine_from_translation([4.0, -3.0])
+    fixed_points = transformation.transform_pts(
+        moving_points, np.linalg.inv(true_affine)
+    )
+    initial_affine = param_utils.affine_from_translation([3.2, -2.3])
+
+    refined_affine, quality = registration._run_marker_icp(
+        fixed_points,
+        moving_points,
+        initial_affine,
+        initial_quality=0.1,
+        transform_type="translation",
+        icp_max_error=2.0,
+        icp_num_iterations=10,
+        icp_tolerance=1e-12,
+    )
+
+    initial_error = np.linalg.norm(initial_affine - true_affine)
+    refined_error = np.linalg.norm(refined_affine - true_affine)
+    assert refined_error < initial_error
+    np.testing.assert_allclose(refined_affine, true_affine, atol=1e-12)
+    assert quality == pytest.approx(1.0)
+
+
 @pytest.mark.parametrize("ndim", [2, 3])
 def test_marker_based_registration_recovers_rotation_only(ndim):
     moving_points = _marker_test_points(ndim)
@@ -905,6 +932,7 @@ def test_marker_based_registration_recovers_rotation_only(ndim):
     result = registration.registration_marker_based(
         fixed_points=fixed_points,
         moving_points=moving_points,
+        icp=True,
         random_state=2,
         fail_on_error=True,
     )

@@ -1062,6 +1062,90 @@ def _run_marker_ransac(
     return affine, quality
 
 
+def _run_marker_icp(
+    fixed_points,
+    moving_points,
+    initial_affine,
+    initial_quality,
+    transform_type,
+    icp_max_error,
+    icp_num_iterations,
+    icp_tolerance,
+):
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+    affine = np.asarray(initial_affine, dtype=float)
+    ndim = fixed_points.shape[1]
+    min_matches = _get_marker_registration_min_matches(transform_type, ndim)
+    moving_tree = cKDTree(moving_points)
+    quality = float(initial_quality)
+
+    logger.debug(
+        "Marker ICP start: transform_type=%s, fixed_points=%s, moving_points=%s, "
+        "max_error=%.6g, iterations=%s, tolerance=%.6g",
+        transform_type,
+        len(fixed_points),
+        len(moving_points),
+        icp_max_error,
+        icp_num_iterations,
+        icp_tolerance,
+    )
+
+    for iteration in range(icp_num_iterations):
+        transformed_fixed_points = transformation.transform_pts(fixed_points, affine)
+        nearest_distances, nearest_indices = moving_tree.query(
+            transformed_fixed_points, k=1
+        )
+        inlier_mask = nearest_distances <= icp_max_error
+        num_inliers = int(np.sum(inlier_mask))
+        if num_inliers < min_matches:
+            logger.debug(
+                "Marker ICP stopped: iteration=%s, inliers=%s, min_matches=%s",
+                iteration,
+                num_inliers,
+                min_matches,
+            )
+            break
+
+        # Fit the requested model to nearest-neighbor marker correspondences,
+        # always from the original fixed points to avoid accumulating drift.
+        try:
+            next_affine = _fit_marker_transform(
+                fixed_points[inlier_mask],
+                moving_points[nearest_indices[inlier_mask]],
+                transform_type,
+            )
+        except ValueError as exc:
+            logger.debug(
+                "Marker ICP stopped: iteration=%s, fit failed: %s",
+                iteration,
+                exc,
+            )
+            break
+
+        mean_residual = float(np.mean(nearest_distances[inlier_mask]))
+        quality = (num_inliers / len(fixed_points)) * max(
+            0.0, 1.0 - mean_residual / icp_max_error
+        )
+        affine_delta = float(np.linalg.norm(next_affine - affine))
+        affine = next_affine
+
+        logger.debug(
+            "Marker ICP iteration %s: inliers=%s/%s, mean_residual=%.4g, "
+            "quality=%.4f, affine_delta=%.4g",
+            iteration + 1,
+            num_inliers,
+            len(fixed_points),
+            mean_residual,
+            quality,
+            affine_delta,
+        )
+        if affine_delta <= icp_tolerance:
+            break
+
+    return affine, quality
+
+
 def _fail_marker_registration(ndim, message, fail_on_error):
     logger.debug(
         "Marker registration failed: ndim=%s, fail_on_error=%s, message=%s",
@@ -1092,6 +1176,10 @@ def registration_marker_based(
     ransac_min_inlier_ratio=0.1,
     ransac_min_inlier_factor=3.0,
     ransac_num_iterations=1000,
+    icp=False,
+    icp_max_error=None,
+    icp_num_iterations=50,
+    icp_tolerance=1e-6,
     random_state=0,
     fail_on_error=True,
 ):
@@ -1127,6 +1215,15 @@ def registration_marker_based(
         Multiplier for the model's minimum number of required matches.
     ransac_num_iterations : int, optional
         Number of random RANSAC samples.
+    icp : bool, optional
+        If True, refine the RANSAC result with nearest-neighbor ICP.
+    icp_max_error : float, optional
+        Maximum nearest-neighbor distance for ICP correspondences. If None,
+        ``ransac_max_error`` is used.
+    icp_num_iterations : int, optional
+        Maximum number of ICP refinement iterations.
+    icp_tolerance : float, optional
+        Stop ICP when the affine matrix update has this Frobenius norm or less.
     random_state : int or numpy.random.Generator, optional
         Seed or generator used for RANSAC sampling.
     fail_on_error : bool, optional
@@ -1155,7 +1252,8 @@ def registration_marker_based(
             "descriptor_ratio=%.6g, descriptor_distance_threshold=%s, "
             "descriptor_threshold_scale=%.6g, ransac_max_error=%.6g, "
             "ransac_min_inlier_ratio=%.6g, ransac_min_inlier_factor=%.6g, "
-            "ransac_num_iterations=%s, random_state=%s",
+            "ransac_num_iterations=%s, icp=%s, icp_max_error=%s, "
+            "icp_num_iterations=%s, icp_tolerance=%.6g, random_state=%s",
             fixed_points.shape,
             moving_points.shape,
             transform_type,
@@ -1168,6 +1266,10 @@ def registration_marker_based(
             ransac_min_inlier_ratio,
             ransac_min_inlier_factor,
             ransac_num_iterations,
+            icp,
+            icp_max_error,
+            icp_num_iterations,
+            icp_tolerance,
             random_state,
         )
         if fixed_points.ndim != 2 or moving_points.ndim != 2:
@@ -1190,6 +1292,14 @@ def registration_marker_based(
             raise ValueError("ransac_max_error must be positive.")
         if ransac_num_iterations < 1:
             raise ValueError("ransac_num_iterations must be at least 1.")
+        if icp_max_error is None:
+            icp_max_error = ransac_max_error
+        elif icp_max_error <= 0:
+            raise ValueError("icp_max_error must be positive.")
+        if icp_num_iterations < 1:
+            raise ValueError("icp_num_iterations must be at least 1.")
+        if icp_tolerance < 0:
+            raise ValueError("icp_tolerance must be non-negative.")
 
         transform_type = str(transform_type).lower()
         _get_marker_registration_min_matches(transform_type, ndim)
@@ -1243,6 +1353,17 @@ def registration_marker_based(
             ransac_num_iterations,
             random_state,
         )
+        if icp:
+            affine, quality = _run_marker_icp(
+                fixed_points,
+                moving_points,
+                affine,
+                quality,
+                transform_type,
+                icp_max_error,
+                icp_num_iterations,
+                icp_tolerance,
+            )
 
     except ValueError as exc:
         return _fail_marker_registration(ndim, str(exc), fail_on_error)
