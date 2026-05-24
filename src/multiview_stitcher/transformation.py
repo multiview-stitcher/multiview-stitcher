@@ -47,6 +47,9 @@ def transform_sim(
     )
     Oy = spatial_image_utils.get_origin_from_sim(sim, asarray=True)
 
+    # scipy.ndimage.affine_transform maps output pixel coordinates back into
+    # input pixel coordinates. Convert the physical transform into that pixel
+    # coordinate system before passing it to the backend-specific resampler.
     matrix_prime = np.dot(np.linalg.inv(Sy), np.dot(matrix, Sx))
     offset_prime = np.dot(
         np.linalg.inv(Sy),
@@ -79,8 +82,30 @@ def transform_sim(
     } | affine_transform_kwargs
 
     backend_data = spatial_image_utils._get_backend_data(sim)
+    input_shape = spatial_image_utils.get_shape_from_sim(sim, asarray=True)
 
-    if spatial_image_utils.is_dask_backed_dataarray(sim):
+    # Skip resampling when the requested output grid samples exactly the same
+    # input pixels. We still rebuild the spatial image below so the output
+    # coordinates follow output_stack_properties, matching the resampled path.
+    is_noop = (
+        tuple(affine_transform_kwargs["output_shape"]) == tuple(input_shape)
+        and np.allclose(
+            affine_transform_kwargs["matrix"],
+            np.eye(ndim),
+            rtol=0,
+            atol=1e-10,
+        )
+        and np.allclose(
+            affine_transform_kwargs["offset"],
+            0,
+            rtol=0,
+            atol=1e-10,
+        )
+    )
+
+    if is_noop:
+        out_data = backend_data
+    elif spatial_image_utils.is_dask_backed_dataarray(sim):
         out_data = dask_image_affine_transform(
             backend_data,
             **affine_transform_kwargs,
