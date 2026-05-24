@@ -797,7 +797,7 @@ def test_fuse_to_zarr():
         assert fused.max().compute() > 0
 
 
-@pytest.mark.parametrize("backend", ["dask", "zarr"])
+@pytest.mark.parametrize("data_backend", ["dask", "zarr"])
 def test_fuse_with_cupy_backend(data_backend):
     try:
         import cupy as cp
