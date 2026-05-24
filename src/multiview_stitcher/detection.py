@@ -7,15 +7,35 @@ from multiview_stitcher import fusion, msi_utils, param_utils
 from multiview_stitcher.misc_utils import requires_overlap
 from multiview_stitcher import spatial_image_utils as si_utils
 
+try:
+    import cupy as cp
+    import cupyx.scipy.ndimage as cupyx_ndimage
+except ImportError:
+    cp = None
+    cupyx_ndimage = None
+
+
+def _is_cupy_array(arr):
+    return cp is not None and isinstance(arr, cp.ndarray)
+
+
+def _as_numpy_array(arr, dtype=None):
+    if _is_cupy_array(arr):
+        arr = cp.asnumpy(arr)
+    elif isinstance(arr, (list, tuple)):
+        arr = [_as_numpy_array(item) for item in arr]
+    return np.asarray(arr, dtype=dtype)
+
 
 def _validate_label_array(labels):
-    if not np.issubdtype(np.asarray(labels).dtype, np.integer):
+    if not np.issubdtype(labels.dtype, np.integer):
         raise TypeError("detection_func must return an integer label array.")
 
 
 def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
     _validate_label_array(labels)
-    labels = np.asarray(labels)
+    is_cupy = _is_cupy_array(labels)
+    ndi = cupyx_ndimage if is_cupy else ndimage
     chunk_start = np.asarray(chunk_start, dtype=float)
     chunk_shape = np.asarray(chunk_shape, dtype=float)
     depth = np.asarray(depth, dtype=float)
@@ -25,10 +45,15 @@ def _extract_core_label_centroids(labels, chunk_start, chunk_shape, depth):
     if len(label_ids) == 0:
         return np.empty((0, labels.ndim), dtype=float)
 
-    centroids = np.asarray(
-        ndimage.center_of_mass(labels > 0, labels=labels, index=label_ids),
-        dtype=float,
+    # The delayed label blocks may be backed by NumPy or CuPy chunks,
+    # depending on the requested fusion backend.
+    center_output = ndi.center_of_mass(
+        labels > 0, labels=labels, index=label_ids
     )
+    centroids = _as_numpy_array(center_output, dtype=float)
+    if centroids.ndim == 1:
+        centroids = centroids[np.newaxis, :]
+
     core_start = depth
     core_stop = depth + chunk_shape
     keep = np.all((centroids >= core_start) & (centroids < core_stop), axis=1)
@@ -161,12 +186,14 @@ def log_detect(
         background, and positive labels identify LoG-response local maxima.
     """
 
-    image = np.asarray(image)
+    is_cupy = _is_cupy_array(image)
+    ndi = cupyx_ndimage if is_cupy else ndimage
     target_size = _target_size_pixels(target_size_physical, spacing)
     if len(target_size) != image.ndim:
         raise ValueError(
             "spacing and target_size_physical must match image.ndim."
         )
+
     sigma_pixels = tuple(
         max(0.5, size / (2.0 * np.sqrt(image.ndim)))
         for size in target_size
@@ -180,14 +207,14 @@ def log_detect(
         for distance in min_distance_pixels
     )
 
-    response = -ndimage.gaussian_laplace(
+    response = -ndi.gaussian_laplace(
         image.astype(np.float32, copy=False),
         sigma=sigma_pixels,
         mode="reflect",
     )
     response *= float(np.mean(sigma_pixels)) ** 2
 
-    max_response = ndimage.maximum_filter(
+    max_response = ndi.maximum_filter(
         response,
         size=max_filter_size,
         mode="reflect",
@@ -201,7 +228,8 @@ def log_detect(
         & (response > 0)
     )
 
-    return ndimage.label(detections)[0]
+    return ndi.label(detections)[0]
+
 
 def detect_beads(
     msim,
@@ -209,6 +237,7 @@ def detect_beads(
     detection_func_kwargs=None,
     detection_overlap=None,
     max_detection_spacing=None,
+    backend=None,
 ):
     """
     Detect bright fiducial beads in a multiscale spatial image.
@@ -242,6 +271,10 @@ def detect_beads(
         ``None``, ``scale0`` is used. Otherwise ``get_res_level_from_spacing``
         selects the coarsest resolution level whose spacing does not exceed
         this value.
+    backend : {"numpy", "cupy"} or None, optional
+        Compute backend to use. If "cupy" and CuPy is available, detection
+        is performed on the GPU: the detection function is passed CuPy arrays
+        and should return a CuPy array.
 
     Returns
     -------
@@ -252,6 +285,9 @@ def detect_beads(
         returned array can be passed directly to ``msi_utils.set_point_set`` or
         ``spatial_image_utils.set_point_set``.
     """
+
+    if backend is None:
+        backend = "numpy"
 
     if max_detection_spacing is None:
         scale_key = "scale0"
@@ -337,6 +373,7 @@ def detect_beads(
         overlap_in_pixels={
             dim: detection_overlap[idim] for idim, dim in enumerate(sdims)
         },
+        backend=backend,
     ).data.astype(np.int64)
 
     point_indices = _compute_point_indices_from_label_blocks(

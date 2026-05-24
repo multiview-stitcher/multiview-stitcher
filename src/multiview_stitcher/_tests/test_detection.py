@@ -1,6 +1,7 @@
 import dask
 import dask.array as da
 import numpy as np
+import pytest
 from scipy.ndimage import gaussian_filter, label
 
 from multiview_stitcher import detection, msi_utils
@@ -174,3 +175,45 @@ def test_detect_beads_uses_max_detection_spacing_for_scale_selection():
 
     assert positions.attrs["segmentation_scale"] == "scale1"
     assert positions.shape == (0, 2)
+
+
+@pytest.mark.parametrize(
+    "backend, expected",
+    [(None, "numpy"), ("cupy", "cupy")],
+)
+def test_detect_beads_passes_backend_to_fuse(monkeypatch, backend, expected):
+    seen = {}
+
+    def fake_fuse(*args, **kwargs):
+        seen["backend"] = kwargs["backend"]
+        labels = np.zeros((4, 4), dtype=np.int64)
+        labels[1, 2] = 1
+        return type(
+            "FusedLabels",
+            (),
+            {"data": da.from_array(labels, chunks=labels.shape)},
+        )()
+
+    def empty_detect(image, spacing):
+        return np.zeros_like(image, dtype=np.int64)
+
+    sim = si_utils.get_sim_from_array(
+        np.zeros((4, 4), dtype=np.float32),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    monkeypatch.setattr(detection.fusion, "fuse", fake_fuse)
+
+    kwargs = {} if backend is None else {"backend": backend}
+    positions = detection.detect_beads(
+        msim,
+        detection_func=empty_detect,
+        detection_overlap=0,
+        **kwargs,
+    )
+
+    assert seen["backend"] == expected
+    assert np.allclose(positions.values, [[1.0, 2.0]])
