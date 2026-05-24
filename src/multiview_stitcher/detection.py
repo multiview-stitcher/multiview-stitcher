@@ -371,6 +371,7 @@ def detect_beads(
     )
     sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
     sim = si_utils.get_sim_field(sim)
+    sim = si_utils.ensure_dask_backed_dataarray(sim)
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
     spacing = si_utils.get_spacing_from_sim(sim)
