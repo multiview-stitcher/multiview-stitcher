@@ -1200,13 +1200,12 @@ def fuse_np(
     # Transform input views
     field_ims_t = [
         transformation.transform_sim(
-            # sim.astype(np.float32),
-            sim,
+            sim.astype(np.float32),
             np.linalg.inv(param),
             output_stack_properties=output_properties,
             order=interpolation_order,
             cval=np.nan,
-        ).data.astype(np.float32)
+        ).data
         for sim, param in zip(sims, params)
     ]
     field_ims_t = np.stack(field_ims_t)
