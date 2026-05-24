@@ -789,6 +789,59 @@ def test_marker_descriptor_threshold_scales_with_points():
     assert scaled_threshold == pytest.approx(threshold * 10)
 
 
+def test_marker_descriptor_matching_matches_bruteforce():
+    fixed_descriptors = [
+        {"point_index": 0, "vector": np.array([0.0, 0.0])},
+        {"point_index": 1, "vector": np.array([1.0, 0.0])},
+        {"point_index": 2, "vector": np.array([2.0, 0.0])},
+        {"point_index": 2, "vector": np.array([2.1, 0.0])},
+    ]
+    moving_descriptors = [
+        {"point_index": 10, "vector": np.array([0.05, 0.0])},
+        {"point_index": 10, "vector": np.array([0.06, 0.0])},
+        {"point_index": 11, "vector": np.array([0.5, 0.0])},
+        {"point_index": 12, "vector": np.array([1.05, 0.0])},
+        {"point_index": 12, "vector": np.array([1.06, 0.0])},
+        {"point_index": 13, "vector": np.array([2.2, 0.0])},
+        {"point_index": 14, "vector": np.array([2.9, 0.0])},
+    ]
+
+    expected_pairs = []
+    for fixed_descriptor in fixed_descriptors:
+        distances_by_moving_point = {}
+        for moving_descriptor in moving_descriptors:
+            distance = float(
+                np.linalg.norm(
+                    fixed_descriptor["vector"] - moving_descriptor["vector"]
+                )
+            )
+            moving_point_index = moving_descriptor["point_index"]
+            if (
+                moving_point_index not in distances_by_moving_point
+                or distance < distances_by_moving_point[moving_point_index]
+            ):
+                distances_by_moving_point[moving_point_index] = distance
+
+        sorted_matches = sorted(
+            distances_by_moving_point.items(), key=lambda item: item[1]
+        )
+        best_moving_point_index, best_distance = sorted_matches[0]
+        second_best_distance = sorted_matches[1][1]
+        if best_distance < 0.5 and best_distance * 3.0 < second_best_distance:
+            expected_pairs.append(
+                (fixed_descriptor["point_index"], best_moving_point_index)
+            )
+
+    candidate_pairs = registration._match_marker_descriptors(
+        fixed_descriptors,
+        moving_descriptors,
+        descriptor_ratio=3.0,
+        descriptor_distance_threshold=0.5,
+    )
+
+    assert set(map(tuple, candidate_pairs)) == set(expected_pairs)
+
+
 @pytest.mark.parametrize("ndim", [2, 3])
 @pytest.mark.parametrize(
     "transform_type",

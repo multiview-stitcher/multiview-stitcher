@@ -715,47 +715,78 @@ def _match_marker_descriptors(
     descriptor_ratio,
     descriptor_distance_threshold,
 ):
+    fixed_vectors = np.asarray(
+        [descriptor["vector"] for descriptor in fixed_descriptors], dtype=float
+    )
+    fixed_point_indices = np.asarray(
+        [descriptor["point_index"] for descriptor in fixed_descriptors],
+        dtype=int,
+    )
+    moving_vectors = np.asarray(
+        [descriptor["vector"] for descriptor in moving_descriptors],
+        dtype=float,
+    )
+    moving_point_indices = np.asarray(
+        [descriptor["point_index"] for descriptor in moving_descriptors],
+        dtype=int,
+    )
+
+    if len(fixed_vectors) == 0 or len(moving_vectors) == 0:
+        return np.empty((0, 2), dtype=int)
+
+    _, moving_descriptor_counts = np.unique(
+        moving_point_indices, return_counts=True
+    )
+    query_k = min(
+        len(moving_vectors),
+        int(np.max(moving_descriptor_counts)) + 1,
+    )
+    descriptor_tree = cKDTree(moving_vectors)
+    nearest_distances, nearest_indices = descriptor_tree.query(
+        fixed_vectors, k=query_k
+    )
+    nearest_distances = np.asarray(nearest_distances, dtype=float)
+    nearest_indices = np.asarray(nearest_indices, dtype=int)
+    if query_k == 1:
+        nearest_distances = nearest_distances[:, np.newaxis]
+        nearest_indices = nearest_indices[:, np.newaxis]
+
     candidates_by_pair = {}
     accepted_descriptor_matches = 0
     rejected_by_distance = 0
     rejected_by_ratio = 0
-    for fixed_descriptor in fixed_descriptors:
-        distances_by_moving_point = {}
-        for moving_descriptor in moving_descriptors:
-            distance = float(
-                np.linalg.norm(
-                    fixed_descriptor["vector"] - moving_descriptor["vector"]
-                )
-            )
-            moving_point_index = moving_descriptor["point_index"]
-            if (
-                moving_point_index not in distances_by_moving_point
-                or distance < distances_by_moving_point[moving_point_index]
-            ):
-                distances_by_moving_point[moving_point_index] = distance
 
-        if not len(distances_by_moving_point):
+    for fixed_point_index, row_distances, row_indices in zip(
+        fixed_point_indices,
+        nearest_distances,
+        nearest_indices,
+    ):
+        best_descriptor_index = row_indices[0]
+        best_moving_point_index = moving_point_indices[best_descriptor_index]
+        best_distance = float(row_distances[0])
+        passes_distance = best_distance < descriptor_distance_threshold
+        if not passes_distance:
+            rejected_by_distance += 1
             continue
 
-        sorted_matches = sorted(
-            distances_by_moving_point.items(), key=lambda item: item[1]
-        )
-        best_moving_point_index, best_distance = sorted_matches[0]
-        second_best_distance = (
-            sorted_matches[1][1] if len(sorted_matches) > 1 else np.inf
-        )
-        passes_distance = best_distance < descriptor_distance_threshold
+        row_moving_point_indices = moving_point_indices[row_indices]
+        second_best_mask = row_moving_point_indices != best_moving_point_index
+        if np.any(second_best_mask):
+            second_best_distance = float(
+                row_distances[np.flatnonzero(second_best_mask)[0]]
+            )
+        else:
+            second_best_distance = np.inf
+
         passes_ratio = best_distance * descriptor_ratio < second_best_distance
-        if passes_distance and passes_ratio:
+        if passes_ratio:
             accepted_descriptor_matches += 1
-            pair = (fixed_descriptor["point_index"], best_moving_point_index)
+            pair = (fixed_point_index, best_moving_point_index)
             if (
                 pair not in candidates_by_pair
                 or best_distance < candidates_by_pair[pair]
             ):
                 candidates_by_pair[pair] = best_distance
-        elif not passes_distance:
-            rejected_by_distance += 1
         else:
             rejected_by_ratio += 1
 
@@ -1736,6 +1767,7 @@ def register_pair_of_msims(
         )
         pairwise_reg_func_kwargs["fixed_points"] = fixed_points_for_registration
         pairwise_reg_func_kwargs["moving_points"] = moving_points_for_registration
+
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "Marker points passed to pairwise registration: points_key=%r, "
