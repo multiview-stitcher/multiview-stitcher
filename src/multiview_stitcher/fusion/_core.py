@@ -405,6 +405,14 @@ def fuse(
             (n_batch>1 only compatible with a provided batch_func). By default 1.
         - batch_func_kwargs: dict, optional
             Additional keyword arguments passed to batch_func.
+    use_cupy : bool, optional
+        If True, each input tile chunk is transferred to the GPU (via
+        ``cupy.asarray``) immediately before fusion and the result is moved
+        back to NumPy with ``cupy.asnumpy`` before it is returned.  This
+        means resampling (affine transform), blending-weight computation, and
+        the fusion function all run on the GPU (for fusion functions that support
+        cupy array input). Requires CuPy to be installed; raises ``ImportError``
+        if CuPy is not available.  By default False.
     Returns
     -------
     SpatialImage or MultiscaleSpatialImage

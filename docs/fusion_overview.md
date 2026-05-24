@@ -205,18 +205,14 @@ fused_sim = fusion.fuse(
 
 ## GPU acceleration
 
-Pass `cupy` arrays as input data to run resampling and fusion on the GPU. This is transparent — any array type supported by the NumPy API works:
+Pass `use_cupy=True` to run resampling, blending weight calculation and fusion on the GPU.
 
 ```python
-import cupy as cp
-
-for sim in sims:
-    sim.data = sim.data.map_blocks(cp.asarray)
-
-fused_sim = fusion.fuse(images=sims, transform_key="translation_registered")
-
-# retrieve from GPU
-fused_sim.data = fused_sim.data.map_blocks(cp.asnumpy)
+fused_sim = fusion.fuse(
+    images=sims,
+    transform_key="translation_registered",
+    use_cupy=True,
+)
 ```
 
 See [GPU support](gpu_support.md) for setup instructions.
