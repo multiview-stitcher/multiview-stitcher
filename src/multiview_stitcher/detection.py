@@ -366,7 +366,7 @@ def detect_beads(
 
     scale_key = _get_detection_scale_key(
         msim,
-        target_size_physical / 4.0,
+        target_size_physical,
         segmentation_res_level,
     )
     sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
