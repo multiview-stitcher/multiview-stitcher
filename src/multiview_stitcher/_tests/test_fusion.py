@@ -222,22 +222,19 @@ def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
 
 
 @pytest.mark.parametrize("backend", ["numpy", "dask", "zarr"])
-def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend, tmp_path):
+def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend):
     data = np.ones((10, 10), dtype=np.float32)
 
     if backend == "numpy":
         array = data
-    if backend == "dask":
+    elif backend == "dask":
         array = da.from_array(data, chunks=(5, 5))
     else:
-        array = zarr.open_array(
-            str(tmp_path / "input.zarr"),
-            mode="w",
-            shape=data.shape,
+        array = zarr.array(
+            data,
             chunks=(5, 5),
-            dtype=data.dtype,
+            store=zarr.storage.MemoryStore(),
         )
-        array[:] = data
 
     sim = si_utils.get_sim_from_array(
         array,
