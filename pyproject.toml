@@ -98,7 +98,7 @@ dev = [
 playground = [
     "napari-stitcher",
     "napari[pyqt6, optional]",
-    "pydantic_bigstitcher",
+    "pydantic_bigstitcher @git+https://github.com/d-v-b/pydantic-bigstitcher.git",
     "ipympl",
     "ome-types",
     "ipyfilechooser>=0.6.0",
