@@ -428,6 +428,181 @@ def test_neuroglancer_source_transform_matches_physical_affine():
     )
 
 
+def test_view_neuroglancer_corrects_spacing_origin_mismatch():
+    """
+    When in-memory sims have different spacing/origin than the on-disk OME-Zarr,
+    generate_neuroglancer_json must include a correction so that the
+    pixel → world mapping is consistent with applying the registered affine
+    in in-memory physical coordinates.
+    """
+    sdims = ["y", "x"]
+    ndim = len(sdims)
+
+    # On-disk OME-Zarr spacing/origin
+    spacing_zarr = {"y": 0.5, "x": 0.5}
+    origin_zarr = {"y": 0.0, "x": 0.0}
+
+    # In-memory sim: user changed spacing and origin
+    spacing_mem = {"y": 1.0, "x": 2.0}
+    origin_mem = {"y": 10.0, "x": -5.0}
+
+    # Registered affine expressed in in-memory physical coordinates
+    theta = np.deg2rad(15)
+    linear = np.array(
+        [
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+    )
+    translation = np.array([3.0, -2.0])
+    mem_affine = np.eye(ndim + 1)
+    mem_affine[:ndim, :ndim] = linear
+    mem_affine[:ndim, ndim] = translation
+
+    # Compute the correction that maps zarr physical coords → mem physical coords
+    correction = np.eye(ndim + 1)
+    for i, dim in enumerate(sdims):
+        scale = spacing_mem[dim] / spacing_zarr[dim]
+        correction[i, i] = scale
+        correction[i, ndim] = origin_mem[dim] - origin_zarr[dim] * scale
+
+    composed_affine = mem_affine @ correction
+
+    ng_affine = vis_utils._affine_to_neuroglancer_source_transform(
+        composed_affine,
+        sdims=sdims,
+        output_spacing=spacing_zarr,
+    )
+
+    # Verify for a test pixel that neuroglancer produces the expected world coordinate
+    pixel = np.array([3.0, 7.0])
+
+    # Expected world: apply mem_affine to the in-memory physical coordinate of the pixel
+    mem_phys = np.array(
+        [pixel[i] * spacing_mem[sdims[i]] + origin_mem[sdims[i]] for i in range(ndim)]
+    )
+    expected_world = linear @ mem_phys + translation
+
+    # Neuroglancer's internal computation (mirrors the formula in
+    # test_neuroglancer_source_transform_matches_physical_affine)
+    zarr_spacing_arr = np.array([spacing_zarr[dim] for dim in sdims])
+    zarr_origin_arr = np.array([origin_zarr[dim] for dim in sdims])
+    output_spacing_arr = zarr_spacing_arr  # outputDimensions uses zarr spacing
+
+    source_coords = pixel + zarr_origin_arr / zarr_spacing_arr
+    ng_linear = (
+        ng_affine[:ndim, :ndim]
+        * zarr_spacing_arr[None, :]
+        / output_spacing_arr[:, None]
+    )
+    ng_output_coords = ng_linear @ source_coords + ng_affine[:ndim, ndim]
+    neuroglancer_world = output_spacing_arr * ng_output_coords
+
+    np.testing.assert_allclose(neuroglancer_world, expected_world, rtol=1e-10)
+
+
+def test_view_neuroglancer_spacing_origin_mismatch_integration():
+    """
+    Integration test: generate_neuroglancer_json produces correct source-transform
+    matrices when in-memory sims have spacing/origin different from on-disk OME-Zarr.
+    """
+    import dask.array as da
+    import xarray as xr
+
+    sdims = ["y", "x"]
+    ndim = len(sdims)
+    tile_size = 10
+
+    spacing_zarr = {"y": 0.5, "x": 0.5}
+    origin_zarr = {"y": 0.0, "x": 0.0}
+    spacing_mem = {"y": 1.0, "x": 2.0}
+    origin_mem = {"y": 10.0, "x": -5.0}
+
+    theta = np.deg2rad(15)
+    linear = np.array(
+        [
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+    )
+    translation = np.array([3.0, -2.0])
+    mem_affine_np = np.eye(ndim + 1)
+    mem_affine_np[:ndim, :ndim] = linear
+    mem_affine_np[:ndim, ndim] = translation
+    xaffine = param_utils.affine_to_xaffine(mem_affine_np)
+
+    # Build zarr-backed sim (use dask array so write_sim_to_ome_zarr works)
+    sim_zarr = xr.DataArray(
+        da.zeros((tile_size, tile_size), chunks=(tile_size, tile_size)),
+        dims=sdims,
+        coords={
+            dim: np.arange(tile_size) * spacing_zarr[dim] + origin_zarr[dim]
+            for dim in sdims
+        },
+    )
+    si_utils.set_sim_affine(sim_zarr, xaffine, transform_key="test")
+
+    # Build in-memory sim with different spacing/origin but same registered affine
+    sim_mem = xr.DataArray(
+        np.zeros((tile_size, tile_size)),
+        dims=sdims,
+        coords={
+            dim: np.arange(tile_size) * spacing_mem[dim] + origin_mem[dim]
+            for dim in sdims
+        },
+    )
+    si_utils.set_sim_affine(sim_mem, xaffine, transform_key="test")
+
+    with tempfile.TemporaryDirectory() as data_dir:
+        zarr_path = os.path.join(data_dir, "sim.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim_zarr, zarr_path)
+
+        ng_json = vis_utils.generate_neuroglancer_json(
+            ome_zarr_paths=[zarr_path],
+            ome_zarr_urls=["http://localhost:8000/sim.zarr"],
+            sims=[sim_mem],
+            transform_key="test",
+        )
+
+        # Extract source-transform matrix and output spacing from JSON
+        source_transform = ng_json["layers"][0]["source"]["transform"]
+        matrix = np.array(source_transform["matrix"])  # shape (len(dims), len(dims)+1)
+        output_dims = source_transform["outputDimensions"]
+        output_spacing_arr = np.array(
+            [output_dims[dim][0] / 1e-6 for dim in sdims]
+        )
+
+        # The spatial block lives in the last ndim rows and last ndim+1 cols
+        # (linear part in [-ndim:, -ndim-1:-1], translation in [-ndim:, -1])
+        ng_linear_block = matrix[-ndim:, -ndim - 1 : -1]
+        ng_translation = matrix[-ndim:, -1]
+
+        # Verify pixel → world coordinate
+        pixel = np.array([3.0, 7.0])
+
+        mem_phys = np.array(
+            [
+                pixel[i] * spacing_mem[sdims[i]] + origin_mem[sdims[i]]
+                for i in range(ndim)
+            ]
+        )
+        expected_world = linear @ mem_phys + translation
+
+        zarr_spacing_arr = np.array([spacing_zarr[dim] for dim in sdims])
+        zarr_origin_arr = np.array([origin_zarr[dim] for dim in sdims])
+
+        ng_linear_scaled = (
+            ng_linear_block
+            * zarr_spacing_arr[None, :]
+            / output_spacing_arr[:, None]
+        )
+        source_coords = pixel + zarr_origin_arr / zarr_spacing_arr
+        ng_output_coords = ng_linear_scaled @ source_coords + ng_translation
+        neuroglancer_world = output_spacing_arr * ng_output_coords
+
+        np.testing.assert_allclose(neuroglancer_world, expected_world, rtol=1e-5)
+
+
 @pytest.mark.parametrize(
     "ndim, N_t, N_c, option",
     [
@@ -514,6 +689,48 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
             ],
         )
         assert len(ng_json.keys())
+
+
+def test_view_neuroglancer_images_param(monkeypatch):
+    """
+    view_neuroglancer accepts `images=` with sims and msims, and emits a
+    DeprecationWarning when the legacy `sims=` parameter is used.
+    """
+    import warnings
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+    monkeypatch.setattr(vis_utils, "serve_dir", lambda *a, **kw: None)
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2, overlap=0, N_c=1, N_t=1, tile_size=10, tiles_x=2, tiles_y=1, tiles_z=1
+    )
+    msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
+
+    with tempfile.TemporaryDirectory() as data_dir:
+        zarr_paths = [
+            os.path.join(data_dir, f"sim_{i}.zarr") for i in range(len(sims))
+        ]
+        for sim, zp in zip(sims, zarr_paths):
+            ngff_utils.write_sim_to_ome_zarr(sim, zp)
+
+        # images= accepts plain sims
+        vis_utils.view_neuroglancer(
+            zarr_paths, images=sims, transform_key=io.METADATA_TRANSFORM_KEY
+        )
+
+        # images= accepts msims (DataTree)
+        vis_utils.view_neuroglancer(
+            zarr_paths, images=msims, transform_key=io.METADATA_TRANSFORM_KEY
+        )
+
+        # legacy sims= triggers a DeprecationWarning
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            vis_utils.view_neuroglancer(
+                zarr_paths, sims=sims, transform_key=io.METADATA_TRANSFORM_KEY
+            )
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
 def test_view_neuroglancer_different_folders(monkeypatch):

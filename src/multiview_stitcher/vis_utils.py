@@ -1233,7 +1233,8 @@ def generate_neuroglancer_json(
         for isim, sim in enumerate(sims):
 
             sim_ome_zarr = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
-            spacing_isim = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacing_zarr = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacing_isim = spacing_zarr
             spacings_per_sim.append(spacing_isim)
 
             affine = spatial_image_utils.get_affine_from_sim(
@@ -1241,13 +1242,33 @@ def generate_neuroglancer_json(
             )
             if "t" in affine.dims:
                 affine = affine.sel(t=0)
-            affine = _affine_to_neuroglancer_source_transform(
-                affine,
+
+            # Compose a correction that maps from OME-Zarr physical coordinates to
+            # in-memory physical coordinates before applying the registered affine.
+            # This is needed when the user has modified origin/spacing of the in-memory
+            # sim relative to what is stored in the OME-Zarr on disk.
+            affine_np = np.array(affine, dtype=float)
+            affine_ndim = affine_np.shape[-1] - 1
+            affine_sdims = sdims[-affine_ndim:]
+            origin_zarr = spatial_image_utils.get_origin_from_sim(sim_ome_zarr)
+            origin_mem = spatial_image_utils.get_origin_from_sim(sim)
+            spacing_mem = spatial_image_utils.get_spacing_from_sim(sim)
+            correction = np.eye(affine_ndim + 1)
+            for i, dim in enumerate(affine_sdims):
+                scale = spacing_mem[dim] / spacing_zarr[dim]
+                correction[i, i] = scale
+                correction[i, affine_ndim] = (
+                    origin_mem[dim] - origin_zarr[dim] * scale
+                )
+            affine_np = affine_np @ correction
+
+            affine_ng = _affine_to_neuroglancer_source_transform(
+                affine_np,
                 sdims=sdims,
                 output_spacing=spacing_isim,
             )
-            affine_ndim = affine.shape[-1] - 1
-            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
+            affine_ndim = affine_ng.shape[-1] - 1
+            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine_ng
     else:
         full_affines = [None for _ in ome_zarr_paths]
         spacings_per_sim = [spacing] * len(ome_zarr_paths)
@@ -1425,6 +1446,7 @@ def get_neuroglancer_url(ng_json):
 
 def view_neuroglancer(
     ome_zarr_paths,
+    images=None,
     sims=None,
     transform_key=None,
     port=8000,
@@ -1438,8 +1460,10 @@ def view_neuroglancer(
     Visualize a list of OME-zarrs in Neuroglancer
     (browser-based, no installation required).
 
-    If sims and transform_key are provided, the affine transformations saved
-    in the sims are used for visualization.
+    If images (or sims) and transform_key are provided, the affine
+    transformations attached to those images are used for visualization.
+    Multi-scale images (msims / DataTree) are automatically reduced to their
+    highest-resolution spatial image via ``msi_utils.get_sim_from_msim``.
 
     Confirmed to work with:
     - 2D and 3D
@@ -1448,20 +1472,51 @@ def view_neuroglancer(
     Parameters
     ----------
     ome_zarr_paths : list of str or Path
-        path to OME-Zarrs
-    sims : list of spatial_images, optional
+        Paths to the OME-Zarr files to visualize.
+    images : list of spatial_image or DataTree, optional
+        Spatial images (sims) or multi-scale images (msims) whose transform
+        metadata is used for visualization.  msims are automatically converted
+        to sims.  Takes precedence over ``sims`` when both are provided.
+    sims : list of spatial_image, optional
+        Kept for backward compatibility.  Use ``images`` for new code.
+        Ignored when ``images`` is also provided.
     transform_key : str, optional
-        transform_key to use for visualization
+        Key of the affine transform to use for visualization.  Required when
+        ``images`` or ``sims`` are provided.
     port : int, optional
-        Port to serve OME-Zarrs. By default 8000
+        Port on which to serve local OME-Zarrs. By default 8000.
     channel_coord : str, optional
-        Which channel to use for initializing contrast limits, by default None
+        Which channel to use for initializing contrast limits, by default None.
     single_layer : bool, optional
-        Whether to show all images in a single layer (True) or in separate layers (False, default).
+        Whether to show all images in a single layer (True) or in separate
+        layers per image (False, default).
     contrast_limits : tuple, optional
-        Contrast limits (min, max) to use for visualization. If None, contrast limits are read
-        from the OME-Zarr omero metadata if available, by default None
+        Contrast limits (min, max) to use for visualization. If None, limits
+        are read from the OME-Zarr omero metadata if available, by default None.
+    layer_dicts : list of dict, optional
+        Per-layer neuroglancer config overrides.
+    global_dict : dict, optional
+        Global neuroglancer config overrides.
     """
+
+    # Resolve the list of spatial images to use for transform lookup.
+    # `images` takes precedence; fall back to the legacy `sims` parameter.
+    if sims is not None and images is None:
+        import warnings
+        warnings.warn(
+            "The 'sims' parameter is deprecated and will be removed in a future "
+            "version. Use 'images' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    resolved_images = images if images is not None else sims
+    if resolved_images is not None:
+        resolved_images = [
+            msi_utils.get_sim_from_msim(img)
+            if msi_utils.is_msim(img)
+            else img
+            for img in resolved_images
+        ]
 
     ome_zarr_paths = [str(p) for p in ome_zarr_paths]
 
@@ -1511,7 +1566,7 @@ def view_neuroglancer(
     ng_json = generate_neuroglancer_json(
         ome_zarr_paths=ome_zarr_paths,
         ome_zarr_urls=ome_zarr_urls,
-        sims=sims,
+        sims=resolved_images,
         transform_key=transform_key,
         channel_coord=channel_coord,
         single_layer=single_layer,
