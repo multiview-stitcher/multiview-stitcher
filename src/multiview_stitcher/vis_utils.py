@@ -1233,7 +1233,8 @@ def generate_neuroglancer_json(
         for isim, sim in enumerate(sims):
 
             sim_ome_zarr = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
-            spacing_isim = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacing_zarr = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
+            spacing_isim = spacing_zarr
             spacings_per_sim.append(spacing_isim)
 
             affine = spatial_image_utils.get_affine_from_sim(
@@ -1241,13 +1242,33 @@ def generate_neuroglancer_json(
             )
             if "t" in affine.dims:
                 affine = affine.sel(t=0)
-            affine = _affine_to_neuroglancer_source_transform(
-                affine,
+
+            # Compose a correction that maps from OME-Zarr physical coordinates to
+            # in-memory physical coordinates before applying the registered affine.
+            # This is needed when the user has modified origin/spacing of the in-memory
+            # sim relative to what is stored in the OME-Zarr on disk.
+            affine_np = np.array(affine, dtype=float)
+            affine_ndim = affine_np.shape[-1] - 1
+            affine_sdims = sdims[-affine_ndim:]
+            origin_zarr = spatial_image_utils.get_origin_from_sim(sim_ome_zarr)
+            origin_mem = spatial_image_utils.get_origin_from_sim(sim)
+            spacing_mem = spatial_image_utils.get_spacing_from_sim(sim)
+            correction = np.eye(affine_ndim + 1)
+            for i, dim in enumerate(affine_sdims):
+                scale = spacing_mem[dim] / spacing_zarr[dim]
+                correction[i, i] = scale
+                correction[i, affine_ndim] = (
+                    origin_mem[dim] - origin_zarr[dim] * scale
+                )
+            affine_np = affine_np @ correction
+
+            affine_ng = _affine_to_neuroglancer_source_transform(
+                affine_np,
                 sdims=sdims,
                 output_spacing=spacing_isim,
             )
-            affine_ndim = affine.shape[-1] - 1
-            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine
+            affine_ndim = affine_ng.shape[-1] - 1
+            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine_ng
     else:
         full_affines = [None for _ in ome_zarr_paths]
         spacings_per_sim = [spacing] * len(ome_zarr_paths)
