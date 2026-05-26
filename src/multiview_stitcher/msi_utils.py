@@ -268,11 +268,27 @@ def get_transforms_from_dataset_as_dict(dataset):
     return transforms_dict
 
 
+def _get_inherited_coords_for_sim(msim, scale, sim):
+    inherited_coords = {}
+    for coord_source in (msim, msim[scale]):
+        for coord_name, coord in coord_source.coords.items():
+            if coord_name in sim.coords:
+                continue
+            if not all(dim in sim.dims for dim in coord.dims):
+                continue
+            inherited_coords[coord_name] = coord
+
+    return inherited_coords
+
+
 def get_sim_from_msim(msim, scale="scale0"):
     """
     highest scale sim from msim with affine transforms
     """
     sim = msim["%s/image" % scale].copy()
+    inherited_coords = _get_inherited_coords_for_sim(msim, scale, sim)
+    if inherited_coords:
+        sim = sim.assign_coords(inherited_coords)
     sim.attrs["transforms"] = get_transforms_from_dataset_as_dict(
         msim["scale0"]
     )

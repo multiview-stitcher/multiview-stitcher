@@ -192,6 +192,15 @@ def test_read_msim_from_ome_zarr(use_dask):
             [str(v) for v in sim_read.coords["c"].values],
         )
 
+        selected_channel = sim.coords["c"].values[1]
+        selected_msim = msi_utils.multiscale_sel_coords(
+            msim_read,
+            {"c": selected_channel},
+        )
+        selected_sim = msi_utils.get_sim_from_msim(selected_msim)
+        assert "c" in selected_sim.coords
+        assert str(selected_sim.coords["c"].item()) == str(selected_channel)
+
         scale_keys = msi_utils.get_sorted_scale_keys(msim_read)
         assert len(scale_keys) > 1
         for scale_key in scale_keys:
