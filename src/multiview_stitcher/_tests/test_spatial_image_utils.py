@@ -4,6 +4,7 @@ import tempfile
 import dask.array as da
 import numpy as np
 import pytest
+import xarray as xr
 import zarr
 
 from multiview_stitcher import param_utils
@@ -292,3 +293,111 @@ def test_get_extent_from_sim(ndim):
 
     for dim in shape:
         assert extent[dim] == pytest.approx(scale[dim] * (shape[dim] - 1))
+
+
+def test_point_set_helpers_and_spatial_selection():
+    sim = si_utils.get_sim_from_array(
+        np.zeros((5, 5)),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 2.0},
+        translation={"y": 10.0, "x": 20.0},
+    )
+
+    points = np.array(
+        [
+            [10.0, 20.0],
+            [12.0, 24.0],
+            [14.0, 28.0],
+        ]
+    )
+    si_utils.set_point_set(sim, points)
+
+    point_set = si_utils.get_point_set(sim)
+    assert point_set["position"].dims == ("t", "c", "point_id", "dim")
+    assert np.allclose(point_set["position"].isel(t=0, c=0), points)
+
+    selected = si_utils.sim_sel_coords(
+        sim,
+        {"y": slice(10.0, 12.0), "x": slice(20.0, 24.0)},
+    )
+    selected_points = si_utils.get_point_set(selected)
+
+    assert selected_points["position"].dims == ("t", "c", "point_id", "dim")
+    assert np.allclose(
+        selected_points["position"].isel(t=0, c=0).values,
+        np.array([[10.0, 20.0], [12.0, 24.0]]),
+    )
+
+
+def test_point_set_nonspatial_selection():
+    sim = si_utils.get_sim_from_array(
+        np.zeros((2, 5, 5)),
+        dims=["t", "y", "x"],
+        t_coords=[0, 1],
+    )
+    points = xr.Dataset(
+        {
+            "position": xr.DataArray(
+                np.array(
+                    [
+                        [[1.0, 1.0], [2.0, 2.0]],
+                        [[3.0, 3.0], [4.0, 4.0]],
+                    ]
+                ),
+                dims=["t", "point_id", "dim"],
+                coords={"t": [0, 1], "dim": ["y", "x"]},
+            )
+        }
+    )
+    si_utils.set_point_set(sim, points)
+
+    selected = si_utils.sim_sel_coords(sim, {"t": 1})
+    selected_points = si_utils.get_point_set(selected)
+
+    assert "t" not in selected_points["position"].dims
+    assert selected_points["position"].dims == ("c", "point_id", "dim")
+    assert np.allclose(
+        selected_points["position"].isel(c=0).values,
+        np.array([[3.0, 3.0], [4.0, 4.0]]),
+    )
+
+
+def test_point_set_spatial_selection_preserves_nonspatial_dims():
+    sim = si_utils.get_sim_from_array(
+        np.zeros((2, 5, 5)),
+        dims=["t", "y", "x"],
+        t_coords=[0, 1],
+    )
+    points = xr.Dataset(
+        {
+            "position": xr.DataArray(
+                np.array(
+                    [
+                        [[1.0, 1.0], [4.0, 4.0]],
+                        [[4.0, 4.0], [1.0, 1.0]],
+                    ]
+                ),
+                dims=["t", "point_id", "dim"],
+                coords={"t": [0, 1], "dim": ["y", "x"]},
+            )
+        }
+    )
+    si_utils.set_point_set(sim, points)
+
+    selected = si_utils.sim_sel_coords(
+        sim,
+        {"y": slice(0.0, 2.0), "x": slice(0.0, 2.0)},
+    )
+    selected_points = si_utils.get_point_set(selected)
+
+    assert selected_points["position"].dims == ("t", "c", "point_id", "dim")
+    assert np.allclose(
+        selected_points["position"].isel(c=0).values,
+        np.array(
+            [
+                [[1.0, 1.0], [np.nan, np.nan]],
+                [[np.nan, np.nan], [1.0, 1.0]],
+            ]
+        ),
+        equal_nan=True,
+    )

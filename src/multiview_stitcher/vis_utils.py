@@ -1,7 +1,9 @@
 import json
 import os
+import ssl
 import urllib
 import webbrowser
+from functools import partial
 from http.server import (
     HTTPServer,
     SimpleHTTPRequestHandler,
@@ -13,6 +15,7 @@ import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.widgets import Slider
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from xarray import DataTree
 
@@ -45,6 +48,7 @@ def plot_positions(
     plot_title=None,
     spacing=None,
     output_filename=None,
+    points_key=None,
 ):
     """
     Plot tile / view positions in both 2D or 3D.
@@ -86,6 +90,9 @@ def plot_positions(
         Title of the plot, by default no title
     output_filename : str, optional
         Filename where to save the plot if not None, by default None
+    points_key : str, optional
+        Name of a point set to overlay. If None, point sets are not plotted.
+        By default None.
 
     Returns
     -------
@@ -150,6 +157,25 @@ def plot_positions(
                 sp["origin"][dim] = sp["origin"][dim] - sp["spacing"][dim] / 2
 
         plot_stack_props(sp, ax, color=pos_colors[iview])
+
+        if points_key is not None:
+            point_positions = _get_point_set_positions_for_plot(
+                sim,
+                points_key=points_key,
+                transform_key=transform_key,
+                sdims=sdims,
+            )
+            if point_positions is not None and len(point_positions):
+                ax.scatter(
+                    point_positions[:, 0],
+                    point_positions[:, 1],
+                    point_positions[:, 2],
+                    c=pos_colors[iview],
+                    edgecolors="k",
+                    marker="o",
+                    s=20,
+                    depthshade=False,
+                )
 
     if display_view_indices:
         for iview, sim in enumerate(sims):
@@ -280,6 +306,384 @@ def plot_positions(
         plt.show()
 
     return fig, ax
+
+
+def _get_point_set_positions_for_plot(sim, points_key, transform_key, sdims):
+    if (
+        "point_sets" not in sim.attrs
+        or points_key not in sim.attrs["point_sets"]
+    ):
+        return None
+
+    point_set = spatial_image_utils.get_point_set(
+        sim,
+        points_key=points_key,
+    )
+    position = point_set["position"]
+    for dim in position.dims:
+        if dim not in ["point_id", "dim"]:
+            position = position.isel({dim: 0})
+
+    position = position.sel(dim=sdims).transpose("point_id", "dim")
+    positions = np.asarray(position.values, dtype=float)
+    positions = positions[np.all(np.isfinite(positions), axis=1)]
+    if not len(positions):
+        return np.empty((0, 3))
+
+    affine = spatial_image_utils.get_affine_from_sim(
+        sim,
+        transform_key=transform_key,
+    )
+    sel_dict = {
+        dim: affine.coords[dim][0].values
+        for dim in affine.dims
+        if dim not in ["x_in", "x_out"]
+    }
+    if len(sel_dict):
+        affine = affine.sel(sel_dict)
+    affine = np.asarray(affine)
+
+    positions_h = np.concatenate(
+        [positions, np.ones((len(positions), 1))],
+        axis=1,
+    )
+    positions = (affine @ positions_h.T).T[:, :-1]
+
+    if len(sdims) == 2:
+        positions = np.column_stack(
+            [np.zeros(len(positions)), positions[:, 1], positions[:, 0]]
+        )
+    else:
+        positions = positions[:, [0, 2, 1]]
+
+    return positions
+
+
+def _resolve_points_key_for_sim(sim, points_key=None):
+    if points_key is None:
+        return None
+
+    point_set_keys = list(sim.attrs.get("point_sets", {}).keys())
+    if points_key not in point_set_keys:
+        raise ValueError(
+            f"Point set {points_key!r} not found. "
+            f"Available point sets: {point_set_keys}."
+        )
+
+    return points_key
+
+
+def _get_sim_for_imshow(image, resolution_level=0):
+    if isinstance(image, DataTree):
+        scale_key = f"scale{resolution_level}"
+        available_scale_keys = msi_utils.get_sorted_scale_keys(image)
+        if scale_key not in available_scale_keys:
+            raise ValueError(
+                f"Resolution level {resolution_level} not found. "
+                f"Available levels: {available_scale_keys}."
+            )
+
+        return msi_utils.get_sim_from_msim(image, scale=scale_key)
+
+    if resolution_level != 0:
+        raise ValueError(
+            "resolution_level is only supported for multiscale inputs."
+        )
+
+    return image
+
+
+def imshow(
+    image,
+    resolution_level=0,
+    points_key=None,
+    points_tolerance=1,
+    project_dim=None,
+    horizontal_dim=None,
+    vertical_dim=None,
+    figure_kwargs=None,
+    imshow_kwargs=None,
+    scatter_kwargs=None,
+    show_plot=True,
+):
+    """
+    Display a 2D slice or projection from a sim or msim.
+
+    The viewer adds one interactive slider per dimension that is not shown in
+    the displayed 2D plane (for example z, t, c). Points are converted from
+    physical coordinates to
+    pixel coordinates as ``(points - origin) / spacing`` for slice matching,
+    while the displayed axes and optional point overlay use physical
+    coordinates.
+
+    Parameters
+    ----------
+    image : xarray.DataArray (spatial-image) or xarray.DataTree (multiscale-spatial-image)
+        Spatial image or multiscale spatial image.
+    resolution_level : int, optional
+        Resolution level to display for multiscale inputs. By default 0.
+    points_key : str, optional
+        Name of the point set to display. If None, no point set is shown.
+    points_tolerance : float, optional
+        Pixel-space tolerance around the currently selected index for every
+        spatial slider dimension. By default 1.
+    project_dim : str, optional
+        Spatial dimension to maximum-project before display. By default None.
+    horizontal_dim : str, optional
+        Spatial dimension to plot on the horizontal axis. If None, defaults to
+        ``"x"`` when available, otherwise another non-projected spatial
+        dimension.
+    vertical_dim : str, optional
+        Spatial dimension to plot on the vertical axis. If None, defaults to
+        ``"y"`` when available, otherwise another non-projected spatial
+        dimension.
+    figure_kwargs : dict, optional
+        Keyword arguments passed to ``matplotlib.pyplot.figure``.
+    imshow_kwargs : dict, optional
+        Keyword arguments passed to ``Axes.imshow``.
+    scatter_kwargs : dict, optional
+        Keyword arguments passed to ``Axes.scatter``.
+    show_plot : bool, optional
+        Whether to call ``plt.show()``. By default True.
+
+    Returns
+    -------
+    fig, ax, sliders
+        Matplotlib figure, axis, and a dict of sliders keyed by dimension.
+    """
+
+    points_tolerance = float(points_tolerance)
+    if points_tolerance < 0:
+        raise ValueError("points_tolerance must be >= 0.")
+
+    figure_kwargs = {} if figure_kwargs is None else dict(figure_kwargs)
+    imshow_kwargs = {} if imshow_kwargs is None else dict(imshow_kwargs)
+    scatter_kwargs = {} if scatter_kwargs is None else dict(scatter_kwargs)
+
+    sim = _get_sim_for_imshow(image, resolution_level=resolution_level)
+    scale_key = f"scale{resolution_level}"
+    points_key = _resolve_points_key_for_sim(sim, points_key=points_key)
+    if "y" not in sim.dims or "x" not in sim.dims:
+        raise ValueError("The selected image must include both y and x dimensions.")
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+    for dim_name, dim_value in [
+        ("horizontal_dim", horizontal_dim),
+        ("vertical_dim", vertical_dim),
+    ]:
+        if dim_value is not None and dim_value not in sdims:
+            raise ValueError(
+                f"{dim_name} must be one of {sdims}, got {dim_value!r}."
+            )
+
+    if project_dim is not None:
+        if project_dim not in sdims:
+            raise ValueError(
+                f"project_dim must be one of {sdims}, got {project_dim!r}."
+            )
+
+    available_plot_dims = [dim for dim in sdims if dim != project_dim]
+
+    def _resolve_plot_dim(requested_dim, preferred_dims, dim_name, other_dim=None):
+        if requested_dim is not None:
+            if requested_dim == project_dim:
+                raise ValueError(f"{dim_name} must differ from project_dim.")
+            return requested_dim
+
+        for dim in preferred_dims:
+            if dim in available_plot_dims and dim != other_dim:
+                return dim
+
+        for dim in available_plot_dims:
+            if dim != other_dim:
+                return dim
+
+        raise ValueError(
+            "Plotting requires two displayed spatial dimensions. "
+            f"After applying project_dim={project_dim!r}, available dimensions "
+            f"are {available_plot_dims}."
+        )
+
+    horizontal_dim = _resolve_plot_dim(
+        horizontal_dim,
+        preferred_dims=["x", "z", "y"],
+        dim_name="horizontal_dim",
+        other_dim=vertical_dim,
+    )
+    vertical_dim = _resolve_plot_dim(
+        vertical_dim,
+        preferred_dims=["y", "z", "x"],
+        dim_name="vertical_dim",
+        other_dim=horizontal_dim,
+    )
+
+    if horizontal_dim == vertical_dim:
+        raise ValueError("horizontal_dim and vertical_dim must be different.")
+
+    display_spatial_dims = [vertical_dim, horizontal_dim]
+
+    slice_dims = [
+        dim
+        for dim in sim.dims
+        if dim not in display_spatial_dims and dim != project_dim
+    ]
+    slider_dims = [dim for dim in slice_dims if sim.sizes[dim] > 1]
+    slice_indices = {dim: 0 for dim in slice_dims}
+
+    spatial_slice_dims = [dim for dim in slice_dims if dim in sdims]
+    sdim_indices = {dim: index for index, dim in enumerate(sdims)}
+    row_dim, col_dim = display_spatial_dims
+    row_index = sdim_indices[row_dim]
+    col_index = sdim_indices[col_dim]
+
+    point_position = None
+    if points_key is not None:
+        point_position = spatial_image_utils.get_point_set(
+            sim,
+            points_key=points_key,
+        )["position"].sel(dim=sdims)
+
+    origin_dict = spatial_image_utils.get_origin_from_sim(sim)
+    spacing_dict = spatial_image_utils.get_spacing_from_sim(sim)
+    shape = spatial_image_utils.get_shape_from_sim(sim)
+    origin = np.array([origin_dict[dim] for dim in sdims], dtype=float)
+    spacing = np.array([spacing_dict[dim] for dim in sdims], dtype=float)
+
+    extent = [
+        origin_dict[col_dim] - spacing_dict[col_dim] / 2,
+        origin_dict[col_dim]
+        + (shape[col_dim] - 0.5) * spacing_dict[col_dim],
+        origin_dict[row_dim]
+        + (shape[row_dim] - 0.5) * spacing_dict[row_dim],
+        origin_dict[row_dim] - spacing_dict[row_dim] / 2,
+    ]
+
+    n_sliders = len(slider_dims)
+    bottom_margin = 0.14 + n_sliders * 0.06
+    fig = plt.figure(**figure_kwargs)
+    ax = fig.add_axes([0.1, bottom_margin, 0.8, max(0.2, 0.82 - bottom_margin)])
+
+    def _get_current_image_slice():
+        sim_slice = sim.isel(slice_indices) if len(slice_indices) else sim
+        if project_dim is not None:
+            sim_slice = sim_slice.max(dim=project_dim)
+        sim_slice = sim_slice.transpose(*display_spatial_dims)
+        return np.asarray(sim_slice.data)
+
+    image_defaults = {
+        "interpolation": "nearest",
+        "cmap": "gray",
+        "extent": extent,
+        "origin": "upper",
+    }
+    image_defaults.update(imshow_kwargs)
+    image_artist = ax.imshow(
+        _get_current_image_slice(),
+        **image_defaults,
+    )
+    points_artist = None
+    if points_key is not None:
+        scatter_defaults = {
+            "s": 40,
+            "edgecolor": "red",
+            "facecolor": "none",
+        }
+        scatter_defaults.update(scatter_kwargs)
+        points_artist = ax.scatter(
+            [],
+            [],
+            **scatter_defaults,
+        )
+
+    ax.set_xlabel(col_dim)
+    ax.set_ylabel(row_dim)
+    ax.set_aspect("equal")
+
+    def _update_title():
+        title_parts = [scale_key]
+        if points_key is not None:
+            title_parts.append(f"points={points_key}")
+        if project_dim is not None:
+            title_parts.append(f"project={project_dim}")
+        if len(slider_dims):
+            coord_text = ", ".join(
+                [
+                    f"{dim}={sim.coords[dim].values[slice_indices[dim]]}"
+                    for dim in slider_dims
+                ]
+            )
+            title_parts.append(coord_text)
+        ax.set_title(" | ".join(title_parts))
+
+    def _update_points_overlay():
+        if points_artist is None or point_position is None:
+            return
+
+        selected_points = point_position
+        for dim in slice_dims:
+            if dim in selected_points.dims and dim not in ["point_id", "dim"]:
+                selected_points = selected_points.isel({dim: slice_indices[dim]})
+
+        points = np.asarray(selected_points.values, dtype=float)
+        if points.ndim == 1:
+            points = points[None, :]
+        points = points.reshape(-1, len(sdims))
+
+        points = points[np.all(np.isfinite(points), axis=1)]
+        if not len(points):
+            points_artist.set_offsets(np.empty((0, 2)))
+            return
+
+        points_px = (points - origin) / spacing
+
+        keep = np.ones(len(points_px), dtype=bool)
+        for dim in spatial_slice_dims:
+            dim_index = sdim_indices[dim]
+            keep &= (
+                np.abs(points_px[:, dim_index] - slice_indices[dim])
+                <= points_tolerance
+            )
+
+        points_xy = points[keep][:, [col_index, row_index]]
+        points_artist.set_offsets(points_xy if len(points_xy) else np.empty((0, 2)))
+
+    sliders = {}
+
+    def _update(_=None):
+        for dim, slider in sliders.items():
+            slice_indices[dim] = int(slider.val)
+            slider.valtext.set_text(str(sim.coords[dim].values[slice_indices[dim]]))
+
+        image_artist.set_data(_get_current_image_slice())
+        if points_artist is not None:
+            _update_points_overlay()
+        _update_title()
+        fig.canvas.draw_idle()
+
+    for idim, dim in enumerate(slider_dims):
+        slider_ax = fig.add_axes(
+            [0.15, 0.03 + (n_sliders - idim - 1) * 0.05, 0.75, 0.03]
+        )
+        sliders[dim] = Slider(
+            ax=slider_ax,
+            label=dim,
+            valmin=0,
+            valmax=sim.sizes[dim] - 1,
+            valinit=0,
+            valstep=1,
+        )
+        sliders[dim].on_changed(_update)
+
+    _update()
+
+    if show_plot:
+        plt.show()
+
+    return fig, ax, sliders
+
+
+def plot_msim_with_points(*args, **kwargs):
+    return imshow(*args, **kwargs)
 
 
 def plot_stack_props(stack_props, ax, color="black", size=10, linewidth=1):

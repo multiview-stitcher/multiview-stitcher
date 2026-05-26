@@ -370,6 +370,7 @@ def _shrink_source_bb(
     """
 
     sdims = list(source_bb["origin"].keys())
+
     if isinstance(shrink_distance, (int, float)):
         shrink_distance = {dim: float(shrink_distance) for dim in sdims}
 

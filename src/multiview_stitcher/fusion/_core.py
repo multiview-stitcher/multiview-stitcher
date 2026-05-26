@@ -141,10 +141,12 @@ def _fuse_block_zarr_backed(
     weights_func,
     weights_func_kwargs,
     overlap_in_pixels,
+    trim_overlap,
     interpolation_order,
     blending_widths,
     shrink_distance,
     backend=None,
+    output_on_backend=False,
 ):
     """
     Compute fused output for a single chunk from zarr-backed input sims.
@@ -165,7 +167,8 @@ def _fuse_block_zarr_backed(
     sdims : list of str
         Spatial dimension names.
     fusion_func, fusion_func_kwargs, weights_func, weights_func_kwargs,
-    overlap_in_pixels, interpolation_order, blending_widths, shrink_distance
+    overlap_in_pixels, trim_overlap, interpolation_order, blending_widths,
+    shrink_distance, backend, output_on_backend
         Fusion parameters forwarded to ``fuse_np``.
 
     Returns
@@ -178,7 +181,10 @@ def _fuse_block_zarr_backed(
     output_chunk_bb = entry["output_bb"]
     output_chunk_bb_with_overlap = entry["output_bb_overlap"]
     fuse_planewise = entry["fuse_planewise"]
-    out_shape = tuple(output_chunk_bb["shape"][dim] for dim in sdims)
+    output_chunk_bb_result = (
+        output_chunk_bb if trim_overlap else output_chunk_bb_with_overlap
+    )
+    out_shape = tuple(output_chunk_bb_result["shape"][dim] for dim in sdims)
 
     chunk_views = entry["views"]  # list of (iview, tile_overlap_bb)
     if not chunk_views:
@@ -222,12 +228,13 @@ def _fuse_block_zarr_backed(
         fusion_func_kwargs=fusion_func_kwargs,
         weights_func=weights_func,
         weights_func_kwargs=weights_func_kwargs,
-        trim_overlap_in_pixels=overlap_in_pixels,
+        trim_overlap_in_pixels=overlap_in_pixels if trim_overlap else 0,
         interpolation_order=interpolation_order,
         full_view_bbs=full_view_bbs,
         blending_widths=blending_widths,
         shrink_distance=shrink_distance,
         backend=backend,
+        output_on_backend=output_on_backend,
     )
 
     # Restore the z-axis removed for planewise fusion.
@@ -261,6 +268,26 @@ def process_output_chunksize(sims, output_chunksize):
         output_chunksize = {dim: output_chunksize for dim in sdims}
 
     return output_chunksize
+
+
+def _chunks_from_chunk_bbs(chunk_bbs, block_indices, sdims):
+    """Return dask chunk sizes matching per-block bounding box shapes."""
+    chunks = []
+
+    for idim, dim in enumerate(sdims):
+        chunks_for_dim = {}
+        for chunk_bb, block_index in zip(chunk_bbs, block_indices):
+            chunks_for_dim.setdefault(
+                int(block_index[idim]), int(chunk_bb["shape"][dim])
+            )
+        chunks.append(
+            tuple(
+                chunks_for_dim[ichunk]
+                for ichunk in range(len(chunks_for_dim))
+            )
+        )
+
+    return tuple(chunks)
 
 
 def process_output_stack_properties(
@@ -317,12 +344,14 @@ def fuse(
     output_stack_properties: BoundingBox = None,
     output_chunksize: Union[int, dict[str, int]] = None,
     overlap_in_pixels: int = None,
+    trim_overlap: bool = True,
     interpolation_order: int = 1,
     blending_widths: dict[str, float] = None,
     output_zarr_url: str | None = None,
     zarr_options: dict | None = None,
     batch_options: dict | None = None,
     backend: str | None = None,
+    output_on_backend: bool = False,
     sims: list | None = None,
 ):
     """
@@ -375,6 +404,13 @@ def fuse(
         chunked dask array or a zarr-backed sim with stored chunk hints, its chunk grid
         is used as the default. Otherwise, the default chunksize defined in
         spatial_image_utils.py is used.
+    overlap_in_pixels : int or dict, optional
+        Pixel overlap added around each output chunk before fusion, by default
+        None.
+    trim_overlap : bool, optional
+        If True, trim fused chunks back to their requested output chunk size
+        after fusion. If False, keep the overlap in each fused chunk returned
+        by the lazy fusion graph. By default True.
     output_zarr_url : str or None, optional
         If not None, fuse directly into a Zarr store at this location and do so in batches of chunks,
         with each chunk being processed independently. This allows for efficient memory usage and
@@ -413,6 +449,10 @@ def fuse(
         cupy.asnumpy. Requires CuPy to be installed; raises
         ImportError if CuPy is not available. None is equivalent to
         "numpy".
+    output_on_backend : bool, optional
+        If True, keep each fused chunk on the selected compute backend for
+        lazy, non-Zarr output. By default False, which converts CuPy-backed
+        results to NumPy before returning them.
     Returns
     -------
     SpatialImage or MultiscaleSpatialImage
@@ -490,6 +530,7 @@ def fuse(
                 output_stack_properties=scale0_output_stack_properties,
                 output_chunksize=output_chunksize,
                 overlap_in_pixels=overlap_in_pixels,
+                trim_overlap=trim_overlap,
                 interpolation_order=interpolation_order,
                 blending_widths=blending_widths,
                 output_zarr_url=output_zarr_url,
@@ -561,9 +602,11 @@ def fuse(
                     output_stack_properties=curr_output_stack_properties,
                     output_chunksize=output_chunksize,
                     overlap_in_pixels=overlap_in_pixels,
+                    trim_overlap=trim_overlap,
                     interpolation_order=interpolation_order,
                     blending_widths=blending_widths,
                     backend=backend,
+                    output_on_backend=output_on_backend,
                 )
             )
 
@@ -614,9 +657,12 @@ def fuse(
             "output_stack_properties": output_stack_properties,
             "output_chunksize": output_chunksize,
             "overlap_in_pixels": overlap_in_pixels,
+            "trim_overlap": trim_overlap,
             "interpolation_order": interpolation_order,
             "blending_widths": blending_widths,
             "backend": backend,
+            # Direct Zarr writes require host arrays, so output_on_backend is
+            # intentionally not forwarded into these per-chunk fuse calls.
         }
 
         # Prepare block fusion and process in batches
@@ -738,6 +784,10 @@ def fuse(
         }
         for output_chunk_bb in output_chunk_bbs
     ]
+
+    output_chunk_bbs_for_result = (
+        output_chunk_bbs if trim_overlap else output_chunk_bbs_with_overlap
+    )
 
     views_bb = [si_utils.get_stack_properties_from_sim(sim) for sim in sims]
 
@@ -906,6 +956,11 @@ def fuse(
                     "views": chunk_views,
                     "output_bb": output_chunk_bb,
                     "output_bb_overlap": output_chunk_bb_with_overlap,
+                    "output_bb_result": (
+                        output_chunk_bb
+                        if trim_overlap
+                        else output_chunk_bb_with_overlap
+                    ),
                     "fuse_planewise": fuse_planewise,
                 }
             )
@@ -936,7 +991,9 @@ def fuse(
             fused = da.map_blocks(
                 _fuse_block_zarr_backed,
                 chunk_params,
-                chunks=tuple(tuple(int(v) for v in c) for c in _normalized_chunks),
+                chunks=_chunks_from_chunk_bbs(
+                    output_chunk_bbs_for_result, block_indices, sdims
+                    ),
                 dtype=sims[0].dtype,
                 output_dtype=sims[0].dtype,
                 sim_coord_dict=sim_coord_dict,
@@ -946,10 +1003,12 @@ def fuse(
                 weights_func=weights_func,
                 weights_func_kwargs=weights_func_kwargs,
                 overlap_in_pixels=overlap_in_pixels,
+                trim_overlap=trim_overlap,
                 interpolation_order=interpolation_order,
                 blending_widths=blending_widths,
                 shrink_distance=shrink_distance,
                 backend=backend,
+                output_on_backend=output_on_backend,
             )
         else:
             # === dask path: per-chunk delayed tasks ===
@@ -958,15 +1017,20 @@ def fuse(
             )
 
             for block_index, entry in zip(block_indices, per_chunk_entries):
-                output_chunk_bb = entry["output_bb"]
                 output_chunk_bb_with_overlap = entry["output_bb_overlap"]
+                output_chunk_bb_result = entry["output_bb_result"]
                 fuse_planewise = entry["fuse_planewise"]
                 chunk_views = entry["views"]
                 relevant_view_indices = [iview for iview, _ in chunk_views]
 
                 if not len(relevant_view_indices):
                     fused_output_chunks[tuple(block_index)] = da.zeros(
-                        tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
+                        tuple(
+                            [
+                                output_chunk_bb_result["shape"][dim]
+                                for dim in sdims
+                            ]
+                        ),
                         dtype=sims[0].dtype,
                     )
                     continue
@@ -1041,17 +1105,27 @@ def fuse(
                     fusion_func_kwargs=fusion_func_kwargs,
                     weights_func=weights_func,
                     weights_func_kwargs=weights_func_kwargs,
-                    trim_overlap_in_pixels=overlap_in_pixels,
+                    # The overlap still defines the fusion target; this only
+                    # controls the final crop inside fuse_np.
+                    trim_overlap_in_pixels=overlap_in_pixels
+                    if trim_overlap
+                    else 0,
                     interpolation_order=interpolation_order,
                     full_view_bbs=full_view_bbs,
                     blending_widths=blending_widths,
                     shrink_distance=shrink_distance,
                     backend=backend,
+                    output_on_backend=output_on_backend,
                 )
 
                 fused_output_chunk = da.from_delayed(
                     fused_output_chunk,
-                    shape=tuple([output_chunk_bb["shape"][dim] for dim in sdims]),
+                    shape=tuple(
+                        [
+                            output_chunk_bb_result["shape"][dim]
+                            for dim in sdims
+                        ]
+                    ),
                     dtype=sims[0].dtype,
                 )
 
@@ -1122,6 +1196,7 @@ def fuse_np(
     blending_widths: dict[float] = None,
     shrink_distance=0,
     backend: str | None = None,
+    output_on_backend: bool = False,
 ):
     """
     Fuse tiles from in-memory slices.
@@ -1140,8 +1215,10 @@ def fuse_np(
         _description_, by default None
     weights_func_kwargs : _type_, optional
         _description_, by default None
-    overlap_in_pixels : int or dict, optional
-        _description_, by default None
+    trim_overlap_in_pixels : int or dict, optional
+        Number of pixels to remove from both sides of each spatial dimension
+        after fusion. Pass 0 to keep the full overlapped output chunk. By
+        default 0.
     interpolation_order : int, optional
         _description_, by default 1
     full_view_bbs : Sequence[dict[str, dict[str, Union[int, float]]]], optional
@@ -1150,6 +1227,9 @@ def fuse_np(
         _description_, by default None
     origins : Sequence[dict[str, float]], optional
         _description_, by default None
+    output_on_backend : bool, optional
+        If True, leave backend-native outputs (for example CuPy arrays) on
+        that backend. By default False.
 
     Returns a delayed object.
     """
@@ -1262,14 +1342,23 @@ def fuse_np(
             dim: trim_overlap_in_pixels for dim in output_properties["shape"].keys()
         }
 
-    if any(trim_overlap_in_pixels[dim] > 0 for dim in output_properties["shape"].keys()):
+    if any(
+        trim_overlap_in_pixels[dim] > 0
+        for dim in output_properties["shape"].keys()
+    ):
         fused = fused[
-            tuple([slice(trim_overlap_in_pixels[dim], -trim_overlap_in_pixels[dim])
-                   for dim in output_properties["shape"].keys()])
+            tuple(
+                slice(trim_overlap_in_pixels[dim], -trim_overlap_in_pixels[dim])
+                if trim_overlap_in_pixels[dim] > 0
+                else slice(None)
+                for dim in output_properties["shape"].keys()
+            )
         ]
 
     fused = np.nan_to_num(fused).astype(input_dtype)
-    if cp is not None and isinstance(fused, cp.ndarray):
+    # Keep the historical behavior unless requested otherwise: chunks computed
+    # on CuPy are copied back to host memory before they leave fuse_np.
+    if cp is not None and isinstance(fused, cp.ndarray) and not output_on_backend:
         fused = cp.asnumpy(fused)
 
     # delete references to intermediate arrays to free memory

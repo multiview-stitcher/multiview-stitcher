@@ -1,6 +1,9 @@
 import os
 import tempfile
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pytest
 from matplotlib import pyplot as plt
@@ -10,11 +13,11 @@ from multiview_stitcher import (
     io,
     msi_utils,
     ngff_utils,
+    param_utils,
     sample_data,
     vis_utils,
 )
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
-
 
 @pytest.mark.parametrize(
     "ndim, N_t",
@@ -74,6 +77,309 @@ def test_plot_positions_single_coord(monkeypatch):
         use_positional_colors=False,
         spacing={"x": 1, "y": 1, "z": 1},
     )
+
+
+def test_plot_positions_point_sets(monkeypatch):
+    affine = param_utils.affine_from_translation([10.0, 20.0])
+    sim = si_utils.get_sim_from_array(
+        np.zeros((10, 10)),
+        dims=["y", "x"],
+        affine=affine,
+    )
+    si_utils.set_point_set(
+        sim,
+        np.array([[1.0, 2.0], [3.0, 4.0]]),
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    point_positions = vis_utils._get_point_set_positions_for_plot(
+        sim,
+        points_key="beads",
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        sdims=["y", "x"],
+    )
+    assert np.allclose(
+        point_positions,
+        np.array([[0.0, 22.0, 11.0], [0.0, 24.0, 13.0]]),
+    )
+
+    fig, ax = vis_utils.plot_positions(
+        [sim],
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        points_key="beads",
+    )
+    assert len(ax.collections) == 2
+    plt.close(fig)
+
+
+def test_imshow_msim_with_points(monkeypatch):
+    data = np.arange(4 * 5 * 6, dtype=float).reshape(4, 5, 6)
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["z", "y", "x"],
+        scale={"z": 2.0, "y": 3.0, "x": 4.0},
+        translation={"z": 10.0, "y": 20.0, "x": 30.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    msi_utils.set_point_set(
+        msim,
+        np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [14.0, 23.0, 34.0],
+                [16.0, 24.5, 34.0],
+            ]
+        ),
+        points_key="beads",
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    fig, ax, sliders = vis_utils.imshow(
+        msim,
+        points_key="beads",
+        points_tolerance=1,
+        figure_kwargs={"figsize": (4, 3)},
+        imshow_kwargs={"vmin": 0, "vmax": 100},
+        scatter_kwargs={"s": 12, "edgecolor": "cyan"},
+    )
+
+    assert list(sliders.keys()) == ["z"]
+    np.testing.assert_allclose(fig.get_size_inches(), np.array([4.0, 3.0]))
+    assert ax.images[0].get_clim() == (0, 100)
+    np.testing.assert_allclose(ax.collections[0].get_sizes(), np.array([12]))
+    np.testing.assert_allclose(
+        np.asarray(ax.images[0].get_extent(), dtype=float),
+        np.array([28.0, 52.0, 33.5, 18.5]),
+    )
+    assert ax.get_xlabel() == "x"
+    assert ax.get_ylabel() == "y"
+    np.testing.assert_allclose(
+        ax.collections[0].get_offsets(),
+        np.array([[30.0, 20.0]]),
+    )
+
+    sliders["z"].set_val(2)
+    np.testing.assert_allclose(
+        ax.collections[0].get_offsets(),
+        np.array([[34.0, 23.0], [34.0, 24.5]]),
+    )
+    plt.close(fig)
+
+
+def test_imshow_without_points(monkeypatch):
+    data = np.arange(4 * 5 * 6, dtype=float).reshape(4, 5, 6)
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["z", "y", "x"],
+        scale={"z": 2.0, "y": 3.0, "x": 4.0},
+        translation={"z": 10.0, "y": 20.0, "x": 30.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    msi_utils.set_point_set(
+        msim,
+        np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [14.0, 23.0, 34.0],
+            ]
+        ),
+        points_key="beads",
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    fig, ax, sliders = vis_utils.imshow(
+        msim,
+        points_key=None,
+    )
+
+    assert list(sliders.keys()) == ["z"]
+    assert len(ax.collections) == 0
+    assert ax.get_xlabel() == "x"
+    assert ax.get_ylabel() == "y"
+    assert "points=" not in ax.get_title()
+    plt.close(fig)
+
+
+@pytest.mark.parametrize(
+    "project_dim, expected_image, expected_offsets, expected_labels, expected_extent",
+    [
+        (
+            "z",
+            lambda data: data.max(axis=0),
+            np.array([[30.0, 20.0], [34.0, 23.0], [34.0, 24.5]]),
+            ("x", "y"),
+            np.array([28.0, 52.0, 33.5, 18.5]),
+        ),
+        (
+            "y",
+            lambda data: data.max(axis=1),
+            np.array([[30.0, 10.0], [34.0, 14.0], [34.0, 16.0]]),
+            ("x", "z"),
+            np.array([28.0, 52.0, 17.0, 9.0]),
+        ),
+        (
+            "x",
+            lambda data: data.max(axis=2).T,
+            np.array([[10.0, 20.0], [14.0, 23.0], [16.0, 24.5]]),
+            ("z", "y"),
+            np.array([9.0, 17.0, 33.5, 18.5]),
+        ),
+    ],
+)
+def test_imshow_projection(
+    monkeypatch,
+    project_dim,
+    expected_image,
+    expected_offsets,
+    expected_labels,
+    expected_extent,
+):
+    data = np.arange(4 * 5 * 6, dtype=float).reshape(4, 5, 6)
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["z", "y", "x"],
+        scale={"z": 2.0, "y": 3.0, "x": 4.0},
+        translation={"z": 10.0, "y": 20.0, "x": 30.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    msi_utils.set_point_set(
+        msim,
+        np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [14.0, 23.0, 34.0],
+                [16.0, 24.5, 34.0],
+            ]
+        ),
+        points_key="beads",
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    fig, ax, sliders = vis_utils.imshow(
+        msim,
+        points_key="beads",
+        project_dim=project_dim,
+    )
+
+    assert list(sliders.keys()) == []
+    np.testing.assert_allclose(ax.images[0].get_array(), expected_image(data))
+    np.testing.assert_allclose(ax.collections[0].get_offsets(), expected_offsets)
+    np.testing.assert_allclose(
+        np.asarray(ax.images[0].get_extent(), dtype=float),
+        expected_extent,
+    )
+    assert ax.get_xlabel() == expected_labels[0]
+    assert ax.get_ylabel() == expected_labels[1]
+    assert f"project={project_dim}" in ax.get_title()
+    plt.close(fig)
+
+
+def test_imshow_points_key_and_resolution_behavior(monkeypatch):
+    sim = si_utils.get_sim_from_array(
+        np.zeros((5, 6)),
+        dims=["y", "x"],
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    fig, ax, sliders = vis_utils.imshow(msim, points_key=None)
+    assert list(sliders.keys()) == []
+    assert len(ax.collections) == 0
+    assert ax.get_xlabel() == "x"
+    assert ax.get_ylabel() == "y"
+    plt.close(fig)
+
+    msi_utils.set_point_set(msim, np.array([[1.0, 2.0]]), points_key="beads")
+    msi_utils.set_point_set(msim, np.array([[3.0, 4.0]]), points_key="spots")
+
+    fig, ax, sliders = vis_utils.imshow(msim, points_key=None)
+    assert list(sliders.keys()) == []
+    assert len(ax.collections) == 0
+    plt.close(fig)
+
+    fig, ax, sliders = vis_utils.imshow(
+        msim,
+        points_key="beads",
+    )
+    assert list(sliders.keys()) == []
+    assert ax.get_xlabel() == "x"
+    assert ax.get_ylabel() == "y"
+    plt.close(fig)
+
+    with pytest.raises(ValueError, match="Point set 'missing' not found"):
+        vis_utils.imshow(msim, points_key="missing")
+
+    with pytest.raises(ValueError, match="horizontal_dim must be one of"):
+        vis_utils.imshow(
+            msim,
+            points_key="beads",
+            horizontal_dim="z",
+        )
+
+    with pytest.raises(ValueError, match="requires two displayed spatial dimensions"):
+        vis_utils.imshow(
+            msim,
+            points_key="beads",
+            project_dim="y",
+        )
+
+    with pytest.raises(ValueError, match="resolution_level is only supported"):
+        vis_utils.imshow(sim, resolution_level=1)
+
+
+def test_imshow_accepts_sim_and_custom_axes(monkeypatch):
+    data = np.arange(4 * 5 * 6, dtype=float).reshape(4, 5, 6)
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["z", "y", "x"],
+        scale={"z": 2.0, "y": 3.0, "x": 4.0},
+        translation={"z": 10.0, "y": 20.0, "x": 30.0},
+    )
+    si_utils.set_point_set(
+        sim,
+        np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [14.0, 23.0, 34.0],
+                [16.0, 24.5, 34.0],
+            ]
+        ),
+        points_key="beads",
+    )
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    fig, ax, sliders = vis_utils.imshow(
+        sim,
+        points_key="beads",
+        points_tolerance=1,
+        horizontal_dim="x",
+        vertical_dim="y",
+    )
+
+    assert list(sliders.keys()) == ["z"]
+    assert ax.get_xlabel() == "x"
+    assert ax.get_ylabel() == "y"
+    np.testing.assert_allclose(
+        np.asarray(ax.images[0].get_extent(), dtype=float),
+        np.array([28.0, 52.0, 33.5, 18.5]),
+    )
+    np.testing.assert_allclose(
+        ax.collections[0].get_offsets(),
+        np.array([[30.0, 20.0]]),
+    )
+
+    sliders["z"].set_val(2)
+    np.testing.assert_allclose(
+        ax.collections[0].get_offsets(),
+        np.array([[34.0, 23.0], [34.0, 24.5]]),
+    )
+    plt.close(fig)
 
 
 def test_neuroglancer_source_transform_matches_physical_affine():

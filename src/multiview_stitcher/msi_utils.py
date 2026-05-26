@@ -115,6 +115,14 @@ def multiscale_sel_coords(msim, sel_dict):
     msim = msim.sel(sel_dict)
     msim.attrs = attrs
 
+    if "point_sets" in list(msim.keys()):
+        for points_key in list(msim["point_sets"].keys()):
+            point_set = msim[f"point_sets/{points_key}"].to_dataset()
+            msim[f"point_sets/{points_key}"] = si_utils.point_set_sel_coords(
+                point_set,
+                sel_dict,
+            )
+
     return msim  # .sel(sel_dict)
 
 
@@ -260,14 +268,37 @@ def get_transforms_from_dataset_as_dict(dataset):
     return transforms_dict
 
 
+def _get_inherited_coords_for_sim(msim, scale, sim):
+    inherited_coords = {}
+    for coord_source in (msim, msim[scale]):
+        for coord_name, coord in coord_source.coords.items():
+            if coord_name in sim.coords:
+                continue
+            if not all(dim in sim.dims for dim in coord.dims):
+                continue
+            inherited_coords[coord_name] = coord
+
+    return inherited_coords
+
+
 def get_sim_from_msim(msim, scale="scale0"):
     """
     highest scale sim from msim with affine transforms
     """
     sim = msim["%s/image" % scale].copy()
+    inherited_coords = _get_inherited_coords_for_sim(msim, scale, sim)
+    if inherited_coords:
+        sim = sim.assign_coords(inherited_coords)
     sim.attrs["transforms"] = get_transforms_from_dataset_as_dict(
         msim["scale0"]
     )
+    if "point_sets" in list(msim.keys()):
+        for points_key in list(msim["point_sets"].keys()):
+            si_utils.set_point_set(
+                sim,
+                get_point_set(msim, points_key=points_key),
+                points_key=points_key,
+            )
 
     return sim
 
@@ -324,6 +355,10 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
         for sk in scale_keys:
             for transform_key, transform in sim_attrs["transforms"].items():
                 msim[sk][transform_key] = transform
+
+    if "point_sets" in sim_attrs:
+        for points_key, point_set in sim_attrs["point_sets"].items():
+            set_point_set(msim, point_set, points_key=points_key)
 
     return msim
 
@@ -420,6 +455,75 @@ def msim_map_blocks(msim, func, *args, **kwargs):
         )
 
     return msim.map_over_datasets(_map_dataset)
+
+
+def set_point_set(msim, points, points_key="beads"):
+    """
+    Attach a named point set to a multiscale spatial image.
+
+    Point positions are expected in intrinsic physical coordinates, i.e. image
+    origin and spacing have already been applied.
+    ``points`` may be an array with shape ``(n_points, n_spatial_dims)``;
+    columns must follow the image spatial dimension order.
+
+    Examples
+    --------
+    Set points from a plain NumPy array. Columns follow the image spatial
+    dimension order:
+
+    >>> points = np.array([[10.0, 20.0], [12.0, 24.0]])
+    >>> set_point_set(msim, points, points_key="beads")
+
+    Set points from NumPy values with explicit dimension labels:
+
+    >>> dim_names = ["y", "x"]
+    >>> point_set = xr.DataArray(
+    ...     points,
+    ...     dims=["point_id", "dim"],
+    ...     coords={"dim": dim_names},
+    ...     name="position",
+    ... ).to_dataset()
+    >>> set_point_set(msim, point_set, points_key="beads")
+    """
+
+    point_set = si_utils._coerce_point_set(
+        points,
+        sdims=get_spatial_dims(msim),
+        nscoords=si_utils._get_nscoords_from_sim(msim["scale0/image"]),
+    )
+    msim[f"point_sets/{points_key}"] = point_set
+
+    return
+
+
+def get_point_set(msim, points_key="beads"):
+    """
+    Get a named point set from a multiscale spatial image.
+
+    Examples
+    --------
+    Retrieve the stored points, their axes order, and spatial dimension
+    coordinates:
+
+    >>> position = get_point_set(msim, points_key="beads")["position"]
+    >>> position.dims
+    ('t', 'c', 'point_id', 'dim')
+    >>> list(position.coords["dim"].values)
+    ['y', 'x']
+    >>> position.isel(t=0, c=0).values
+    array([[10., 20.],
+           [12., 24.]])
+    """
+
+    if (
+        "point_sets" not in list(msim.keys())
+        or points_key not in list(msim["point_sets"].keys())
+    ):
+        raise KeyError(f"Point set {points_key!r} not found in msim.")
+
+    return si_utils._coerce_point_set(
+        msim[f"point_sets/{points_key}"].to_dataset()
+    )
 
 
 def set_affine_transform(
@@ -635,6 +739,6 @@ def correct_multiscale_origins(msim):
               for dim in sdims}
                 )} | \
         {t: ds.data_vars[t] for t in ds.data_vars if t != 'image'})
-        if len(ds.data_vars) > 0 else ds)
+        if "image" in ds.data_vars else ds)
 
     return msim

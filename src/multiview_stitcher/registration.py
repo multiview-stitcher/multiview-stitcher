@@ -1,5 +1,7 @@
 import copy
+import itertools
 import logging
+import math
 import os
 import tempfile
 import warnings
@@ -8,12 +10,13 @@ from typing import Union
 import dask.array as da
 import networkx as nx
 import numpy as np
-import pandas as pd
 import skimage.registration
+import skimage.transform
 import xarray as xr
 from dask import compute, delayed
 from dask.utils import has_keyword
 from scipy import ndimage, stats
+from scipy.spatial import cKDTree
 from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 
@@ -40,6 +43,58 @@ from multiview_stitcher import (
 logger = logging.getLogger(__name__)
 
 MultiscaleSpatialImage = xr.DataTree
+
+
+def _format_array_for_log(array, precision=4):
+    return np.array2string(
+        np.asarray(array),
+        precision=precision,
+        suppress_small=True,
+    )
+
+
+def _format_numeric_stats_for_log(values):
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return "empty"
+
+    return (
+        f"min={np.min(values):.4g}, "
+        f"median={np.median(values):.4g}, "
+        f"p95={np.percentile(values, 95):.4g}, "
+        f"max={np.max(values):.4g}"
+    )
+
+
+def _format_point_bounds_for_log(points):
+    points = np.asarray(points, dtype=float)
+    if points.ndim != 2 or len(points) == 0:
+        return "empty"
+
+    return (
+        "min="
+        + _format_array_for_log(np.min(points, axis=0))
+        + ", max="
+        + _format_array_for_log(np.max(points, axis=0))
+        + ", centroid="
+        + _format_array_for_log(np.mean(points, axis=0))
+    )
+
+
+def _get_callable_name(func):
+    return getattr(func, "__name__", func.__class__.__name__)
+
+
+def _estimate_skimage_transform(transform_cls, fixed_points, moving_points, ndim):
+    if hasattr(transform_cls, "from_estimate"):
+        return transform_cls.from_estimate(fixed_points, moving_points)
+
+    transform_model = transform_cls(dimensionality=ndim)
+    if not transform_model.estimate(fixed_points, moving_points):
+        return False
+
+    return transform_model
 
 
 def apply_recursive_dict(func, d):
@@ -511,6 +566,820 @@ def phase_correlation_registration(
     return reg_result
 
 
+def _get_points_array_for_registration(point_set, sdims):
+    position = point_set["position"]
+    extra_dims = [
+        dim for dim in position.dims if dim not in ["point_id", "dim"]
+    ]
+    for dim in extra_dims:
+        if position.sizes[dim] != 1:
+            raise ValueError(
+                "Point sets passed to pairwise registration must be selected "
+                f"to one value along dimension {dim!r}."
+            )
+        position = position.isel({dim: 0})
+
+    position = position.sel(dim=sdims).transpose("point_id", "dim")
+
+    points = np.asarray(position.data)
+    valid = np.all(np.isfinite(points), axis=1)
+
+    return points[valid]
+
+
+def _transform_points_for_registration(points, affine):
+    if points.size == 0:
+        return points
+    return transformation.transform_pts(points, affine)
+
+
+def _get_marker_registration_min_matches(transform_type, ndim):
+    transform_type = transform_type.lower()
+    if transform_type == "translation":
+        return 1
+    if transform_type == "rigid":
+        return ndim
+    if transform_type == "affine":
+        return ndim + 1
+    raise ValueError(
+        "Unsupported marker registration transform_type "
+        f"{transform_type!r}. Expected 'translation', 'rigid', or 'affine'."
+    )
+
+
+def _get_marker_descriptor_vector_length(num_neighbors):
+    return math.comb(num_neighbors + 1, 2)
+
+
+def _get_marker_nearest_neighbor_scale(*point_sets):
+    nearest_distances = []
+    for points in point_sets:
+        points = np.asarray(points, dtype=float)
+        if len(points) < 2:
+            continue
+        distances, _ = cKDTree(points).query(points, k=2)
+        nearest_distances.extend(distances[:, 1])
+
+    nearest_distances = np.asarray(nearest_distances, dtype=float)
+    nearest_distances = nearest_distances[np.isfinite(nearest_distances)]
+    if nearest_distances.size == 0:
+        return 0.0
+
+    return float(np.median(nearest_distances))
+
+
+def _get_marker_descriptor_distance_threshold(
+    fixed_points,
+    moving_points,
+    num_neighbors,
+    descriptor_threshold_scale,
+):
+    descriptor_vector_length = _get_marker_descriptor_vector_length(num_neighbors)
+    nn_scale = _get_marker_nearest_neighbor_scale(fixed_points, moving_points)
+    threshold = float(
+        nn_scale * np.sqrt(descriptor_vector_length) * descriptor_threshold_scale
+    )
+    logger.debug(
+        "Marker descriptor automatic threshold: nearest_neighbor_median=%.6g, "
+        "descriptor_vector_length=%s, descriptor_threshold_scale=%.6g, "
+        "threshold=%.6g",
+        nn_scale,
+        descriptor_vector_length,
+        descriptor_threshold_scale,
+        threshold,
+    )
+    return threshold
+
+
+def _get_marker_descriptors(points, num_neighbors, redundancy, label=None):
+    points = np.asarray(points, dtype=float)
+    required_neighbors = num_neighbors + redundancy
+    if len(points) < required_neighbors + 1:
+        raise ValueError(
+            "Not enough points to build marker descriptors. "
+            f"Need at least {required_neighbors + 1}, got {len(points)}."
+        )
+
+    tree = cKDTree(points)
+    query_k = min(len(points), required_neighbors + 2)
+    _, neighbor_indices = tree.query(points, k=query_k)
+
+    descriptors = []
+    for point_index, point_neighbor_indices in enumerate(neighbor_indices):
+        point_neighbor_indices = np.atleast_1d(point_neighbor_indices)
+        point_neighbor_indices = [
+            int(ind) for ind in point_neighbor_indices if int(ind) != point_index
+        ][:required_neighbors]
+
+        if len(point_neighbor_indices) < required_neighbors:
+            continue
+
+        for subset in itertools.combinations(point_neighbor_indices, num_neighbors):
+            descriptor_points = points[[point_index] + list(subset)]
+            distances = []
+            for i, j in itertools.combinations(
+                range(len(descriptor_points)), 2
+            ):
+                distances.append(
+                    np.linalg.norm(descriptor_points[i] - descriptor_points[j])
+                )
+            descriptors.append(
+                {
+                    "point_index": point_index,
+                    "vector": np.sort(np.asarray(distances, dtype=float)),
+                }
+            )
+
+    if len(descriptors) == 0:
+        raise ValueError("No marker descriptors could be built.")
+
+    logger.debug(
+        "%s marker descriptors: points=%s, num_neighbors=%s, redundancy=%s, "
+        "required_neighbors=%s, descriptors=%s, descriptors_per_point=%s, "
+        "descriptor_vector_length=%s",
+        label.capitalize() if label else "Built",
+        len(points),
+        num_neighbors,
+        redundancy,
+        required_neighbors,
+        len(descriptors),
+        math.comb(required_neighbors, num_neighbors),
+        len(descriptors[0]["vector"]),
+    )
+    return descriptors
+
+
+def _match_marker_descriptors(
+    fixed_descriptors,
+    moving_descriptors,
+    descriptor_ratio,
+    descriptor_distance_threshold,
+):
+    fixed_vectors = np.asarray(
+        [descriptor["vector"] for descriptor in fixed_descriptors], dtype=float
+    )
+    fixed_point_indices = np.asarray(
+        [descriptor["point_index"] for descriptor in fixed_descriptors],
+        dtype=int,
+    )
+    moving_vectors = np.asarray(
+        [descriptor["vector"] for descriptor in moving_descriptors],
+        dtype=float,
+    )
+    moving_point_indices = np.asarray(
+        [descriptor["point_index"] for descriptor in moving_descriptors],
+        dtype=int,
+    )
+
+    if len(fixed_vectors) == 0 or len(moving_vectors) == 0:
+        return np.empty((0, 2), dtype=int)
+
+    _, moving_descriptor_counts = np.unique(
+        moving_point_indices, return_counts=True
+    )
+    query_k = min(
+        len(moving_vectors),
+        int(np.max(moving_descriptor_counts)) + 1,
+    )
+    descriptor_tree = cKDTree(moving_vectors)
+    nearest_distances, nearest_indices = descriptor_tree.query(
+        fixed_vectors, k=query_k
+    )
+    nearest_distances = np.asarray(nearest_distances, dtype=float)
+    nearest_indices = np.asarray(nearest_indices, dtype=int)
+    if query_k == 1:
+        nearest_distances = nearest_distances[:, np.newaxis]
+        nearest_indices = nearest_indices[:, np.newaxis]
+
+    candidates_by_pair = {}
+    accepted_descriptor_matches = 0
+    rejected_by_distance = 0
+    rejected_by_ratio = 0
+
+    for fixed_point_index, row_distances, row_indices in zip(
+        fixed_point_indices,
+        nearest_distances,
+        nearest_indices,
+    ):
+        best_descriptor_index = row_indices[0]
+        best_moving_point_index = moving_point_indices[best_descriptor_index]
+        best_distance = float(row_distances[0])
+        passes_distance = best_distance < descriptor_distance_threshold
+        if not passes_distance:
+            rejected_by_distance += 1
+            continue
+
+        row_moving_point_indices = moving_point_indices[row_indices]
+        second_best_mask = row_moving_point_indices != best_moving_point_index
+        if np.any(second_best_mask):
+            second_best_distance = float(
+                row_distances[np.flatnonzero(second_best_mask)[0]]
+            )
+        else:
+            second_best_distance = np.inf
+
+        passes_ratio = best_distance * descriptor_ratio < second_best_distance
+        if passes_ratio:
+            accepted_descriptor_matches += 1
+            pair = (fixed_point_index, best_moving_point_index)
+            if (
+                pair not in candidates_by_pair
+                or best_distance < candidates_by_pair[pair]
+            ):
+                candidates_by_pair[pair] = best_distance
+        else:
+            rejected_by_ratio += 1
+
+    candidate_pairs = np.asarray(list(candidates_by_pair.keys()), dtype=int)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Marker descriptor matching: fixed_descriptors=%s, moving_descriptors=%s, "
+            "descriptor_ratio=%.6g, descriptor_distance_threshold=%.6g, "
+            "accepted_descriptor_matches=%s, unique_candidate_pairs=%s, "
+            "rejected_by_distance=%s, rejected_by_ratio=%s, "
+            "candidate_distance_stats=%s",
+            len(fixed_descriptors),
+            len(moving_descriptors),
+            descriptor_ratio,
+            descriptor_distance_threshold,
+            accepted_descriptor_matches,
+            len(candidate_pairs),
+            rejected_by_distance,
+            rejected_by_ratio,
+            _format_numeric_stats_for_log(list(candidates_by_pair.values())),
+        )
+        if len(candidate_pairs):
+            logger.debug(
+                "Marker descriptor candidate pair sample: %s",
+                _format_array_for_log(candidate_pairs[:10]),
+            )
+
+    return candidate_pairs
+
+
+def _fit_marker_transform(fixed_points, moving_points, transform_type):
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+    ndim = fixed_points.shape[1]
+    transform_type = transform_type.lower()
+
+    if transform_type == "translation":
+        translation = np.mean(moving_points - fixed_points, axis=0)
+        transform_model = skimage.transform.EuclideanTransform(
+            translation=translation,
+            dimensionality=ndim,
+        )
+        return np.asarray(transform_model.params, dtype=float)
+
+    if transform_type == "rigid":
+        transform_model = _estimate_skimage_transform(
+            skimage.transform.EuclideanTransform,
+            fixed_points,
+            moving_points,
+            ndim,
+        )
+        if not transform_model:
+            raise ValueError(
+                "Rigid marker registration points are degenerate. "
+                f"skimage.transform returned: {transform_model}"
+            )
+        return np.asarray(transform_model.params, dtype=float)
+
+    if transform_type == "affine":
+        transform_model = _estimate_skimage_transform(
+            skimage.transform.AffineTransform,
+            fixed_points,
+            moving_points,
+            ndim,
+        )
+        if not transform_model:
+            raise ValueError(
+                "Affine marker registration points are degenerate. "
+                f"skimage.transform returned: {transform_model}"
+            )
+        return np.asarray(transform_model.params, dtype=float)
+
+    raise ValueError(
+        "Unsupported marker registration transform_type "
+        f"{transform_type!r}. Expected 'translation', 'rigid', or 'affine'."
+    )
+
+
+def _score_marker_transform(affine, fixed_points, moving_points, ransac_max_error):
+    transformed_fixed_points = transformation.transform_pts(fixed_points, affine)
+    residuals = np.linalg.norm(transformed_fixed_points - moving_points, axis=1)
+    inlier_mask = residuals <= ransac_max_error
+    return residuals, inlier_mask
+
+
+def _run_marker_ransac(
+    fixed_points,
+    moving_points,
+    candidate_pairs,
+    transform_type,
+    ransac_max_error,
+    ransac_min_inlier_ratio,
+    ransac_min_inlier_factor,
+    ransac_num_iterations,
+    random_state,
+):
+    ndim = fixed_points.shape[1]
+    min_model_matches = _get_marker_registration_min_matches(
+        transform_type, ndim
+    )
+    min_inliers = max(
+        min_model_matches,
+        int(np.round(min_model_matches * ransac_min_inlier_factor)),
+    )
+
+    if len(candidate_pairs) < min_inliers:
+        logger.debug(
+            "Marker RANSAC skipped: candidate_pairs=%s, min_inliers=%s, "
+            "transform_type=%s, ndim=%s",
+            len(candidate_pairs),
+            min_inliers,
+            transform_type,
+            ndim,
+        )
+        raise ValueError(
+            "Not enough marker correspondences for RANSAC. "
+            f"Need at least {min_inliers}, got {len(candidate_pairs)}."
+        )
+
+    fixed_candidates = fixed_points[candidate_pairs[:, 0]]
+    moving_candidates = moving_points[candidate_pairs[:, 1]]
+    rng = np.random.default_rng(random_state)
+    best_result = None
+    num_candidates = len(candidate_pairs)
+    num_combinations = math.comb(num_candidates, min_model_matches)
+
+    if num_combinations <= ransac_num_iterations:
+        sample_iter = itertools.combinations(
+            range(num_candidates), min_model_matches
+        )
+        sampling_mode = "exhaustive"
+        num_samples = num_combinations
+    else:
+        sample_iter = (
+            rng.choice(
+                num_candidates, size=min_model_matches, replace=False
+            )
+            for _ in range(ransac_num_iterations)
+        )
+        sampling_mode = "random"
+        num_samples = ransac_num_iterations
+
+    logger.debug(
+        "Marker RANSAC start: transform_type=%s, ndim=%s, candidate_pairs=%s, "
+        "min_model_matches=%s, min_inliers=%s, min_inlier_ratio=%.6g, "
+        "max_error=%.6g, sampling_mode=%s, samples=%s, possible_combinations=%s",
+        transform_type,
+        ndim,
+        num_candidates,
+        min_model_matches,
+        min_inliers,
+        ransac_min_inlier_ratio,
+        ransac_max_error,
+        sampling_mode,
+        num_samples,
+        num_combinations,
+    )
+
+    for sample_indices in sample_iter:
+        sample_indices = np.asarray(sample_indices, dtype=int)
+        try:
+            affine = _fit_marker_transform(
+                fixed_candidates[sample_indices],
+                moving_candidates[sample_indices],
+                transform_type,
+            )
+        except ValueError:
+            continue
+
+        residuals, inlier_mask = _score_marker_transform(
+            affine,
+            fixed_candidates,
+            moving_candidates,
+            ransac_max_error,
+        )
+        num_inliers = int(np.sum(inlier_mask))
+        if num_inliers == 0:
+            mean_residual = np.inf
+            model_quality = 0.0
+        else:
+            mean_residual = float(np.mean(residuals[inlier_mask]))
+            model_quality = (num_inliers / num_candidates) * max(
+                0.0, 1.0 - mean_residual / ransac_max_error
+            )
+
+        result_key = (model_quality, num_inliers, -mean_residual)
+        if best_result is None or result_key > best_result["key"]:
+            best_result = {
+                "key": result_key,
+                "inlier_mask": inlier_mask,
+                "mean_residual": mean_residual,
+                "quality": model_quality,
+            }
+
+    if best_result is None:
+        logger.debug("Marker RANSAC failed: no non-degenerate sample produced a model.")
+        raise ValueError("No marker transform model could be estimated.")
+
+    inlier_mask = best_result["inlier_mask"]
+    num_inliers = int(np.sum(inlier_mask))
+    inlier_ratio = num_inliers / num_candidates
+    logger.debug(
+        "Marker RANSAC best model before refit: inliers=%s/%s, "
+        "inlier_ratio=%.4f, mean_inlier_residual=%.4g, quality=%.4f",
+        num_inliers,
+        num_candidates,
+        inlier_ratio,
+        best_result["mean_residual"],
+        best_result["quality"],
+    )
+
+    if num_inliers < min_inliers or inlier_ratio < ransac_min_inlier_ratio:
+        logger.debug(
+            "Marker RANSAC rejected best model: inliers=%s/%s, "
+            "inlier_ratio=%.4f, required_min_inliers=%s, "
+            "required_min_inlier_ratio=%.4f",
+            num_inliers,
+            num_candidates,
+            inlier_ratio,
+            min_inliers,
+            ransac_min_inlier_ratio,
+        )
+        raise ValueError(
+            "Marker RANSAC did not find enough inliers. "
+            f"Found {num_inliers}/{num_candidates} inliers."
+        )
+
+    affine = _fit_marker_transform(
+        fixed_candidates[inlier_mask],
+        moving_candidates[inlier_mask],
+        transform_type,
+    )
+    residuals, inlier_mask = _score_marker_transform(
+        affine,
+        fixed_candidates,
+        moving_candidates,
+        ransac_max_error,
+    )
+    num_inliers = int(np.sum(inlier_mask))
+    if num_inliers < min_inliers:
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Marker RANSAC refit rejected: inliers=%s/%s, "
+                "required_min_inliers=%s, residual_stats=%s",
+                num_inliers,
+                num_candidates,
+                min_inliers,
+                _format_numeric_stats_for_log(residuals),
+            )
+        raise ValueError(
+            "Refit marker transform did not preserve enough inliers. "
+            f"Found {num_inliers}/{num_candidates} inliers."
+        )
+    mean_residual = float(np.mean(residuals[inlier_mask]))
+    inlier_ratio = float(num_inliers / num_candidates)
+    quality = inlier_ratio * max(0.0, 1.0 - mean_residual / ransac_max_error)
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Marker RANSAC refit accepted: inliers=%s/%s, inlier_ratio=%.4f, "
+            "mean_inlier_residual=%.4g, quality=%.4f, residual_stats=%s, "
+            "inlier_residual_stats=%s, affine=\n%s",
+            num_inliers,
+            num_candidates,
+            inlier_ratio,
+            mean_residual,
+            quality,
+            _format_numeric_stats_for_log(residuals),
+            _format_numeric_stats_for_log(residuals[inlier_mask]),
+            _format_array_for_log(affine),
+        )
+
+    return affine, quality
+
+
+def _run_marker_icp(
+    fixed_points,
+    moving_points,
+    initial_affine,
+    initial_quality,
+    transform_type,
+    icp_max_error,
+    icp_num_iterations,
+    icp_tolerance,
+):
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+    affine = np.asarray(initial_affine, dtype=float)
+    ndim = fixed_points.shape[1]
+    min_matches = _get_marker_registration_min_matches(transform_type, ndim)
+    moving_tree = cKDTree(moving_points)
+    quality = float(initial_quality)
+
+    logger.debug(
+        "Marker ICP start: transform_type=%s, fixed_points=%s, moving_points=%s, "
+        "max_error=%.6g, iterations=%s, tolerance=%.6g",
+        transform_type,
+        len(fixed_points),
+        len(moving_points),
+        icp_max_error,
+        icp_num_iterations,
+        icp_tolerance,
+    )
+
+    for iteration in range(icp_num_iterations):
+        transformed_fixed_points = transformation.transform_pts(fixed_points, affine)
+        nearest_distances, nearest_indices = moving_tree.query(
+            transformed_fixed_points, k=1
+        )
+        inlier_mask = nearest_distances <= icp_max_error
+        num_inliers = int(np.sum(inlier_mask))
+        if num_inliers < min_matches:
+            logger.debug(
+                "Marker ICP stopped: iteration=%s, inliers=%s, min_matches=%s",
+                iteration,
+                num_inliers,
+                min_matches,
+            )
+            break
+
+        # Fit the requested model to nearest-neighbor marker correspondences,
+        # always from the original fixed points to avoid accumulating drift.
+        try:
+            next_affine = _fit_marker_transform(
+                fixed_points[inlier_mask],
+                moving_points[nearest_indices[inlier_mask]],
+                transform_type,
+            )
+        except ValueError as exc:
+            logger.debug(
+                "Marker ICP stopped: iteration=%s, fit failed: %s",
+                iteration,
+                exc,
+            )
+            break
+
+        mean_residual = float(np.mean(nearest_distances[inlier_mask]))
+        quality = (num_inliers / len(fixed_points)) * max(
+            0.0, 1.0 - mean_residual / icp_max_error
+        )
+        affine_delta = float(np.linalg.norm(next_affine - affine))
+        affine = next_affine
+
+        logger.debug(
+            "Marker ICP iteration %s: inliers=%s/%s, mean_residual=%.4g, "
+            "quality=%.4f, affine_delta=%.4g",
+            iteration + 1,
+            num_inliers,
+            len(fixed_points),
+            mean_residual,
+            quality,
+            affine_delta,
+        )
+        if affine_delta <= icp_tolerance:
+            break
+
+    return affine, quality
+
+
+def _fail_marker_registration(ndim, message, fail_on_error):
+    logger.debug(
+        "Marker registration failed: ndim=%s, fail_on_error=%s, message=%s",
+        ndim,
+        fail_on_error,
+        message,
+    )
+    if fail_on_error:
+        raise ValueError(message)
+
+    warnings.warn(message, UserWarning, stacklevel=2)
+    return {
+        "affine_matrix": np.eye(ndim + 1),
+        "quality": np.nan,
+    }
+
+
+def registration_marker_based(
+    fixed_points,
+    moving_points,
+    transform_type="rigid",
+    num_neighbors=3,
+    redundancy=1,
+    descriptor_ratio=3.0,
+    descriptor_distance_threshold=None,
+    descriptor_threshold_scale=1.0,
+    ransac_max_error=5.0,
+    ransac_min_inlier_ratio=0.1,
+    ransac_min_inlier_factor=3.0,
+    ransac_num_iterations=1000,
+    icp=False,
+    icp_max_error=None,
+    icp_num_iterations=50,
+    icp_tolerance=1e-6,
+    random_state=0,
+    fail_on_error=True,
+):
+    """
+    Marker-based registration inspired by BigStitcher RGLDM bead matching.
+
+    The function matches local geometric descriptors computed from
+    ``fixed_points`` and ``moving_points``, removes inconsistent matches with
+    RANSAC, and returns a homogeneous transform from fixed to moving points.
+
+    Parameters
+    ----------
+    fixed_points, moving_points : array-like
+        Point coordinates with shape ``(n_points, n_spatial_dims)``.
+    transform_type : {"translation", "rigid", "affine"}, optional
+        Transformation model to estimate. By default "rigid".
+    num_neighbors : int, optional
+        Number of nearest neighbors used for each local descriptor.
+    redundancy : int, optional
+        Additional neighbors considered when forming descriptor subsets.
+    descriptor_ratio : float, optional
+        Best match must be this many times better than the second-best match.
+    descriptor_distance_threshold : float, optional
+        Maximum descriptor distance. If None, it is estimated from nearest
+        neighbor distances in the point sets.
+    descriptor_threshold_scale : float, optional
+        Scale factor for the automatic descriptor distance threshold.
+    ransac_max_error : float, optional
+        Maximum point residual for a correspondence to count as an inlier.
+    ransac_min_inlier_ratio : float, optional
+        Minimum fraction of candidate correspondences that must be inliers.
+    ransac_min_inlier_factor : float, optional
+        Multiplier for the model's minimum number of required matches.
+    ransac_num_iterations : int, optional
+        Number of random RANSAC samples.
+    icp : bool, optional
+        If True, refine the RANSAC result with nearest-neighbor ICP.
+    icp_max_error : float, optional
+        Maximum nearest-neighbor distance for ICP correspondences. If None,
+        ``ransac_max_error`` is used.
+    icp_num_iterations : int, optional
+        Maximum number of ICP refinement iterations.
+    icp_tolerance : float, optional
+        Stop ICP when the affine matrix update has this Frobenius norm or less.
+    random_state : int or numpy.random.Generator, optional
+        Seed or generator used for RANSAC sampling.
+    fail_on_error : bool, optional
+        If True, raise on failure. Otherwise warn and return identity with
+        ``quality=np.nan``.
+
+    References
+    ----------
+    BigStitcher/Fiji RGLDM bead registration:
+    https://github.com/fiji/SPIM_Registration/tree/master/src/main/java/spim/process/interestpointregistration/geometricdescriptor
+    """
+
+    fixed_points = np.asarray(fixed_points, dtype=float)
+    moving_points = np.asarray(moving_points, dtype=float)
+    if fixed_points.ndim == 2:
+        ndim = fixed_points.shape[1]
+    elif moving_points.ndim == 2:
+        ndim = moving_points.shape[1]
+    else:
+        ndim = 2
+
+    try:
+        logger.debug(
+            "Marker registration input: fixed_shape=%s, moving_shape=%s, "
+            "transform_type=%s, num_neighbors=%s, redundancy=%s, "
+            "descriptor_ratio=%.6g, descriptor_distance_threshold=%s, "
+            "descriptor_threshold_scale=%.6g, ransac_max_error=%.6g, "
+            "ransac_min_inlier_ratio=%.6g, ransac_min_inlier_factor=%.6g, "
+            "ransac_num_iterations=%s, icp=%s, icp_max_error=%s, "
+            "icp_num_iterations=%s, icp_tolerance=%.6g, random_state=%s",
+            fixed_points.shape,
+            moving_points.shape,
+            transform_type,
+            num_neighbors,
+            redundancy,
+            descriptor_ratio,
+            descriptor_distance_threshold,
+            descriptor_threshold_scale,
+            ransac_max_error,
+            ransac_min_inlier_ratio,
+            ransac_min_inlier_factor,
+            ransac_num_iterations,
+            icp,
+            icp_max_error,
+            icp_num_iterations,
+            icp_tolerance,
+            random_state,
+        )
+        if fixed_points.ndim != 2 or moving_points.ndim != 2:
+            raise ValueError("Marker point arrays must be two-dimensional.")
+        if fixed_points.shape[1] != moving_points.shape[1]:
+            raise ValueError(
+                "Fixed and moving marker points must have the same dimensionality."
+            )
+        if not len(fixed_points) or not len(moving_points):
+            raise ValueError("Marker point arrays must not be empty.")
+        if num_neighbors < 1:
+            raise ValueError("num_neighbors must be at least 1.")
+        if redundancy < 0:
+            raise ValueError("redundancy must be non-negative.")
+        if descriptor_ratio <= 0:
+            raise ValueError("descriptor_ratio must be positive.")
+        if descriptor_threshold_scale < 0:
+            raise ValueError("descriptor_threshold_scale must be non-negative.")
+        if ransac_max_error <= 0:
+            raise ValueError("ransac_max_error must be positive.")
+        if ransac_num_iterations < 1:
+            raise ValueError("ransac_num_iterations must be at least 1.")
+        if icp_max_error is None:
+            icp_max_error = ransac_max_error
+        elif icp_max_error <= 0:
+            raise ValueError("icp_max_error must be positive.")
+        if icp_num_iterations < 1:
+            raise ValueError("icp_num_iterations must be at least 1.")
+        if icp_tolerance < 0:
+            raise ValueError("icp_tolerance must be non-negative.")
+
+        transform_type = str(transform_type).lower()
+        _get_marker_registration_min_matches(transform_type, ndim)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Marker registration point extents: fixed=(%s), moving=(%s)",
+                _format_point_bounds_for_log(fixed_points),
+                _format_point_bounds_for_log(moving_points),
+            )
+
+        if descriptor_distance_threshold is None:
+            descriptor_distance_threshold = (
+                _get_marker_descriptor_distance_threshold(
+                    fixed_points,
+                    moving_points,
+                    num_neighbors,
+                    descriptor_threshold_scale,
+                )
+            )
+        elif descriptor_distance_threshold < 0:
+            raise ValueError("descriptor_distance_threshold must be non-negative.")
+        else:
+            logger.debug(
+                "Marker descriptor manual threshold: threshold=%.6g",
+                descriptor_distance_threshold,
+            )
+
+        fixed_descriptors = _get_marker_descriptors(
+            fixed_points, num_neighbors, redundancy, label="fixed"
+        )
+        moving_descriptors = _get_marker_descriptors(
+            moving_points, num_neighbors, redundancy, label="moving"
+        )
+        candidate_pairs = _match_marker_descriptors(
+            fixed_descriptors,
+            moving_descriptors,
+            descriptor_ratio,
+            descriptor_distance_threshold,
+        )
+        if len(candidate_pairs) == 0:
+            raise ValueError("No marker correspondence candidates found.")
+
+        affine, quality = _run_marker_ransac(
+            fixed_points,
+            moving_points,
+            candidate_pairs,
+            transform_type,
+            ransac_max_error,
+            ransac_min_inlier_ratio,
+            ransac_min_inlier_factor,
+            ransac_num_iterations,
+            random_state,
+        )
+        if icp:
+            affine, quality = _run_marker_icp(
+                fixed_points,
+                moving_points,
+                affine,
+                quality,
+                transform_type,
+                icp_max_error,
+                icp_num_iterations,
+                icp_tolerance,
+            )
+
+    except ValueError as exc:
+        return _fail_marker_registration(ndim, str(exc), fail_on_error)
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Marker registration result: quality=%.4f, fixed_to_moving_affine=\n%s",
+            quality,
+            _format_array_for_log(affine),
+        )
+    return {
+        "affine_matrix": affine,
+        "quality": quality,
+    }
+
+
 def get_affine_from_intrinsic_affine(
     data_affine,
     sim_fixed,
@@ -607,40 +1476,81 @@ def get_affine_from_intrinsic_affine(
 
 
 def dispatch_pairwise_reg_func(
-    pairwise_reg_func, fixed_data, moving_data, **pairwise_reg_func_kwargs
+    pairwise_reg_func,
+    fixed_data=None,
+    moving_data=None,
+    skip_constant_check=False,
+    **pairwise_reg_func_kwargs,
 ):
     """
     Check that images are not constant and apply the registration function.
     """
-    int_extrema = [
-        [func(im) for im in [fixed_data, moving_data]]
-        for func in [np.nanmin, np.nanmax]
-    ]
-
-    # return if no translation if images are constant
-    for i in range(2):
-        if int_extrema[0][i] == int_extrema[1][i]:
-            warnings.warn(
-                "An overlap region between tiles/views is all zero or constant. Assuming identity transform.",
-                UserWarning,
-                stacklevel=2,
-            )
-            reg_result = {}
-            reg_result["affine_matrix"] = param_utils.identity_transform(
-                fixed_data.ndim
-            )
-            reg_result["quality"] = np.nan
-            return reg_result
-
-    return pairwise_reg_func(
-        fixed_data, moving_data, **pairwise_reg_func_kwargs
+    has_image_data = fixed_data is not None and moving_data is not None
+    func_name = _get_callable_name(pairwise_reg_func)
+    fixed_points = pairwise_reg_func_kwargs.get("fixed_points")
+    moving_points = pairwise_reg_func_kwargs.get("moving_points")
+    logger.debug(
+        "Dispatching pairwise registration: func=%s, has_image_data=%s, "
+        "fixed_data_shape=%s, moving_data_shape=%s, skip_constant_check=%s, "
+        "fixed_points_shape=%s, moving_points_shape=%s, kwargs=%s",
+        func_name,
+        has_image_data,
+        np.shape(fixed_data) if fixed_data is not None else None,
+        np.shape(moving_data) if moving_data is not None else None,
+        skip_constant_check,
+        np.shape(fixed_points) if fixed_points is not None else None,
+        np.shape(moving_points) if moving_points is not None else None,
+        sorted(pairwise_reg_func_kwargs.keys()),
     )
+    if has_image_data and not skip_constant_check:
+        int_extrema = [
+            [func(im) for im in [fixed_data, moving_data]]
+            for func in [np.nanmin, np.nanmax]
+        ]
+
+        # return if no translation if images are constant
+        for i in range(2):
+            if int_extrema[0][i] == int_extrema[1][i]:
+                logger.debug(
+                    "Pairwise registration skipped because %s image is constant: "
+                    "func=%s, min=max=%s",
+                    ["fixed", "moving"][i],
+                    func_name,
+                    int_extrema[0][i],
+                )
+                warnings.warn(
+                    "An overlap region between tiles/views is all zero or constant. Assuming identity transform.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                reg_result = {}
+                reg_result["affine_matrix"] = param_utils.identity_transform(
+                    fixed_data.ndim
+                )
+                reg_result["quality"] = np.nan
+                return reg_result
+
+    if has_image_data:
+        pairwise_reg_func_kwargs["fixed_data"] = fixed_data
+        pairwise_reg_func_kwargs["moving_data"] = moving_data
+
+    reg_result = pairwise_reg_func(**pairwise_reg_func_kwargs)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Pairwise registration returned: func=%s, quality=%s, affine=\n%s",
+            func_name,
+            reg_result.get("quality"),
+            _format_array_for_log(reg_result.get("affine_matrix")),
+        )
+    return reg_result
 
 
 def register_pair_of_msims(
     msim1,
     msim2,
     transform_key,
+    points_key="beads",
+    prefilter_markers: bool = False,
     registration_binning=None,
     reg_res_level=None,
     overlap_tolerance: Union[int, dict[str, int]] = None,
@@ -662,6 +1572,11 @@ def register_pair_of_msims(
         Extrinsic coordinate system to consider as preregistration.
         This affects the calculation of the overlap region and is passed on to the
         registration func, by default None
+    points_key : str, optional
+        Named point set to pass to marker-aware pairwise registration functions.
+    prefilter_markers : bool, optional
+        If True, restrict markers to the pairwise overlap before passing them
+        to marker-aware pairwise registration functions. By default False.
     registration_binning : dict, optional
         Binning factors to apply for registration. If reg_res_level is also provided,
         the binning factors must be compatible with the resolution level.
@@ -693,6 +1608,20 @@ def register_pair_of_msims(
 
     spatial_dims = msi_utils.get_spatial_dims(msim1)
     ndim = len(spatial_dims)
+    pairwise_reg_func_name = _get_callable_name(pairwise_reg_func)
+    logger.debug(
+        "Registering pair of msims: func=%s, transform_key=%s, points_key=%s, "
+        "prefilter_markers=%s, spatial_dims=%s, registration_binning=%s, "
+        "reg_res_level=%s, overlap_tolerance=%s",
+        pairwise_reg_func_name,
+        transform_key,
+        points_key,
+        prefilter_markers,
+        spatial_dims,
+        registration_binning,
+        reg_res_level,
+        overlap_tolerance,
+    )
 
     if overlap_tolerance is None:
         overlap_tolerance = {dim: 0.0 for dim in spatial_dims}
@@ -802,14 +1731,19 @@ def register_pair_of_msims(
     ]
 
     if max(registration_binning.values()) > 1:
-        reg_sims_b = [
-            sim.coarsen(registration_binning, boundary="trim")
-            .mean()
-            .astype(sim.dtype)
-            for sim in reg_sims
-        ]
+        reg_sims_b = []
+        for sim in reg_sims:
+            sim_binned = (
+                sim.coarsen(registration_binning, boundary="trim")
+                .mean()
+                .astype(sim.dtype)
+            )
+            sim_binned.attrs.update(copy.deepcopy(sim.attrs))
+            reg_sims_b.append(sim_binned)
     else:
         reg_sims_b = reg_sims
+
+    reg_sims_b_marker_source = reg_sims_b
 
     overlap_dict = _get_overlap_bboxes(
         reg_sims_b[0],
@@ -819,6 +1753,13 @@ def register_pair_of_msims(
         overlap_tolerance=overlap_tolerance,
     )
     lowers, uppers = overlap_dict["lowers"], overlap_dict["uppers"]
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Pairwise registration overlap in loaded coordinate space: "
+            "lowers=%s, uppers=%s",
+            _format_array_for_log(lowers),
+            _format_array_for_log(uppers),
+        )
 
     reg_sims_spacing = [
         spatial_image_utils.get_spacing_from_sim(sim) for sim in reg_sims_b
@@ -826,7 +1767,8 @@ def register_pair_of_msims(
 
     tol = 1e-6
     reg_sims_b = [
-        sim.sel(
+        spatial_image_utils.sim_sel_coords(
+            sim,
             {
                 # add spacing to include bounding pixels
                 dim: slice(
@@ -866,25 +1808,143 @@ def register_pair_of_msims(
             "initial_affine",
         ]
     }
+    pairwise_reg_func_has_data_keywords = {
+        keyword: has_keyword(pairwise_reg_func, keyword)
+        for keyword in ["fixed_data", "moving_data"]
+    }
+    pairwise_reg_func_has_point_keywords = {
+        keyword: has_keyword(pairwise_reg_func, keyword)
+        for keyword in ["fixed_points", "moving_points"]
+    }
 
-    if not np.any(list(pairwise_reg_func_has_keywords.values())):
-        registration_func_space = "pixel_space"
-
-        sims_pixel_space = sims_to_intrinsic_coord_system(
-            reg_sims_b[0],
-            reg_sims_b[1],
-            transform_key=transform_key,
-            overlap_bboxes=(lowers, uppers),
+    if np.any(list(pairwise_reg_func_has_data_keywords.values())) and not np.all(
+        list(pairwise_reg_func_has_data_keywords.values())
+    ):
+        raise ValueError(
+            "Image-aware pairwise registration functions must accept both "
+            "'fixed_data' and 'moving_data'."
         )
 
-        fixed_data = sims_pixel_space[0].data
-        moving_data = sims_pixel_space[1].data
+    pairwise_reg_func_has_image_data = np.all(
+        list(pairwise_reg_func_has_data_keywords.values())
+    )
+
+    if np.any(list(pairwise_reg_func_has_point_keywords.values())) and not np.all(
+        list(pairwise_reg_func_has_point_keywords.values())
+    ):
+        raise ValueError(
+            "Point-aware pairwise registration functions must accept both "
+            "'fixed_points' and 'moving_points'."
+        )
+
+    if np.all(list(pairwise_reg_func_has_point_keywords.values())):
+        registration_func_space = "transform_key_space"
+
+        affines = [
+            spatial_image_utils.get_affine_from_sim(
+                sim, transform_key=transform_key
+            )
+            .squeeze()
+            .data
+            for sim in reg_sims_b
+        ]
+        initial_affine = np.matmul(np.linalg.inv(affines[1]), affines[0])
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Point-aware pairwise registration setup: func=%s, "
+                "registration_func_space=%s, accepts_image_data=%s, "
+                "initial_affine=\n%s",
+                pairwise_reg_func_name,
+                registration_func_space,
+                pairwise_reg_func_has_image_data,
+                _format_array_for_log(initial_affine),
+            )
+
+        marker_sims = reg_sims_b if prefilter_markers else reg_sims_b_marker_source
+        fixed_point_set = spatial_image_utils.get_point_set(
+            marker_sims[0],
+            points_key=points_key,
+        )
+        moving_point_set = spatial_image_utils.get_point_set(
+            marker_sims[1],
+            points_key=points_key,
+        )
+        fixed_points = _get_points_array_for_registration(
+            fixed_point_set,
+            spatial_dims,
+        )
+        moving_points = _get_points_array_for_registration(
+            moving_point_set,
+            spatial_dims,
+        )
+
+        fixed_points_for_registration = _transform_points_for_registration(
+            fixed_points,
+            affines[0],
+        )
+        moving_points_for_registration = _transform_points_for_registration(
+            moving_points,
+            affines[1],
+        )
+        pairwise_reg_func_kwargs["fixed_points"] = fixed_points_for_registration
+        pairwise_reg_func_kwargs["moving_points"] = moving_points_for_registration
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Marker points passed to pairwise registration: points_key=%r, "
+                "prefilter_markers=%s, fixed_count=%s, moving_count=%s, "
+                "fixed_bounds=(%s), moving_bounds=(%s)",
+                points_key,
+                prefilter_markers,
+                len(fixed_points_for_registration),
+                len(moving_points_for_registration),
+                _format_point_bounds_for_log(fixed_points_for_registration),
+                _format_point_bounds_for_log(moving_points_for_registration),
+            )
+
+        for isim, sim in enumerate(reg_sims_b):
+            prefix = ["fixed", "moving"][isim]
+            if pairwise_reg_func_has_keywords[f"{prefix}_origin"]:
+                pairwise_reg_func_kwargs[
+                    f"{prefix}_origin"
+                ] = spatial_image_utils.get_origin_from_sim(sim)
+            if pairwise_reg_func_has_keywords[f"{prefix}_spacing"]:
+                pairwise_reg_func_kwargs[
+                    f"{prefix}_spacing"
+                ] = spatial_image_utils.get_spacing_from_sim(sim)
+
+        if pairwise_reg_func_has_keywords["initial_affine"]:
+            pairwise_reg_func_kwargs[
+                "initial_affine"
+            ] = param_utils.affine_to_xaffine(initial_affine)
+
+        fixed_data = None
+        moving_data = None
+        if pairwise_reg_func_has_image_data:
+            fixed_data = reg_sims_b[0].data
+            moving_data = reg_sims_b[1].data
+
+    elif not np.any(list(pairwise_reg_func_has_keywords.values())):
+        fixed_data = None
+        moving_data = None
+
+        if pairwise_reg_func_has_image_data:
+            registration_func_space = "pixel_space"
+
+            sims_pixel_space = sims_to_intrinsic_coord_system(
+                reg_sims_b[0],
+                reg_sims_b[1],
+                transform_key=transform_key,
+                overlap_bboxes=(lowers, uppers),
+            )
+
+            fixed_data = sims_pixel_space[0].data
+            moving_data = sims_pixel_space[1].data
+        else:
+            registration_func_space = "transform_key_space"
 
     elif np.all(list(pairwise_reg_func_has_keywords.values())):
         registration_func_space = "physical_space"
-
-        fixed_data = reg_sims_b[0].data
-        moving_data = reg_sims_b[1].data
 
         for isim, sim in enumerate(reg_sims_b):
             prefix = ["fixed", "moving"][isim]
@@ -909,13 +1969,37 @@ def register_pair_of_msims(
             "initial_affine"
         ] = param_utils.affine_to_xaffine(initial_affine)
 
+        fixed_data = None
+        moving_data = None
+        if pairwise_reg_func_has_image_data:
+            fixed_data = reg_sims_b[0].data
+            moving_data = reg_sims_b[1].data
+
     else:
         raise ValueError("Unknown registration function signature")
 
+    logger.debug(
+        "Pairwise registration call prepared: func=%s, registration_func_space=%s, "
+        "accepts_image_data=%s, accepts_points=%s, kwargs=%s",
+        pairwise_reg_func_name,
+        registration_func_space,
+        pairwise_reg_func_has_image_data,
+        np.all(list(pairwise_reg_func_has_point_keywords.values())),
+        sorted(pairwise_reg_func_kwargs.keys()),
+    )
+
+    if pairwise_reg_func_has_image_data:
+        fixed_data = xr.DataArray(fixed_data, dims=spatial_dims)
+        moving_data = xr.DataArray(moving_data, dims=spatial_dims)
+
     param_dict_d = delayed(dispatch_pairwise_reg_func, nout=1)(
         pairwise_reg_func,
-        fixed_data=xr.DataArray(fixed_data, dims=spatial_dims),
-        moving_data=xr.DataArray(moving_data, dims=spatial_dims),
+        fixed_data=fixed_data,
+        moving_data=moving_data,
+        skip_constant_check=(
+            not pairwise_reg_func_has_image_data
+            or registration_func_space == "transform_key_space"
+        ),
         **pairwise_reg_func_kwargs,
     )
 
@@ -943,6 +2027,8 @@ def register_pair_of_msims(
         affine_phys = np.matmul(
             affines[1], np.matmul(affine, np.linalg.inv(affines[0]))
         )
+    elif registration_func_space == "transform_key_space":
+        affine_phys = affine
 
     param_ds = xr.Dataset(
         data_vars={
@@ -1102,6 +2188,8 @@ def _plot_registration_summaries(
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key: str = None,
+    points_key: str = "beads",
+    prefilter_markers: bool = False,
     reg_channel_index: int = None,
     reg_channel: str = None,
     new_transform_key: str = None,
@@ -1142,6 +2230,11 @@ def register(
     transform_key : str, optional
         Extrinsic coordinate system to use as a starting point
         for the registration, by default None
+    points_key : str, optional
+        Named point set to use for marker-aware pairwise registration functions.
+    prefilter_markers : bool, optional
+        If True, restrict markers to each pairwise overlap before marker-based
+        pairwise registration. By default False.
     new_transform_key : str, optional
         If set, the registration result will be registered as a new extrinsic
         coordinate system in the input views (with the given name), by default None
@@ -1297,6 +2390,16 @@ def register(
         pairs=pairs,
         overlap_tolerance=overlap_tolerance,
     )
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Registration graph built: nodes=%s, edges=%s, edge_list=%s, "
+            "transform_key=%s, overlap_tolerance=%s",
+            g.number_of_nodes(),
+            g.number_of_edges(),
+            sorted(g.edges()),
+            transform_key,
+            overlap_tolerance,
+        )
 
     # prune registration pair graph
     if pre_registration_pruning_method is not None:
@@ -1307,6 +2410,15 @@ def register(
         )
     else:
         g_reg = g
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Registration graph after pruning: method=%s, nodes=%s, edges=%s, "
+            "edge_list=%s",
+            pre_registration_pruning_method,
+            g_reg.number_of_nodes(),
+            g_reg.number_of_edges(),
+            sorted(g_reg.edges()),
+        )
 
     # if required, import itk already here
     # to make sure it's available in dask threads
@@ -1327,6 +2439,8 @@ def register(
         msims_reg,
         g_reg,
         transform_key=transform_key,
+        points_key=points_key,
+        prefilter_markers=prefilter_markers,
         registration_binning=registration_binning,
         reg_res_level=reg_res_level,
         overlap_tolerance=overlap_tolerance,
@@ -1350,6 +2464,14 @@ def register(
         method=groupwise_resolution_method,
         **groupwise_resolution_kwargs,
     )
+    if logger.isEnabledFor(logging.DEBUG):
+        for view_index, params_for_view in sorted(params_dict.items()):
+            logger.debug(
+                "Groupwise registration transform: view=%s, method=%s, affine=\n%s",
+                view_index,
+                groupwise_resolution_method,
+                _format_array_for_log(params_for_view),
+            )
 
     params = [
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
@@ -1458,6 +2580,16 @@ def compute_pairwise_registrations(
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
         g_reg_computed.edges[pair]["quality"] = params[i]["quality"]
         g_reg_computed.edges[pair]["bbox"] = params[i]["bbox"]
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Computed pairwise registration: edge=%s, quality=%s, "
+                "transform_shape=%s, transform=\n%s\nbbox=%s",
+                pair,
+                _format_array_for_log(params[i]["quality"]),
+                np.asarray(params[i]["transform"]).shape,
+                _format_array_for_log(params[i]["transform"]),
+                _format_array_for_log(params[i]["bbox"]),
+            )
 
     return g_reg_computed
 
