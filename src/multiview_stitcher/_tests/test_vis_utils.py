@@ -691,6 +691,48 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
         assert len(ng_json.keys())
 
 
+def test_view_neuroglancer_images_param(monkeypatch):
+    """
+    view_neuroglancer accepts `images=` with sims and msims, and emits a
+    DeprecationWarning when the legacy `sims=` parameter is used.
+    """
+    import warnings
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+    monkeypatch.setattr(vis_utils, "serve_dir", lambda *a, **kw: None)
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2, overlap=0, N_c=1, N_t=1, tile_size=10, tiles_x=2, tiles_y=1, tiles_z=1
+    )
+    msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims]
+
+    with tempfile.TemporaryDirectory() as data_dir:
+        zarr_paths = [
+            os.path.join(data_dir, f"sim_{i}.zarr") for i in range(len(sims))
+        ]
+        for sim, zp in zip(sims, zarr_paths):
+            ngff_utils.write_sim_to_ome_zarr(sim, zp)
+
+        # images= accepts plain sims
+        vis_utils.view_neuroglancer(
+            zarr_paths, images=sims, transform_key=io.METADATA_TRANSFORM_KEY
+        )
+
+        # images= accepts msims (DataTree)
+        vis_utils.view_neuroglancer(
+            zarr_paths, images=msims, transform_key=io.METADATA_TRANSFORM_KEY
+        )
+
+        # legacy sims= triggers a DeprecationWarning
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            vis_utils.view_neuroglancer(
+                zarr_paths, sims=sims, transform_key=io.METADATA_TRANSFORM_KEY
+            )
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+
+
 def test_view_neuroglancer_different_folders(monkeypatch):
     """
     view_neuroglancer must:
