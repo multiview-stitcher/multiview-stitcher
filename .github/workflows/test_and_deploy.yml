@@ -77,4 +77,9 @@ jobs:
         run: |
           git tag
           python -m build .
-          twine upload dist/*
+          python -m twine check --strict dist/*
+          python -m twine upload \
+            --verbose \
+            --disable-progress-bar \
+            --non-interactive \
+            dist/*
