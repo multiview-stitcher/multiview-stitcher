@@ -535,7 +535,7 @@ def read_czi_view_into_sim(
         stacks.append(stack)
     stacks = da.stack(stacks, axis=0)
 
-    dims = [[], ['c']][int(len(channels) > 1)] + sdims
+    dims = ['c'] + sdims
 
     # rotate -info['positions'][iview][3] around center of stack
     # spacing = np.array(info['spacing'][::-1])
