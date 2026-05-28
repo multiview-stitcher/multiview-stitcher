@@ -189,9 +189,9 @@ def log_detect(
         If provided, the minimum pixel intensity in a neighborhood around each
         candidate detection must be less than this value for the candidate to be
         accepted. This can help filter out detections within the interior of bright objects.
-    max_neigh_sample_size : float or iterable[float]
+    max_neigh_sample_size : float or dict[str, float] or None, optional
         Specifies the size of the neighborhood used to compute the minimum pixel intensity
-    max_neigh_sigma : float or None, optional
+    max_neigh_sigma : float or dict[str, float] or None, optional
         If provided, intensities are smoothed with a Gaussian filter before computing
         the minimum in the neighborhood. The sigma of the Gaussian filter is specified in physical units.
     Returns

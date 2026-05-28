@@ -52,12 +52,17 @@ def test_log_detect_max_neigh_params_run():
         },
         {
             "max_neigh_intensity": 20,
-            "max_neigh_sample_size": 30,
+            "max_neigh_sample_size": 30.5,
         },
         {
             "max_neigh_intensity": 20,
-            "max_neigh_sample_size": 8,
+            "max_neigh_sample_size": {'y': 3, 'x': 2},
             "max_neigh_sigma": 2.5,
+        },
+
+        {
+            "max_neigh_intensity": 20,
+            "max_neigh_sigma": {'y': 2.5, 'x': 1.0},
         },
     ]
 
