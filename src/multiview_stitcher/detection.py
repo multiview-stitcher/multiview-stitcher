@@ -163,6 +163,9 @@ def log_detect(
     target_size_physical,
     threshold_rel=0.2,
     threshold_abs=None,
+    max_neigh_intensity=None,
+    max_neigh_sample_size=None,
+    max_neigh_sigma=None,
 ):
     """
     Detect bright beads in an in-memory array using Laplacian-of-Gaussian.
@@ -182,6 +185,15 @@ def log_detect(
     threshold_abs : float or None, optional
         Absolute LoG response threshold. If provided, ``threshold_rel`` is
         ignored.
+    max_neigh_intensity : float or None, optional
+        If provided, the minimum pixel intensity in a neighborhood around each
+        candidate detection must be less than this value for the candidate to be
+        accepted. This can help filter out detections within the interior of bright objects.
+    max_neigh_sample_size : float or iterable[float]
+        Specifies the size of the neighborhood used to compute the minimum pixel intensity
+    max_neigh_sigma : float or None, optional
+        If provided, intensities are smoothed with a Gaussian filter before computing
+        the minimum in the neighborhood. The sigma of the Gaussian filter is specified in physical units.
     Returns
     -------
     numpy.ndarray
@@ -230,6 +242,45 @@ def log_detect(
         & (response > threshold_abs)
         & (response > 0)
     )
+
+    if max_neigh_intensity is not None:
+        if max_neigh_sigma is not None:
+
+            max_neigh_sigma = _normalize_target_size_physical(
+                max_neigh_sigma, image.ndim
+            )
+
+            max_neigh_sigma_pixels = tuple(
+                si / sp for si, sp in zip(max_neigh_sigma, spacing)
+            )
+
+            sample_intensities = ndi.gaussian_filter(
+                image.astype(np.float32, copy=False),
+                sigma=max_neigh_sigma_pixels,
+            )
+        else:
+            sample_intensities = image
+
+        if max_neigh_sample_size is not None:
+
+            max_neigh_sample_size = _normalize_target_size_physical(
+                max_neigh_sample_size, image.ndim
+            )
+            min_filter_size_physical = max_neigh_sample_size
+        else:
+            min_filter_size_physical = _normalize_target_size_physical(
+                target_size_physical, image.ndim
+            )
+
+        min_filter_size= [sip / sp
+                for sip, sp in zip(min_filter_size_physical, spacing)]            
+            
+        min_sample_intensities = ndi.minimum_filter(
+            sample_intensities,
+            size=min_filter_size,
+            mode="reflect",
+        )
+        detections &= (min_sample_intensities < max_neigh_intensity)
 
     return ndi.label(detections)[0]
 
