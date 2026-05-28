@@ -566,6 +566,7 @@ def read_czi_view_into_sim(
 def read_multiview_czi_into_sims(
     fn,
     transform_initialization_mode='rotate_around_y_positions',
+    eps=1.0,
     ):
     """
     Read all views from a multi-view CZI file into spatial images,
@@ -586,6 +587,9 @@ def read_multiview_czi_into_sims(
         and align it's new center to the stack center.
         Tip: Visualize how well views are aligned using
         `multiview_stitcher.vis_utils.plot_positions`.
+    eps: float
+        Parameter for grouping views based on y position in the "rotate_around_y_positions" mode:
+        Views with y positions distant by at most eps to each other will be grouped together.
     """
 
     if transform_initialization_mode not in [
@@ -605,7 +609,7 @@ def read_multiview_czi_into_sims(
         # define a stack center based on the mean x and z position of each group
         # rotate each view and align it's new center to the stack center
         y_positions = info['positions'][:, 1]
-        group_labels = dbscan(y_positions.reshape(-1, 1), eps=1, min_pts=1)
+        group_labels = dbscan(y_positions.reshape(-1, 1), eps=eps, min_pts=1)
         logger.info(f"Group labels for views based on y positions: {group_labels}")
         for group in np.unique(group_labels):
             group_views = np.where(group_labels == group)[0]
