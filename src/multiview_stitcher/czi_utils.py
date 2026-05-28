@@ -9,9 +9,9 @@ import numpy as np
 import xarray as xr
 from dask import delayed
 
-logger = logging.getLogger(__name__)
-
 from multiview_stitcher import spatial_image_utils as si_utils, param_utils
+
+logger = logging.getLogger(__name__)
 
 try:
     import czifile
