@@ -221,6 +221,145 @@ def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
         np.testing.assert_array_equal(fused_dask_data, fused_zarr_data)
 
 
+@pytest.mark.parametrize("varying_dim", ["c", "t"], ids=["channel", "time"])
+def test_fuse_zarr_backed_selected_nonspatial_preserves_identity(varying_dim):
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=2 if varying_dim == "c" else 1,
+        N_t=2 if varying_dim == "t" else 1,
+        tile_size=16,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1.0,
+        spacing_y=1.0,
+        spacing_z=1.0,
+        random_data=True,
+    )[0]
+
+    data = np.asarray(sim.data.compute()).copy()
+    if varying_dim == "c":
+        data[:, 1] = data[:, 0] + 1000
+        selected_indices = {"t": 0, "c": 1}
+    elif varying_dim == "t":
+        data[1] = data[0] + 1000
+        selected_indices = {"t": 1, "c": 0}
+    else:
+        raise ValueError(f"Unsupported non-spatial dim {varying_dim!r}")
+
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=sim.dims,
+        scale=si_utils.get_spacing_from_sim(sim),
+        translation=si_utils.get_origin_from_sim(sim),
+        affine=si_utils.get_affine_from_sim(sim, METADATA_TRANSFORM_KEY),
+        transform_key=METADATA_TRANSFORM_KEY,
+        c_coords=sim.coords["c"].values,
+        t_coords=sim.coords["t"].values,
+    )
+
+    expected = data[selected_indices["t"], selected_indices["c"]]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarr_path = os.path.join(tmpdir, "view.ome.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path, overwrite=True)
+
+        msim = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        zsim = msi_utils.get_sim_from_msim(msim, scale="scale0")
+        selected = si_utils.sim_sel_coords(
+            zsim,
+            {
+                dim: zsim.coords[dim][[idx]]
+                for dim, idx in selected_indices.items()
+            },
+        )
+
+        selected_data = np.squeeze(np.asarray(selected.data))
+        np.testing.assert_array_equal(selected_data, expected)
+
+        fused = fusion.fuse([selected], transform_key=METADATA_TRANSFORM_KEY)
+        fused_data = np.squeeze(np.asarray(fused.data.compute()))
+
+        np.testing.assert_array_equal(fused_data, expected)
+
+
+@pytest.mark.parametrize("varying_dim", ["c", "t"], ids=["channel", "time"])
+def test_fuse_zarr_backed_msims_to_ome_zarr_preserves_nonspatial_offsets(
+    varying_dim,
+):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=8,
+        N_c=2 if varying_dim == "c" else 1,
+        N_t=2 if varying_dim == "t" else 1,
+        tile_size=32,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1.0,
+        spacing_y=1.0,
+        spacing_z=1.0,
+        random_data=True,
+    )
+
+    fixed = []
+    for sim in sims:
+        data = np.asarray(sim.data.compute()).copy()
+        if varying_dim == "c":
+            data[:, 1] = data[:, 0] + 1000
+        elif varying_dim == "t":
+            data[1] = data[0] + 1000
+        else:
+            raise ValueError(f"Unsupported non-spatial dim {varying_dim!r}")
+
+        fixed.append(
+            si_utils.get_sim_from_array(
+                data,
+                dims=sim.dims,
+                scale=si_utils.get_spacing_from_sim(sim),
+                translation=si_utils.get_origin_from_sim(sim),
+                affine=si_utils.get_affine_from_sim(
+                    sim, METADATA_TRANSFORM_KEY
+                ),
+                transform_key=METADATA_TRANSFORM_KEY,
+                c_coords=sim.coords["c"].values,
+                t_coords=sim.coords["t"].values,
+            )
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zmsims = []
+        for isim, sim in enumerate(fixed):
+            view_path = os.path.join(tmpdir, f"view_{isim}.ome.zarr")
+            ngff_utils.write_sim_to_ome_zarr(sim, view_path, overwrite=True)
+            msim = ngff_utils.read_msim_from_ome_zarr(view_path)
+            msi_utils.set_affine_transform(
+                msim,
+                si_utils.get_affine_from_sim(sim, METADATA_TRANSFORM_KEY),
+                transform_key=METADATA_TRANSFORM_KEY,
+            )
+            zmsims.append(msim)
+
+        output_path = os.path.join(tmpdir, "fused.ome.zarr")
+        fused = fusion.fuse(
+            zmsims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            output_zarr_url=output_path,
+            zarr_options={"ome_zarr": True, "overwrite": True},
+            output_chunksize=16,
+        )
+
+        fused_sim = msi_utils.get_sim_from_msim(fused, scale="scale0")
+        fused_data = np.squeeze(np.asarray(fused_sim.data.compute()))
+
+        np.testing.assert_allclose(
+            fused_data[1] - fused_data[0],
+            1000,
+            atol=1,
+        )
+
+
 @pytest.mark.parametrize("backend", ["numpy", "dask", "zarr"])
 def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend):
     data = np.ones((10, 10), dtype=np.float32)
