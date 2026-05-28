@@ -690,33 +690,59 @@ def _get_scalar_indexer_value(indexer):
     return None
 
 
-def _extract_isel_dropped(sim, indexed_dims):
-    """
-    Recover dropped-dimension ``isel`` indices from xarray's lazy key.
-
-    Returns ``{dim: int_index}`` for dims removed by scalar selection.
-    """
-    # Walk the _data chain to find the lazy indexer holding the selection key.
+def _get_lazy_indexer_tuple(sim, indexed_dims):
+    """Return the lazy xarray selection key for a zarr-backed sim, if any."""
     data = sim.variable._data
     while True:
         key = getattr(data, "key", None)
         if hasattr(key, "tuple") and len(key.tuple) == len(indexed_dims):
-            break
+            return key.tuple
 
         if hasattr(data, "array"):
             data = data.array
         elif hasattr(data, "_array"):
             data = data._array
         else:
-            return {}
+            return None
 
+
+def _is_full_slice(indexer):
+    return isinstance(indexer, slice) and indexer == slice(None)
+
+
+def _extract_isel_selections(sim, indexed_dims):
+    """
+    Recover lazy ``isel`` selections from xarray's indexing wrapper.
+
+    Returns
+    -------
+    tuple[dict, dict]
+        ``(isel_indexers, isel_dropped)`` where ``isel_indexers`` contains
+        non-full selections for dimensions still present on ``sim`` and
+        ``isel_dropped`` contains scalar indices for dimensions removed by
+        selection.
+    """
+    key_tuple = _get_lazy_indexer_tuple(sim, indexed_dims)
+    if key_tuple is None:
+        return {}, {}
+
+    isel_indexers = {}
     isel_dropped = {}
-    for dim, idx in zip(indexed_dims, key.tuple):
+    for dim, idx in zip(indexed_dims, key_tuple):
         scalar_idx = _get_scalar_indexer_value(idx)
         if dim not in sim.dims and scalar_idx is not None:
             isel_dropped[dim] = scalar_idx
 
-    return isel_dropped
+        if dim in SPATIAL_DIMS:
+            continue
+
+        if dim in sim.dims and not _is_full_slice(idx):
+            idx_array = np.asarray(idx)
+            if idx_array.ndim > 1:
+                continue
+            isel_indexers[dim] = idx
+
+    return isel_indexers, isel_dropped
 
 
 def _coord_value_to_index(coords, value):
@@ -751,11 +777,12 @@ def serialize_zarr_backed_sim(sim):
     zarr_array = _get_xarray_zarr_array(sim)
     zarr_dims = _get_backing_zarr_dims(sim, zarr_array)
     indexed_dims = _get_indexed_dims(sim, zarr_dims)
-    isel_dropped = _extract_isel_dropped(sim, indexed_dims)
+    isel_indexers, isel_dropped = _extract_isel_selections(sim, indexed_dims)
 
     return {
         "zarr_array": zarr_array,
         "zarr_dims": zarr_dims,
+        "isel_indexers": isel_indexers,
         "isel_dropped": isel_dropped,
         "spacing": get_spacing_from_sim(sim),
         "origin": get_origin_from_sim(sim),
@@ -787,21 +814,39 @@ def deserialize_zarr_backed_sim(
         zarr_dims = info["zarr_dims"]
         selected = _zarr_array_to_dataarray(info["zarr_array"], dims=zarr_dims)
 
+        base_indexers = dict(info.get("isel_indexers", {}))
+        base_indexers.update(info["isel_dropped"])
+        applicable_base_indexers = {
+            dim: idx for dim, idx in base_indexers.items() if dim in selected.dims
+        }
+        if applicable_base_indexers:
+            selected = selected.isel(applicable_base_indexers, drop=True)
+
+        current_nsdim_coords = {}
+        for dim in ["t", "c"]:
+            coord_values = info.get(f"{dim}_coords")
+            if (
+                dim in selected.dims
+                and coord_values is not None
+                and len(coord_values) == selected.sizes[dim]
+            ):
+                current_nsdim_coords[dim] = coord_values
+        if current_nsdim_coords:
+            selected = selected.assign_coords(current_nsdim_coords)
+
         # Keep dropped dims scalar so only the requested slab is selected.
         indexer = {}
-        for dim in zarr_dims:
-            if dim in info["isel_dropped"]:
-                indexer[dim] = info["isel_dropped"][dim]
-                continue
-
+        for dim in selected.dims:
             if dim in sim_coord_dict:
-                coord_values = info.get(f"{dim}_coords")
-                if coord_values is None:
+                if dim not in selected.coords:
                     raise ValueError(
                         f"Missing coordinate values for selected dimension {dim!r}."
                     )
                 indexer[dim] = (
-                    _coord_value_to_index(coord_values, sim_coord_dict[dim])
+                    _coord_value_to_index(
+                        selected.coords[dim].values,
+                        sim_coord_dict[dim],
+                    )
                 )
                 continue
 
@@ -846,11 +891,26 @@ def deserialize_zarr_backed_sim(
         dims=info["zarr_dims"],
         scale=info["spacing"],
         translation=info["origin"],
-        c_coords=info["c_coords"],
-        t_coords=info["t_coords"],
+        c_coords=None,
+        t_coords=None,
     )
-    if info["isel_dropped"]:
-        sim = sim.isel(info["isel_dropped"], drop=True)
+    base_indexers = dict(info.get("isel_indexers", {}))
+    base_indexers.update(info["isel_dropped"])
+    if base_indexers:
+        sim = sim.isel(base_indexers, drop=True)
+
+    current_nsdim_coords = {}
+    for dim in ["t", "c"]:
+        coord_values = info.get(f"{dim}_coords")
+        if (
+            dim in sim.dims
+            and coord_values is not None
+            and len(coord_values) == sim.sizes[dim]
+        ):
+            current_nsdim_coords[dim] = coord_values
+    if current_nsdim_coords:
+        sim = sim.assign_coords(current_nsdim_coords)
+
     return sim
 
 
