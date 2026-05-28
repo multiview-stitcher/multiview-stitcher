@@ -834,7 +834,8 @@ def deserialize_zarr_backed_sim(
         if current_nsdim_coords:
             selected = selected.assign_coords(current_nsdim_coords)
 
-        # Keep dropped dims scalar so only the requested slab is selected.
+        # Select the requested overlap slab (spatial dims) and any remaining
+        # non-spatial coordinates requested via sim_coord_dict.
         indexer = {}
         for dim in selected.dims:
             if dim in sim_coord_dict:
