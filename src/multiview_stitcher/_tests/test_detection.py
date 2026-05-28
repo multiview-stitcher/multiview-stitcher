@@ -37,6 +37,41 @@ def test_log_detect_detects_numpy_beads():
     assert np.allclose(detected, bead_pixels, atol=1)
 
 
+def test_log_detect_max_neigh_params_run():
+    bead_pixels = np.array(
+        [
+            [20, 22],
+            [43, 41],
+        ]
+    )
+    image = _make_bead_image(bead_pixels)
+
+    calls = [
+        {
+            "max_neigh_intensity": 20,
+        },
+        {
+            "max_neigh_intensity": 20,
+            "max_neigh_sample_size": 30,
+        },
+        {
+            "max_neigh_intensity": 20,
+            "max_neigh_sample_size": 8,
+            "max_neigh_sigma": 2.5,
+        },
+    ]
+
+    for kwargs in calls:
+        labels = detection.log_detect(
+            image,
+            spacing=(1.0, 1.0),
+            target_size_physical=4,
+            threshold_rel=0.3,
+            **kwargs,
+        )
+        assert np.issubdtype(labels.dtype, np.integer)
+
+
 def test_detect_beads_returns_intrinsic_physical_positions():
     bead_pixels = np.array(
         [
