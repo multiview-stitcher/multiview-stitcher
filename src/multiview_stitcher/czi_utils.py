@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import warnings
 from collections import OrderedDict
 from pathlib import Path
@@ -7,6 +8,10 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 from dask import delayed
+
+from multiview_stitcher import spatial_image_utils as si_utils, param_utils
+
+logger = logging.getLogger(__name__)
 
 try:
     import czifile
@@ -490,3 +495,189 @@ def get_info_from_multiview_czi(filename):
         )
 
     return infoDict
+
+
+import dask.array as da
+from dask.delayed import delayed
+
+from multiview_stitcher import czi_utils, param_utils, transformation
+
+def read_czi_view_into_sim(
+    fn,
+    view,
+    ):
+
+    """
+    Lazily read a view from a multi-view CZI file as a Dask array, and return it as an xarray.DataArray
+    with appropriate dimension metadata and affine transformation set.
+    """
+
+    info = get_info_from_multiview_czi(fn)
+    sdims = ['z', 'y', 'x']
+    shape = info['sizes'][view][::-1]
+    channels = info['channels']
+
+    stacks = []
+    for ch in channels:
+        stack = da.stack(
+            [
+                da.from_delayed(
+                    delayed(read_view_from_multiview_czi)(
+                        fn, view=view, ch=ch, z=z
+                    ),
+                    shape=(shape[1], shape[2]),
+                    dtype=np.uint16,
+                )
+                for z in range(shape[0])
+            ],
+            axis=0
+        )
+        stacks.append(stack)
+    stacks = da.stack(stacks, axis=0)
+
+    dims = ['c'] + sdims
+
+    # rotate -info['positions'][iview][3] around center of stack
+    # spacing = np.array(info['spacing'][::-1])
+    # origin = np.array(info['origins'][view][::-1])
+    # center = spacing * np.array(shape) / 2 + origin
+    center = info['centerOfRotation'][::-1]
+    angle = -info['positions'][view][3]
+    affine = param_utils.affine_from_rotation(
+        angle, direction=[0, 1, 0], point=center,
+    )
+    affine = np.linalg.inv(affine)
+
+    channel_names = get_czi_channel_names(fn)
+
+    sim = si_utils.get_sim_from_array(
+        stacks,
+        dims=dims,
+        scale={dim: s for dim, s in zip(sdims, info['spacing'][::-1])},
+        translation={dim: t for dim, t in zip(sdims, info['origins'][view][::-1])},
+        affine=affine,
+        transform_key='metadata',
+        c_coords=channel_names,
+    )
+
+    return sim
+
+
+def read_multiview_czi_into_sims(
+    fn,
+    transform_initialization_mode='rotate_around_y_positions',
+    eps=1.0,
+    ):
+    """
+    Read all views from a multi-view CZI file into spatial images,
+    with affine transformations initialized based on the specified mode.
+
+    Parameters
+    ----------
+    fn : str or Path
+        Path to the multi-view CZI file.
+    transform_initialization_mode: str
+        Mode for initializing the affine transformations of the views. Options are:
+        - "rotation_around_czi_center_position": initialize transforms based on
+        rotation around "centerPosition" extracted from CZI metadata.
+        This sometimes works, sometimes doesn't (probably based on calibration).
+        - "rotate_around_y_positions" (default): initialize transforms using the following
+        heuristic: divide views into groups based on y position, define a stack center
+        based on the mean x and z position of each group, rotate each view around y axis
+        and align it's new center to the stack center.
+        Tip: Visualize how well views are aligned using
+        `multiview_stitcher.vis_utils.plot_positions`.
+    eps: float
+        Parameter for grouping views based on y position in the "rotate_around_y_positions" mode:
+        Views with y positions distant by at most eps to each other will be grouped together.
+    """
+
+    if transform_initialization_mode not in [
+        'rotation_around_czi_center_position',
+        'rotate_around_y_positions',
+    ]:
+        raise ValueError(f"Invalid transform_initialization_mode: {transform_initialization_mode}")
+
+    info = get_info_from_multiview_czi(fn)
+    sims = []
+    for iview in range(info['n_views']):
+        sim = read_czi_view_into_sim(fn, view=iview)
+        sims.append(sim)
+
+    if transform_initialization_mode == 'rotate_around_y_positions':
+        # divide views into groups based on y position and
+        # define a stack center based on the mean x and z position of each group
+        # rotate each view and align it's new center to the stack center
+        y_positions = info['positions'][:, 1]
+        group_labels = dbscan(y_positions.reshape(-1, 1), eps=eps, min_pts=1)
+        logger.info(f"Group labels for views based on y positions: {group_labels}")
+        for group in np.unique(group_labels):
+            group_views = np.where(group_labels == group)[0]
+            group_positions = info['positions'][group_views][:, :3][:,::-1]
+            center = np.mean(group_positions, axis=0)
+            logger.info(f"Group {group}: views {group_views}, center {center}")
+            for iview in group_views:
+                view_center = info['positions'][iview][:3][::-1]
+                angle = -info['positions'][iview][3]
+                affine = param_utils.affine_from_rotation(
+                    angle, direction=[0, 1, 0], point=view_center,
+                )
+                # align rotated center to group center
+                rotated_center = transformation.transform_pts(view_center[None], affine)[0]
+                translation = center - rotated_center
+                affine[:3, 3] += translation
+                affine = param_utils.affine_to_xaffine(affine)
+                si_utils.set_sim_affine(
+                    sims[iview], affine, transform_key='metadata',
+                )
+
+    return sims
+
+
+def dbscan(X, eps, min_pts):
+    """
+    A simple implementation of DBSCAN clustering algorithm for 1D data,
+    used for grouping views based on y position in the "rotate_around_y_positions"
+    mode of transform initialization in `read_multiview_czi_into_sims`.
+    """
+
+    X = np.asarray(X)
+    n = len(X)
+    labels = np.full(n, -1)
+    visited = np.zeros(n, bool)
+    cluster = 0
+
+    def neighbors(i):
+        return np.where(np.linalg.norm(X - X[i], axis=1) <= eps)[0]
+
+    for i in range(n):
+        if visited[i]:
+            continue
+
+        visited[i] = True
+        nbrs = list(neighbors(i))
+
+        if len(nbrs) < min_pts:
+            continue
+
+        labels[i] = cluster
+        j = 0
+
+        while j < len(nbrs):
+            p = nbrs[j]
+
+            if not visited[p]:
+                visited[p] = True
+                p_nbrs = list(neighbors(p))
+
+                if len(p_nbrs) >= min_pts:
+                    nbrs += [x for x in p_nbrs if x not in nbrs]
+
+            if labels[p] == -1:
+                labels[p] = cluster
+
+            j += 1
+
+        cluster += 1
+
+    return labels
