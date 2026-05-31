@@ -1,5 +1,10 @@
+import asyncio
+from dataclasses import asdict
 from functools import partial
+import json
+import math
 import os, shutil
+import threading
 
 import dask
 import ngff_zarr
@@ -14,6 +19,477 @@ from xarray import DataTree
 
 from multiview_stitcher import msi_utils, param_utils, misc_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+
+
+def _drop_none_values(value):
+    if isinstance(value, dict):
+        return {
+            key: _drop_none_values(val)
+            for key, val in value.items()
+            if val is not None
+        }
+    if isinstance(value, list):
+        return [_drop_none_values(val) for val in value]
+    return value
+
+
+def _zarr_dtype(dtype):
+    dtype = np.dtype(dtype)
+    if dtype.byteorder == "=":
+        if dtype.itemsize == 1:
+            dtype = dtype.newbyteorder("|")
+        else:
+            dtype = dtype.newbyteorder("<" if np.little_endian else ">")
+    return dtype.str
+
+
+def _fill_value_for_dtype(dtype):
+    dtype = np.dtype(dtype)
+    if np.issubdtype(dtype, np.floating):
+        return 0.0
+    if np.issubdtype(dtype, np.integer):
+        return 0
+    if np.issubdtype(dtype, np.bool_):
+        return False
+    return 0
+
+
+def _regular_chunks_from_dask_chunks(chunks, shape):
+    chunk_shape = []
+    for axis, (dim_chunks, dim_size) in enumerate(zip(chunks, shape)):
+        if not dim_chunks:
+            raise ValueError(f"Dimension {axis} has no chunk metadata.")
+
+        regular_chunk = int(dim_chunks[0])
+        if regular_chunk <= 0:
+            raise ValueError(f"Invalid chunk size {regular_chunk}.")
+
+        interior_chunks = dim_chunks[:-1]
+        if any(int(chunk) != regular_chunk for chunk in interior_chunks):
+            raise ValueError(
+                "Virtual OME-Zarr serving requires regular chunks except "
+                f"for final edge chunks; dimension {axis} has chunks "
+                f"{dim_chunks}."
+            )
+
+        if int(dim_chunks[-1]) > regular_chunk:
+            raise ValueError(
+                "Virtual OME-Zarr serving requires final edge chunks to be "
+                f"no larger than the declared chunk; dimension {axis} has "
+                f"chunks {dim_chunks}."
+            )
+
+        chunk_shape.append(min(regular_chunk, int(dim_size)))
+
+    return tuple(chunk_shape)
+
+
+def _chunk_shape_from_sim(sim):
+    data = si_utils._get_backend_data(sim)
+
+    if hasattr(data, "chunks"):
+        return _regular_chunks_from_dask_chunks(data.chunks, sim.shape)
+
+    preferred_chunks = sim.encoding.get("preferred_chunks")
+    if preferred_chunks is not None:
+        return tuple(
+            min(int(preferred_chunks[dim]), int(sim.sizes[dim]))
+            for dim in sim.dims
+        )
+
+    zarr_chunks = sim.attrs.get("_zarr_chunks")
+    if zarr_chunks is not None and len(zarr_chunks) == sim.ndim:
+        return tuple(
+            min(int(chunk), int(size))
+            for chunk, size in zip(zarr_chunks, sim.shape)
+        )
+
+    return tuple(int(size) for size in sim.shape)
+
+
+def _json_response_dict(obj):
+    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+
+
+class VirtualOMEZarr:
+    """
+    Read-only virtual OME-Zarr 0.4 / Zarr v2 hierarchy backed by an msim.
+
+    Chunk requests are materialized directly from the source image with
+    ``np.asarray(sim.isel(...).data)`` and no temporary Zarr store is written.
+    """
+
+    def __init__(self, msim, name="image", compressor=None, omero=None):
+        if not msi_utils.is_msim(msim):
+            raise TypeError("VirtualOMEZarr expects a MultiscaleSpatialImage.")
+
+        self.msim = msim
+        self.name = name
+        self.compressor = compressor
+        self.omero = omero
+        self.scale_keys = msi_utils.get_sorted_scale_keys(msim)
+        if not self.scale_keys:
+            raise ValueError("msim must contain at least one scale.")
+
+        self.paths = [str(index) for index in range(len(self.scale_keys))]
+        self.sims = [
+            msi_utils.get_sim_from_msim(msim, scale=scale_key)
+            for scale_key in self.scale_keys
+        ]
+        self.chunk_shapes = {
+            path: _chunk_shape_from_sim(sim)
+            for path, sim in zip(self.paths, self.sims)
+        }
+
+        self.ngff_multiscales = msim_to_ngff_multiscales(
+            msim,
+            transform_key=None,
+        )
+        self._root_zattrs = self._build_root_zattrs()
+
+    def _build_root_zattrs(self):
+        metadata = asdict(self.ngff_multiscales.metadata)
+        metadata = _drop_none_values(metadata)
+        metadata["name"] = self.name
+        metadata["datasets"] = [
+            {
+                **dataset,
+                "path": path,
+            }
+            for path, dataset in zip(self.paths, metadata["datasets"])
+        ]
+
+        zattrs = {
+            "multiscales": [metadata],
+        }
+        if self.omero is not None:
+            zattrs["omero"] = (
+                asdict(self.omero)
+                if hasattr(self.omero, "__dataclass_fields__")
+                else self.omero
+            )
+
+        return _drop_none_values(zattrs)
+
+    def root_zgroup(self):
+        return {"zarr_format": 2}
+
+    def root_zattrs(self):
+        return self._root_zattrs
+
+    def array_zattrs(self, path):
+        self._get_sim(path)
+        return {}
+
+    def array_zarray(self, path):
+        sim = self._get_sim(path)
+        chunk_shape = self.chunk_shapes[path]
+        compressor = (
+            self.compressor.get_config()
+            if self.compressor is not None
+            else None
+        )
+
+        return {
+            "zarr_format": 2,
+            "shape": [int(size) for size in sim.shape],
+            "chunks": [int(size) for size in chunk_shape],
+            "dtype": _zarr_dtype(sim.dtype),
+            "compressor": compressor,
+            "fill_value": _fill_value_for_dtype(sim.dtype),
+            "order": "C",
+            "filters": None,
+            "dimension_separator": "/",
+        }
+
+    def consolidated_metadata(self):
+        metadata = {
+            ".zgroup": self.root_zgroup(),
+            ".zattrs": self.root_zattrs(),
+        }
+        for path in self.paths:
+            metadata[f"{path}/.zarray"] = self.array_zarray(path)
+            metadata[f"{path}/.zattrs"] = self.array_zattrs(path)
+
+        return {
+            "zarr_consolidated_format": 1,
+            "metadata": metadata,
+        }
+
+    def get_json_key(self, key):
+        key = key.strip("/")
+
+        if key == ".zgroup":
+            return self.root_zgroup()
+        if key == ".zattrs":
+            return self.root_zattrs()
+        if key == ".zmetadata":
+            return self.consolidated_metadata()
+        if key.endswith("/.zarray"):
+            return self.array_zarray(key[: -len("/.zarray")])
+        if key.endswith("/.zattrs"):
+            return self.array_zattrs(key[: -len("/.zattrs")])
+
+        raise KeyError(key)
+
+    def read_chunk(self, path, chunk_key):
+        sim = self._get_sim(path)
+        chunk_shape = self.chunk_shapes[path]
+        chunk_index = self._parse_chunk_key(path, chunk_key, sim)
+
+        indexers = {}
+        for dim, chunk_i, chunk_size, size in zip(
+            sim.dims,
+            chunk_index,
+            chunk_shape,
+            sim.shape,
+        ):
+            start = int(chunk_i * chunk_size)
+            stop = min(start + int(chunk_size), int(size))
+            indexers[dim] = slice(start, stop)
+
+        chunk = np.asarray(sim.isel(indexers).data)
+        chunk = self._pad_edge_chunk(chunk, chunk_shape, sim.dtype)
+        chunk = np.ascontiguousarray(chunk)
+
+        if self.compressor is not None:
+            return self.compressor.encode(chunk)
+
+        return chunk.tobytes(order="C")
+
+    def _get_sim(self, path):
+        if path not in self.paths:
+            raise KeyError(path)
+        return self.sims[self.paths.index(path)]
+
+    def _parse_chunk_key(self, path, chunk_key, sim):
+        parts = chunk_key.strip("/").split("/")
+        if len(parts) != sim.ndim:
+            raise KeyError(chunk_key)
+
+        try:
+            chunk_index = tuple(int(part) for part in parts)
+        except ValueError as exc:
+            raise KeyError(chunk_key) from exc
+
+        chunk_shape = self.chunk_shapes[path]
+        grid_shape = tuple(
+            int(math.ceil(size / chunk))
+            for size, chunk in zip(sim.shape, chunk_shape)
+        )
+        if any(
+            index < 0 or index >= grid
+            for index, grid in zip(chunk_index, grid_shape)
+        ):
+            raise KeyError(chunk_key)
+
+        return chunk_index
+
+    def _pad_edge_chunk(self, chunk, chunk_shape, dtype):
+        if tuple(chunk.shape) == tuple(chunk_shape):
+            return chunk.astype(dtype, copy=False)
+
+        padded = np.full(
+            chunk_shape,
+            _fill_value_for_dtype(dtype),
+            dtype=dtype,
+        )
+        insert = tuple(slice(0, size) for size in chunk.shape)
+        padded[insert] = chunk
+        return padded
+
+
+class VirtualOMEZarrServer:
+    def __init__(
+        self,
+        virtual_zarrs,
+        host="127.0.0.1",
+        port=8000,
+        route_prefix="image",
+        max_concurrent_chunks=None,
+    ):
+        self.virtual_zarrs = {
+            f"{route_prefix}_{index}": virtual_zarr
+            for index, virtual_zarr in enumerate(virtual_zarrs)
+        }
+        self.host = host
+        self.port = int(port)
+        self.max_concurrent_chunks = (
+            max_concurrent_chunks
+            if max_concurrent_chunks is not None
+            else min(4, os.cpu_count() or 1)
+        )
+        self.urls = [
+            f"http://{self.host}:{self.port}/{name}"
+            for name in self.virtual_zarrs
+        ]
+        self._loop = None
+        self._runner = None
+        self._thread = None
+        self._started = threading.Event()
+        self._stopped = threading.Event()
+        self._start_error = None
+
+    def serve_forever(self):
+        self.start()
+        try:
+            self._stopped.wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.stop()
+
+    def start(self):
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._started.clear()
+        self._stopped.clear()
+        self._start_error = None
+        self._thread = threading.Thread(
+            target=self._run_loop_thread,
+            daemon=True,
+        )
+        self._thread.start()
+        self._started.wait()
+        if self._start_error is not None:
+            raise self._start_error
+
+    def stop(self):
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        self._stopped.set()
+
+    def _run_loop_thread(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._start_async())
+            self._started.set()
+            self._loop.run_forever()
+        except BaseException as exc:
+            self._start_error = exc
+            self._started.set()
+        finally:
+            if self._runner is not None:
+                self._loop.run_until_complete(self._runner.cleanup())
+            self._loop.close()
+            self._stopped.set()
+
+    async def _start_async(self):
+        from aiohttp import web
+
+        app = web.Application()
+        app["virtual_zarrs"] = self.virtual_zarrs
+        app["chunk_semaphore"] = asyncio.Semaphore(
+            self.max_concurrent_chunks
+        )
+        app.router.add_route("*", "/{image_name}", _handle_virtual_zarr_request)
+        app.router.add_route(
+            "*",
+            "/{image_name}/{key:.*}",
+            _handle_virtual_zarr_request,
+        )
+
+        self._runner = web.AppRunner(app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self.host, self.port)
+        await site.start()
+        print(
+            f"Serving virtual OME-Zarrs at http://{self.host}:{self.port} "
+            "until interrupted..."
+        )
+
+
+async def _handle_virtual_zarr_request(request):
+    from aiohttp import web
+
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+    }
+
+    if request.method == "OPTIONS":
+        return web.Response(status=204, headers=cors_headers)
+
+    if request.method not in {"GET", "HEAD"}:
+        raise web.HTTPMethodNotAllowed(
+            request.method,
+            ["GET", "HEAD", "OPTIONS"],
+            headers=cors_headers,
+        )
+
+    image_name = request.match_info["image_name"]
+    key = request.match_info.get("key", "").strip("/")
+    virtual_zarr = request.app["virtual_zarrs"].get(image_name)
+    if virtual_zarr is None:
+        raise web.HTTPNotFound(headers=cors_headers)
+
+    try:
+        json_obj = virtual_zarr.get_json_key(key)
+    except KeyError:
+        json_obj = None
+
+    if json_obj is not None:
+        payload = _json_response_dict(json_obj)
+        return web.Response(
+            body=b"" if request.method == "HEAD" else payload,
+            content_type="application/json",
+            headers={
+                **cors_headers,
+                "Content-Length": str(len(payload)),
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    parts = key.split("/", 1)
+    if len(parts) != 2:
+        raise web.HTTPNotFound(headers=cors_headers)
+
+    path, chunk_key = parts
+    try:
+        async with request.app["chunk_semaphore"]:
+            payload = await asyncio.to_thread(
+                virtual_zarr.read_chunk,
+                path,
+                chunk_key,
+            )
+    except KeyError:
+        raise web.HTTPNotFound(headers=cors_headers)
+
+    return web.Response(
+        body=b"" if request.method == "HEAD" else payload,
+        content_type="application/octet-stream",
+        headers={
+            **cors_headers,
+            "Content-Length": str(len(payload)),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+def serve_virtual_ome_zarrs(
+    msims,
+    host="127.0.0.1",
+    port=8000,
+    route_prefix="image",
+    max_concurrent_chunks=None,
+    compressor=None,
+):
+    virtual_zarrs = [
+        VirtualOMEZarr(msim, name=f"{route_prefix}_{index}", compressor=compressor)
+        for index, msim in enumerate(msims)
+    ]
+    return VirtualOMEZarrServer(
+        virtual_zarrs,
+        host=host,
+        port=port,
+        route_prefix=route_prefix,
+        max_concurrent_chunks=max_concurrent_chunks,
+    )
 
 
 def sim_to_ngff_image(sim, transform_key):

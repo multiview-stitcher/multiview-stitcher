@@ -733,6 +733,61 @@ def test_view_neuroglancer_images_param(monkeypatch):
         assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
+def test_view_neuroglancer_virtual_images(monkeypatch):
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+
+    served = []
+    captured_json = []
+
+    class FakeVirtualServer:
+        urls = ["http://127.0.0.1:8123/image_0"]
+
+        def serve_forever(self):
+            served.append(True)
+
+    def fake_serve_virtual_ome_zarrs(msims, **kwargs):
+        assert len(msims) == 1
+        assert kwargs["port"] == 8123
+        return FakeVirtualServer()
+
+    def capture_ng_url(ng_json):
+        captured_json.append(ng_json)
+        return "https://example.invalid/neuroglancer"
+
+    monkeypatch.setattr(
+        ngff_utils,
+        "serve_virtual_ome_zarrs",
+        fake_serve_virtual_ome_zarrs,
+    )
+    monkeypatch.setattr(vis_utils, "get_neuroglancer_url", capture_ng_url)
+
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    vis_utils.view_neuroglancer(
+        images=[msim],
+        transform_key=io.METADATA_TRANSFORM_KEY,
+        port=8123,
+    )
+
+    assert served == [True]
+    assert captured_json
+    source = captured_json[0]["layers"][0]["source"]
+    assert source["url"] == "http://127.0.0.1:8123/image_0/|zarr2:"
+    assert "transform" in source
+
+
 def test_view_neuroglancer_different_folders(monkeypatch):
     """
     view_neuroglancer must:

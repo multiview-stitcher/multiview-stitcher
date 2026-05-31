@@ -2,10 +2,12 @@ import os
 import shutil
 import tempfile
 
+import dask.array as da
 import ngff_zarr
 import numpy as np
 import pytest
 import zarr
+from xarray import DataTree
 
 from multiview_stitcher import (
     io,
@@ -14,6 +16,18 @@ from multiview_stitcher import (
     sample_data,
 )
 from multiview_stitcher import spatial_image_utils as si_utils
+
+
+def _single_scale_msim_from_sim(sim):
+    return DataTree.from_dict({"scale0": sim.to_dataset(name="image")})
+
+
+def _decode_virtual_chunk(virtual_zarr, path, chunk_key):
+    zarray = virtual_zarr.array_zarray(path)
+    return np.frombuffer(
+        virtual_zarr.read_chunk(path, chunk_key),
+        dtype=np.dtype(zarray["dtype"]),
+    ).reshape(zarray["chunks"])
 
 
 @pytest.mark.parametrize(
@@ -275,6 +289,104 @@ def test_read_msim_from_ome_zarr_backends():
         for scale_key in msi_utils.get_sorted_scale_keys(msim_zarr):
             sim_scale = msi_utils.get_sim_from_msim(msim_zarr, scale=scale_key)
             assert sim_scale.attrs.get("_zarr_chunks") is not None
+
+
+def test_virtual_ome_zarr_metadata_and_numpy_chunk():
+    data = np.arange(5 * 6, dtype=np.uint16).reshape(5, 6)
+    sim = si_utils.to_spatial_image(
+        data,
+        dims=["y", "x"],
+        scale={"y": 0.5, "x": 0.25},
+        translation={"y": 2.0, "x": 4.0},
+    )
+    virtual_zarr = ngff_utils.VirtualOMEZarr(
+        _single_scale_msim_from_sim(sim)
+    )
+
+    assert virtual_zarr.root_zgroup() == {"zarr_format": 2}
+    root_zattrs = virtual_zarr.root_zattrs()
+    assert "multiscales" in root_zattrs
+    assert "_ARRAY_DIMENSIONS" not in str(root_zattrs)
+
+    multiscales = root_zattrs["multiscales"][0]
+    assert [axis["name"] for axis in multiscales["axes"]] == ["y", "x"]
+    assert multiscales["datasets"][0]["path"] == "0"
+
+    zarray = virtual_zarr.array_zarray("0")
+    assert zarray["shape"] == [5, 6]
+    assert zarray["chunks"] == [5, 6]
+    assert zarray["dimension_separator"] == "/"
+    assert zarray["compressor"] is None
+
+    decoded = _decode_virtual_chunk(virtual_zarr, "0", "0/0")
+    np.testing.assert_array_equal(decoded, data)
+
+    consolidated = virtual_zarr.consolidated_metadata()["metadata"]
+    assert ".zattrs" in consolidated
+    assert "0/.zarray" in consolidated
+    assert consolidated["0/.zattrs"] == {}
+
+
+def test_virtual_ome_zarr_dask_edge_chunk_padding():
+    data = np.arange(5 * 6, dtype=np.uint16).reshape(5, 6)
+    dask_data = da.from_array(data, chunks=(3, 4))
+    sim = si_utils.to_spatial_image(
+        dask_data,
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    virtual_zarr = ngff_utils.VirtualOMEZarr(
+        _single_scale_msim_from_sim(sim)
+    )
+
+    assert virtual_zarr.array_zarray("0")["chunks"] == [3, 4]
+
+    decoded = _decode_virtual_chunk(virtual_zarr, "0", "1/1")
+    expected = np.zeros((3, 4), dtype=np.uint16)
+    expected[:2, :2] = data[3:5, 4:6]
+    np.testing.assert_array_equal(decoded, expected)
+
+    with pytest.raises(KeyError):
+        virtual_zarr.read_chunk("0", "2/0")
+
+    with pytest.raises(KeyError):
+        virtual_zarr.read_chunk("missing", "0/0")
+
+
+def test_virtual_ome_zarr_zarr_backed_chunk():
+    data = da.from_array(
+        np.arange(5 * 6, dtype=np.uint16).reshape(5, 6),
+        chunks=(3, 4),
+    )
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(
+            sim,
+            zarr_path,
+            downscale_factors_per_spatial_dim={"y": 1, "x": 1},
+            show_progressbar=False,
+        )
+        msim = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+
+        virtual_zarr = ngff_utils.VirtualOMEZarr(msim)
+        sim_read = msi_utils.get_sim_from_msim(msim, scale="scale0")
+        chunk_shape = virtual_zarr.chunk_shapes["0"]
+        chunk_key = "/".join("0" for _ in chunk_shape)
+        decoded = _decode_virtual_chunk(virtual_zarr, "0", chunk_key)
+
+        indexers = {
+            dim: slice(0, chunk_shape[idim])
+            for idim, dim in enumerate(sim_read.dims)
+        }
+        expected = np.asarray(sim_read.isel(indexers).data)
+        np.testing.assert_array_equal(decoded, expected)
 
 
 def test_multiscales_completion():
