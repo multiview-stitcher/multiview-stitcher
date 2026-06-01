@@ -569,7 +569,7 @@ def test_view_neuroglancer_spacing_origin_mismatch_integration():
         matrix = np.array(source_transform["matrix"])  # shape (len(dims), len(dims)+1)
         output_dims = source_transform["outputDimensions"]
         output_spacing_arr = np.array(
-            [output_dims[dim][0] / 1e-6 for dim in sdims]
+            [output_dims[dim][0] for dim in sdims]
         )
 
         # The spatial block lives in the last ndim rows and last ndim+1 cols
@@ -664,6 +664,12 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                 single_layer=single_layer,
             )
             assert len(ng_json.keys())
+            assert ng_json["dimensions"]["y"] == [0.1, ""]
+            assert ng_json["dimensions"]["x"] == [0.1, ""]
+            if "t" in sims[0].dims:
+                assert ng_json["dimensions"]["t"] == [1, ""]
+            if "c" in sims[0].dims:
+                assert ng_json["dimensions"]["c"] == [1, ""]
 
         # test with channel coord
         if option != "different_c_coords":

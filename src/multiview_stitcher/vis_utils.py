@@ -1331,7 +1331,7 @@ def generate_neuroglancer_json(
         window = None
 
     output_dimensions = {
-        dim: [spacing[dim] * 1e-6 if dim in sdims else 1e-6, ""] for dim in dims
+        dim: [spacing[dim] if dim in sdims else 1, ""] for dim in dims
     }
 
     ng_config = {
@@ -1356,7 +1356,9 @@ def generate_neuroglancer_json(
                         ],
                         "outputDimensions": {
                             (dim if dim != "c" else "c'"): [
-                                spacings_per_sim[iview][dim] * 1e-6 if dim in sdims else 1e-6,
+                                spacings_per_sim[iview][dim]
+                                if dim in sdims
+                                else 1,
                                 "",
                             ]
                             for dim in dims
@@ -1406,9 +1408,9 @@ def generate_neuroglancer_json(
                                 ],
                                 "outputDimensions": {
                                     (dim if dim != "c" else "c'"): [
-                                        spacings_per_sim[iview][dim] * 1e-6
+                                        spacings_per_sim[iview][dim]
                                         if dim in sdims
-                                        else 1e-6,
+                                        else 1,
                                         "",
                                     ]
                                     for dim in dims
