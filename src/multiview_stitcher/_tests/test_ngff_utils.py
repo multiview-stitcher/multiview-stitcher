@@ -310,6 +310,10 @@ def test_virtual_ome_zarr_metadata_and_numpy_chunk():
 
     multiscales = root_zattrs["multiscales"][0]
     assert [axis["name"] for axis in multiscales["axes"]] == ["y", "x"]
+    assert [axis["unit"] for axis in multiscales["axes"]] == [
+        "micrometer",
+        "micrometer",
+    ]
     assert multiscales["datasets"][0]["path"] == "0"
 
     zarray = virtual_zarr.array_zarray("0")

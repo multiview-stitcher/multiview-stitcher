@@ -1331,7 +1331,11 @@ def generate_neuroglancer_json(
         window = None
 
     output_dimensions = {
-        dim: [spacing[dim] if dim in sdims else 1, ""] for dim in dims
+        dim: [
+            spacing[dim] if dim in sdims else 1,
+            "um" if dim in sdims else "",
+        ]
+        for dim in dims
     }
 
     ng_config = {
@@ -1360,7 +1364,7 @@ def generate_neuroglancer_json(
                                 spacings_per_sim[iview][dim]
                                 if dim in sdims
                                 else 1,
-                                "",
+                                "um" if dim in sdims else "",
                             ]
                             for dim in dims
                         },
@@ -1412,7 +1416,7 @@ def generate_neuroglancer_json(
                                         spacings_per_sim[iview][dim]
                                         if dim in sdims
                                         else 1,
-                                        "",
+                                        "um" if dim in sdims else "",
                                     ]
                                     for dim in dims
                                 },
@@ -1569,7 +1573,7 @@ def view_neuroglancer(
         )
         ome_zarr_paths = virtual_server.urls
         ome_zarr_urls = [
-            f"{url.rstrip('/')}/|zarr2:"
+            url.rstrip("/")
             for url in virtual_server.urls
         ]
         source_images = resolved_images
@@ -1613,9 +1617,9 @@ def view_neuroglancer(
         ome_zarr_urls = [
             "http://localhost:{port}/{rel}".format(
                 port=port,
-                rel=os.path.relpath(os.path.abspath(path), dir_to_serve).replace(
-                    os.sep, "/"
-                ),
+                rel=os.path.relpath(
+                    os.path.abspath(path), dir_to_serve
+                ).replace(os.sep, "/"),
             )
             if (not path.startswith("http") and dir_to_serve is not None)
             else path
@@ -1641,6 +1645,8 @@ def view_neuroglancer(
 
     print("Opening Neuroglancer in browser...")
     print("URL:", ng_url)
+    print("Decoded URL:")
+    print(urllib.parse.unquote(ng_url))
     print("Controls:")
     print("All panels")
     print("\t\tZoom: Ctrl + Mousewheel")

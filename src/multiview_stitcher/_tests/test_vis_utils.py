@@ -571,6 +571,7 @@ def test_view_neuroglancer_spacing_origin_mismatch_integration():
         output_spacing_arr = np.array(
             [output_dims[dim][0] for dim in sdims]
         )
+        assert all(output_dims[dim][1] == "um" for dim in sdims)
 
         # The spatial block lives in the last ndim rows and last ndim+1 cols
         # (linear part in [-ndim:, -ndim-1:-1], translation in [-ndim:, -1])
@@ -664,8 +665,10 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                 single_layer=single_layer,
             )
             assert len(ng_json.keys())
-            assert ng_json["dimensions"]["y"] == [0.1, ""]
-            assert ng_json["dimensions"]["x"] == [0.1, ""]
+            assert ng_json["dimensions"]["y"] == [0.1, "um"]
+            assert ng_json["dimensions"]["x"] == [0.1, "um"]
+            if "z" in sims[0].dims:
+                assert ng_json["dimensions"]["z"] == [2, "um"]
             if "t" in sims[0].dims:
                 assert ng_json["dimensions"]["t"] == [1, ""]
             if "c" in sims[0].dims:
@@ -676,6 +679,19 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                 if single_layer
                 else ng_json["layers"][0]["source"]["transform"]["matrix"]
             )
+            output_dims = (
+                ng_json["layers"][0]["source"][0]["transform"][
+                    "outputDimensions"
+                ]
+                if single_layer
+                else ng_json["layers"][0]["source"]["transform"][
+                    "outputDimensions"
+                ]
+            )
+            assert output_dims["y"] == [0.1, "um"]
+            assert output_dims["x"] == [0.1, "um"]
+            if "z" in sims[0].dims:
+                assert output_dims["z"] == [2, "um"]
             assert type(matrix[0][0]) is float
 
         # test with channel coord
@@ -797,7 +813,7 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
     assert served == [True]
     assert captured_json
     source = captured_json[0]["layers"][0]["source"]
-    assert source["url"] == "http://127.0.0.1:8123/image_0/|zarr2:"
+    assert source["url"] == "http://127.0.0.1:8123/image_0"
     assert "transform" in source
 
 

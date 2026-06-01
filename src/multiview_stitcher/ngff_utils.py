@@ -151,6 +151,10 @@ class VirtualOMEZarr:
         metadata = asdict(self.ngff_multiscales.metadata)
         metadata = _drop_none_values(metadata)
         metadata["name"] = self.name
+        metadata["axes"] = [
+            axis | ({"unit": "micrometer"} if axis.get("type") == "space" else {})
+            for axis in metadata["axes"]
+        ]
         metadata["datasets"] = [
             {
                 **dataset,
