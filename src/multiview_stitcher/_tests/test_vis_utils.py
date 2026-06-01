@@ -670,6 +670,13 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                 assert ng_json["dimensions"]["t"] == [1, ""]
             if "c" in sims[0].dims:
                 assert ng_json["dimensions"]["c"] == [1, ""]
+            assert "np.float" not in str(ng_json)
+            matrix = (
+                ng_json["layers"][0]["source"][0]["transform"]["matrix"]
+                if single_layer
+                else ng_json["layers"][0]["source"]["transform"]["matrix"]
+            )
+            assert type(matrix[0][0]) is float
 
         # test with channel coord
         if option != "different_c_coords":

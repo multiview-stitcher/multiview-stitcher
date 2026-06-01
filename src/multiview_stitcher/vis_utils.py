@@ -1352,7 +1352,8 @@ def generate_neuroglancer_json(
                     "transform": {
                         # neuroglancer drops last row of homogeneous matrix
                         "matrix": [
-                            list(row) for row in full_affines[iview][:-1]
+                            [float(value) for value in row]
+                            for row in full_affines[iview][:-1]
                         ],
                         "outputDimensions": {
                             (dim if dim != "c" else "c'"): [
@@ -1403,7 +1404,7 @@ def generate_neuroglancer_json(
                             "transform": {
                                 # neuroglancer drops last row of homogeneous matrix
                                 "matrix": [
-                                    list(row)
+                                    [float(value) for value in row]
                                     for row in full_affines[iview][:-1]
                                 ],
                                 "outputDimensions": {
