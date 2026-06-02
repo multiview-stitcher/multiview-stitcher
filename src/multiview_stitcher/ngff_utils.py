@@ -431,7 +431,14 @@ class VirtualOMEZarrServer:
         # main thread (e.g. in a plain script) and __init__ was not.
         _register_sigint_stop_event(self._stopped)
         try:
-            self._stopped.wait()
+            # Use a bounded wait (0.5 s) instead of blocking indefinitely.
+            # On POSIX the SIGINT handler sets _stopped, so the wait returns
+            # almost immediately.  On Windows, IPyKernel injects
+            # KeyboardInterrupt via PyThreadState_SetAsyncExc; Python only
+            # checks async exceptions at bytecode boundaries, so a finite
+            # timeout ensures the exception can fire within each polling cycle.
+            while not self._stopped.wait(timeout=0.5):
+                pass
         except KeyboardInterrupt:
             pass
         finally:

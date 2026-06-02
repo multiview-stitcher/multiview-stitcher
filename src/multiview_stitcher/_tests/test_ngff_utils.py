@@ -461,13 +461,13 @@ def test_virtual_server_stops_when_main_thread_interrupted():
     # Give the server time to start listening.
     time.sleep(STARTUP_WAIT)
 
-    # Simulate Jupyter's "Interrupt Kernel": send SIGINT to the process.
-    # SIGINT is delivered to the *main* thread (this thread), NOT to
-    # serve_thread.  We catch KeyboardInterrupt here and do nothing further —
-    # exactly mirroring IPyKernel cancelling the asyncio task without ever
-    # propagating the interrupt to the blocking background thread.
+    # Simulate Jupyter's "Interrupt Kernel": raise SIGINT in the current
+    # (main) thread.  signal.raise_signal calls C's raise() and works on both
+    # POSIX and Windows (unlike os.kill which on Windows calls TerminateProcess
+    # for signal values other than CTRL_C_EVENT/CTRL_BREAK_EVENT).
+    # SIGINT is handled by the main thread only; serve_thread keeps blocking.
     try:
-        os.kill(os.getpid(), signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)
         time.sleep(0.05)  # let the signal land
     except KeyboardInterrupt:
         pass  # main thread handles the interrupt; serve_thread keeps blocking
