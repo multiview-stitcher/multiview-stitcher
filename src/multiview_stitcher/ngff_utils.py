@@ -260,6 +260,21 @@ class VirtualOMEZarr:
 
         raise KeyError(key)
 
+    def chunk_content_length(self, path, chunk_key):
+        """Return the byte length of a serialised chunk without materialising
+        the underlying dask array.
+
+        Returns ``None`` when a compressor is configured because the compressed
+        size cannot be known without actually compressing the data.
+        """
+        if self.compressor is not None:
+            return None
+        sim = self._get_sim(path)  # raises KeyError for unknown path
+        self._parse_chunk_key(path, chunk_key, sim)  # raises KeyError if out of bounds
+        # Edge chunks are always padded to the full chunk shape before
+        # serialisation, so the wire size is always prod(chunk_shape) * itemsize.
+        return int(np.prod(self.chunk_shapes[path])) * np.dtype(sim.dtype).itemsize
+
     def read_chunk(self, path, chunk_key):
         sim = self._get_sim(path)
         chunk_shape = self.chunk_shapes[path]
@@ -399,10 +414,14 @@ class VirtualOMEZarrServer:
         route_prefix="image",
         max_concurrent_chunks=None,
     ):
-        self.virtual_zarrs = {
-            f"{route_prefix}_{index}": virtual_zarr
-            for index, virtual_zarr in enumerate(virtual_zarrs)
-        }
+        # Build the routing dict and, crucially, derive each zarr's
+        # multiscales name from its route key so the two can never diverge.
+        self.virtual_zarrs = {}
+        for index, virtual_zarr in enumerate(virtual_zarrs):
+            route_name = f"{route_prefix}_{index}"
+            virtual_zarr.name = route_name
+            virtual_zarr._root_zattrs["multiscales"][0]["name"] = route_name
+            self.virtual_zarrs[route_name] = virtual_zarr
         self.host = host
         self.port = int(port)
         self.max_concurrent_chunks = (
@@ -558,6 +577,23 @@ async def _handle_virtual_zarr_request(request):
         raise web.HTTPNotFound(headers=cors_headers)
 
     path, chunk_key = parts
+
+    # Short-circuit HEAD requests: validate existence cheaply without
+    # materialising the (potentially expensive) dask graph.
+    if request.method == "HEAD":
+        try:
+            content_length = virtual_zarr.chunk_content_length(path, chunk_key)
+        except KeyError:
+            raise web.HTTPNotFound(headers=cors_headers)
+        head_headers = {**cors_headers, "Cache-Control": "public, max-age=3600"}
+        if content_length is not None:
+            head_headers["Content-Length"] = str(content_length)
+        return web.Response(
+            body=b"",
+            content_type="application/octet-stream",
+            headers=head_headers,
+        )
+
     try:
         async with request.app["chunk_semaphore"]:
             payload = await asyncio.to_thread(
@@ -587,9 +623,11 @@ def serve_virtual_ome_zarrs(
     max_concurrent_chunks=None,
     compressor=None,
 ):
+    # Names are derived from the route keys inside VirtualOMEZarrServer so that
+    # the URL path and the OME-Zarr multiscales metadata always stay in sync.
     virtual_zarrs = [
-        VirtualOMEZarr(msim, name=f"{route_prefix}_{index}", compressor=compressor)
-        for index, msim in enumerate(msims)
+        VirtualOMEZarr(msim, compressor=compressor)
+        for msim in msims
     ]
     return VirtualOMEZarrServer(
         virtual_zarrs,

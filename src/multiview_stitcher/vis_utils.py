@@ -2,6 +2,7 @@ import json
 import os
 import ssl
 import urllib
+import urllib.parse
 import webbrowser
 from functools import partial
 from http.server import (
