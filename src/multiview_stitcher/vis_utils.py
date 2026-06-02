@@ -1543,24 +1543,18 @@ def view_neuroglancer(
     input_images = images if images is not None else sims
     if input_images is not None and not isinstance(input_images, (list, tuple)):
         input_images = [input_images]
-    if input_images is not None:
-        resolved_images = [
-            msi_utils.get_sim_from_msim(img)
-            if msi_utils.is_msim(img)
-            else img
-            for img in input_images
-        ]
-    else:
-        resolved_images = None
 
     virtual_server = None
     source_images = None
+    resolved_images = None
     if ome_zarr_paths is None:
         if input_images is None:
             raise ValueError(
                 "Either ome_zarr_paths or images must be provided."
             )
 
+        # Preserve existing msims (with all resolution levels); wrap plain sims
+        # in a single-scale msim so the virtual server serves the data as-is.
         virtual_msims = [
             img
             if msi_utils.is_msim(img)
@@ -1576,12 +1570,25 @@ def view_neuroglancer(
             url.rstrip("/")
             for url in virtual_server.urls
         ]
-        source_images = resolved_images
+        # Derive scale0 sims from the virtual msims as the single source of
+        # truth for spacing/dimension metadata and transform lookup.
+        source_images = [
+            msi_utils.get_sim_from_msim(msim) for msim in virtual_msims
+        ]
+        resolved_images = source_images if transform_key is not None else None
         dir_to_serve = None
     else:
         if isinstance(ome_zarr_paths, (str, os.PathLike)):
             ome_zarr_paths = [ome_zarr_paths]
         ome_zarr_paths = [str(p) for p in ome_zarr_paths]
+
+        if input_images is not None:
+            resolved_images = [
+                msi_utils.get_sim_from_msim(img)
+                if msi_utils.is_msim(img)
+                else img
+                for img in input_images
+            ]
 
         # determine a common root for all local paths so files in different
         # directories can all be served from a single HTTP server
