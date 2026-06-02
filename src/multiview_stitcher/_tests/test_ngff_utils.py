@@ -393,6 +393,105 @@ def test_virtual_ome_zarr_zarr_backed_chunk():
         np.testing.assert_array_equal(decoded, expected)
 
 
+@pytest.mark.skipif(
+    not hasattr(__import__("signal"), "SIGINT"),
+    reason="os.kill/SIGINT not available on this platform",
+)
+def test_virtual_server_stops_when_main_thread_interrupted():
+    """
+    UNWANTED BEHAVIOUR: When serve_forever() runs in a non-main thread
+    (as when a Jupyter / IPyKernel 6+ asyncio kernel executes a notebook cell
+    in a thread pool), a SIGINT sent to the process is delivered to the *main*
+    thread only.  threading.Event.wait() in the background thread is never
+    interrupted, so serve_forever() blocks indefinitely — the server keeps
+    running, the port stays bound, and background threads pile up across kernel
+    interrupts / restarts.
+
+    The fix must either:
+    * register a SIGINT / atexit hook in the main thread that calls server.stop(),
+    * or use a timeout-based polling wait so the thread wakes up periodically and
+      can check an external stop condition.
+
+    This test FAILS with the current implementation (serve_forever keeps blocking)
+    and is expected to PASS after the fix.
+    """
+    import os
+    import signal
+    import socket
+    import threading
+    import time
+
+    STARTUP_WAIT = 0.3    # seconds to let the server start
+    STOP_DEADLINE = 2.0   # serve_forever() must stop within this long after the interrupt
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    server = ngff_utils.serve_virtual_ome_zarrs([msim], port=port)
+
+    serve_done = threading.Event()
+
+    def _run_serve():
+        """Simulates a Jupyter notebook cell executing in a non-main thread."""
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            # KeyboardInterrupt would only arrive here if the main thread
+            # propagated it — which does not happen in Jupyter's thread-pool
+            # execution model.
+            pass
+        finally:
+            serve_done.set()
+
+    serve_thread = threading.Thread(target=_run_serve, daemon=True)
+    serve_thread.start()
+
+    # Give the server time to start listening.
+    time.sleep(STARTUP_WAIT)
+
+    # Simulate Jupyter's "Interrupt Kernel": send SIGINT to the process.
+    # SIGINT is delivered to the *main* thread (this thread), NOT to
+    # serve_thread.  We catch KeyboardInterrupt here and do nothing further —
+    # exactly mirroring IPyKernel cancelling the asyncio task without ever
+    # propagating the interrupt to the blocking background thread.
+    try:
+        os.kill(os.getpid(), signal.SIGINT)
+        time.sleep(0.05)  # let the signal land
+    except KeyboardInterrupt:
+        pass  # main thread handles the interrupt; serve_thread keeps blocking
+
+    try:
+        # With the current implementation serve_done is never set because
+        # serve_forever() is stuck in Event.wait() with no timeout and no
+        # external mechanism calls stop().
+        stopped_in_time = serve_done.wait(timeout=STOP_DEADLINE)
+    finally:
+        server.stop()      # always free the port so other tests can run
+        serve_thread.join(timeout=1)
+
+    assert stopped_in_time, (
+        f"serve_forever() did not stop within {STOP_DEADLINE}s after SIGINT "
+        "was delivered to the main thread.  When a Jupyter kernel is "
+        "interrupted, the background thread running serve_forever() keeps "
+        "blocking indefinitely, leaking the server and its bound port."
+    )
+    assert not server._thread.is_alive(), (
+        "aiohttp server thread is still running after serve_forever() returned."
+    )
+
+
 def test_multiscales_completion():
     """Check that writing without overwrite completes a partially deleted pyramid:
     after removing a resolution level on disk, re-writing fills it in and the
