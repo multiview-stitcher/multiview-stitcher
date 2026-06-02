@@ -143,31 +143,53 @@ class VirtualOMEZarr:
             for path, sim in zip(self.paths, self.sims)
         }
 
-        self.ngff_multiscales = msim_to_ngff_multiscales(
-            msim,
-            transform_key=None,
-        )
         self._root_zattrs = self._build_root_zattrs()
 
     def _build_root_zattrs(self):
-        metadata = asdict(self.ngff_multiscales.metadata)
-        metadata = _drop_none_values(metadata)
-        metadata["name"] = self.name
-        metadata["axes"] = [
-            axis | ({"unit": "micrometer"} if axis.get("type") == "space" else {})
-            for axis in metadata["axes"]
-        ]
-        metadata["datasets"] = [
-            {
-                **dataset,
-                "path": path,
-            }
-            for path, dataset in zip(self.paths, metadata["datasets"])
+        # Build OME-Zarr 0.4 .zattrs metadata directly from the sim coordinates
+        # without calling ngff_zarr.to_multiscales, which would rechunk the dask
+        # arrays and potentially trigger serialisation of large images to disk.
+        _DIM_TYPE = {"t": "time", "c": "channel"}
+        sdims = si_utils.get_spatial_dims_from_sim(self.sims[0])
+        dims = self.sims[0].dims
+
+        axes = [
+            _drop_none_values({
+                "name": dim,
+                "type": _DIM_TYPE.get(dim, "space"),
+                "unit": "micrometer" if dim not in _DIM_TYPE else None,
+            })
+            for dim in dims
         ]
 
-        zattrs = {
-            "multiscales": [metadata],
+        datasets = []
+        for path, sim in zip(self.paths, self.sims):
+            spacing = si_utils.get_spacing_from_sim(sim)
+            origin = si_utils.get_origin_from_sim(sim)
+            scale_values = [
+                float(spacing[dim]) if dim in sdims else 1.0
+                for dim in dims
+            ]
+            translation_values = [
+                float(origin[dim]) if dim in sdims else 0.0
+                for dim in dims
+            ]
+            datasets.append({
+                "path": path,
+                "coordinateTransformations": [
+                    {"type": "scale", "scale": scale_values},
+                    {"type": "translation", "translation": translation_values},
+                ],
+            })
+
+        metadata = {
+            "version": "0.4",
+            "name": self.name,
+            "axes": axes,
+            "datasets": datasets,
         }
+
+        zattrs = {"multiscales": [metadata]}
         if self.omero is not None:
             zattrs["omero"] = (
                 asdict(self.omero)
