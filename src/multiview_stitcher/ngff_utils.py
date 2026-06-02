@@ -1,9 +1,11 @@
+import atexit
 import asyncio
 from dataclasses import asdict
 from functools import partial
 import json
 import math
 import os, shutil
+import signal
 import threading
 
 import dask
@@ -303,6 +305,69 @@ class VirtualOMEZarr:
         return padded
 
 
+# ---------------------------------------------------------------------------
+# Module-level SIGINT routing
+# When a VirtualOMEZarrServer is created from the main thread, its _stopped
+# event is registered here.  A shared SIGINT handler sets every registered
+# event so that serve_forever() unblocks even when it runs in a worker thread
+# (e.g. a Jupyter / IPyKernel 6+ thread-pool cell), where signals are
+# delivered only to the *main* thread.
+# ---------------------------------------------------------------------------
+_sigint_lock = threading.Lock()
+_sigint_stop_events: list = []
+_sigint_prev_handler = None
+
+
+def _sigint_handler(sig, frame):
+    with _sigint_lock:
+        for ev in list(_sigint_stop_events):
+            ev.set()
+    prev = _sigint_prev_handler
+    if callable(prev):
+        prev(sig, frame)
+    else:
+        raise KeyboardInterrupt
+
+
+def _register_sigint_stop_event(event):
+    """Register *event* to be set on SIGINT.  No-op when not on main thread."""
+    global _sigint_prev_handler
+    if threading.current_thread() is not threading.main_thread():
+        return
+    try:
+        with _sigint_lock:
+            if event not in _sigint_stop_events:
+                _sigint_stop_events.append(event)
+            cur = signal.getsignal(signal.SIGINT)
+            if cur is not _sigint_handler:
+                _sigint_prev_handler = cur
+                signal.signal(signal.SIGINT, _sigint_handler)
+    except (ValueError, OSError):
+        with _sigint_lock:
+            if event in _sigint_stop_events:
+                _sigint_stop_events.remove(event)
+
+
+def _unregister_sigint_stop_event(event):
+    """Remove *event* from the SIGINT registry; restore the original handler
+    when the registry becomes empty."""
+    global _sigint_prev_handler
+    try:
+        with _sigint_lock:
+            if event in _sigint_stop_events:
+                _sigint_stop_events.remove(event)
+            if not _sigint_stop_events:
+                cur = signal.getsignal(signal.SIGINT)
+                if cur is _sigint_handler and _sigint_prev_handler is not None:
+                    try:
+                        signal.signal(signal.SIGINT, _sigint_prev_handler)
+                    except (ValueError, OSError):
+                        pass
+                    _sigint_prev_handler = None
+    except Exception:
+        pass
+
+
 class VirtualOMEZarrServer:
     def __init__(
         self,
@@ -333,14 +398,22 @@ class VirtualOMEZarrServer:
         self._started = threading.Event()
         self._stopped = threading.Event()
         self._start_error = None
+        # Register cleanup hooks as early as possible (while still on the
+        # calling thread, which may be the main thread).
+        atexit.register(self.stop)
+        _register_sigint_stop_event(self._stopped)
 
     def serve_forever(self):
         self.start()
+        # Also try here in case serve_forever() is called directly from the
+        # main thread (e.g. in a plain script) and __init__ was not.
+        _register_sigint_stop_event(self._stopped)
         try:
             self._stopped.wait()
         except KeyboardInterrupt:
             pass
         finally:
+            _unregister_sigint_stop_event(self._stopped)
             self.stop()
 
     def start(self):
@@ -365,6 +438,8 @@ class VirtualOMEZarrServer:
         if self._thread is not None:
             self._thread.join(timeout=5)
         self._stopped.set()
+        _unregister_sigint_stop_event(self._stopped)
+        atexit.unregister(self.stop)
 
     def _run_loop_thread(self):
         self._loop = asyncio.new_event_loop()
