@@ -569,9 +569,9 @@ def test_view_neuroglancer_spacing_origin_mismatch_integration():
         matrix = np.array(source_transform["matrix"])  # shape (len(dims), len(dims)+1)
         output_dims = source_transform["outputDimensions"]
         output_spacing_arr = np.array(
-            [output_dims[dim][0] for dim in sdims]
+            [output_dims[dim][0] / 1e-6 for dim in sdims]
         )
-        assert all(output_dims[dim][1] == "um" for dim in sdims)
+        assert all(output_dims[dim][1] == "m" for dim in sdims)
 
         # The spatial block lives in the last ndim rows and last ndim+1 cols
         # (linear part in [-ndim:, -ndim-1:-1], translation in [-ndim:, -1])
@@ -665,14 +665,14 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                 single_layer=single_layer,
             )
             assert len(ng_json.keys())
-            assert ng_json["dimensions"]["y"] == [0.1, "um"]
-            assert ng_json["dimensions"]["x"] == [0.1, "um"]
+            assert ng_json["dimensions"]["y"] == [0.1e-6, "m"]
+            assert ng_json["dimensions"]["x"] == [0.1e-6, "m"]
             if "z" in sims[0].dims:
-                assert ng_json["dimensions"]["z"] == [2, "um"]
+                assert ng_json["dimensions"]["z"] == [2e-6, "m"]
             if "t" in sims[0].dims:
-                assert ng_json["dimensions"]["t"] == [1, ""]
+                assert ng_json["dimensions"]["t"] == [1.0, ""]
             if "c" in sims[0].dims:
-                assert ng_json["dimensions"]["c"] == [1, ""]
+                assert ng_json["dimensions"]["c"] == [1.0, ""]
             assert "np.float" not in str(ng_json)
             matrix = (
                 ng_json["layers"][0]["source"][0]["transform"]["matrix"]
@@ -688,10 +688,10 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                     "outputDimensions"
                 ]
             )
-            assert output_dims["y"] == [0.1, "um"]
-            assert output_dims["x"] == [0.1, "um"]
+            assert output_dims["y"] == [0.1e-6, "m"]
+            assert output_dims["x"] == [0.1e-6, "m"]
             if "z" in sims[0].dims:
-                assert output_dims["z"] == [2, "um"]
+                assert output_dims["z"] == [2e-6, "m"]
             assert type(matrix[0][0]) is float
 
         # test with channel coord
@@ -815,6 +815,64 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
     source = captured_json[0]["layers"][0]["source"]
     assert source["url"] == "http://127.0.0.1:8123/image_0"
     assert "transform" in source
+    assert captured_json[0]["dimensions"]["t"] == [1, ""]
+    assert captured_json[0]["dimensions"]["c"] == [1, ""]
+    assert captured_json[0]["dimensions"]["y"] == [0.5, "um"]
+    assert captured_json[0]["dimensions"]["x"] == [0.5, "um"]
+    assert source["transform"]["outputDimensions"]["t"] == [1, ""]
+    assert source["transform"]["outputDimensions"]["c'"] == [1, ""]
+    assert source["transform"]["outputDimensions"]["y"] == [0.5, "um"]
+    assert source["transform"]["outputDimensions"]["x"] == [0.5, "um"]
+
+
+def test_view_neuroglancer_virtual_images_without_transform(monkeypatch):
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+
+    served = []
+    captured_json = []
+
+    class FakeVirtualServer:
+        urls = ["http://127.0.0.1:8124/image_0"]
+
+        def serve_forever(self):
+            served.append(True)
+
+    monkeypatch.setattr(
+        ngff_utils,
+        "serve_virtual_ome_zarrs",
+        lambda msims, **kwargs: FakeVirtualServer(),
+    )
+    monkeypatch.setattr(
+        vis_utils,
+        "get_neuroglancer_url",
+        lambda ng_json: captured_json.append(ng_json)
+        or "https://example.invalid/neuroglancer",
+    )
+
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+
+    vis_utils.view_neuroglancer(images=[sim], port=8124)
+
+    assert served == [True]
+    assert captured_json
+    source = captured_json[0]["layers"][0]["source"]
+    assert source["url"] == "http://127.0.0.1:8124/image_0"
+    assert source["transform"] == {}
+    assert captured_json[0]["dimensions"]["t"] == [1, ""]
+    assert captured_json[0]["dimensions"]["c"] == [1, ""]
+    assert captured_json[0]["dimensions"]["y"] == [0.5, "um"]
+    assert captured_json[0]["dimensions"]["x"] == [0.5, "um"]
 
 
 def test_view_neuroglancer_different_folders(monkeypatch):
