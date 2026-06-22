@@ -742,3 +742,18 @@ def correct_multiscale_origins(msim):
         if "image" in ds.data_vars else ds)
 
     return msim
+
+
+# define a function to combine msims along a given dimension
+def concat(msims, concat_kwargs={}, dim='c'):
+
+    with xr.set_options(keep_attrs=True):
+        return xr.DataTree.from_dict(
+            {sk: xr.concat(
+                [msim[sk].dataset for msim in msims],
+                dim=dim,
+                data_vars='different',
+                compat="equals",
+                **concat_kwargs)
+                for sk in list(msims)[0].keys()}
+        )
