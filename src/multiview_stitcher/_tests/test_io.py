@@ -60,14 +60,16 @@ def test_tiff_io(ndim, N_t, N_c):
         assert (sims[0] == sims_io).min()
 
 
-def test_read_imaris_into_msim_synthetic_file(tmp_path):
+def test_read_imaris_into_msim_synthetic_file():
     h5py = pytest.importorskip("h5py")
-    filepath = tmp_path / "synthetic.ims"
+
+    import tempfile
+    tmp_path = tempfile.gettempdir()
+    filepath = os.path.join(tmp_path, "synthetic.ims")
     data0 = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)
 
     def _ims_attr(value):
         return np.frombuffer(f"{value}\x00".encode("utf-8"), dtype="S1")
-
 
     def _require_group(root, path):
         group = root
