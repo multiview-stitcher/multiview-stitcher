@@ -102,6 +102,7 @@ dev = [
 playground = [
     "napari-stitcher",
     "napari[pyqt6, optional]",
+    "napari-ome-zarr",
     "pydantic_bigstitcher>=0.0.11",
     "ipympl",
     "ome-types",
