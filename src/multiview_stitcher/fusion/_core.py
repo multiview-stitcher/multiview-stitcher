@@ -985,6 +985,12 @@ def fuse(
             chunk_params = da.from_array(
                 chunk_params_np,
                 chunks=(1,) * len(nblocks_per_dim),
+                # chunk_params_np is an object array containing nested
+                # per-block metadata.  Dask's default deterministic naming
+                # tokenizes that object graph, which is expensive and does
+                # not buy useful cacheability for this freshly built fusion
+                # plan.
+                name=False,
             )
 
             # === zarr path: thin dask graph via map_blocks ===
