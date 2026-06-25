@@ -1063,11 +1063,19 @@ def serve_dir(dir_path, port=8000):
         Port to use for the server, by default 8000
     """
 
-    # code taken from ome-zarr-py
     class CORSRequestHandler(SimpleHTTPRequestHandler):
         def end_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            # Private Network Access: allows public pages (e.g. the OME-Zarr
+            # validator on ome.github.io) to fetch from localhost in Chrome.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
             SimpleHTTPRequestHandler.end_headers(self)
+
+        def do_OPTIONS(self) -> None:
+            # Respond to CORS preflight (including PNA preflight) with 204.
+            self.send_response(204)
+            self.end_headers()
 
         def translate_path(self, path: str) -> str:
             # Since we don't call the class constructor ourselves,

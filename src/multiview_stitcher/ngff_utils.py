@@ -635,7 +635,7 @@ class VirtualOMEZarrServer:
         # route key so the URL path and the embedded metadata name stay in sync.
         self.virtual_zarrs = {}
         for index, virtual_zarr in enumerate(virtual_zarrs):
-            route_name = f"{route_prefix}_{index}"
+            route_name = f"{route_prefix}_{index}.ome.zarr"
             virtual_zarr.name = route_name
             # Update the name embedded in root metadata (differs by zarr type).
             if isinstance(virtual_zarr, VirtualOMEZarr):
@@ -758,6 +758,9 @@ async def _handle_virtual_zarr_request(request):
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
         "Access-Control-Allow-Headers": "*",
+        # Private Network Access: allows public pages (e.g. the OME-Zarr
+        # validator on ome.github.io) to fetch from localhost in Chrome.
+        "Access-Control-Allow-Private-Network": "true",
     }
 
     if request.method == "OPTIONS":
@@ -775,6 +778,11 @@ async def _handle_virtual_zarr_request(request):
     virtual_zarr = request.app["virtual_zarrs"].get(image_name)
     if virtual_zarr is None:
         raise web.HTTPNotFound(headers=cors_headers)
+
+    # An empty key targets the store root. Serve .zgroup so that clients
+    # doing bucket-style existence checks (HEAD on the root URL) get 200.
+    if not key:
+        key = ".zgroup"
 
     try:
         json_obj = virtual_zarr.get_json_key(key)
