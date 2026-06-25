@@ -720,6 +720,34 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
         assert len(ng_json.keys())
 
 
+def test_generate_neuroglancer_json_xy_layout_for_3d():
+    sim = sample_data.generate_tiled_dataset(
+        ndim=3,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+
+    default_config = vis_utils.generate_neuroglancer_json(
+        ome_zarr_paths=None,
+        ome_zarr_urls=["http://example.invalid/image"],
+        sims=[sim],
+    )
+    xy_config = vis_utils.generate_neuroglancer_json(
+        ome_zarr_paths=None,
+        ome_zarr_urls=["http://example.invalid/image"],
+        sims=[sim],
+        layout="xy",
+    )
+
+    assert default_config["layout"] == "4panel"
+    assert xy_config["layout"] == "xy"
+
+
 def test_view_neuroglancer_images_param(monkeypatch):
     """
     view_neuroglancer accepts `images=` with sims and msims, and emits a
@@ -793,7 +821,7 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
     monkeypatch.setattr(vis_utils, "get_neuroglancer_url", capture_ng_url)
 
     sim = sample_data.generate_tiled_dataset(
-        ndim=2,
+        ndim=3,
         overlap=0,
         N_c=1,
         N_t=1,
@@ -808,10 +836,12 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
         images=[msim],
         transform_key=io.METADATA_TRANSFORM_KEY,
         port=8123,
+        layout="xy",
     )
 
     assert served == [True]
     assert captured_json
+    assert captured_json[0]["layout"] == "xy"
     source = captured_json[0]["layers"][0]["source"]
     assert source["url"] == "http://127.0.0.1:8123/image_0"
     assert "transform" in source

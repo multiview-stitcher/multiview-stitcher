@@ -1216,6 +1216,7 @@ def generate_neuroglancer_json(
     contrast_limits: tuple = None,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
+    layout: str = None,
 ):
     virtual_ome_zarrs = ome_zarr_paths is None
 
@@ -1417,13 +1418,16 @@ def generate_neuroglancer_json(
         for dim in dims
     }
 
+    if layout is None:
+        layout = "xy" if ndim == 2 else "4panel"
+
     ng_config = {
         "dimensions": output_dimensions,
         "displayDimensions": sdims[::-1],
         "layerListPanel": {"visible": True},
         # 'position': [center[idim] for idim, dim in enumerate(sdims)],
         # "concurrentDownloads": 100, # leave at default
-        "layout": "xy" if ndim == 2 else "4panel",
+        "layout": layout,
     }
 
     if not single_layer:
@@ -1556,6 +1560,7 @@ def view_neuroglancer(
     contrast_limits=None,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
+    layout: str = None,
 ):
     """
     Visualize a list of OME-Zarrs or in-memory images in Neuroglancer
@@ -1601,6 +1606,10 @@ def view_neuroglancer(
         Per-layer neuroglancer config overrides.
     global_dict : dict, optional
         Global neuroglancer config overrides.
+    layout : str, optional
+        Initial Neuroglancer layout. Defaults to ``"xy"`` for 2D data and
+        ``"4panel"`` for 3D data. Set to ``"xy"`` to start with only the XY
+        projection.
     """
 
     # Resolve the list of spatial images to use for transform lookup.
@@ -1720,6 +1729,7 @@ def view_neuroglancer(
         contrast_limits=contrast_limits,
         layer_dicts=layer_dicts,
         global_dict=global_dict,
+        layout=layout,
     )
     ng_url = get_neuroglancer_url(ng_json)
 
