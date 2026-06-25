@@ -393,6 +393,116 @@ def test_virtual_ome_zarr_zarr_backed_chunk():
         np.testing.assert_array_equal(decoded, expected)
 
 
+def _make_hcs_plate_tree(rows=("B",), cols=("1", "2"), fovs=("0",)):
+    """Build a minimal HCS plate DataTree with synthetic msims."""
+    tree_dict = {}
+    for row in rows:
+        for col in cols:
+            for fov in fovs:
+                data = np.arange(4 * 5, dtype=np.uint16).reshape(4, 5)
+                sim = si_utils.to_spatial_image(
+                    data,
+                    dims=["y", "x"],
+                    scale={"y": 0.5, "x": 0.25},
+                    translation={"y": 0.0, "x": 0.0},
+                )
+                # tree_dict[f"{row}/{col}/{fov}/scale0"] = sim.to_dataset(name="image")
+                tree_dict[f"{row}/{col}/{fov}"] = msi_utils.get_msim_from_sim(
+                    sim, scale_factors=[])
+    return DataTree.from_dict(tree_dict)
+
+
+def test_virtual_hcs_plate_metadata():
+    """VirtualOMEZarrHCSPlate serves correct OME-Zarr HCS 0.4 metadata."""
+    plate_tree = _make_hcs_plate_tree(rows=("B",), cols=("1", "2"), fovs=("0", "1"))
+    plate = ngff_utils.VirtualOMEZarrHCSPlate(plate_tree, name="testplate")
+
+    # Root-level metadata
+    assert plate.root_zgroup() == {"zarr_format": 2}
+    root_zattrs = plate.root_zattrs()
+    assert "plate" in root_zattrs
+    plate_meta = root_zattrs["plate"]
+    assert plate_meta["version"] == "0.4"
+    assert plate_meta["rows"] == [{"name": "B"}]
+    assert plate_meta["columns"] == [{"name": "1"}, {"name": "2"}]
+    assert len(plate_meta["wells"]) == 2
+
+    # Row group
+    assert plate.get_json_key("B/.zgroup") == {"zarr_format": 2}
+
+    # Well-level metadata
+    well_zattrs = plate.get_json_key("B/1/.zattrs")
+    assert "well" in well_zattrs
+    assert len(well_zattrs["well"]["images"]) == 2  # two FOVs
+
+    # FOV multiscales metadata (delegated to inner VirtualOMEZarr)
+    fov_zattrs = plate.get_json_key("B/1/0/.zattrs")
+    assert "multiscales" in fov_zattrs
+
+    # Scale array metadata
+    zarray = plate.get_json_key("B/1/0/0/.zarray")
+    assert zarray["shape"] == [4, 5]
+
+    # Consolidated metadata covers the full hierarchy
+    consolidated = plate.consolidated_metadata()["metadata"]
+    assert ".zattrs" in consolidated
+    assert "B/.zgroup" in consolidated
+    assert "B/1/.zattrs" in consolidated
+    assert "B/1/0/.zattrs" in consolidated
+    assert "B/1/0/0/.zarray" in consolidated
+    assert "B/2/0/0/.zarray" in consolidated
+
+    # Unknown keys raise KeyError
+    with pytest.raises(KeyError):
+        plate.get_json_key("Z/.zgroup")
+
+
+def test_virtual_hcs_plate_chunk_read():
+    """VirtualOMEZarrHCSPlate reads pixel data correctly via read_chunk."""
+    data = np.arange(4 * 5, dtype=np.uint16).reshape(4, 5)
+    sim = si_utils.to_spatial_image(
+        data,
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    tree_dict = {"B/1/0/scale0": sim.to_dataset(name="image")}
+    plate_tree = DataTree.from_dict(tree_dict)
+    plate = ngff_utils.VirtualOMEZarrHCSPlate(plate_tree)
+
+    # _parse_data_key splits row/col/fov/scale from chunk coords
+    path, chunk_key = plate._parse_data_key("B/1/0/0/0/0")
+    assert path == "B/1/0/0"
+    assert chunk_key == "0/0"
+
+    # read_chunk returns the correct raw bytes
+    raw = plate.read_chunk("B/1/0/0", "0/0")
+    decoded = np.frombuffer(raw, dtype=np.uint16).reshape(4, 5)
+    np.testing.assert_array_equal(decoded, data)
+
+    # Out-of-bounds chunk raises KeyError
+    with pytest.raises(KeyError):
+        plate.read_chunk("B/1/0/0", "1/0")  # only one chunk in y
+
+    # Unknown FOV raises KeyError
+    with pytest.raises(KeyError):
+        plate.read_chunk("Z/9/0/0", "0/0")
+
+
+def test_is_hcs_plate_tree():
+    """_is_hcs_plate_tree correctly distinguishes HCS plates from msims."""
+    data = np.zeros((4, 5), dtype=np.uint16)
+    sim = si_utils.to_spatial_image(
+        data, dims=["y", "x"], scale={"y": 1.0, "x": 1.0}, translation={"y": 0.0, "x": 0.0}
+    )
+    msim = _single_scale_msim_from_sim(sim)
+
+    plate_tree = _make_hcs_plate_tree()
+
+    assert not ngff_utils._is_hcs_plate_tree(msim)
+    assert ngff_utils._is_hcs_plate_tree(plate_tree)
+
+
 @pytest.mark.skipif(
     not hasattr(__import__("signal"), "SIGINT"),
     reason="os.kill/SIGINT not available on this platform",

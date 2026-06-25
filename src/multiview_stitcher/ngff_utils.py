@@ -341,6 +341,223 @@ class VirtualOMEZarr:
         padded[insert] = chunk
         return padded
 
+    def _parse_data_key(self, key):
+        """Split a chunk URL key into ``(scale_path, chunk_coords)``.
+
+        Standard OME-Zarr chunk keys follow the pattern ``{scale}/{chunk}``.
+        """
+        parts = key.split("/", 1)
+        if len(parts) != 2:
+            raise KeyError(key)
+        return parts[0], parts[1]
+
+
+# ---------------------------------------------------------------------------
+# HCS plate helpers
+# ---------------------------------------------------------------------------
+
+def _is_hcs_plate_tree(datatree):
+    """Return True if *datatree* is an HCS plate tree rather than an msim.
+
+    An msim has ``scale0``, ``scale1``, … as direct children; an HCS plate
+    tree has row/column/FOV children instead.
+    """
+    return (
+        isinstance(datatree, DataTree)
+        and not msi_utils.get_sorted_scale_keys(datatree)
+        and bool(datatree.children)
+    )
+
+
+class VirtualOMEZarrHCSPlate:
+    """Read-only virtual OME-Zarr HCS plate backed by a DataTree of msims.
+
+    *plate_tree* must contain msim sub-trees at paths of the form
+    ``{row}/{column}/{fov}`` (e.g. ``"B/1/0"``).  Each FOV sub-tree is
+    wrapped in a :class:`VirtualOMEZarr` and served under the corresponding
+    HCS well path.  Only a single acquisition (id=0) is assumed.
+
+    Parameters
+    ----------
+    plate_tree:
+        DataTree with msim elements at ``{row}/{col}/{fov}`` positions.
+    name:
+        Plate name embedded in the OME-Zarr HCS metadata.
+    compressor:
+        Optional numcodecs compressor applied to every chunk.
+    """
+
+    def __init__(self, plate_tree, name="plate", compressor=None):
+        self.name = name
+        self.compressor = compressor
+
+        # Walk 3 levels deep to find msim nodes at {row}/{col}/{fov}.
+        self._fov_zarrs = {}  # (row, col, fov) -> VirtualOMEZarr
+
+        for row, row_tree in plate_tree.children.items():
+            for col, col_tree in row_tree.children.items():
+                for fov, fov_tree in col_tree.children.items():
+                    if msi_utils.get_sorted_scale_keys(fov_tree):
+                        self._fov_zarrs[(row, col, fov)] = VirtualOMEZarr(
+                            fov_tree, compressor=compressor
+                        )
+
+        if not self._fov_zarrs:
+            raise ValueError(
+                "plate_tree contains no msim FOVs at row/column/fov depth."
+            )
+
+        # Derive sorted row / column lists from the FOVs that were found.
+        rows_set = {r for r, _, _ in self._fov_zarrs}
+        cols_set = {c for _, c, _ in self._fov_zarrs}
+        self._row_list = sorted(rows_set)
+        self._col_list = sorted(
+            cols_set, key=lambda x: int(x) if x.isdigit() else x
+        )
+
+        # (row, col) -> sorted list of fov keys present in that well.
+        self._fov_map = {}
+        for row, col, fov in self._fov_zarrs:
+            self._fov_map.setdefault((row, col), []).append(fov)
+        for wk in self._fov_map:
+            self._fov_map[wk] = sorted(
+                self._fov_map[wk], key=lambda x: int(x) if x.isdigit() else x
+            )
+
+        self._root_zattrs = self._build_root_zattrs()
+
+    def _build_root_zattrs(self):
+        """Build OME-Zarr HCS 0.4 plate-level metadata."""
+        rows = [{"name": r} for r in self._row_list]
+        columns = [{"name": c} for c in self._col_list]
+        wells = [
+            {
+                "path": f"{row}/{col}",
+                "rowIndex": self._row_list.index(row),
+                "columnIndex": self._col_list.index(col),
+            }
+            for row in self._row_list
+            for col in self._col_list
+            if (row, col) in self._fov_map
+        ]
+        return {
+            "plate": {
+                "version": "0.4",
+                "name": self.name,
+                "acquisitions": [{"id": 0}],
+                "columns": columns,
+                "rows": rows,
+                "wells": wells,
+            }
+        }
+
+    def root_zgroup(self):
+        return {"zarr_format": 2}
+
+    def root_zattrs(self):
+        return self._root_zattrs
+
+    def _well_zattrs(self, row, col):
+        """Build OME-Zarr HCS 0.4 well metadata for *row*/*col*."""
+        fovs = self._fov_map.get((row, col), [])
+        images = [{"path": fov, "acquisition": 0} for fov in fovs]
+        return {"well": {"images": images, "version": "0.4"}}
+
+    def consolidated_metadata(self):
+        """Return consolidated Zarr metadata for the entire plate hierarchy."""
+        metadata = {
+            ".zgroup": self.root_zgroup(),
+            ".zattrs": self.root_zattrs(),
+        }
+        for row in self._row_list:
+            metadata[f"{row}/.zgroup"] = {"zarr_format": 2}
+            for col in self._col_list:
+                if (row, col) not in self._fov_map:
+                    continue
+                metadata[f"{row}/{col}/.zgroup"] = {"zarr_format": 2}
+                metadata[f"{row}/{col}/.zattrs"] = self._well_zattrs(row, col)
+                for fov in self._fov_map[(row, col)]:
+                    fov_zarr = self._fov_zarrs[(row, col, fov)]
+                    for sub_key, sub_val in (
+                        fov_zarr.consolidated_metadata()["metadata"].items()
+                    ):
+                        full_key = f"{row}/{col}/{fov}/{sub_key}".rstrip("/")
+                        metadata[full_key] = sub_val
+        return {"zarr_consolidated_format": 1, "metadata": metadata}
+
+    def get_json_key(self, key):
+        """Route a metadata key request to the correct level of the hierarchy."""
+        key = key.strip("/")
+
+        if key == ".zgroup":
+            return self.root_zgroup()
+        if key == ".zattrs":
+            return self.root_zattrs()
+        if key == ".zmetadata":
+            return self.consolidated_metadata()
+
+        parts = key.split("/")
+
+        # Row group: {row}/.zgroup
+        if len(parts) == 2 and parts[1] == ".zgroup" and parts[0] in self._row_list:
+            return {"zarr_format": 2}
+
+        # Well level: {row}/{col}/.zgroup  or  {row}/{col}/.zattrs
+        if len(parts) == 3 and parts[0] in self._row_list:
+            row, col, meta = parts
+            if (row, col) in self._fov_map:
+                if meta == ".zgroup":
+                    return {"zarr_format": 2}
+                if meta == ".zattrs":
+                    return self._well_zattrs(row, col)
+
+        # FOV and deeper: {row}/{col}/{fov}/… — delegate to per-FOV VirtualOMEZarr.
+        if len(parts) >= 4:
+            row, col, fov = parts[0], parts[1], parts[2]
+            fov_key = "/".join(parts[3:])
+            fov_zarr = self._fov_zarrs.get((row, col, fov))
+            if fov_zarr is not None:
+                return fov_zarr.get_json_key(fov_key)
+
+        raise KeyError(key)
+
+    def _parse_data_key(self, key):
+        """Split an HCS chunk URL key into ``(path, chunk_key)``.
+
+        HCS chunk keys follow ``{row}/{col}/{fov}/{scale}/{chunk_coords}``.
+        The first four components form the *path*; the remainder is the
+        chunk coordinate string passed to :meth:`read_chunk`.
+        """
+        parts = key.strip("/").split("/")
+        # Need row/col/fov/scale plus at least one chunk-coordinate component.
+        if len(parts) < 5:
+            raise KeyError(key)
+        path = "/".join(parts[:4])
+        chunk_key = "/".join(parts[4:])
+        return path, chunk_key
+
+    def read_chunk(self, path, chunk_key):
+        """Read a chunk; *path* is ``{row}/{col}/{fov}/{scale}``."""
+        parts = path.strip("/").split("/")
+        if len(parts) != 4:
+            raise KeyError(path)
+        row, col, fov, scale = parts
+        fov_zarr = self._fov_zarrs.get((row, col, fov))
+        if fov_zarr is None:
+            raise KeyError(path)
+        return fov_zarr.read_chunk(scale, chunk_key)
+
+    def chunk_content_length(self, path, chunk_key):
+        """Return chunk byte length without materialising the dask graph."""
+        parts = path.strip("/").split("/")
+        if len(parts) != 4:
+            raise KeyError(path)
+        row, col, fov, scale = parts
+        fov_zarr = self._fov_zarrs.get((row, col, fov))
+        if fov_zarr is None:
+            raise KeyError(path)
+        return fov_zarr.chunk_content_length(scale, chunk_key)
+
 
 # ---------------------------------------------------------------------------
 # Module-level SIGINT routing
@@ -414,13 +631,17 @@ class VirtualOMEZarrServer:
         route_prefix="image",
         max_concurrent_chunks=None,
     ):
-        # Build the routing dict and, crucially, derive each zarr's
-        # multiscales name from its route key so the two can never diverge.
+        # Build the routing dict. Each virtual zarr's name is derived from its
+        # route key so the URL path and the embedded metadata name stay in sync.
         self.virtual_zarrs = {}
         for index, virtual_zarr in enumerate(virtual_zarrs):
             route_name = f"{route_prefix}_{index}"
             virtual_zarr.name = route_name
-            virtual_zarr._root_zattrs["multiscales"][0]["name"] = route_name
+            # Update the name embedded in root metadata (differs by zarr type).
+            if isinstance(virtual_zarr, VirtualOMEZarr):
+                virtual_zarr._root_zattrs["multiscales"][0]["name"] = route_name
+            elif isinstance(virtual_zarr, VirtualOMEZarrHCSPlate):
+                virtual_zarr._root_zattrs["plate"]["name"] = route_name
             self.virtual_zarrs[route_name] = virtual_zarr
         self.host = host
         self.port = int(port)
@@ -572,11 +793,12 @@ async def _handle_virtual_zarr_request(request):
             },
         )
 
-    parts = key.split("/", 1)
-    if len(parts) != 2:
+    # Delegate key splitting to each virtual zarr type: VirtualOMEZarr uses
+    # "{scale}/{chunk}" while VirtualOMEZarrHCSPlate uses "{row}/{col}/{fov}/{scale}/{chunk}".
+    try:
+        path, chunk_key = virtual_zarr._parse_data_key(key)
+    except KeyError:
         raise web.HTTPNotFound(headers=cors_headers)
-
-    path, chunk_key = parts
 
     # Short-circuit HEAD requests: validate existence cheaply without
     # materialising the (potentially expensive) dask graph.
@@ -623,12 +845,22 @@ def serve_virtual_ome_zarrs(
     max_concurrent_chunks=None,
     compressor=None,
 ):
-    # Names are derived from the route keys inside VirtualOMEZarrServer so that
-    # the URL path and the OME-Zarr multiscales metadata always stay in sync.
-    virtual_zarrs = [
-        VirtualOMEZarr(msim, compressor=compressor)
-        for msim in msims
-    ]
+    """Serve a list of msims or HCS plate DataTrees as virtual OME-Zarrs.
+
+    Each element is auto-detected: DataTrees with ``scale0``/``scale1``
+    children are served as OME-Zarr multiscale images; DataTrees with
+    row/column/FOV depth are served as OME-Zarr HCS plates.
+    Names are derived from the route keys inside :class:`VirtualOMEZarrServer`
+    so the URL path and the embedded metadata name always stay in sync.
+    """
+    virtual_zarrs = []
+    for element in msims:
+        if _is_hcs_plate_tree(element):
+            virtual_zarrs.append(
+                VirtualOMEZarrHCSPlate(element, compressor=compressor)
+            )
+        else:
+            virtual_zarrs.append(VirtualOMEZarr(element, compressor=compressor))
     return VirtualOMEZarrServer(
         virtual_zarrs,
         host=host,
