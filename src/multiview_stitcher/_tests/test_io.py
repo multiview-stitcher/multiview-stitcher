@@ -4,7 +4,7 @@ import tempfile
 import numpy as np
 import pytest
 
-from multiview_stitcher import io, sample_data
+from multiview_stitcher import io, msi_utils, sample_data
 
 
 @pytest.mark.parametrize(
@@ -58,3 +58,70 @@ def test_tiff_io(ndim, N_t, N_c):
             sims_io.coords[dim] = np.arange(len(sims_io.coords[dim]))
 
         assert (sims[0] == sims_io).min()
+
+
+def test_read_imaris_into_msim_synthetic_file():
+    h5py = pytest.importorskip("h5py")
+
+    import tempfile
+    tmp_path = tempfile.gettempdir()
+    filepath = os.path.join(tmp_path, "synthetic.ims")
+    data0 = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)
+
+    def _ims_attr(value):
+        return np.frombuffer(f"{value}\x00".encode("utf-8"), dtype="S1")
+
+    def _require_group(root, path):
+        group = root
+        for part in path.split("/"):
+            group = group.require_group(part)
+        return group
+
+    with h5py.File(filepath, "w") as f:
+        image_info = _require_group(f, "DataSetInfo/Image")
+        for name, value in {
+            "X": 4,
+            "Y": 3,
+            "Z": 2,
+            "ExtMin0": 0.0,
+            "ExtMin1": 0.0,
+            "ExtMin2": 0.0,
+            "ExtMax0": 4.0,
+            "ExtMax1": 6.0,
+            "ExtMax2": 6.0,
+        }.items():
+            image_info.attrs[name] = _ims_attr(value)
+
+        for ires, shape in [(0, (2, 3, 4)), (1, (1, 2, 2))]:
+            for ichannel in [0, 1]:
+                group = _require_group(
+                    f,
+                    "DataSet/"
+                    f"ResolutionLevel {ires}/TimePoint 0/Channel {ichannel}",
+                )
+                group.attrs["ImageSizeZ"] = _ims_attr(shape[0])
+                group.attrs["ImageSizeY"] = _ims_attr(shape[1])
+                group.attrs["ImageSizeX"] = _ims_attr(shape[2])
+
+                if ires == 0:
+                    data = np.full((2, 4, 4), 999, dtype=np.uint16)
+                    data[:, :3, :] = data0 + ichannel * 100
+                else:
+                    data = np.full(shape, ichannel + 10, dtype=np.uint16)
+                group.create_dataset("Data", data=data, chunks=(1, 1, 2))
+
+    msim = io.read_imaris_into_msim(filepath, channels=[1])
+    sim0 = msi_utils.get_sim_from_msim(msim, scale="scale0")
+
+    assert msi_utils.get_sorted_scale_keys(msim) == ["scale0", "scale1"]
+    assert sim0.dims == ("t", "c", "z", "y", "x")
+    assert sim0.shape == (1, 1, 2, 3, 4)
+    assert sim0.coords["c"].values.tolist() == [1]
+    assert sim0.coords["t"].values.tolist() == [0]
+    np.testing.assert_allclose(sim0.coords["z"].values, [0.0, 3.0])
+    np.testing.assert_allclose(sim0.coords["y"].values, [0.0, 2.0, 4.0])
+    np.testing.assert_allclose(sim0.coords["x"].values, [0.0, 1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(
+        sim0.sel(t=0, c=1).data.compute(),
+        data0 + 100,
+    )

@@ -2,10 +2,12 @@ import os
 import shutil
 import tempfile
 
+import dask.array as da
 import ngff_zarr
 import numpy as np
 import pytest
 import zarr
+from xarray import DataTree
 
 from multiview_stitcher import (
     io,
@@ -14,6 +16,18 @@ from multiview_stitcher import (
     sample_data,
 )
 from multiview_stitcher import spatial_image_utils as si_utils
+
+
+def _single_scale_msim_from_sim(sim):
+    return DataTree.from_dict({"scale0": sim.to_dataset(name="image")})
+
+
+def _decode_virtual_chunk(virtual_zarr, path, chunk_key):
+    zarray = virtual_zarr.array_zarray(path)
+    return np.frombuffer(
+        virtual_zarr.read_chunk(path, chunk_key),
+        dtype=np.dtype(zarray["dtype"]),
+    ).reshape(zarray["chunks"])
 
 
 @pytest.mark.parametrize(
@@ -275,6 +289,207 @@ def test_read_msim_from_ome_zarr_backends():
         for scale_key in msi_utils.get_sorted_scale_keys(msim_zarr):
             sim_scale = msi_utils.get_sim_from_msim(msim_zarr, scale=scale_key)
             assert sim_scale.attrs.get("_zarr_chunks") is not None
+
+
+def test_virtual_ome_zarr_metadata_and_numpy_chunk():
+    data = np.arange(5 * 6, dtype=np.uint16).reshape(5, 6)
+    sim = si_utils.to_spatial_image(
+        data,
+        dims=["y", "x"],
+        scale={"y": 0.5, "x": 0.25},
+        translation={"y": 2.0, "x": 4.0},
+    )
+    virtual_zarr = ngff_utils.VirtualOMEZarr(
+        _single_scale_msim_from_sim(sim)
+    )
+
+    assert virtual_zarr.root_zgroup() == {"zarr_format": 2}
+    root_zattrs = virtual_zarr.root_zattrs()
+    assert "multiscales" in root_zattrs
+    assert "_ARRAY_DIMENSIONS" not in str(root_zattrs)
+
+    multiscales = root_zattrs["multiscales"][0]
+    assert [axis["name"] for axis in multiscales["axes"]] == ["y", "x"]
+    assert [axis["unit"] for axis in multiscales["axes"]] == [
+        "micrometer",
+        "micrometer",
+    ]
+    assert multiscales["datasets"][0]["path"] == "0"
+
+    zarray = virtual_zarr.array_zarray("0")
+    assert zarray["shape"] == [5, 6]
+    assert zarray["chunks"] == [5, 6]
+    assert zarray["dimension_separator"] == "/"
+    assert zarray["compressor"] is None
+
+    decoded = _decode_virtual_chunk(virtual_zarr, "0", "0/0")
+    np.testing.assert_array_equal(decoded, data)
+
+    consolidated = virtual_zarr.consolidated_metadata()["metadata"]
+    assert ".zattrs" in consolidated
+    assert "0/.zarray" in consolidated
+    assert consolidated["0/.zattrs"] == {}
+
+
+def test_virtual_ome_zarr_dask_edge_chunk_padding():
+    data = np.arange(5 * 6, dtype=np.uint16).reshape(5, 6)
+    dask_data = da.from_array(data, chunks=(3, 4))
+    sim = si_utils.to_spatial_image(
+        dask_data,
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    virtual_zarr = ngff_utils.VirtualOMEZarr(
+        _single_scale_msim_from_sim(sim)
+    )
+
+    assert virtual_zarr.array_zarray("0")["chunks"] == [3, 4]
+
+    decoded = _decode_virtual_chunk(virtual_zarr, "0", "1/1")
+    expected = np.zeros((3, 4), dtype=np.uint16)
+    expected[:2, :2] = data[3:5, 4:6]
+    np.testing.assert_array_equal(decoded, expected)
+
+    with pytest.raises(KeyError):
+        virtual_zarr.read_chunk("0", "2/0")
+
+    with pytest.raises(KeyError):
+        virtual_zarr.read_chunk("missing", "0/0")
+
+
+def test_virtual_ome_zarr_zarr_backed_chunk():
+    data = da.from_array(
+        np.arange(5 * 6, dtype=np.uint16).reshape(5, 6),
+        chunks=(3, 4),
+    )
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+
+    with tempfile.TemporaryDirectory() as zarr_path:
+        ngff_utils.write_sim_to_ome_zarr(
+            sim,
+            zarr_path,
+            downscale_factors_per_spatial_dim={"y": 1, "x": 1},
+            show_progressbar=False,
+        )
+        msim = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+
+        virtual_zarr = ngff_utils.VirtualOMEZarr(msim)
+        sim_read = msi_utils.get_sim_from_msim(msim, scale="scale0")
+        chunk_shape = virtual_zarr.chunk_shapes["0"]
+        chunk_key = "/".join("0" for _ in chunk_shape)
+        decoded = _decode_virtual_chunk(virtual_zarr, "0", chunk_key)
+
+        indexers = {
+            dim: slice(0, chunk_shape[idim])
+            for idim, dim in enumerate(sim_read.dims)
+        }
+        expected = np.asarray(sim_read.isel(indexers).data)
+        np.testing.assert_array_equal(decoded, expected)
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("signal"), "SIGINT"),
+    reason="os.kill/SIGINT not available on this platform",
+)
+def test_virtual_server_stops_when_main_thread_interrupted():
+    """
+    UNWANTED BEHAVIOUR: When serve_forever() runs in a non-main thread
+    (as when a Jupyter / IPyKernel 6+ asyncio kernel executes a notebook cell
+    in a thread pool), a SIGINT sent to the process is delivered to the *main*
+    thread only.  threading.Event.wait() in the background thread is never
+    interrupted, so serve_forever() blocks indefinitely — the server keeps
+    running, the port stays bound, and background threads pile up across kernel
+    interrupts / restarts.
+
+    The fix must either:
+    * register a SIGINT / atexit hook in the main thread that calls server.stop(),
+    * or use a timeout-based polling wait so the thread wakes up periodically and
+      can check an external stop condition.
+
+    This test FAILS with the current implementation (serve_forever keeps blocking)
+    and is expected to PASS after the fix.
+    """
+    import os
+    import signal
+    import socket
+    import threading
+    import time
+
+    STARTUP_WAIT = 0.3    # seconds to let the server start
+    STOP_DEADLINE = 2.0   # serve_forever() must stop within this long after the interrupt
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    server = ngff_utils.serve_virtual_ome_zarrs([msim], port=port)
+
+    serve_done = threading.Event()
+
+    def _run_serve():
+        """Simulates a Jupyter notebook cell executing in a non-main thread."""
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            # KeyboardInterrupt would only arrive here if the main thread
+            # propagated it — which does not happen in Jupyter's thread-pool
+            # execution model.
+            pass
+        finally:
+            serve_done.set()
+
+    serve_thread = threading.Thread(target=_run_serve, daemon=True)
+    serve_thread.start()
+
+    # Give the server time to start listening.
+    time.sleep(STARTUP_WAIT)
+
+    # Simulate Jupyter's "Interrupt Kernel": raise SIGINT in the current
+    # (main) thread.  signal.raise_signal calls C's raise() and works on both
+    # POSIX and Windows (unlike os.kill which on Windows calls TerminateProcess
+    # for signal values other than CTRL_C_EVENT/CTRL_BREAK_EVENT).
+    # SIGINT is handled by the main thread only; serve_thread keeps blocking.
+    try:
+        signal.raise_signal(signal.SIGINT)
+        time.sleep(0.05)  # let the signal land
+    except KeyboardInterrupt:
+        pass  # main thread handles the interrupt; serve_thread keeps blocking
+
+    try:
+        # With the current implementation serve_done is never set because
+        # serve_forever() is stuck in Event.wait() with no timeout and no
+        # external mechanism calls stop().
+        stopped_in_time = serve_done.wait(timeout=STOP_DEADLINE)
+    finally:
+        server.stop()      # always free the port so other tests can run
+        serve_thread.join(timeout=1)
+
+    assert stopped_in_time, (
+        f"serve_forever() did not stop within {STOP_DEADLINE}s after SIGINT "
+        "was delivered to the main thread.  When a Jupyter kernel is "
+        "interrupted, the background thread running serve_forever() keeps "
+        "blocking indefinitely, leaking the server and its bound port."
+    )
+    assert not server._thread.is_alive(), (
+        "aiohttp server thread is still running after serve_forever() returned."
+    )
 
 
 def test_multiscales_completion():

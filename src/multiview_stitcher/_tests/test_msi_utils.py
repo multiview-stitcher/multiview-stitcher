@@ -359,3 +359,29 @@ def test_msim_point_set_roundtrip_and_selection():
         msi_utils.get_point_set(selected)["position"].isel(t=0, c=0).values,
         np.array([[1.0, 1.0], [2.0, 2.0]]),
     )
+
+
+def test_concat_result_can_be_selected_with_multiscale_sel_coords():
+    msims = [
+        msi_utils.get_msim_from_sim(
+            si_utils.get_sim_from_array(
+                np.full((4, 5), value),
+                dims=["y", "x"],
+            ),
+            scale_factors=[],
+        )
+        for value in range(2)
+    ]
+
+    selected = msi_utils.multiscale_sel_coords(
+        msi_utils.concat(msims, dim="c"),
+        {"y": slice(0.0, 1.0)},
+    )
+
+    sim = selected["scale0/image"]
+    assert sim.dims == ("t", "c", "y", "x")
+    assert sim.shape == (1, 2, 2, 5)
+    np.testing.assert_array_equal(
+        sim.isel(t=0, y=0, x=0).values,
+        np.array([0, 1]),
+    )

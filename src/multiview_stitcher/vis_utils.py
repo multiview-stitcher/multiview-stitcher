@@ -2,6 +2,7 @@ import json
 import os
 import ssl
 import urllib
+import urllib.parse
 import webbrowser
 from functools import partial
 from http.server import (
@@ -11,6 +12,7 @@ from http.server import (
 )
 
 import numpy as np
+import ngff_zarr
 import zarr
 from matplotlib import colormaps, colors
 from matplotlib import pyplot as plt
@@ -1214,64 +1216,112 @@ def generate_neuroglancer_json(
     contrast_limits: tuple = None,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
+    layout: str = None,
 ):
+    virtual_ome_zarrs = ome_zarr_paths is None
+
     # read the first multiscales
-    sim = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[0])
+    if virtual_ome_zarrs:
+        if sims is None:
+            raise ValueError(
+                "sims must be provided when ome_zarr_paths is None."
+            )
+        ngff_multiscales = None
+        ngff_images = None
+        ome_zarr_sim0 = sims[0]
+        sim = ome_zarr_sim0
+    else:
+        ngff_multiscales = [
+            ngff_zarr.from_ngff_zarr(ome_zarr_path)
+            for ome_zarr_path in ome_zarr_paths
+        ]
+        ngff_images = [
+            multiscales.images[0]
+            for multiscales in ngff_multiscales
+        ]
+        ome_zarr_sim0 = ngff_utils.ngff_image_to_sim(
+            ngff_images[0],
+            transform_key=spatial_image_utils.DEFAULT_TRANSFORM_KEY,
+        )
+        sim = ome_zarr_sim0
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
     ndim = len(sdims)
     dims = sim.dims
     spacing = spatial_image_utils.get_spacing_from_sim(sim)
 
     if sims is not None:
-        if transform_key is None:
+        if transform_key is None and not virtual_ome_zarrs:
             raise ValueError(
                 "transform_key must be provided if sims are given"
             )
 
-        full_affines = [np.eye(len(dims) + 1) for _ in sims]
         spacings_per_sim = []
-        for isim, sim in enumerate(sims):
-
-            sim_ome_zarr = ngff_utils.read_sim_from_ome_zarr(ome_zarr_paths[isim])
-            spacing_zarr = spatial_image_utils.get_spacing_from_sim(sim_ome_zarr)
-            spacing_isim = spacing_zarr
-            spacings_per_sim.append(spacing_isim)
-
-            affine = spatial_image_utils.get_affine_from_sim(
-                sim, transform_key=transform_key
-            )
-            if "t" in affine.dims:
-                affine = affine.sel(t=0)
-
-            # Compose a correction that maps from OME-Zarr physical coordinates to
-            # in-memory physical coordinates before applying the registered affine.
-            # This is needed when the user has modified origin/spacing of the in-memory
-            # sim relative to what is stored in the OME-Zarr on disk.
-            affine_np = np.array(affine, dtype=float)
-            affine_ndim = affine_np.shape[-1] - 1
-            affine_sdims = sdims[-affine_ndim:]
-            origin_zarr = spatial_image_utils.get_origin_from_sim(sim_ome_zarr)
-            origin_mem = spatial_image_utils.get_origin_from_sim(sim)
-            spacing_mem = spatial_image_utils.get_spacing_from_sim(sim)
-            correction = np.eye(affine_ndim + 1)
-            for i, dim in enumerate(affine_sdims):
-                scale = spacing_mem[dim] / spacing_zarr[dim]
-                correction[i, i] = scale
-                correction[i, affine_ndim] = (
-                    origin_mem[dim] - origin_zarr[dim] * scale
+        if transform_key is None:
+            full_affines = [None for _ in sims]
+            for source_sim in sims:
+                spacings_per_sim.append(
+                    spatial_image_utils.get_spacing_from_sim(source_sim)
                 )
-            affine_np = affine_np @ correction
+        else:
+            full_affines = [np.eye(len(dims) + 1) for _ in sims]
+            for isim, registered_sim in enumerate(sims):
 
-            affine_ng = _affine_to_neuroglancer_source_transform(
-                affine_np,
-                sdims=sdims,
-                output_spacing=spacing_isim,
-            )
-            affine_ndim = affine_ng.shape[-1] - 1
-            full_affines[isim][-affine_ndim - 1 :, -affine_ndim - 1 :] = affine_ng
+                if virtual_ome_zarrs:
+                    sim_ome_zarr = registered_sim
+                else:
+                    sim_ome_zarr = (
+                        ome_zarr_sim0
+                        if isim == 0
+                        else ngff_utils.ngff_image_to_sim(
+                            ngff_images[isim],
+                            transform_key=(
+                                spatial_image_utils.DEFAULT_TRANSFORM_KEY
+                            ),
+                        )
+                    )
+                spacing_zarr = spatial_image_utils.get_spacing_from_sim(
+                    sim_ome_zarr
+                )
+                spacing_isim = spacing_zarr
+                spacings_per_sim.append(spacing_isim)
+
+                affine = spatial_image_utils.get_affine_from_sim(
+                    registered_sim, transform_key=transform_key
+                )
+                if "t" in affine.dims:
+                    affine = affine.sel(t=0)
+
+                # Compose a correction that maps from OME-Zarr physical coordinates to
+                # in-memory physical coordinates before applying the registered affine.
+                # This is needed when the user has modified origin/spacing of the in-memory
+                # sim relative to what is stored in the OME-Zarr on disk.
+                affine_np = np.array(affine, dtype=float)
+                affine_ndim = affine_np.shape[-1] - 1
+                affine_sdims = sdims[-affine_ndim:]
+                origin_zarr = spatial_image_utils.get_origin_from_sim(sim_ome_zarr)
+                origin_mem = spatial_image_utils.get_origin_from_sim(registered_sim)
+                spacing_mem = spatial_image_utils.get_spacing_from_sim(registered_sim)
+                correction = np.eye(affine_ndim + 1)
+                for i, dim in enumerate(affine_sdims):
+                    scale = spacing_mem[dim] / spacing_zarr[dim]
+                    correction[i, i] = scale
+                    correction[i, affine_ndim] = (
+                        origin_mem[dim] - origin_zarr[dim] * scale
+                    )
+                affine_np = affine_np @ correction
+
+                affine_ng = _affine_to_neuroglancer_source_transform(
+                    affine_np,
+                    sdims=sdims,
+                    output_spacing=spacing_isim,
+                )
+                affine_ndim = affine_ng.shape[-1] - 1
+                full_affines[isim][
+                    -affine_ndim - 1 :, -affine_ndim - 1 :
+                ] = affine_ng
     else:
-        full_affines = [None for _ in ome_zarr_paths]
-        spacings_per_sim = [spacing] * len(ome_zarr_paths)
+        full_affines = [None for _ in ome_zarr_urls]
+        spacings_per_sim = [spacing] * len(ome_zarr_urls)
 
     if contrast_limits is not None:
         window = {
@@ -1289,21 +1339,33 @@ def generate_neuroglancer_json(
             # this currently assumes that channel_coord
             # is present in all sims and at the same index
             channel_coord = str(channel_coord)
-            channel_index = [str(c) for c in sim.coords["c"].values].index(
-                channel_coord
-            )
-        limits = np.array(
-            [
-                sim_lims
-                for sim_lims in [
-                    get_contrast_min_max_from_ome_zarr_omero_metadata(
-                        path, channel_coord
-                    )
-                    for path in ome_zarr_paths
+            if sims is not None:
+                channel_coords = sims[0].coords["c"].values
+            elif not virtual_ome_zarrs:
+                omero = getattr(ngff_multiscales[0].metadata, "omero", None)
+                channel_coords = (
+                    [channel.label for channel in omero.channels]
+                    if omero is not None
+                    else sim.coords["c"].values
+                )
+            else:
+                channel_coords = sim.coords["c"].values
+            channel_index = [str(c) for c in channel_coords].index(channel_coord)
+        if not virtual_ome_zarrs:
+            limits = np.array(
+                [
+                    sim_lims
+                    for sim_lims in [
+                        get_contrast_min_max_from_ome_zarr_omero_metadata(
+                            path, channel_coord
+                        )
+                        for path in ome_zarr_paths
+                    ]
+                    if sim_lims is not None
                 ]
-                if sim_lims is not None
-            ]
-        )
+            )
+        else:
+            limits = np.array([])
         if len(limits) == 0:
             window = None
         else:
@@ -1318,9 +1380,46 @@ def generate_neuroglancer_json(
         channel_index = 0
         window = None
 
+    if not virtual_ome_zarrs:
+        unit_specs = {
+            "meter": (1, "m"),
+            "millimeter": (1e-3, "m"),
+            "micrometer": (1e-6, "m"),
+            "nanometer": (1e-9, "m"),
+            "second": (1, "s"),
+            "millisecond": (1e-3, "s"),
+            "microsecond": (1e-6, "s"),
+            "nanosecond": (1e-9, "s"),
+        }
+        dimension_specs_per_source = []
+        for ngff_image in ngff_images:
+            dimension_specs = {}
+            for dim in dims:
+                unit = (ngff_image.axes_units or {}).get(dim)
+                scale, ng_unit = unit_specs.get(unit, (1, unit or ""))
+                dimension_specs[dim] = [
+                    float(ngff_image.scale.get(dim, 1)) * scale,
+                    ng_unit,
+                ]
+            dimension_specs_per_source.append(dimension_specs)
+    else:
+        dimension_specs_per_source = []
+        for spacing_isim in spacings_per_sim:
+            dimension_specs_per_source.append({
+                dim: [
+                    float(spacing_isim[dim]) if dim in sdims else 1,
+                    "um" if dim in sdims else "",
+                ]
+                for dim in dims
+            })
+
     output_dimensions = {
-        dim: [spacing[dim] * 1e-6 if dim in sdims else 1e-6, ""] for dim in dims
+        dim: dimension_specs_per_source[0][dim]
+        for dim in dims
     }
+
+    if layout is None:
+        layout = "xy" if ndim == 2 else "4panel"
 
     ng_config = {
         "dimensions": output_dimensions,
@@ -1328,7 +1427,7 @@ def generate_neuroglancer_json(
         "layerListPanel": {"visible": True},
         # 'position': [center[idim] for idim, dim in enumerate(sdims)],
         # "concurrentDownloads": 100, # leave at default
-        "layout": "xy" if ndim == 2 else "4panel",
+        "layout": layout,
     }
 
     if not single_layer:
@@ -1340,13 +1439,13 @@ def generate_neuroglancer_json(
                     "transform": {
                         # neuroglancer drops last row of homogeneous matrix
                         "matrix": [
-                            list(row) for row in full_affines[iview][:-1]
+                            [float(value) for value in row]
+                            for row in full_affines[iview][:-1]
                         ],
                         "outputDimensions": {
-                            (dim if dim != "c" else "c'"): [
-                                spacings_per_sim[iview][dim] * 1e-6 if dim in sdims else 1e-6,
-                                "",
-                            ]
+                            (dim if dim != "c" else "c'"): dimension_specs_per_source[
+                                iview
+                            ][dim]
                             for dim in dims
                         },
                     }
@@ -1383,20 +1482,26 @@ def generate_neuroglancer_json(
                 "source": [
                     {
                         "url": f"{url}",
-                        "transform": {
-                            # neuroglancer drops last row of homogeneous matrix
-                            "matrix": [
-                                list(row) for row in full_affines[iview][:-1]
-                            ],
-                            "outputDimensions": {
-                                (dim if dim != "c" else "c'"): [
-                                    spacings_per_sim[iview][dim] * 1e-6 if dim in sdims else 1e-6,
-                                    "",
-                                ]
-                                for dim in dims
-                            },
-                        },
                     }
+                    | (
+                        {
+                            "transform": {
+                                # neuroglancer drops last row of homogeneous matrix
+                                "matrix": [
+                                    [float(value) for value in row]
+                                    for row in full_affines[iview][:-1]
+                                ],
+                                "outputDimensions": {
+                                    (dim if dim != "c" else "c'"): dimension_specs_per_source[
+                                        iview
+                                    ][dim]
+                                    for dim in dims
+                                },
+                            },
+                        }
+                        if full_affines[iview] is not None
+                        else {}
+                    )
                     for iview, url in enumerate(ome_zarr_urls)
                 ],
                 "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
@@ -1445,7 +1550,7 @@ def get_neuroglancer_url(ng_json):
 
 
 def view_neuroglancer(
-    ome_zarr_paths,
+    ome_zarr_paths=None,
     images=None,
     sims=None,
     transform_key=None,
@@ -1455,15 +1560,18 @@ def view_neuroglancer(
     contrast_limits=None,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
+    layout: str = None,
 ):
     """
-    Visualize a list of OME-zarrs in Neuroglancer
+    Visualize a list of OME-Zarrs or in-memory images in Neuroglancer
     (browser-based, no installation required).
 
     If images (or sims) and transform_key are provided, the affine
     transformations attached to those images are used for visualization.
     Multi-scale images (msims / DataTree) are automatically reduced to their
-    highest-resolution spatial image via ``msi_utils.get_sim_from_msim``.
+    highest-resolution spatial image via ``msi_utils.get_sim_from_msim`` for
+    transform lookup. If ``ome_zarr_paths`` is omitted, ``images`` are served
+    directly as virtual read-only OME-Zarr 0.4 datasets.
 
     Confirmed to work with:
     - 2D and 3D
@@ -1471,8 +1579,9 @@ def view_neuroglancer(
 
     Parameters
     ----------
-    ome_zarr_paths : list of str or Path
-        Paths to the OME-Zarr files to visualize.
+    ome_zarr_paths : list of str or Path, optional
+        Paths to the OME-Zarr files to visualize. If omitted, ``images`` or
+        ``sims`` are exposed through a virtual OME-Zarr server.
     images : list of spatial_image or DataTree, optional
         Spatial images (sims) or multi-scale images (msims) whose transform
         metadata is used for visualization.  msims are automatically converted
@@ -1497,6 +1606,10 @@ def view_neuroglancer(
         Per-layer neuroglancer config overrides.
     global_dict : dict, optional
         Global neuroglancer config overrides.
+    layout : str, optional
+        Initial Neuroglancer layout. Defaults to ``"xy"`` for 2D data and
+        ``"4panel"`` for 3D data. Set to ``"xy"`` to start with only the XY
+        projection.
     """
 
     # Resolve the list of spatial images to use for transform lookup.
@@ -1509,70 +1622,114 @@ def view_neuroglancer(
             DeprecationWarning,
             stacklevel=2,
         )
-    resolved_images = images if images is not None else sims
-    if resolved_images is not None:
-        resolved_images = [
-            msi_utils.get_sim_from_msim(img)
+    input_images = images if images is not None else sims
+    if input_images is not None and not isinstance(input_images, (list, tuple)):
+        input_images = [input_images]
+
+    virtual_server = None
+    resolved_images = None
+    json_ome_zarr_paths = None
+    if ome_zarr_paths is None:
+        if input_images is None:
+            raise ValueError(
+                "Either ome_zarr_paths or images must be provided."
+            )
+
+        # Preserve existing msims (with all resolution levels); wrap plain sims
+        # in a single-scale msim so the virtual server serves the data as-is.
+        virtual_msims = [
+            img
             if msi_utils.is_msim(img)
-            else img
-            for img in resolved_images
+            else msi_utils.get_msim_from_sim(img, scale_factors=[])
+            for img in input_images
+        ]
+        virtual_server = ngff_utils.serve_virtual_ome_zarrs(
+            virtual_msims,
+            port=port,
+        )
+        ome_zarr_paths = virtual_server.urls
+        ome_zarr_urls = [
+            url.rstrip("/")
+            for url in virtual_server.urls
+        ]
+        # Derive scale0 sims from the virtual msims as the single source of
+        # truth for spacing/dimension metadata and transform lookup.
+        resolved_images = [
+            msi_utils.get_sim_from_msim(msim) for msim in virtual_msims
+        ]
+        dir_to_serve = None
+    else:
+        if isinstance(ome_zarr_paths, (str, os.PathLike)):
+            ome_zarr_paths = [ome_zarr_paths]
+        ome_zarr_paths = [str(p) for p in ome_zarr_paths]
+        json_ome_zarr_paths = ome_zarr_paths
+
+        if input_images is not None:
+            resolved_images = [
+                msi_utils.get_sim_from_msim(img)
+                if msi_utils.is_msim(img)
+                else img
+                for img in input_images
+            ]
+
+        # determine a common root for all local paths so files in different
+        # directories can all be served from a single HTTP server
+        _MAX_SERVE_DEPTH = 3
+        local_paths = [p for p in ome_zarr_paths if not p.startswith("http")]
+        if local_paths:
+            dir_to_serve = os.path.commonpath(
+                [os.path.dirname(os.path.abspath(p)) for p in local_paths]
+            )
+            # safety check: refuse to serve overly broad directories
+            for path in local_paths:
+                rel = os.path.relpath(os.path.abspath(path), dir_to_serve)
+                depth = len(rel.split(os.sep))
+                if dir_to_serve == os.sep or depth > _MAX_SERVE_DEPTH:
+                    import warnings
+
+                    warnings.warn(
+                        f"view_neuroglancer: the common ancestor directory "
+                        f"'{dir_to_serve}' is too broad (depth {depth} > "
+                        f"{_MAX_SERVE_DEPTH}) or is the filesystem root. "
+                        f"Local files will not be served. "
+                        f"Pass HTTP URLs instead.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    dir_to_serve = None
+                    break
+        else:
+            dir_to_serve = None
+
+        # generate urls for the ome zarr files
+        # use forward slashes in URLs regardless of OS path separator
+        ome_zarr_urls = [
+            "http://localhost:{port}/{rel}".format(
+                port=port,
+                rel=os.path.relpath(
+                    os.path.abspath(path), dir_to_serve
+                ).replace(os.sep, "/"),
+            )
+            if (not path.startswith("http") and dir_to_serve is not None)
+            else path
+            for path in ome_zarr_paths
         ]
 
-    ome_zarr_paths = [str(p) for p in ome_zarr_paths]
-
-    # determine a common root for all local paths so files in different
-    # directories can all be served from a single HTTP server
-    _MAX_SERVE_DEPTH = 3
-    local_paths = [p for p in ome_zarr_paths if not p.startswith("http")]
-    if local_paths:
-        dir_to_serve = os.path.commonpath(
-            [os.path.dirname(os.path.abspath(p)) for p in local_paths]
-        )
-        # safety check: refuse to serve overly broad directories
-        for path in local_paths:
-            rel = os.path.relpath(os.path.abspath(path), dir_to_serve)
-            depth = len(rel.split(os.sep))
-            if dir_to_serve == os.sep or depth > _MAX_SERVE_DEPTH:
-                import warnings
-
-                warnings.warn(
-                    f"view_neuroglancer: the common ancestor directory "
-                    f"'{dir_to_serve}' is too broad (depth {depth} > "
-                    f"{_MAX_SERVE_DEPTH}) or is the filesystem root. "
-                    f"Local files will not be served. "
-                    f"Pass HTTP URLs instead.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                dir_to_serve = None
-                break
-    else:
-        dir_to_serve = None
-
-    # generate urls for the ome zarr files
-    # use forward slashes in URLs regardless of OS path separator
-    ome_zarr_urls = [
-        "http://localhost:{port}/{rel}".format(
-            port=port,
-            rel=os.path.relpath(os.path.abspath(path), dir_to_serve).replace(
-                os.sep, "/"
-            ),
-        )
-        if (not path.startswith("http") and dir_to_serve is not None)
-        else path
-        for path in ome_zarr_paths
-    ]
-
     ng_json = generate_neuroglancer_json(
-        ome_zarr_paths=ome_zarr_paths,
+        ome_zarr_paths=json_ome_zarr_paths,
         ome_zarr_urls=ome_zarr_urls,
-        sims=resolved_images,
+        sims=(
+            resolved_images
+            if json_ome_zarr_paths is None or transform_key is not None
+            else None
+        ),
         transform_key=transform_key,
         channel_coord=channel_coord,
         single_layer=single_layer,
         contrast_limits=contrast_limits,
         layer_dicts=layer_dicts,
         global_dict=global_dict,
+        layout=layout,
     )
     ng_url = get_neuroglancer_url(ng_json)
 
@@ -1581,6 +1738,8 @@ def view_neuroglancer(
 
     print("Opening Neuroglancer in browser...")
     print("URL:", ng_url)
+    print("Decoded URL:")
+    print(urllib.parse.unquote(ng_url))
     print("Controls:")
     print("All panels")
     print("\t\tZoom: Ctrl + Mousewheel")
@@ -1593,6 +1752,8 @@ def view_neuroglancer(
 
     webbrowser.open(ng_url)
 
-    # serve the local ome-zarr files
-    if dir_to_serve is not None:
+    # serve the local or virtual OME-Zarr files
+    if virtual_server is not None:
+        virtual_server.serve_forever()
+    elif dir_to_serve is not None:
         serve_dir(dir_to_serve, port=port)

@@ -15,6 +15,7 @@ except ImportError:
 
 
 from multiview_stitcher import czi_utils
+from multiview_stitcher.imaris_utils import read_imaris_into_msim
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = si_utils.DEFAULT_TRANSFORM_KEY

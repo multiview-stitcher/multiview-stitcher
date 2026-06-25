@@ -312,14 +312,14 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
 
     sim = sim.copy()
     sim_attrs = copy.deepcopy(sim.attrs)
-
+        
     spatial_shape = si_utils.get_shape_from_sim(sim)
 
     if scale_factors is None:
         scale_factors = calc_resolution_levels(spatial_shape)[1]
         scale_factors = scale_factors[1:]  # remove input scale
 
-    if chunks is None:
+    if chunks is None and len(scale_factors) > 0:
         sim_backend = getattr(sim.variable, "_data", None)
         if isinstance(sim_backend, da.Array):
             chunks = {
@@ -338,7 +338,7 @@ def get_msim_from_sim(sim, scale_factors=None, chunks=None):
             sim if len(scale_factors) == 0 else si_utils.ensure_dask_backed_dataarray(sim)
         ]
     else:
-        sims = [_chunk_sim(sim, chunks)]
+        sims = [sim]
 
     for scale_factor in scale_factors:
         sims.append(_downsample_sim(sims[-1], scale_factor, chunks))
@@ -742,3 +742,18 @@ def correct_multiscale_origins(msim):
         if "image" in ds.data_vars else ds)
 
     return msim
+
+
+# define a function to combine msims along a given dimension
+def concat(msims, concat_kwargs={}, dim='c'):
+
+    with xr.set_options(keep_attrs=True):
+        return xr.DataTree.from_dict(
+            {sk: xr.concat(
+                [msim[sk].dataset for msim in msims],
+                dim=dim,
+                data_vars='different',
+                compat="equals",
+                **concat_kwargs)
+                for sk in list(msims)[0].keys()}
+        )

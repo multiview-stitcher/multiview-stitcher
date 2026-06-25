@@ -82,6 +82,9 @@ czi = [
     "czifile ==2019.7.2.3",
     "imagecodecs >=2023.7.10",
 ]
+imaris = [
+    "h5py",
+]
 dev = [
     "tox",
     "jupyter",
@@ -92,16 +95,19 @@ dev = [
     "antspyx >=0.6.0",
     "itk-elastix >=0.25.2",
     "czifile ==2019.7.2.3",
+    "h5py",
     "imagecodecs >=2023.7.10",
     "pre-commit",
 ]
 playground = [
     "napari-stitcher",
     "napari[pyqt6, optional]",
-    #"pydantic_bigstitcher @git+https://github.com/d-v-b/pydantic-bigstitcher.git", (pypi doesn't allow git dependencies)
+    "pydantic_bigstitcher>=0.0.11",
     "ipympl",
     "ome-types",
     "ipyfilechooser>=0.6.0",
+    "joblib",
+    "h5py",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",
