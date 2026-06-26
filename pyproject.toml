@@ -108,6 +108,8 @@ playground = [
     "ipyfilechooser>=0.6.0",
     "joblib",
     "h5py",
+    "lxml",
+    "xmltodict",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",

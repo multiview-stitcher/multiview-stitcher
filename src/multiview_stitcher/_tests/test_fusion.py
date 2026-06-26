@@ -47,9 +47,7 @@ def _make_distinct_level_msim():
         dims=["y", "x"],
         transform_key=METADATA_TRANSFORM_KEY,
     )
-    msim = msi_utils.get_msim_from_sim(
-        sim, scale_factors=[{"y": 2, "x": 2}]
-    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[{"y": 2, "x": 2}])
     msim["scale1"]["image"] = xr.ones_like(msim["scale1"]["image"]) * 2
     return msim
 
@@ -85,7 +83,9 @@ def test_fuse_sims():
     )
 
 
-def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypatch):
+def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(
+    monkeypatch,
+):
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
         N_c=1,
@@ -159,6 +159,82 @@ def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(monkeypa
         fused.data.compute()
 
     assert observed and all(observed)
+
+
+def test_fuse_reuses_spatial_plan_across_channels(monkeypatch):
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=3,
+        N_t=1,
+        tile_size=16,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=1.0,
+        spacing_y=1.0,
+        spacing_z=1.0,
+        random_data=True,
+        chunksize=8,
+    )
+
+    plan_calls = []
+    original_build_plan = fusion_core._build_spatial_fusion_plan
+
+    def wrapped_build_plan(*args, **kwargs):
+        plan_calls.append(kwargs)
+        return original_build_plan(*args, **kwargs)
+
+    monkeypatch.setattr(
+        fusion_core,
+        "_build_spatial_fusion_plan",
+        wrapped_build_plan,
+    )
+
+    fusion.fuse(
+        sims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        output_spacing={"y": 2.0, "x": 2.0},
+        output_chunksize={"y": 8, "x": 8},
+    )
+
+    assert len(plan_calls) == 1
+
+
+def test_fuse_axis_aligned_translation_plan_skips_generic_overlap(monkeypatch):
+    sims = [
+        si_utils.get_sim_from_array(
+            da.ones((1, 1, 8, 8), chunks=(1, 1, 4, 4)) * value,
+            dims=["c", "t", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": x_origin},
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for value, x_origin in [(1, 0.0), (2, 6.0)]
+    ]
+
+    def fail_generic_overlap(*args, **kwargs):
+        raise AssertionError(
+            "axis-aligned translation fusion should not call generic overlap"
+        )
+
+    monkeypatch.setattr(
+        fusion_core.mv_graph,
+        "get_overlap_for_bbs",
+        fail_generic_overlap,
+    )
+
+    fused = fusion.fuse(
+        sims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.max_fusion,
+        output_chunksize={"y": 4, "x": 4},
+    )
+    fused_data = np.asarray(fused.data.compute(scheduler="single-threaded"))
+
+    assert fused_data.shape == (1, 1, 8, 14)
+    np.testing.assert_array_equal(fused_data[..., :, :6], 1)
+    np.testing.assert_array_equal(fused_data[..., :, 6:], 2)
 
 
 def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
@@ -401,7 +477,9 @@ def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend):
     )
 
 
-def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
+def test_materialize_xarray_zarr_backend_retries_server_disconnect(
+    monkeypatch,
+):
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
         N_c=1,
@@ -477,8 +555,7 @@ def test_materialize_xarray_zarr_backend_retries_server_disconnect(monkeypatch):
     assert attempt_count >= 2
     assert len(semaphore_entries) == 2
     assert all(
-        config.get("async.concurrency")
-        == si_utils.HTTP_ZARR_ASYNC_CONCURRENCY
+        config.get("async.concurrency") == si_utils.HTTP_ZARR_ASYNC_CONCURRENCY
         for config in recorded_configs
     )
 
@@ -640,9 +717,11 @@ def test_multi_view_fusion(ndim, weights_func):
         sims[:],
         transform_key=METADATA_TRANSFORM_KEY,
         weights_func=weights_func,
-        weights_func_kwargs={"sigma_1": 1, "sigma_2": 2}
-        if weights_func == weights.content_based
-        else None,
+        weights_func_kwargs=(
+            {"sigma_1": 1, "sigma_2": 2}
+            if weights_func == weights.content_based
+            else None
+        ),
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -885,15 +964,18 @@ def test_fusion_chunksizes(input_chunksize, backend):
             fused = fusion.fuse(
                 sims,
                 transform_key=METADATA_TRANSFORM_KEY,
-                output_chunksize=output_chunksize
-                if set_output_chunksize
-                else None,
+                output_chunksize=(
+                    output_chunksize if set_output_chunksize else None
+                ),
             )
 
             if set_output_chunksize:
                 expected_chunksize = output_chunksize
             else:
-                if backend in ["dask", "zarr"] and input_chunksize["x"] is not None:
+                if (
+                    backend in ["dask", "zarr"]
+                    and input_chunksize["x"] is not None
+                ):
                     expected_chunksize = input_chunksize
                 else:
                     expected_chunksize = {
@@ -901,7 +983,9 @@ def test_fusion_chunksizes(input_chunksize, backend):
                             fused.shape[-ndim + idim],
                             si_utils.get_default_spatial_chunksizes(ndim)[dim],
                         )
-                        for idim, dim in enumerate(si_utils.SPATIAL_DIMS[-ndim:])
+                        for idim, dim in enumerate(
+                            si_utils.SPATIAL_DIMS[-ndim:]
+                        )
                     }
             assert all(
                 fused.data.chunksize[-ndim + idim] == expected_chunksize[dim]
@@ -911,10 +995,8 @@ def test_fusion_chunksizes(input_chunksize, backend):
 
 def test_fuse_to_zarr():
 
-    sims = io.read_mosaic_into_sims(
-        sample_data.get_mosaic_sample_data_path()
-        )
-    
+    sims = io.read_mosaic_into_sims(sample_data.get_mosaic_sample_data_path())
+
     fuse_kwargs = {
         "images": sims,
         "transform_key": METADATA_TRANSFORM_KEY,

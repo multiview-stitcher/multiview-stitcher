@@ -258,7 +258,10 @@ def process_output_chunksize(sims, output_chunksize):
         elif si_utils.is_dask_backed_dataarray(sims[0]):
             # if first tile is a chunked dask array, use its chunksize
             output_chunksize = dict(
-                zip(sdims, si_utils._get_backend_data(sims[0]).chunksize[-ndim:])
+                zip(
+                    sdims,
+                    si_utils._get_backend_data(sims[0]).chunksize[-ndim:],
+                )
             )
         else:
             # if first tile is not a chunked dask array, use default chunksize
@@ -282,8 +285,7 @@ def _chunks_from_chunk_bbs(chunk_bbs, block_indices, sdims):
             )
         chunks.append(
             tuple(
-                chunks_for_dim[ichunk]
-                for ichunk in range(len(chunks_for_dim))
+                chunks_for_dim[ichunk] for ichunk in range(len(chunks_for_dim))
             )
         )
 
@@ -301,10 +303,10 @@ def process_output_stack_properties(
 ):
     if transform_key is None:
         raise ValueError(
-            "transform_key must be provided to determine transformation" \
+            "transform_key must be provided to determine transformation"
             "parameters for calculating output stack properties."
         )
-    
+
     params = [
         si_utils.get_affine_from_sim(sim, transform_key=transform_key)
         for sim in sims
@@ -328,6 +330,363 @@ def process_output_stack_properties(
             output_stack_properties["shape"] = output_shape
 
     return output_stack_properties
+
+
+def _coord_cache_value(value):
+    """Return a hashable scalar/tuple for xarray coordinate values."""
+    if hasattr(value, "values"):
+        value = value.values
+
+    value = np.asarray(value)
+    if value.shape == ():
+        return value.item()
+
+    return tuple(value.ravel().tolist())
+
+
+def _is_grid_aligned(offset, spacing, tol=1e-6):
+    if spacing == 0:
+        return False
+
+    pixel_offset = offset / spacing
+    return np.isclose(pixel_offset, np.round(pixel_offset), atol=tol)
+
+
+def _get_fixed_spatial_dims(
+    sparams,
+    views_bb,
+    output_stack_properties,
+    sdims,
+    tol=1e-6,
+):
+    """Return spatial dims that are axis-aligned, unscaled, and grid-aligned."""
+    fix_dims = []
+
+    for dim in sdims:
+        other_dims = [odim for odim in sdims if odim != dim]
+        dim_is_fixed = True
+
+        for param in sparams:
+            if not np.isclose(
+                float(param.sel(x_in=dim, x_out=dim)),
+                1,
+                atol=tol,
+            ):
+                dim_is_fixed = False
+                break
+
+            if any(
+                not np.isclose(
+                    float(param.sel(x_in=dim, x_out=other_dim)),
+                    0,
+                    atol=tol,
+                )
+                for other_dim in other_dims
+            ):
+                dim_is_fixed = False
+                break
+
+            if any(
+                not np.isclose(
+                    float(param.sel(x_in=other_dim, x_out=dim)),
+                    0,
+                    atol=tol,
+                )
+                for other_dim in other_dims
+            ):
+                dim_is_fixed = False
+                break
+
+            translation = float(param.sel(x_in=dim, x_out="1"))
+            if not _is_grid_aligned(
+                output_stack_properties["origin"][dim] - translation,
+                output_stack_properties["spacing"][dim],
+                tol=tol,
+            ):
+                dim_is_fixed = False
+                break
+
+        if not dim_is_fixed:
+            continue
+
+        if any(
+            not np.isclose(
+                output_stack_properties["spacing"][dim],
+                views_bb[iview]["spacing"][dim],
+                atol=tol,
+            )
+            for iview in range(len(views_bb))
+        ):
+            continue
+
+        fix_dims.append(dim)
+
+    return fix_dims
+
+
+def _get_axis_aligned_translation_overlap(
+    target_bb,
+    query_bb,
+    param,
+    sdims,
+    tol=1e-6,
+):
+    """
+    Return overlap in query coordinates for grid-aligned translation transforms.
+
+    This is equivalent to the translation-only case of
+    ``mv_graph.get_overlap_for_bbs`` but uses integer slice arithmetic instead
+    of back-projecting corners and intersecting floating-point bounding boxes.
+    """
+    overlap_origin = {}
+    overlap_shape = {}
+
+    for dim in sdims:
+        spacing = query_bb["spacing"][dim]
+        translation = float(param.sel(x_in=dim, x_out="1"))
+        start_float = (
+            target_bb["origin"][dim] - translation - query_bb["origin"][dim]
+        ) / spacing
+        start = int(np.round(start_float))
+        if not np.isclose(start_float, start, atol=tol):
+            return None
+
+        stop = start + int(target_bb["shape"][dim])
+        overlap_start = max(start, 0)
+        overlap_stop = min(stop, int(query_bb["shape"][dim]))
+
+        if overlap_start >= overlap_stop:
+            return None
+
+        overlap_origin[dim] = query_bb["origin"][dim] + overlap_start * spacing
+        overlap_shape[dim] = overlap_stop - overlap_start
+
+    return {
+        "origin": overlap_origin,
+        "shape": overlap_shape,
+        "spacing": query_bb["spacing"],
+    }
+
+
+def _build_spatial_fusion_plan(
+    *,
+    sparams,
+    views_bb,
+    output_stack_properties,
+    output_chunksize,
+    output_chunk_bbs,
+    output_chunk_bbs_with_overlap,
+    output_chunk_bbs_for_result,
+    block_indices,
+    overlap_in_pixels,
+    trim_overlap,
+    interpolation_order,
+    sdims,
+):
+    fix_dims = _get_fixed_spatial_dims(
+        sparams=sparams,
+        views_bb=views_bb,
+        output_stack_properties=output_stack_properties,
+        sdims=sdims,
+    )
+    use_axis_aligned_translation = set(fix_dims) == set(sdims)
+
+    inv_sparams = None
+    if not use_axis_aligned_translation:
+        # Pre-compute the inverse of each tile's affine transform once.
+        # This avoids recomputing np.linalg.inv inside get_overlap_for_bbs for
+        # every (tile, chunk) pair.
+        inv_sparams = [
+            xr.DataArray(
+                np.linalg.inv(sp.data),
+                dims=sp.dims,
+                coords=sp.coords,
+            )
+            for sp in sparams
+        ]
+
+    # Build a chunk_index -> [tile_indices] mapping by iterating over tiles
+    # and using the regular output chunk grid to find overlapping chunks via
+    # simple index arithmetic — O(N_tiles * ndim) instead of O(N_tiles * N_chunks).
+    #
+    # Output chunks form a regular grid: all blocks have the same pixel size
+    # per dimension except possibly the last block (which may be smaller).
+    # The first (uniform) block size is sufficient to map any physical
+    # coordinate to a chunk index via floor division; we clamp to the valid
+    # range so the last partial block is always included when needed.
+    _normalized_chunks = normalize_chunks(
+        [output_chunksize[dim] for dim in sdims],
+        [output_stack_properties["shape"][dim] for dim in sdims],
+    )
+    _n_blocks_per_dim = [len(c) for c in _normalized_chunks]
+    _uniform_cs_per_dim = [c[0] for c in _normalized_chunks]
+    _osp_origin = np.array(
+        [output_stack_properties["origin"][dim] for dim in sdims]
+    )
+    _osp_spacing = np.array(
+        [output_stack_properties["spacing"][dim] for dim in sdims]
+    )
+    # Physical padding: interpolation extent + chunk overlap added to output chunks
+    _additional_extent_pixels = np.array(
+        [
+            0.0 if dim in fix_dims else float(interpolation_order)
+            for dim in sdims
+        ]
+    )
+    _padding_phys = (
+        _additional_extent_pixels * _osp_spacing
+        + np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
+    )
+
+    _chunk_to_tiles: dict = {}
+    for iview in range(len(sparams)):
+        # Forward-project tile corners through the affine to get its AABB
+        # in output (world) space.
+        tile_corners_output = transformation.transform_pts(
+            mv_graph.get_vertices_from_stack_props(views_bb[iview]),
+            sparams[iview].data,
+        )
+        aabb_min = np.min(tile_corners_output, axis=0) - _padding_phys
+        aabb_max = np.max(tile_corners_output, axis=0) + _padding_phys
+
+        # Map the padded AABB to a range of chunk indices per dimension.
+        idx_ranges = []
+        skip = False
+        for idim in range(len(sdims)):
+            cs_phys = _uniform_cs_per_dim[idim] * _osp_spacing[idim]
+            i_first = max(
+                0,
+                int(np.floor((aabb_min[idim] - _osp_origin[idim]) / cs_phys)),
+            )
+            i_last = min(
+                _n_blocks_per_dim[idim] - 1,
+                int(np.floor((aabb_max[idim] - _osp_origin[idim]) / cs_phys)),
+            )
+            if i_first > i_last:
+                skip = True
+                break
+            idx_ranges.append(range(i_first, i_last + 1))
+        if skip:
+            continue
+        for chunk_idx in product(*idx_ranges):
+            _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
+
+    # Pre-compute per-chunk relevant-view data once and reuse it in both
+    # fusion paths. For each output chunk, determine which tiles truly
+    # overlap and store their tile-slice bounding boxes.
+    additional_extent = {
+        dim: 0 if dim in fix_dims else int(interpolation_order)
+        for dim in sdims
+    }
+
+    per_chunk_entries = []
+    for (
+        output_chunk_bb,
+        output_chunk_bb_with_overlap,
+        output_chunk_bb_result,
+        block_index,
+    ) in zip(
+        output_chunk_bbs,
+        output_chunk_bbs_with_overlap,
+        output_chunk_bbs_for_result,
+        block_indices,
+    ):
+        chunk_views = []
+        for iview in _chunk_to_tiles.get(tuple(block_index), []):
+            if use_axis_aligned_translation:
+                overlap = _get_axis_aligned_translation_overlap(
+                    target_bb=output_chunk_bb_with_overlap,
+                    query_bb=views_bb[iview],
+                    param=sparams[iview],
+                    sdims=sdims,
+                )
+            else:
+                overlap = mv_graph.get_overlap_for_bbs(
+                    target_bb=output_chunk_bb_with_overlap,
+                    query_bbs=[views_bb[iview]],
+                    param=inv_sparams[iview],
+                    additional_extent_in_pixels=additional_extent,
+                    param_is_inverse=True,
+                )[0]
+            if overlap is not None:
+                chunk_views.append((iview, overlap))
+        fuse_planewise = (
+            "z" in fix_dims
+            and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
+        )
+        per_chunk_entries.append(
+            {
+                "views": chunk_views,
+                "output_bb": output_chunk_bb,
+                "output_bb_overlap": output_chunk_bb_with_overlap,
+                "output_bb_result": output_chunk_bb_result,
+                "fuse_planewise": fuse_planewise,
+            }
+        )
+
+    return {
+        "sparams": sparams,
+        "fix_dims": fix_dims,
+        "per_chunk_entries": per_chunk_entries,
+        "uses_axis_aligned_translation": use_axis_aligned_translation,
+    }
+
+
+def _get_spatial_plan_cache_key(params_coord_dict, param_dependent_nsdims):
+    return tuple(
+        (dim, _coord_cache_value(params_coord_dict[dim]))
+        for dim in param_dependent_nsdims
+    )
+
+
+def _select_params_for_coords(params, params_coord_dict):
+    return [
+        param.sel(
+            {
+                dim: coord
+                for dim, coord in params_coord_dict.items()
+                if dim in param.dims
+            }
+        )
+        for param in params
+    ]
+
+
+def _build_zarr_chunk_params(
+    *,
+    plan,
+    tile_series,
+    views_bb,
+    block_indices,
+    nblocks_per_dim,
+):
+    chunk_params_np = np.empty(nblocks_per_dim, dtype=object)
+    sparams = plan["sparams"]
+    for block_index, entry in zip(block_indices, plan["per_chunk_entries"]):
+        chunk_params_np[tuple(block_index)] = {
+            "views": [
+                {
+                    "tile_info": tile_series[iview],
+                    "tile_overlap_bb": tile_overlap_bb,
+                    "sparam": sparams[iview],
+                    "view_bb": views_bb[iview],
+                }
+                for iview, tile_overlap_bb in entry["views"]
+            ],
+            "output_bb": entry["output_bb"],
+            "output_bb_overlap": entry["output_bb_overlap"],
+            "fuse_planewise": entry["fuse_planewise"],
+        }
+
+    return da.from_array(
+        chunk_params_np,
+        chunks=(1,) * len(nblocks_per_dim),
+        # chunk_params_np is an object array containing nested per-block
+        # metadata.  Dask's default deterministic naming tokenizes that object
+        # graph, which is expensive and does not buy useful cacheability for
+        # this freshly built fusion plan.
+        name=False,
+    )
 
 
 def fuse(
@@ -492,8 +851,7 @@ def fuse(
 
         # Scale 0 defines the finest output geometry; coarser outputs derive from it.
         scale0_sims = [
-            msi_utils.get_sim_from_msim(msim, scale="scale0")
-            for msim in msims
+            msi_utils.get_sim_from_msim(msim, scale="scale0") for msim in msims
         ]
 
         scale0_output_stack_properties = process_output_stack_properties(
@@ -629,17 +987,23 @@ def fuse(
         ome_zarr = zarr_options.get("ome_zarr", False)
         ngff_version = zarr_options.get("ngff_version", "0.4")
         overwrite = zarr_options.get("overwrite", True)
-        zarr_array_creation_kwargs = zarr_options.get("zarr_array_creation_kwargs", None)
+        zarr_array_creation_kwargs = zarr_options.get(
+            "zarr_array_creation_kwargs", None
+        )
 
         # Resolve store path for data (OME-Zarr stores scale 0 under "<root>/0")
-        store_url = os.path.join(output_zarr_url, "0") if ome_zarr else output_zarr_url
+        store_url = (
+            os.path.join(output_zarr_url, "0") if ome_zarr else output_zarr_url
+        )
 
         if overwrite and os.path.exists(output_zarr_url):
             shutil.rmtree(output_zarr_url)
         if ome_zarr:
             # Ensure creation kwargs reflect NGFF version when writing OME-Zarr
-            zarr_array_creation_kwargs = ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
-                ngff_version, zarr_array_creation_kwargs
+            zarr_array_creation_kwargs = (
+                ngff_utils.update_zarr_array_creation_kwargs_for_ngff_version(
+                    ngff_version, zarr_array_creation_kwargs
+                )
             )
 
         # Build kwargs for per-chunk fuse() calls (exclude zarr-specific args to avoid recursion)
@@ -675,7 +1039,7 @@ def fuse(
         nblocks = block_fusion_info["nblocks"]
         osp = block_fusion_info["output_stack_properties"]
         osp["shape"] = {dim: int(v) for dim, v in osp["shape"].items()}
-        print(f'Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...')
+        print(f"Fusing {np.prod(nblocks)} blocks in batches of {n_batch}...")
         for batch in tqdm(
             misc_utils.ndindex_batches(nblocks, n_batch),
             total=int(np.ceil(np.prod(nblocks) / n_batch)),
@@ -746,14 +1110,20 @@ def fuse(
         if func is not None and hasattr(func, "required_overlap"):
             # Inject output_chunksize so the overlap can be clamped to it.
             _kwargs_with_chunksize = dict(func_kwargs or {})
-            if has_keyword(func, "output_chunksize") and output_chunksize is not None:
-                _kwargs_with_chunksize.setdefault("output_chunksize", output_chunksize)
+            if (
+                has_keyword(func, "output_chunksize")
+                and output_chunksize is not None
+            ):
+                _kwargs_with_chunksize.setdefault(
+                    "output_chunksize", output_chunksize
+                )
             curr_overlap = func.required_overlap(_kwargs_with_chunksize)
             # normalize
             if not isinstance(curr_overlap, dict):
                 curr_overlap = {dim: curr_overlap for dim in sdims}
             overlap_in_pixels = {
-                dim: max(overlap_in_pixels[dim], curr_overlap[dim]) for dim in sdims
+                dim: max(overlap_in_pixels[dim], curr_overlap[dim])
+                for dim in sdims
             }
         if func is not None and hasattr(func, "required_source_shrinkage"):
             shrink_distance = func.required_source_shrinkage(func_kwargs)
@@ -772,7 +1142,8 @@ def fuse(
         | {
             "origin": {
                 dim: output_chunk_bb["origin"][dim]
-                - overlap_in_pixels[dim] * output_stack_properties["spacing"][dim]
+                - overlap_in_pixels[dim]
+                * output_stack_properties["spacing"][dim]
                 for dim in sdims
             }
         }
@@ -802,6 +1173,11 @@ def fuse(
         # that sims pre-filtered with sim_sel_coords are handled correctly.
         tile_series = [si_utils.serialize_zarr_backed_sim(sim) for sim in sims]
 
+    param_dependent_nsdims = [
+        dim for dim in nsdims if any(dim in param.dims for param in params)
+    ]
+    spatial_plan_cache = {}
+
     merges = []
     for ns_coords in itertools.product(
         *tuple([sims[0].coords[nsdim] for nsdim in nsdims])
@@ -810,188 +1186,42 @@ def fuse(
             ndsim: ns_coords[i] for i, ndsim in enumerate(nsdims)
         }
         params_coord_dict = {
-            ndsim: ns_coords[i]
-            for i, ndsim in enumerate(nsdims)
-            if ndsim in params[0].dims
+            dim: sim_coord_dict[dim] for dim in param_dependent_nsdims
         }
+        spatial_plan_key = _get_spatial_plan_cache_key(
+            params_coord_dict,
+            param_dependent_nsdims,
+        )
 
-        # ssims = [sim.sel(sim_coord_dict) for sim in sims]
-        sparams = [param.sel(params_coord_dict) for param in params]
-
-        # should this be done within the loop over output chunks?
-        fix_dims = []
-        for dim in sdims:
-            other_dims = [odim for odim in sdims if odim != dim]
-            if (
-                any((param.sel(x_in=dim, x_out=dim) - 1) for param in sparams)
-                or any(
-                    any(param.sel(x_in=dim, x_out=other_dims))
-                    for param in sparams
-                )
-                or any(
-                    any(param.sel(x_in=other_dims, x_out=dim))
-                    for param in sparams
-                )
-                or any(
-                    output_stack_properties["spacing"][dim]
-                    - views_bb[iview]["spacing"][dim]
-                    for iview in range(len(sims))
-                )
-                or any(
-                    float(
-                        output_stack_properties["origin"][dim]
-                        - param.sel(x_in=dim, x_out="1")
-                    )
-                    % output_stack_properties["spacing"][dim]
-                    for param in sparams
-                )
-            ):
-                continue
-            fix_dims.append(dim)
-
-        # Pre-compute the inverse of each tile's affine transform once.
-        # This avoids recomputing np.linalg.inv inside get_overlap_for_bbs for
-        # every (tile, chunk) pair.
-        inv_sparams = [
-            xr.DataArray(
-                np.linalg.inv(sp.data),
-                dims=sp.dims,
-                coords=sp.coords,
+        if spatial_plan_key not in spatial_plan_cache:
+            spatial_plan_cache[spatial_plan_key] = _build_spatial_fusion_plan(
+                sparams=_select_params_for_coords(params, params_coord_dict),
+                views_bb=views_bb,
+                output_stack_properties=output_stack_properties,
+                output_chunksize=output_chunksize,
+                output_chunk_bbs=output_chunk_bbs,
+                output_chunk_bbs_with_overlap=output_chunk_bbs_with_overlap,
+                output_chunk_bbs_for_result=output_chunk_bbs_for_result,
+                block_indices=block_indices,
+                overlap_in_pixels=overlap_in_pixels,
+                trim_overlap=trim_overlap,
+                interpolation_order=interpolation_order,
+                sdims=sdims,
             )
-            for sp in sparams
-        ]
-
-        # Build a chunk_index -> [tile_indices] mapping by iterating over tiles
-        # and using the regular output chunk grid to find overlapping chunks via
-        # simple index arithmetic — O(N_tiles * ndim) instead of O(N_tiles * N_chunks).
-        #
-        # Output chunks form a regular grid: all blocks have the same pixel size
-        # per dimension except possibly the last block (which may be smaller).
-        # The first (uniform) block size is sufficient to map any physical
-        # coordinate to a chunk index via floor division; we clamp to the valid
-        # range so the last partial block is always included when needed.
-        _normalized_chunks = normalize_chunks(
-            [output_chunksize[dim] for dim in sdims],
-            [output_stack_properties["shape"][dim] for dim in sdims],
-        )
-        _n_blocks_per_dim = [len(c) for c in _normalized_chunks]
-        _uniform_cs_per_dim = [c[0] for c in _normalized_chunks]
-        _osp_origin = np.array(
-            [output_stack_properties["origin"][dim] for dim in sdims]
-        )
-        _osp_spacing = np.array(
-            [output_stack_properties["spacing"][dim] for dim in sdims]
-        )
-        # Physical padding: interpolation extent + chunk overlap added to output chunks
-        _additional_extent_pixels = np.array(
-            [0.0 if dim in fix_dims else float(interpolation_order) for dim in sdims]
-        )
-        _padding_phys = (
-            _additional_extent_pixels * _osp_spacing
-            + np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
-        )
-
-        _chunk_to_tiles: dict = {}
-        for iview in range(len(sims)):
-            # Forward-project tile corners through the affine to get its AABB
-            # in output (world) space.
-            tile_corners_output = transformation.transform_pts(
-                mv_graph.get_vertices_from_stack_props(views_bb[iview]),
-                sparams[iview].data,
-            )
-            aabb_min = np.min(tile_corners_output, axis=0) - _padding_phys
-            aabb_max = np.max(tile_corners_output, axis=0) + _padding_phys
-
-            # Map the padded AABB to a range of chunk indices per dimension.
-            idx_ranges = []
-            skip = False
-            for idim in range(len(sdims)):
-                cs_phys = _uniform_cs_per_dim[idim] * _osp_spacing[idim]
-                i_first = max(
-                    0,
-                    int(np.floor((aabb_min[idim] - _osp_origin[idim]) / cs_phys)),
-                )
-                i_last = min(
-                    _n_blocks_per_dim[idim] - 1,
-                    int(np.floor((aabb_max[idim] - _osp_origin[idim]) / cs_phys)),
-                )
-                if i_first > i_last:
-                    skip = True
-                    break
-                idx_ranges.append(range(i_first, i_last + 1))
-            if skip:
-                continue
-            for chunk_idx in product(*idx_ranges):
-                _chunk_to_tiles.setdefault(chunk_idx, []).append(iview)
-
-        # Pre-compute per-chunk relevant-view data once and reuse it in both
-        # fusion paths. For each output chunk, determine which tiles truly
-        # overlap and store their tile-slice bounding boxes.
-        additional_extent = {
-            dim: 0 if dim in fix_dims else int(interpolation_order)
-            for dim in sdims
-        }
-
-        per_chunk_entries = []
-        for output_chunk_bb, output_chunk_bb_with_overlap, block_index in zip(
-            output_chunk_bbs, output_chunk_bbs_with_overlap, block_indices
-        ):
-            chunk_views = []
-            for iview in _chunk_to_tiles.get(tuple(block_index), []):
-                overlap = mv_graph.get_overlap_for_bbs(
-                    target_bb=output_chunk_bb_with_overlap,
-                    query_bbs=[views_bb[iview]],
-                    param=inv_sparams[iview],
-                    additional_extent_in_pixels=additional_extent,
-                    param_is_inverse=True,
-                )
-                if overlap[0] is not None:
-                    chunk_views.append((iview, overlap[0]))
-            fuse_planewise = (
-                "z" in fix_dims
-                and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
-            )
-            per_chunk_entries.append(
-                {
-                    "views": chunk_views,
-                    "output_bb": output_chunk_bb,
-                    "output_bb_overlap": output_chunk_bb_with_overlap,
-                    "output_bb_result": (
-                        output_chunk_bb
-                        if trim_overlap
-                        else output_chunk_bb_with_overlap
-                    ),
-                    "fuse_planewise": fuse_planewise,
-                }
-            )
+        spatial_plan = spatial_plan_cache[spatial_plan_key]
+        sparams = spatial_plan["sparams"]
+        per_chunk_entries = spatial_plan["per_chunk_entries"]
 
         if input_is_zarr:
-            chunk_params_np = np.empty(nblocks_per_dim, dtype=object)
-            for block_index, entry in zip(block_indices, per_chunk_entries):
-                chunk_params_np[tuple(block_index)] = {
-                    "views": [
-                        {
-                            "tile_info": tile_series[iview],
-                            "tile_overlap_bb": tile_overlap_bb,
-                            "sparam": sparams[iview],
-                            "view_bb": views_bb[iview],
-                        }
-                        for iview, tile_overlap_bb in entry["views"]
-                    ],
-                    "output_bb": entry["output_bb"],
-                    "output_bb_overlap": entry["output_bb_overlap"],
-                    "fuse_planewise": entry["fuse_planewise"],
-                }
-            chunk_params = da.from_array(
-                chunk_params_np,
-                chunks=(1,) * len(nblocks_per_dim),
-                # chunk_params_np is an object array containing nested
-                # per-block metadata.  Dask's default deterministic naming
-                # tokenizes that object graph, which is expensive and does
-                # not buy useful cacheability for this freshly built fusion
-                # plan.
-                name=False,
-            )
+            if "zarr_chunk_params" not in spatial_plan:
+                spatial_plan["zarr_chunk_params"] = _build_zarr_chunk_params(
+                    plan=spatial_plan,
+                    tile_series=tile_series,
+                    views_bb=views_bb,
+                    block_indices=block_indices,
+                    nblocks_per_dim=nblocks_per_dim,
+                )
+            chunk_params = spatial_plan["zarr_chunk_params"]
 
             # === zarr path: thin dask graph via map_blocks ===
             fused = da.map_blocks(
@@ -999,7 +1229,7 @@ def fuse(
                 chunk_params,
                 chunks=_chunks_from_chunk_bbs(
                     output_chunk_bbs_for_result, block_indices, sdims
-                    ),
+                ),
                 dtype=sims[0].dtype,
                 output_dtype=sims[0].dtype,
                 sim_coord_dict=sim_coord_dict,
@@ -1079,8 +1309,10 @@ def fuse(
                         for iview in relevant_view_indices
                     ]
 
-                    output_chunk_bb_with_overlap = mv_graph.project_bb_along_dim(
-                        output_chunk_bb_with_overlap, dim="z"
+                    output_chunk_bb_with_overlap = (
+                        mv_graph.project_bb_along_dim(
+                            output_chunk_bb_with_overlap, dim="z"
+                        )
                     )
 
                     full_view_bbs = [
@@ -1097,11 +1329,11 @@ def fuse(
                     ]
 
                 fused_output_chunk = delayed(
-                    lambda append_leading_axis, **kwargs: fuse_np(**kwargs)[
-                        np.newaxis
-                    ]
-                    if append_leading_axis
-                    else fuse_np(**kwargs),
+                    lambda append_leading_axis, **kwargs: (
+                        fuse_np(**kwargs)[np.newaxis]
+                        if append_leading_axis
+                        else fuse_np(**kwargs)
+                    ),
                 )(
                     append_leading_axis=fuse_planewise,
                     sims=sims_slices,
@@ -1113,9 +1345,9 @@ def fuse(
                     weights_func_kwargs=weights_func_kwargs,
                     # The overlap still defines the fusion target; this only
                     # controls the final crop inside fuse_np.
-                    trim_overlap_in_pixels=overlap_in_pixels
-                    if trim_overlap
-                    else 0,
+                    trim_overlap_in_pixels=(
+                        overlap_in_pixels if trim_overlap else 0
+                    ),
                     interpolation_order=interpolation_order,
                     full_view_bbs=full_view_bbs,
                     blending_widths=blending_widths,
@@ -1127,10 +1359,7 @@ def fuse(
                 fused_output_chunk = da.from_delayed(
                     fused_output_chunk,
                     shape=tuple(
-                        [
-                            output_chunk_bb_result["shape"][dim]
-                            for dim in sdims
-                        ]
+                        [output_chunk_bb_result["shape"][dim] for dim in sdims]
                     ),
                     dtype=sims[0].dtype,
                 )
@@ -1320,7 +1549,10 @@ def fuse_np(
         fusion_func_kwargs["params"] = params
     if fusion_requires_blending_weights:
         fusion_func_kwargs["blending_weights"] = field_ws_t
-    if has_keyword(fusion_func, "output_spacing") and "output_spacing" not in fusion_func_kwargs:
+    if (
+        has_keyword(fusion_func, "output_spacing")
+        and "output_spacing" not in fusion_func_kwargs
+    ):
         fusion_func_kwargs["output_spacing"] = output_properties["spacing"]
 
     # calculate fusion weights if required
@@ -1330,8 +1562,13 @@ def fuse_np(
             weights_func_kwargs["params"] = params
         if has_keyword(weights_func, "blending_weights"):
             weights_func_kwargs["blending_weights"] = field_ws_t
-        if has_keyword(weights_func, "output_chunksize") and "output_chunksize" not in weights_func_kwargs:
-            weights_func_kwargs["output_chunksize"] = output_properties["shape"]
+        if (
+            has_keyword(weights_func, "output_chunksize")
+            and "output_chunksize" not in weights_func_kwargs
+        ):
+            weights_func_kwargs["output_chunksize"] = output_properties[
+                "shape"
+            ]
 
         fusion_weights = weights_func(**weights_func_kwargs)
         fusion_func_kwargs["fusion_weights"] = fusion_weights
@@ -1345,7 +1582,8 @@ def fuse_np(
     # normalize to dict[str, int]
     if not isinstance(trim_overlap_in_pixels, dict):
         trim_overlap_in_pixels = {
-            dim: trim_overlap_in_pixels for dim in output_properties["shape"].keys()
+            dim: trim_overlap_in_pixels
+            for dim in output_properties["shape"].keys()
         }
 
     if any(
@@ -1354,9 +1592,14 @@ def fuse_np(
     ):
         fused = fused[
             tuple(
-                slice(trim_overlap_in_pixels[dim], -trim_overlap_in_pixels[dim])
-                if trim_overlap_in_pixels[dim] > 0
-                else slice(None)
+                (
+                    slice(
+                        trim_overlap_in_pixels[dim],
+                        -trim_overlap_in_pixels[dim],
+                    )
+                    if trim_overlap_in_pixels[dim] > 0
+                    else slice(None)
+                )
                 for dim in output_properties["shape"].keys()
             )
         ]
@@ -1364,7 +1607,11 @@ def fuse_np(
     fused = np.nan_to_num(fused).astype(input_dtype)
     # Keep the historical behavior unless requested otherwise: chunks computed
     # on CuPy are copied back to host memory before they leave fuse_np.
-    if cp is not None and isinstance(fused, cp.ndarray) and not output_on_backend:
+    if (
+        cp is not None
+        and isinstance(fused, cp.ndarray)
+        and not output_on_backend
+    ):
         fused = cp.asnumpy(fused)
 
     # delete references to intermediate arrays to free memory
@@ -1689,12 +1936,14 @@ def prepare_block_fusion(
 
     output_stack_properties = process_output_stack_properties(
         sims=sims,
-        output_stack_properties=fuse_kwargs.pop("output_stack_properties", None),
+        output_stack_properties=fuse_kwargs.pop(
+            "output_stack_properties", None
+        ),
         output_spacing=fuse_kwargs.pop("output_spacing", None),
         output_origin=fuse_kwargs.pop("output_origin", None),
         output_shape=fuse_kwargs.pop("output_shape", None),
         output_stack_mode=fuse_kwargs.pop("output_stack_mode", "union"),
-        transform_key=fuse_kwargs.get("transform_key", None)
+        transform_key=fuse_kwargs.get("transform_key", None),
     )
 
     output_chunksize = process_output_chunksize(
@@ -1706,22 +1955,39 @@ def prepare_block_fusion(
     sdims = si_utils.get_spatial_dims_from_sim(sims[0])
     ns_shape = {dim: len(sims[0].coords[dim]) for dim in nsdims}
 
-    full_output_shape = [ns_shape[dim] for dim in nsdims]\
-         + [output_stack_properties['shape'][dim] for dim in sdims]
-    full_output_chunksize = [1,] * len(nsdims)\
-         + [int(output_chunksize[dim]) for dim in sdims]
-        
+    full_output_shape = [ns_shape[dim] for dim in nsdims] + [
+        output_stack_properties["shape"][dim] for dim in sdims
+    ]
+    full_output_chunksize = [
+        1,
+    ] * len(
+        nsdims
+    ) + [int(output_chunksize[dim]) for dim in sdims]
+
     normalized_chunks = normalize_chunks(
-        shape=full_output_shape,
-        chunks=full_output_chunksize)
-    
+        shape=full_output_shape, chunks=full_output_chunksize
+    )
+
     print("Fusing into an output stack:")
-    print("- shape: ", {dim: int(output_stack_properties['shape'][dim])
-        if dim in sdims else ns_shape[dim] for dim in dims})
-    print("- spacing: ", {k: float(v)
-        for k, v in output_stack_properties['spacing'].items()})
-    print("- origin: ", {k: float(v)
-        for k, v in output_stack_properties['origin'].items()})
+    print(
+        "- shape: ",
+        {
+            dim: (
+                int(output_stack_properties["shape"][dim])
+                if dim in sdims
+                else ns_shape[dim]
+            )
+            for dim in dims
+        },
+    )
+    print(
+        "- spacing: ",
+        {k: float(v) for k, v in output_stack_properties["spacing"].items()},
+    )
+    print(
+        "- origin: ",
+        {k: float(v) for k, v in output_stack_properties["origin"].items()},
+    )
     # print(f"- chunksize: {fuse_kwargs.get('output_chunksize', None)}")
 
     # Create the Zarr array store on disk
@@ -1730,50 +1996,68 @@ def prepare_block_fusion(
         chunks=[int(i) for i in full_output_chunksize],
         dtype=sims[0].data.dtype,
         store=output_zarr_url,  # The path to the directory where the store will be created
-        overwrite=True,      # Allows overwriting if the path exists
-        **zarr_array_creation_kwargs
-        if zarr_array_creation_kwargs is not None else {},
+        overwrite=True,  # Allows overwriting if the path exists
+        **(
+            zarr_array_creation_kwargs
+            if zarr_array_creation_kwargs is not None
+            else {}
+        ),
     )
 
     def fuse_chunk(
-            block_id,
-            osp=output_stack_properties,
-            ns_shape=ns_shape,
-            nsdims=nsdims,
-            fuse_kwargs=fuse_kwargs,
-            output_chunksize=output_chunksize,
-            output_zarr_array=output_zarr_array,
-            ):
+        block_id,
+        osp=output_stack_properties,
+        ns_shape=ns_shape,
+        nsdims=nsdims,
+        fuse_kwargs=fuse_kwargs,
+        output_chunksize=output_chunksize,
+        output_zarr_array=output_zarr_array,
+    ):
         """
         Fuse a single chunk and write to zarr array.
         """
 
-        sdims = list(osp['shape'].keys())
+        sdims = list(osp["shape"].keys())
 
         normalized_chunks = normalize_chunks(
-            shape=[ns_shape[dim] for dim in nsdims] + [osp['shape'][dim] for dim in sdims],
-            chunks=(1,) * len(nsdims) +tuple(output_chunksize[dim] for dim in sdims))
+            shape=[ns_shape[dim] for dim in nsdims]
+            + [osp["shape"][dim] for dim in sdims],
+            chunks=(1,) * len(nsdims)
+            + tuple(output_chunksize[dim] for dim in sdims),
+        )
 
         ns_coord = {dim: block_id[idim] for idim, dim in enumerate(nsdims)}
 
-        spatial_chunk_ind = block_id[len(nsdims):]
+        spatial_chunk_ind = block_id[len(nsdims) :]
 
-        chunk_offset = {sdims[idim]: int(np.sum(normalized_chunks[len(nsdims) + idim][:b])) if b > 0 else 0
-                        for idim, b in enumerate(spatial_chunk_ind)}
-        chunk_offset_phys = {dim: chunk_offset[dim] * osp['spacing'][dim] + osp['origin'][dim]
-                            for idim, dim in enumerate(sdims)}
-        chunk_shape = {sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
-                    for idim, b in enumerate(spatial_chunk_ind)}
-
+        chunk_offset = {
+            sdims[idim]: (
+                int(np.sum(normalized_chunks[len(nsdims) + idim][:b]))
+                if b > 0
+                else 0
+            )
+            for idim, b in enumerate(spatial_chunk_ind)
+        }
+        chunk_offset_phys = {
+            dim: chunk_offset[dim] * osp["spacing"][dim] + osp["origin"][dim]
+            for idim, dim in enumerate(sdims)
+        }
+        chunk_shape = {
+            sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
+            for idim, b in enumerate(spatial_chunk_ind)
+        }
 
         sims = fuse_kwargs.get("images")
         if sims is None:
             sims = fuse_kwargs.get("sims")
         # restrict sims to relevant non-spatial coordinates
-        sims = [si_utils.sim_sel_coords(
-            sim,
-            {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()})
-            for sim in sims]
+        sims = [
+            si_utils.sim_sel_coords(
+                sim,
+                {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()},
+            )
+            for sim in sims
+        ]
 
         logger.debug(
             "Fusing chunk with block id %s, spatial chunk index %s",
@@ -1789,31 +2073,40 @@ def prepare_block_fusion(
             },
             output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
             output_shape={dim: chunk_shape[dim] for dim in sdims},
-            output_spacing={dim: osp['spacing'][dim] for dim in sdims},
-            ).data
+            output_spacing={dim: osp["spacing"][dim] for dim in sdims},
+        ).data
 
         input_is_cupy = cp is not None and isinstance(fused, cp.ndarray)
 
         if cp is not None:
             fused = fused.map_blocks(
-                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x)
+                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x
+            )
 
         # Write the fused chunk to the appropriate location in the Zarr array
-        with dask_config.set(scheduler='single-threaded'):
+        with dask_config.set(scheduler="single-threaded"):
             da.to_zarr(
-                fused, output_zarr_array,
+                fused,
+                output_zarr_array,
                 region=tuple(
-                    [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims] +
-                    [slice(chunk_offset[dim], chunk_offset[dim] + chunk_shape[dim]) for dim in sdims]),
+                    [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims]
+                    + [
+                        slice(
+                            chunk_offset[dim],
+                            chunk_offset[dim] + chunk_shape[dim],
+                        )
+                        for dim in sdims
+                    ]
+                ),
             )
 
         if cp is not None:
             misc_utils.clear_cupy_memory()
 
         return
-    
+
     nblocks = [len(nc) for nc in normalized_chunks]
-    
+
     return {
         "func": fuse_chunk,
         "nblocks": nblocks,
