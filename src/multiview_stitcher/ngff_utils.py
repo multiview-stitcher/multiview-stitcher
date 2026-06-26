@@ -128,7 +128,7 @@ class VirtualOMEZarr:
         self.msim = msim
         self.name = name
         self.compressor = compressor
-        self.omero = omero
+        self.omero = omero if omero is not None else msim.attrs.get("omero")
         self.scale_keys = msi_utils.get_sorted_scale_keys(msim)
         if not self.scale_keys:
             raise ValueError("msim must contain at least one scale.")
@@ -803,7 +803,7 @@ async def _handle_virtual_zarr_request(request):
             headers={
                 **cors_headers,
                 "Content-Length": str(len(payload)),
-                "Cache-Control": "public, max-age=3600",
+                "Cache-Control": "no-store",
             },
         )
 
@@ -821,7 +821,7 @@ async def _handle_virtual_zarr_request(request):
             content_length = virtual_zarr.chunk_content_length(path, chunk_key)
         except KeyError:
             raise web.HTTPNotFound(headers=cors_headers)
-        head_headers = {**cors_headers, "Cache-Control": "public, max-age=3600"}
+        head_headers = {**cors_headers, "Cache-Control": "no-store"}
         if content_length is not None:
             head_headers["Content-Length"] = str(content_length)
         return web.Response(
@@ -846,7 +846,7 @@ async def _handle_virtual_zarr_request(request):
         headers={
             **cors_headers,
             "Content-Length": str(len(payload)),
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "no-store",
         },
     )
 
