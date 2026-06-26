@@ -955,19 +955,23 @@ def msim_to_ngff_multiscales(msim, transform_key):
 
     sdims = msi_utils.get_spatial_dims(msim)
 
+    ngff_multiscales_scales_v04 = [
+        ms.metadata.to_version("0.4") for ms in ngff_multiscales_scales
+    ]
+
     ngff_multiscales = ngff_zarr.Multiscales(
         ngff_ims,
         metadata=ngff_zarr.Metadata(
-            axes=ngff_multiscales_scales[0].metadata.axes,
+            axes=ngff_multiscales_scales_v04[0].axes,
             datasets=[
                 ngff_zarr.Dataset(
                     path="scale%s/image" % iscale,
-                    coordinateTransformations=ngff_multiscales_scale.metadata.datasets[
+                    coordinateTransformations=ngff_multiscales_scale_v04.datasets[
                         0
                     ].coordinateTransformations,
                 )
-                for iscale, ngff_multiscales_scale in enumerate(
-                    ngff_multiscales_scales
+                for iscale, ngff_multiscales_scale_v04 in enumerate(
+                    ngff_multiscales_scales_v04
                 )
             ],
             coordinateTransformations=None,
