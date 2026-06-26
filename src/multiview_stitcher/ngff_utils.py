@@ -7,6 +7,7 @@ import math
 import os, shutil
 import signal
 import threading
+import uuid
 
 import dask
 import ngff_zarr
@@ -650,8 +651,12 @@ class VirtualOMEZarrServer:
             if max_concurrent_chunks is not None
             else min(4, os.cpu_count() or 1)
         )
+        # Unique token per server instance so URLs change on every restart,
+        # preventing web viewers (e.g. Neuroglancer) from serving stale
+        # in-memory cache when the same port is reused with different data.
+        self._session_token = uuid.uuid4().hex[:8]
         self.urls = [
-            f"http://{self.host}:{self.port}/{name}"
+            f"http://{self.host}:{self.port}/{self._session_token}/{name}"
             for name in self.virtual_zarrs
         ]
         self._loop = None
@@ -734,10 +739,13 @@ class VirtualOMEZarrServer:
         app["chunk_semaphore"] = asyncio.Semaphore(
             self.max_concurrent_chunks
         )
-        app.router.add_route("*", "/{image_name}", _handle_virtual_zarr_request)
+        token = self._session_token
+        app.router.add_route(
+            "*", f"/{token}/{{image_name}}", _handle_virtual_zarr_request
+        )
         app.router.add_route(
             "*",
-            "/{image_name}/{key:.*}",
+            f"/{token}/{{image_name}}/{{key:.*}}",
             _handle_virtual_zarr_request,
         )
 
