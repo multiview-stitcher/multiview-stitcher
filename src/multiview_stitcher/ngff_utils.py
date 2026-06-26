@@ -779,10 +779,16 @@ async def _handle_virtual_zarr_request(request):
     if virtual_zarr is None:
         raise web.HTTPNotFound(headers=cors_headers)
 
-    # An empty key targets the store root. Serve .zgroup so that clients
-    # doing bucket-style existence checks (HEAD on the root URL) get 200.
     if not key:
-        key = ".zgroup"
+        if not request.path.endswith("/"):
+            location = request.path + "/"
+            if request.query_string:
+                location += "?" + request.query_string
+            raise web.HTTPPermanentRedirect(
+                location=location,
+                headers=cors_headers,
+            )
+        return web.Response(status=204, headers=cors_headers)
 
     try:
         json_obj = virtual_zarr.get_json_key(key)
