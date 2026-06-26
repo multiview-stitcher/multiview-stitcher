@@ -1063,11 +1063,19 @@ def serve_dir(dir_path, port=8000):
         Port to use for the server, by default 8000
     """
 
-    # code taken from ome-zarr-py
     class CORSRequestHandler(SimpleHTTPRequestHandler):
         def end_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            # Private Network Access: allows public pages (e.g. the OME-Zarr
+            # validator on ome.github.io) to fetch from localhost in Chrome.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
             SimpleHTTPRequestHandler.end_headers(self)
+
+        def do_OPTIONS(self) -> None:
+            # Respond to CORS preflight (including PNA preflight) with 204.
+            self.send_response(204)
+            self.end_headers()
 
         def translate_path(self, path: str) -> str:
             # Since we don't call the class constructor ourselves,
@@ -1753,6 +1761,77 @@ def view_neuroglancer(
     webbrowser.open(ng_url)
 
     # serve the local or virtual OME-Zarr files
+    if virtual_server is not None:
+        virtual_server.serve_forever()
+    elif dir_to_serve is not None:
+        serve_dir(dir_to_serve, port=port)
+
+
+# Public URL of the OME-Zarr validator web app.
+_OME_ZARR_VALIDATOR_URL = "https://ome.github.io/ome-ngff-validator/"
+
+
+def view_ome_zarr(image, port=8000):
+    """
+    Open the OME-Zarr validator for the given image.
+
+    Depending on the type of *image*, the data is either served locally
+    (virtually or from disk) or passed directly to the validator.
+
+    Parameters
+    ----------
+    image : DataTree, str, or Path
+        The image to validate. Three forms are accepted:
+
+        1. **msim DataTree** – a multiscale spatial image (DataTree with
+           ``scale0``, ``scale1``, … children). Served as a virtual
+           OME-Zarr multiscale image.
+        2. **HCS plate DataTree** – a DataTree whose children follow a
+           ``{row}/{column}/{fov}`` hierarchy of msims. Served as a
+           virtual OME-Zarr HCS plate.
+        3. **str or Path** – an OME-Zarr path on disk or an HTTP URL.
+           Local paths are served via a CORS-enabled HTTP file server;
+           HTTP URLs are used as-is.
+    port : int, optional
+        Port for the local HTTP server (virtual or directory). Default 8000.
+    """
+    virtual_server = None
+    dir_to_serve = None
+
+    if isinstance(image, DataTree):
+        # Start the virtual server before opening the browser so the port is
+        # bound and ready when the validator fetches the metadata.
+        virtual_server = ngff_utils.serve_virtual_ome_zarrs([image], port=port)
+        virtual_server.start()
+        zarr_url = virtual_server.urls[0]
+
+    elif isinstance(image, (str, os.PathLike)):
+        path = str(image)
+        if path.startswith("http"):
+            # Already a web-accessible URL — pass straight to the validator.
+            zarr_url = path
+        else:
+            abs_path = os.path.abspath(path)
+            dir_to_serve = os.path.dirname(abs_path)
+            zarr_name = os.path.basename(abs_path)
+            zarr_url = f"http://localhost:{port}/{zarr_name}"
+
+    else:
+        raise TypeError(
+            f"image must be a DataTree, str, or Path-like, got {type(image).__name__}"
+        )
+
+    validator_url = (
+        _OME_ZARR_VALIDATOR_URL
+        + "?source="
+        + urllib.parse.quote(zarr_url, safe="")
+    )
+
+    print(f"Zarr URL: {zarr_url}")
+    print(f"Opening OME-Zarr validator: {validator_url}")
+
+    webbrowser.open(validator_url)
+
     if virtual_server is not None:
         virtual_server.serve_forever()
     elif dir_to_serve is not None:
