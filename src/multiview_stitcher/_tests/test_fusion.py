@@ -776,6 +776,37 @@ def test_fused_field_coverage():
     assert np.min(fusedc) > 0
 
 
+def test_scaled_single_tile_fusion_has_no_zero_terminal_lines():
+    scale = {"y": 1.0, "x": 1.0}
+    affine = np.array(
+        [
+            [1.05, 0, 0],
+            [0, 1.05, 0],
+            [0, 0, 1],
+        ]
+    )
+
+    sim = si_utils.get_sim_from_array(
+        da.ones((20, 20), chunks=(10, 10), dtype=np.uint16),
+        dims=["y", "x"],
+        scale=scale,
+        translation={"y": 0.0, "x": 0.0},
+        affine=affine,
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    fused = fusion.fuse(
+        [sim],
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.max_fusion,
+        output_chunksize={"y": 7, "x": 7},
+        output_spacing=scale,
+    )
+    fusedc = np.asarray(fused.data.compute(scheduler="single-threaded"))
+
+    np.testing.assert_array_equal(fusedc, np.ones_like(fusedc))
+
+
 def test_fused_field_slice():
     """
     Make sure that slice in fused output

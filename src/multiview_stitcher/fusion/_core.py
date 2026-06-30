@@ -1817,18 +1817,17 @@ def combine_stack_props(stack_props_list):
     )
     combined_stack_props["shape"] = np.max(
         [
-            np.ceil(
-                (
-                    sp["origin"]
-                    + sp["shape"] * sp["spacing"]
-                    - combined_stack_props["origin"]
-                )
-                / combined_stack_props["spacing"]
+            _shape_from_center_bounds(
+                combined_stack_props["origin"],
+                sp["origin"]
+                + (np.asarray(sp["shape"], dtype=float) - 1)
+                * sp["spacing"],
+                combined_stack_props["spacing"],
             )
             for sp in stack_props_list
         ],
         axis=0,
-    ).astype(np.uint64)
+    )
 
     return combined_stack_props
 
@@ -1841,9 +1840,12 @@ def get_transformed_stack_vertices(
         (len(stack_properties_list), len(stack_keypoints), ndim)
     )
     for iim, sp in enumerate(stack_properties_list):
-        tmp_vertices = stack_keypoints * np.array(sp["shape"]) * np.array(
-            sp["spacing"]
-        ) + np.array(sp["origin"])
+        tmp_vertices = (
+            stack_keypoints
+            * (np.array(sp["shape"], dtype=float) - 1)
+            * np.array(sp["spacing"])
+            + np.array(sp["origin"])
+        )
         tmp_vertices_transformed = (
             np.dot(params[iim][:ndim, :ndim], tmp_vertices.T).T
             + params[iim][:ndim, ndim]
@@ -1853,15 +1855,27 @@ def get_transformed_stack_vertices(
     return vertices
 
 
+def _shape_from_center_bounds(lower, upper, spacing):
+    span = (upper - lower) / spacing
+    span_rounded = np.round(span)
+    span = np.where(
+        np.isclose(span, span_rounded, rtol=0, atol=1e-9),
+        span_rounded,
+        span,
+    )
+    return np.floor(np.maximum(span, 0)).astype(np.uint64) + 1
+
+
 def calc_stack_properties_from_volume(volume, spacing):
     """
-    :param volume: lower and upper edge of final volume (e.g. [edgeLow,edgeHigh] as calculated by calc_final_stack_cube)
+    :param volume: lower and upper pixel-center coordinates of final volume
+        (e.g. [centerLow, centerHigh] as calculated by calc_final_stack_cube)
     :param spacing: final spacing
     :return: dictionary containing size, origin and spacing of final stack
     """
 
     origin = volume[0]
-    shape = np.ceil((volume[1] - volume[0]) / spacing).astype(np.uint64)
+    shape = _shape_from_center_bounds(volume[0], volume[1], spacing)
 
     properties_dict = {}
     properties_dict["shape"] = shape
