@@ -700,9 +700,12 @@ def test_fuse_msims_with_fractional_intrinsic_translation(monkeypatch):
     )
     fused = msi_utils.get_sim_from_msim(fused_msim, scale="scale0")
 
-    assert fused.sizes["y"] == 19
-    assert fused.sizes["x"] == 19
-    assert np.max(fused.data.compute()) == 4
+    fused_data = fused.data.compute()
+
+    assert fused.sizes["y"] == 18
+    assert fused.sizes["x"] == 18
+    assert np.max(fused_data) == 4
+    assert np.min(fused_data) > 0
 
 
 @pytest.mark.parametrize("ome_zarr", [False, True])

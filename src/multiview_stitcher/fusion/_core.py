@@ -1885,20 +1885,24 @@ def combine_stack_props(stack_props_list):
     combined_stack_props["spacing"] = np.min(
         [sp["spacing"] for sp in stack_props_list], axis=0
     )
-    combined_stack_props["shape"] = np.max(
-        [
-            np.ceil(
-                (
-                    sp["origin"]
-                    + sp["shape"] * sp["spacing"]
-                    - combined_stack_props["origin"]
+    combined_stack_props["shape"] = (
+        np.max(
+            [
+                np.floor(
+                    (
+                        sp["origin"]
+                        + (sp["shape"] - 1) * sp["spacing"]
+                        - combined_stack_props["origin"]
+                    )
+                    / combined_stack_props["spacing"]
+                    + 1e-9
                 )
-                / combined_stack_props["spacing"]
-            )
-            for sp in stack_props_list
-        ],
-        axis=0,
-    ).astype(np.uint64)
+                for sp in stack_props_list
+            ],
+            axis=0,
+        ).astype(np.uint64)
+        + 1
+    )
 
     return combined_stack_props
 
@@ -1911,9 +1915,9 @@ def get_transformed_stack_vertices(
         (len(stack_properties_list), len(stack_keypoints), ndim)
     )
     for iim, sp in enumerate(stack_properties_list):
-        tmp_vertices = stack_keypoints * np.array(sp["shape"]) * np.array(
-            sp["spacing"]
-        ) + np.array(sp["origin"])
+        tmp_vertices = stack_keypoints * (
+            np.array(sp["shape"]) - 1
+        ) * np.array(sp["spacing"]) + np.array(sp["origin"])
         tmp_vertices_transformed = (
             np.dot(params[iim][:ndim, :ndim], tmp_vertices.T).T
             + params[iim][:ndim, ndim]
@@ -1931,7 +1935,10 @@ def calc_stack_properties_from_volume(volume, spacing):
     """
 
     origin = volume[0]
-    shape = np.ceil((volume[1] - volume[0]) / spacing).astype(np.uint64)
+    shape = (
+        np.floor((volume[1] - volume[0]) / spacing + 1e-9).astype(np.uint64)
+        + 1
+    )
 
     properties_dict = {}
     properties_dict["shape"] = shape
