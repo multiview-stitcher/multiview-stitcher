@@ -744,24 +744,9 @@ def correct_multiscale_origins(msim):
     return msim
 
 
-def _combined_msim_from_scale_sims(scale_sims):
-    """Assemble an msim DataTree from combined per-scale sims.
-
-    Each combined sim carries its transforms in ``attrs["transforms"]``; these
-    are re-attached as data_vars per scale (mirroring ``get_msim_from_sim``).
-    """
-    msim = DataTree.from_dict(
-        {sk: _sim_to_dataset(sim) for sk, sim in scale_sims.items()}
-    )
-    for sk, sim in scale_sims.items():
-        for transform_key, transform in sim.attrs.get("transforms", {}).items():
-            msim[sk][transform_key] = transform
-    return msim
-
-
 def _scale_sims_concatable(scale_sims, dim):
     """True when every scale can be concatenated lazily along ``dim`` in zarr."""
-    for sims in scale_sims.values():
+    for sims in scale_sims:
         if not (len(sims) > 1 and dim in sims[0].dims):
             return False
         if not si_utils._zarr_backed_combine_applicable(sims):
@@ -783,16 +768,16 @@ def concat(msims, concat_kwargs={}, dim='c'):
     # ``dim`` (always so for chunk-size-1 axes such as ``c``/``t``), combine each
     # scale's image via the zarr-aware si_utils.concat so the result stays
     # zarr-backed instead of being materialized by the dataset-level xr.concat.
-    scale_sims = {
-        sk: [get_sim_from_msim(msim, scale=sk) for msim in msims]
+    # The combined per-scale sims are resolution levels of the combined image,
+    # so get_msim_from_sims reassembles them into a DataTree (keeping the lazy
+    # zarr backing and propagating the transforms).
+    scale_sims = [
+        [get_sim_from_msim(msim, scale=sk) for msim in msims]
         for sk in scale_keys
-    }
+    ]
     if scale_keys and _scale_sims_concatable(scale_sims, dim):
-        return _combined_msim_from_scale_sims(
-            {
-                sk: si_utils.concat(sims, dim=dim)
-                for sk, sims in scale_sims.items()
-            }
+        return get_msim_from_sims(
+            [si_utils.concat(sims, dim=dim) for sims in scale_sims]
         )
 
     with xr.set_options(keep_attrs=True):
@@ -812,13 +797,14 @@ def stack(msims, dim="t"):
 
     Each scale is stacked via the zarr-aware :func:`si_utils.stack`, so a stack
     of zarr-backed msims stays lazily zarr-backed (new axis with chunk size 1).
+    The stacked per-scale sims are reassembled with get_msim_from_sims.
     """
     msims = list(msims)
     scale_keys = get_sorted_scale_keys(msims[0])
-    scale_sims = {
-        sk: [get_sim_from_msim(msim, scale=sk) for msim in msims]
+    scale_sims = [
+        [get_sim_from_msim(msim, scale=sk) for msim in msims]
         for sk in scale_keys
-    }
-    return _combined_msim_from_scale_sims(
-        {sk: si_utils.stack(sims, dim=dim) for sk, sims in scale_sims.items()}
+    ]
+    return get_msim_from_sims(
+        [si_utils.stack(sims, dim=dim) for sims in scale_sims]
     )
