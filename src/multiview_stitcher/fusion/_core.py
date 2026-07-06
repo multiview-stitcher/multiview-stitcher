@@ -352,19 +352,17 @@ def _is_grid_aligned(offset, spacing, tol=1e-6):
     return np.isclose(pixel_offset, np.round(pixel_offset), atol=tol)
 
 
-def _get_fixed_spatial_dims(
+def _get_axis_aligned_translation_dims(
     sparams,
-    views_bb,
-    output_stack_properties,
     sdims,
     tol=1e-6,
 ):
-    """Return spatial dims that are axis-aligned, unscaled, and grid-aligned."""
-    fix_dims = []
+    """Return spatial dims that are unaffected except for translation."""
+    axis_aligned_dims = []
 
     for dim in sdims:
         other_dims = [odim for odim in sdims if odim != dim]
-        dim_is_fixed = True
+        dim_is_axis_aligned = True
 
         for param in sparams:
             if not np.isclose(
@@ -372,7 +370,7 @@ def _get_fixed_spatial_dims(
                 1,
                 atol=tol,
             ):
-                dim_is_fixed = False
+                dim_is_axis_aligned = False
                 break
 
             if any(
@@ -383,7 +381,7 @@ def _get_fixed_spatial_dims(
                 )
                 for other_dim in other_dims
             ):
-                dim_is_fixed = False
+                dim_is_axis_aligned = False
                 break
 
             if any(
@@ -394,19 +392,34 @@ def _get_fixed_spatial_dims(
                 )
                 for other_dim in other_dims
             ):
-                dim_is_fixed = False
+                dim_is_axis_aligned = False
                 break
 
-            translation = float(param.sel(x_in=dim, x_out="1"))
-            if not _is_grid_aligned(
-                output_stack_properties["origin"][dim] - translation,
-                output_stack_properties["spacing"][dim],
-                tol=tol,
-            ):
-                dim_is_fixed = False
-                break
+        if dim_is_axis_aligned:
+            axis_aligned_dims.append(dim)
 
-        if not dim_is_fixed:
+    return axis_aligned_dims
+
+
+def _get_grid_aligned_translation_dims(
+    sparams,
+    views_bb,
+    output_stack_properties,
+    sdims,
+    tol=1e-6,
+):
+    """Return translation-only dims whose source pixels align to output pixels."""
+    axis_aligned_dims = set(
+        _get_axis_aligned_translation_dims(
+            sparams=sparams,
+            sdims=sdims,
+            tol=tol,
+        )
+    )
+    grid_aligned_dims = []
+
+    for dim in sdims:
+        if dim not in axis_aligned_dims:
             continue
 
         if any(
@@ -419,9 +432,23 @@ def _get_fixed_spatial_dims(
         ):
             continue
 
-        fix_dims.append(dim)
+        dim_is_grid_aligned = True
+        for iview, param in enumerate(sparams):
+            translation = float(param.sel(x_in=dim, x_out="1"))
+            if not _is_grid_aligned(
+                output_stack_properties["origin"][dim]
+                - translation
+                - views_bb[iview]["origin"][dim],
+                views_bb[iview]["spacing"][dim],
+                tol=tol,
+            ):
+                dim_is_grid_aligned = False
+                break
 
-    return fix_dims
+        if dim_is_grid_aligned:
+            grid_aligned_dims.append(dim)
+
+    return grid_aligned_dims
 
 
 def _get_axis_aligned_translation_overlap(
@@ -429,36 +456,61 @@ def _get_axis_aligned_translation_overlap(
     query_bb,
     param,
     sdims,
+    additional_extent_in_pixels=None,
     tol=1e-6,
 ):
     """
-    Return overlap in query coordinates for grid-aligned translation transforms.
+    Return overlap in query coordinates for axis-aligned translations.
 
-    This is equivalent to the translation-only case of
-    ``mv_graph.get_overlap_for_bbs`` but uses integer slice arithmetic instead
-    of back-projecting corners and intersecting floating-point bounding boxes.
+    The returned bounding box is an integer source-pixel window covering the
+    output chunk back-projected into query coordinates. For fractional
+    translations this deliberately over-reads enough source pixels for the
+    later interpolation step in ``fuse_np``.
     """
+    if additional_extent_in_pixels is None:
+        additional_extent_in_pixels = {dim: 0 for dim in sdims}
+
     overlap_origin = {}
     overlap_shape = {}
 
     for dim in sdims:
-        spacing = query_bb["spacing"][dim]
+        query_spacing = query_bb["spacing"][dim]
+        target_spacing = target_bb["spacing"][dim]
         translation = float(param.sel(x_in=dim, x_out="1"))
-        start_float = (
-            target_bb["origin"][dim] - translation - query_bb["origin"][dim]
-        ) / spacing
-        start = int(np.round(start_float))
-        if not np.isclose(start_float, start, atol=tol):
-            return None
 
-        stop = start + int(target_bb["shape"][dim])
+        query_min = target_bb["origin"][dim] - translation
+        query_max = (
+            target_bb["origin"][dim]
+            + (int(target_bb["shape"][dim]) - 1) * target_spacing
+            - translation
+        )
+        query_min, query_max = sorted((query_min, query_max))
+
+        additional_extent = (
+            additional_extent_in_pixels[dim] * query_spacing
+        )
+        start_float = (
+            query_min
+            - additional_extent
+            - query_bb["origin"][dim]
+        ) / query_spacing
+        stop_float = (
+            query_max
+            + additional_extent
+            - query_bb["origin"][dim]
+        ) / query_spacing
+
+        start = int(np.floor(start_float + tol))
+        stop = int(np.ceil(stop_float - tol)) + 1
         overlap_start = max(start, 0)
         overlap_stop = min(stop, int(query_bb["shape"][dim]))
 
         if overlap_start >= overlap_stop:
             return None
 
-        overlap_origin[dim] = query_bb["origin"][dim] + overlap_start * spacing
+        overlap_origin[dim] = (
+            query_bb["origin"][dim] + overlap_start * query_spacing
+        )
         overlap_shape[dim] = overlap_stop - overlap_start
 
     return {
@@ -483,13 +535,19 @@ def _build_spatial_fusion_plan(
     interpolation_order,
     sdims,
 ):
-    fix_dims = _get_fixed_spatial_dims(
+    axis_aligned_translation_dims = _get_axis_aligned_translation_dims(
+        sparams=sparams,
+        sdims=sdims,
+    )
+    grid_aligned_translation_dims = _get_grid_aligned_translation_dims(
         sparams=sparams,
         views_bb=views_bb,
         output_stack_properties=output_stack_properties,
         sdims=sdims,
     )
-    use_axis_aligned_translation = set(fix_dims) == set(sdims)
+    use_axis_aligned_translation = (
+        set(axis_aligned_translation_dims) == set(sdims)
+    )
 
     inv_sparams = None
     if not use_axis_aligned_translation:
@@ -526,20 +584,25 @@ def _build_spatial_fusion_plan(
     _osp_spacing = np.array(
         [output_stack_properties["spacing"][dim] for dim in sdims]
     )
-    # Physical padding: interpolation extent + chunk overlap added to output chunks
-    _additional_extent_pixels = np.array(
-        [
-            0.0 if dim in fix_dims else float(interpolation_order)
-            for dim in sdims
-        ]
-    )
-    _padding_phys = (
-        _additional_extent_pixels * _osp_spacing
-        + np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
+    _overlap_padding_phys = (
+        np.array([overlap_in_pixels[dim] for dim in sdims]) * _osp_spacing
     )
 
     _chunk_to_tiles: dict = {}
     for iview in range(len(sparams)):
+        _interpolation_padding_phys = np.array(
+            [
+                (
+                    0.0
+                    if dim in grid_aligned_translation_dims
+                    else float(interpolation_order)
+                    * views_bb[iview]["spacing"][dim]
+                )
+                for dim in sdims
+            ]
+        )
+        _padding_phys = _interpolation_padding_phys + _overlap_padding_phys
+
         # Forward-project tile corners through the affine to get its AABB
         # in output (world) space.
         tile_corners_output = transformation.transform_pts(
@@ -575,7 +638,11 @@ def _build_spatial_fusion_plan(
     # fusion paths. For each output chunk, determine which tiles truly
     # overlap and store their tile-slice bounding boxes.
     additional_extent = {
-        dim: 0 if dim in fix_dims else int(interpolation_order)
+        dim: (
+            0
+            if dim in grid_aligned_translation_dims
+            else int(interpolation_order)
+        )
         for dim in sdims
     }
 
@@ -599,6 +666,7 @@ def _build_spatial_fusion_plan(
                     query_bb=views_bb[iview],
                     param=sparams[iview],
                     sdims=sdims,
+                    additional_extent_in_pixels=additional_extent,
                 )
             else:
                 overlap = mv_graph.get_overlap_for_bbs(
@@ -611,7 +679,7 @@ def _build_spatial_fusion_plan(
             if overlap is not None:
                 chunk_views.append((iview, overlap))
         fuse_planewise = (
-            "z" in fix_dims
+            "z" in grid_aligned_translation_dims
             and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
         )
         per_chunk_entries.append(
@@ -626,7 +694,9 @@ def _build_spatial_fusion_plan(
 
     return {
         "sparams": sparams,
-        "fix_dims": fix_dims,
+        "fix_dims": grid_aligned_translation_dims,
+        "axis_aligned_translation_dims": axis_aligned_translation_dims,
+        "grid_aligned_translation_dims": grid_aligned_translation_dims,
         "per_chunk_entries": per_chunk_entries,
         "uses_axis_aligned_translation": use_axis_aligned_translation,
     }

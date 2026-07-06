@@ -657,6 +657,54 @@ def test_fuse_msims_to_ome_zarr_returns_msim():
         assert np.max(fused["scale0/image"].data.compute()) == 2
 
 
+def test_fuse_msims_with_fractional_intrinsic_translation(monkeypatch):
+    def fail_generic_overlap(*args, **kwargs):
+        raise AssertionError(
+            "fractional translations should use the translation overlap path"
+        )
+
+    monkeypatch.setattr(
+        fusion_core.mv_graph,
+        "get_overlap_for_bbs",
+        fail_generic_overlap,
+    )
+
+    a = 8.5
+    tile_translations = [
+        {"y": 0, "x": 0},
+        {"y": a, "x": 0},
+        {"y": 0, "x": a},
+        {"y": a, "x": a},
+    ]
+    tile_arrays = [
+        np.full((2, 10, 10), iview + 1, dtype=np.uint16)
+        for iview in range(len(tile_translations))
+    ]
+
+    msims = []
+    for tile_array, tile_translation in zip(tile_arrays, tile_translations):
+        sim = si_utils.get_sim_from_array(
+            tile_array,
+            dims=["c", "y", "x"],
+            scale={"y": 1, "x": 1},
+            translation=tile_translation,
+            transform_key=METADATA_TRANSFORM_KEY,
+            c_coords=["DAPI", "GFP"],
+        )
+        msims.append(msi_utils.get_msim_from_sim(sim, scale_factors=[]))
+
+    fused_msim = fusion.fuse(
+        images=msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        output_chunksize={"y": 5, "x": 5},
+    )
+    fused = msi_utils.get_sim_from_msim(fused_msim, scale="scale0")
+
+    assert fused.sizes["y"] == 19
+    assert fused.sizes["x"] == 19
+    assert np.max(fused.data.compute()) == 4
+
+
 @pytest.mark.parametrize("ome_zarr", [False, True])
 def test_fuse_sims_to_zarr_returns_sim(ome_zarr):
     sim = msi_utils.get_sim_from_msim(_make_distinct_level_msim())
