@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import zarr
+import tifffile
 from tqdm import tqdm
 
 # aicsimageio is optional
@@ -254,6 +254,8 @@ def read_tiff_into_spatial_xarray(
     affine_transform: Optional[Union[np.ndarray, list]] = None,
     dims: Optional[Union[list, tuple]] = None,
     channel_names: Optional[Union[list, tuple]] = None,
+    transform_key: Optional[str] = METADATA_TRANSFORM_KEY,
+    backend="dask",
 ):
     """
     Read tiff file into spatial image.
@@ -278,11 +280,20 @@ def read_tiff_into_spatial_xarray(
     -------
     SpatialImage (multiview-stitcher flavor)
     """
-    from tifffile import TiffFile
+    
 
-    with TiffFile(filename) as tif:
-        data = tif.asarray()
-        axes = tif.series[0].axes
+    if backend == "numpy":
+        data = tifffile.imread(filename)
+    elif backend == "dask":
+        from multiview_stitcher.tif_utils import tif_to_dask_plane_chunks
+        data = tif_to_dask_plane_chunks(filename)
+    elif backend == "zarr":
+        from multiview_stitcher.tif_utils import tif_to_virtual_zarr_v3_page_chunks
+        data, _ = tif_to_virtual_zarr_v3_page_chunks(filename)
+
+    from tifffile import TiffFile
+    with tifffile.TiffFile(filename) as tif:
+        axes = tif.series[0].axes.replace("I", "Z")
 
     if dims is None:
         # infer from metadata
@@ -294,7 +305,7 @@ def read_tiff_into_spatial_xarray(
         scale=scale,
         translation=translation,
         affine=affine_transform,
-        transform_key=METADATA_TRANSFORM_KEY,
+        transform_key=transform_key,
         c_coords=channel_names,
     )
 
