@@ -52,6 +52,44 @@ def test_sim_zarr_array_input_backend_is_preserved():
         assert isinstance(sim_slice.data, da.Array)
 
 
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_get_sim_from_array_supports_zarr_v2_and_v3(zarr_format):
+    """A sim can be built from both zarr v2 (OME-Zarr 0.4) and v3 arrays,
+    including the singleton t/c expansion path (2D input -> t,c,y,x)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        kwargs = (
+            {"dimension_separator": "/"} if zarr_format == 2 else {}
+        )
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(8, 8),
+            chunks=(4, 4),
+            dtype=np.uint16,
+            zarr_format=zarr_format,
+            **kwargs,
+        )
+        zarray[:] = zarr_format
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+        )
+
+        # Singleton t/c added via the virtual layer -> real, dims-matching array
+        # whose format mirrors the source (v2 stays v2, v3 stays v3).
+        assert list(sim.dims) == ["t", "c", "y", "x"]
+        assert si_utils.is_xarray_zarr_backed(sim)
+        backing = si_utils._get_xarray_zarr_array(sim)
+        assert backing.ndim == sim.ndim
+        assert backing.metadata.zarr_format == zarr_format
+        np.testing.assert_array_equal(
+            np.asarray(sim.isel(t=0, c=0).data), np.full((8, 8), zarr_format)
+        )
+
+
 def test_sim_zarr_array_html_repr_reuses_zarr_repr():
     with tempfile.TemporaryDirectory() as tmpdir:
         zarray = zarr.open_array(
