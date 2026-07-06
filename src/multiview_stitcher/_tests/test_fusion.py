@@ -658,6 +658,9 @@ def test_fuse_msims_to_ome_zarr_returns_msim():
 
 
 def test_fuse_msims_with_fractional_intrinsic_translation(monkeypatch):
+    # Fractional translations are still axis-aligned translations, so they
+    # should use the translation overlap planner rather than the generic affine
+    # overlap code.
     def fail_generic_overlap(*args, **kwargs):
         raise AssertionError(
             "fractional translations should use the translation overlap path"
@@ -702,6 +705,9 @@ def test_fuse_msims_with_fractional_intrinsic_translation(monkeypatch):
 
     fused_data = fused.data.compute()
 
+    # The last valid tile center is at 17.5, so an output grid with origin 0
+    # and spacing 1 should stop at center 17 and not create an empty border at
+    # center 18.
     assert fused.sizes["y"] == 18
     assert fused.sizes["x"] == 18
     assert np.max(fused_data) == 4

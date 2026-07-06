@@ -365,6 +365,8 @@ def _get_axis_aligned_translation_dims(
         dim_is_axis_aligned = True
 
         for param in sparams:
+            # A translation-only dimension keeps its own scale at 1 and has no
+            # cross-axis terms in either direction.
             if not np.isclose(
                 float(param.sel(x_in=dim, x_out=dim)),
                 1,
@@ -422,6 +424,8 @@ def _get_grid_aligned_translation_dims(
         if dim not in axis_aligned_dims:
             continue
 
+        # Grid alignment is only meaningful when source and output pixels have
+        # the same spacing along this dimension.
         if any(
             not np.isclose(
                 output_stack_properties["spacing"][dim],
@@ -435,6 +439,9 @@ def _get_grid_aligned_translation_dims(
         dim_is_grid_aligned = True
         for iview, param in enumerate(sparams):
             translation = float(param.sel(x_in=dim, x_out="1"))
+            # After applying the translation, the output origin must land on a
+            # source pixel center. Fractional translations intentionally fail
+            # this stricter check but remain axis-aligned translations.
             if not _is_grid_aligned(
                 output_stack_properties["origin"][dim]
                 - translation
@@ -478,6 +485,9 @@ def _get_axis_aligned_translation_overlap(
         target_spacing = target_bb["spacing"][dim]
         translation = float(param.sel(x_in=dim, x_out="1"))
 
+        # Back-project the output pixel-center range into query coordinates.
+        # target_bb["shape"] counts centers, so the last sampled center is
+        # origin + (shape - 1) * spacing.
         query_min = target_bb["origin"][dim] - translation
         query_max = (
             target_bb["origin"][dim]
@@ -500,6 +510,8 @@ def _get_axis_aligned_translation_overlap(
             - query_bb["origin"][dim]
         ) / query_spacing
 
+        # Fractional translations need a covering integer source window; the
+        # resampling in fuse_np handles the subpixel offset later.
         start = int(np.floor(start_float + tol))
         stop = int(np.ceil(stop_float - tol)) + 1
         overlap_start = max(start, 0)
@@ -545,6 +557,9 @@ def _build_spatial_fusion_plan(
         output_stack_properties=output_stack_properties,
         sdims=sdims,
     )
+    # Axis-aligned translations can use a cheap overlap planner even when they
+    # are fractional. Grid-aligned dims are a stricter subset where no
+    # interpolation padding is needed.
     use_axis_aligned_translation = (
         set(axis_aligned_translation_dims) == set(sdims)
     )
@@ -590,6 +605,8 @@ def _build_spatial_fusion_plan(
 
     _chunk_to_tiles: dict = {}
     for iview in range(len(sparams)):
+        # Fractional translation dims still use the translation overlap path,
+        # but need interpolation support pixels around the source window.
         _interpolation_padding_phys = np.array(
             [
                 (
@@ -637,6 +654,8 @@ def _build_spatial_fusion_plan(
     # Pre-compute per-chunk relevant-view data once and reuse it in both
     # fusion paths. For each output chunk, determine which tiles truly
     # overlap and store their tile-slice bounding boxes.
+    # The extent is passed in source pixels; grid-aligned dims can use exact
+    # integer slices, while fractional dims need interpolation support.
     additional_extent = {
         dim: (
             0
@@ -1885,6 +1904,9 @@ def combine_stack_props(stack_props_list):
     combined_stack_props["spacing"] = np.min(
         [sp["spacing"] for sp in stack_props_list], axis=0
     )
+    # Stack bounds are expressed in pixel-center coordinates. The last valid
+    # center is origin + (shape - 1) * spacing; using shape * spacing would add
+    # an empty trailing output row/column for fractional translations.
     combined_stack_props["shape"] = (
         np.max(
             [
@@ -1915,6 +1937,9 @@ def get_transformed_stack_vertices(
         (len(stack_properties_list), len(stack_keypoints), ndim)
     )
     for iim, sp in enumerate(stack_properties_list):
+        # stack_keypoints are 0/1 corner selectors over pixel centers, not over
+        # outer pixel edges. This keeps output stack sizing consistent with the
+        # coordinates sampled by transform_sim.
         tmp_vertices = stack_keypoints * (
             np.array(sp["shape"]) - 1
         ) * np.array(sp["spacing"]) + np.array(sp["origin"])
@@ -1935,6 +1960,8 @@ def calc_stack_properties_from_volume(volume, spacing):
     """
 
     origin = volume[0]
+    # Convert a pixel-center extent back to a count of sampled centers. The
+    # small epsilon keeps values such as 17.999999999 from losing one pixel.
     shape = (
         np.floor((volume[1] - volume[0]) / spacing + 1e-9).astype(np.uint64)
         + 1
