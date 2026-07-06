@@ -288,7 +288,11 @@ def test_read_msim_from_ome_zarr_backends():
 
         for scale_key in msi_utils.get_sorted_scale_keys(msim_zarr):
             sim_scale = msi_utils.get_sim_from_msim(msim_zarr, scale=scale_key)
-            assert sim_scale.attrs.get("_zarr_chunks") is not None
+            # Chunk hints now live in xarray encoding (single source of truth),
+            # keyed and ordered by the backing zarr array's axes.
+            preferred_chunks = sim_scale.encoding.get("preferred_chunks")
+            assert preferred_chunks is not None
+            assert tuple(preferred_chunks) == tuple(sim_scale.dims)
 
 
 def test_virtual_ome_zarr_metadata_and_numpy_chunk():

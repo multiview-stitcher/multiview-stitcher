@@ -11,6 +11,7 @@ from xarray.backends import BackendArray
 from xarray.core import indexing
 
 from multiview_stitcher import param_utils
+from multiview_stitcher import zarr_utils
 
 DEFAULT_TRANSFORM_KEY = "affine_metadata"
 
@@ -92,62 +93,6 @@ class ZarrReprLazilyIndexedArray(indexing.LazilyIndexedArray):
         return text[: max_width - 3] + "..."
 
 
-class SingletonExpandedBackendArray(BackendArray):
-    # xarray.expand_dims materializes some backend arrays. This wrapper presents
-    # leading singleton axes virtually, so we can add missing t/c dims without
-    # touching the underlying zarr-backed payload.
-    def __init__(self, array, singleton_axes):
-        self.array = array
-        self.singleton_axes = tuple(singleton_axes)
-        self.dtype = np.dtype(array.dtype)
-
-        inner_shape = iter(array.shape)
-        self.shape = tuple(
-            1 if axis in self.singleton_axes else next(inner_shape)
-            for axis in range(len(array.shape) + len(self.singleton_axes))
-        )
-
-    def _raw_indexing_method(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        key = key + (slice(None),) * (len(self.shape) - len(key))
-
-        inner_key = []
-        expand_axes = []
-        output_axis = 0
-
-        for axis, item in enumerate(key):
-            if axis in self.singleton_axes:
-                if not isinstance(item, (int, np.integer)):
-                    expand_axes.append(output_axis)
-                    output_axis += 1
-                continue
-
-            inner_key.append(item)
-            if not isinstance(item, (int, np.integer)):
-                output_axis += 1
-
-        inner_key = tuple(inner_key)
-        if hasattr(self.array, "_updated_key"):
-            result = np.asarray(self.array[indexing.BasicIndexer(inner_key)])
-        else:
-            result = np.asarray(self.array[inner_key])
-
-        for axis in expand_axes:
-            result = np.expand_dims(result, axis=axis)
-
-        return result
-
-    def __getitem__(self, key):
-        return indexing.explicit_indexing_adapter(
-            key,
-            self.shape,
-            indexing.IndexingSupport.BASIC,
-            self._raw_indexing_method,
-        )
-
-
 def _zarr_array_to_dataarray(
     zarray,
     dims,
@@ -167,11 +112,14 @@ def _zarr_array_to_dataarray(
         attrs=var_attrs,
     )
     xim = xr.DataArray(var, coords=coords, name=name)
-    xim.attrs["_zarr_dims"] = tuple(dims)
 
+    # Chunk hints live only in xarray encoding; they are keyed and ordered by the
+    # backing zarr array's axes, which - thanks to the virtual-transform layer -
+    # always match the DataArray dims 1:1. This is the single source of truth for
+    # both the preferred dask chunking and the backing-zarr dimension order (see
+    # _get_backing_zarr_dims), so no dim/chunk bookkeeping is stored in attrs.
     zchunks = getattr(zarray, "chunks", None)
     if zchunks is not None:
-        xim.attrs["_zarr_chunks"] = tuple(zchunks)
         xim.encoding["preferred_chunks"] = {
             dim: chunk for dim, chunk in zip(dims, zchunks)
         }
@@ -296,11 +244,13 @@ def _get_preferred_chunks(xim):
     preferred_chunks = xim.encoding.get("preferred_chunks")
 
     if preferred_chunks is None:
-        zarr_chunks = xim.attrs.get("_zarr_chunks")
-        if zarr_chunks is not None:
-            preferred_chunks = {
-                dim: chunk for dim, chunk in zip(xim.dims, zarr_chunks)
-            }
+        # Recover chunk hints directly from the backing zarr array when the
+        # encoding was dropped by some xarray operation. This only works when the
+        # zarr array's axes still match the DataArray dims 1:1, which the virtual
+        # transform layer guarantees for freshly combined/expanded sims.
+        zarr_array = _get_xarray_zarr_array(xim)
+        if zarr_array is not None and zarr_array.ndim == xim.ndim:
+            preferred_chunks = dict(zip(xim.dims, zarr_array.chunks))
 
     if preferred_chunks is None:
         spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
@@ -319,33 +269,22 @@ def _get_preferred_chunks(xim):
 
 def _expand_with_singleton_dims_lazily(xim, missing_dims):
     """Add leading singleton dims without materializing the zarr-backed data."""
-    # Add missing non-spatial dims without forcing xarray to realize the zarr
-    # backend; registration/fusion convert to dask only after slicing.
-    backend = SingletonExpandedBackendArray(
-        _get_backend_data(xim),
-        singleton_axes=tuple(range(len(missing_dims))),
-    )
-    lazy_data = ZarrReprLazilyIndexedArray(backend)
+    # Build a *real* expanded zarr array (one leading singleton axis per missing
+    # dim) via the virtual-transform layer, then wrap it as a zarr-backed
+    # DataArray. The result therefore wraps exactly one zarr.Array whose axes
+    # match its dims 1:1 - no generic array-like shim and no bookkeeping attrs.
+    zarray = _get_xarray_zarr_array(xim)
+    expanded_zarray = zarr_utils.virtual_expand_dims(zarray, len(missing_dims))
+
     dims = tuple(missing_dims) + tuple(xim.dims)
-    expanded = xr.DataArray(
-        xr.Variable(dims, lazy_data, attrs=dict(xim.attrs)),
-        coords={dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims},
+    coords = {dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims}
+    return _zarr_array_to_dataarray(
+        expanded_zarray,
+        dims=dims,
+        coords=coords,
         name=xim.name,
+        attrs=xim.attrs,
     )
-
-    preferred_chunks = dict(xim.encoding.get("preferred_chunks", {}))
-    preferred_chunks.update({dim: 1 for dim in missing_dims})
-    if preferred_chunks:
-        expanded.encoding["preferred_chunks"] = {
-            dim: preferred_chunks[dim]
-            for dim in expanded.dims
-            if dim in preferred_chunks
-        }
-
-    if "_zarr_chunks" in xim.attrs:
-        expanded.attrs["_zarr_chunks"] = xim.attrs["_zarr_chunks"]
-
-    return expanded
 
 
 def ensure_dask_backed_dataarray(xim):
@@ -361,16 +300,15 @@ def ensure_dask_backed_dataarray(xim):
 
 
 def _copy_chunk_hints(source, target):
-    """Copy chunking and backing-zarr metadata between DataArrays."""
+    """Copy chunk hints (xarray encoding) between DataArrays.
+
+    ``to_spatial_image`` rebuilds a fresh DataArray from the raw variable data,
+    which drops encoding; re-attach the preferred chunk sizes so the backing-zarr
+    dimension order and dask chunking survive.
+    """
     preferred_chunks = source.encoding.get("preferred_chunks")
     if preferred_chunks is not None:
         target.encoding["preferred_chunks"] = dict(preferred_chunks)
-
-    if "_zarr_chunks" in source.attrs:
-        target.attrs["_zarr_chunks"] = source.attrs["_zarr_chunks"]
-
-    if "_zarr_dims" in source.attrs:
-        target.attrs["_zarr_dims"] = tuple(source.attrs["_zarr_dims"])
 
 
 def _get_axis_coords(dim, size, scale, translation):
@@ -544,8 +482,11 @@ def get_sim_from_array(
     nsdims = ["c", "t"]
     missing_nsdims = [nsdim for nsdim in reversed(nsdims) if nsdim not in xim.dims]
     if missing_nsdims:
-        if is_xarray_zarr_backed(xim):
-            # Keep missing singleton axes virtual for zarr-backed inputs.
+        backing_zarr = _get_xarray_zarr_array(xim)
+        if backing_zarr is not None and backing_zarr.ndim == xim.ndim:
+            # Keep missing singleton axes virtual for zarr-backed inputs whose
+            # backing array still matches the current dims 1:1 (a prior lazy isel
+            # could break that, in which case we fall through to a plain expand).
             xim = _expand_with_singleton_dims_lazily(xim, missing_nsdims)
         else:
             for nsdim in nsdims:
@@ -645,14 +586,9 @@ def get_spacing_from_sim(sim, asarray=False):
 
 def _get_backing_zarr_dims(sim, zarr_array):
     """Recover the raw zarr dimension order stored on a zarr-backed sim."""
-    zarr_dims = sim.attrs.get("_zarr_dims")
-    if zarr_dims is None:
-        zarr_dims = sim.variable.attrs.get("_zarr_dims")
-    if zarr_dims is not None:
-        zarr_dims = list(zarr_dims)
-        if len(zarr_dims) == zarr_array.ndim:
-            return zarr_dims
-
+    # encoding["preferred_chunks"] is written in backing-zarr axis order at
+    # construction and is preserved across isel/sel/transpose, so its keys are
+    # the source of truth for the backing dimension order.
     preferred_chunks = sim.encoding.get("preferred_chunks", {})
     if len(preferred_chunks) == zarr_array.ndim:
         return list(preferred_chunks)
@@ -1408,12 +1344,105 @@ def combine_attrs_func(x, context=None):
     }
 
 
+def _combine_zarr_backed_sims(sims, dim, new_dim):
+    """Combine zarr-backed sims along ``dim`` while staying zarr-backed.
+
+    The numeric combine is delegated to the dimension-agnostic virtual-transform
+    layer (which returns a real ``zarr.Array``); labelled semantics - dims,
+    coords and transforms - are assembled here so the result mirrors the
+    equivalent ``xr.concat``/stack, only lazily.
+
+    Parameters
+    ----------
+    sims : list of zarr-backed DataArrays sharing everything but ``dim``.
+    dim : combine dimension.
+    new_dim : if True, stack along a *new* dimension ``dim``; otherwise
+        concatenate along the *existing* dimension ``dim``.
+    """
+    zarrays = [_get_xarray_zarr_array(sim) for sim in sims]
+
+    if new_dim:
+        # Place the new axis in canonical (t, c, z, y, x) order without a lazy
+        # transpose, so the backing zarr array keeps matching the dims 1:1.
+        result_dims = tuple(
+            d for d in SPATIAL_IMAGE_DIMS if d in set(sims[0].dims) | {dim}
+        )
+        axis = result_dims.index(dim)
+        combined = zarr_utils.virtual_stack(zarrays, axis=axis)
+        combine_coord = np.arange(len(sims))
+    else:
+        result_dims = tuple(sims[0].dims)
+        axis = result_dims.index(dim)
+        combined = zarr_utils.virtual_concat(zarrays, axis)
+        combine_coord = (
+            np.concatenate(
+                [np.asarray(sim.coords[dim].values) for sim in sims]
+            )
+            if dim in sims[0].coords
+            else None
+        )
+
+    # Concatenated coord along the combine dim; every other coord from sims[0].
+    coords = {}
+    for d in result_dims:
+        if d == dim:
+            if combine_coord is not None:
+                coords[d] = combine_coord
+        elif d in sims[0].coords:
+            coords[d] = sims[0].coords[d].values
+
+    result = _zarr_array_to_dataarray(
+        combined, dims=result_dims, coords=coords, name=sims[0].name
+    )
+
+    # Combine transforms so fusion's per-coordinate param selection resolves for
+    # the combined sim:
+    #  - stacking a new dim, or concatenating a dim the transform already tracks:
+    #    concat the transforms along that dim (sizes line up) and align coords;
+    #  - concatenating a dim the transform does not track (e.g. channels of one
+    #    view): the transform is shared, so keep it as-is.
+    transforms = {}
+    for transform_key in sims[0].attrs.get("transforms", {}):
+        parts = [sim.attrs["transforms"][transform_key] for sim in sims]
+        if new_dim or dim in parts[0].dims:
+            combined_tf = xr.concat(parts, dim=dim)
+            if (
+                combine_coord is not None
+                and dim in combined_tf.dims
+                and combined_tf.sizes[dim] == len(combine_coord)
+            ):
+                combined_tf = combined_tf.assign_coords({dim: combine_coord})
+        else:
+            combined_tf = parts[0]
+        transforms[transform_key] = combined_tf
+    if transforms:
+        result.attrs["transforms"] = transforms
+
+    return result
+
+
+def _zarr_backed_combine_applicable(sims):
+    """True when every sim wraps a real zarr array matching its dims 1:1."""
+    for sim in sims:
+        if not is_xarray_zarr_backed(sim):
+            return False
+        zarr_array = _get_xarray_zarr_array(sim)
+        if zarr_array is None or zarr_array.ndim != sim.ndim:
+            return False
+    return True
+
+
 def concat(sims, dim, **kwargs):
     """
     Concatenate multiview-stitcher flavoured SpatialImages.
 
     Same as xr.concat but with handling of
     transform_keys in attributes.
+
+    When all inputs are zarr-backed and the concatenation is chunk-aligned along
+    ``dim`` (always the case for chunk-size-1 axes such as ``c``/``t``), the
+    result is produced lazily via the virtual-transform layer and stays
+    zarr-backed; otherwise it falls back to the eager ``xr.concat`` path.
 
     Parameters
     ----------
@@ -1422,8 +1451,65 @@ def concat(sims, dim, **kwargs):
     dim : str
         dim to concatenate over
     """
+    sims = list(sims)
+    if (
+        len(sims) > 1
+        and dim in sims[0].dims
+        and _zarr_backed_combine_applicable(sims)
+    ):
+        axis = list(sims[0].dims).index(dim)
+        zarrays = [_get_xarray_zarr_array(sim) for sim in sims]
+        if zarr_utils.is_chunk_aligned_concat(zarrays, axis):
+            return _combine_zarr_backed_sims(sims, dim, new_dim=False)
 
     return xr.concat(sims, dim=dim, combine_attrs=combine_attrs_func, **kwargs)
+
+
+def stack(sims, dim="t", coords=None):
+    """
+    Stack multiview-stitcher flavoured SpatialImages along a new dimension.
+
+    When all inputs are zarr-backed, the stack is produced lazily via the
+    virtual-transform layer (new axis with chunk size 1) and stays zarr-backed;
+    otherwise it falls back to an eager ``xr.concat`` on a new dimension.
+
+    Parameters
+    ----------
+    sims : sequence of xarray.DataArray
+        multiview-stitcher flavor spatial images, sharing all dims/coords.
+    dim : str, optional
+        Name of the new dimension to create, by default "t".
+    coords : array-like, optional
+        Coordinate values for the new dimension. Defaults to ``range(len(sims))``.
+    """
+    sims = list(sims)
+    if dim in sims[0].dims:
+        raise ValueError(
+            f"Cannot stack along existing dimension {dim!r}; use concat instead."
+        )
+
+    zarrays = (
+        [_get_xarray_zarr_array(sim) for sim in sims]
+        if _zarr_backed_combine_applicable(sims)
+        else None
+    )
+    if zarrays is not None and zarr_utils.is_stackable(zarrays):
+        result = _combine_zarr_backed_sims(sims, dim, new_dim=True)
+    else:
+        # Eager fallback for non-zarr or incompatible (mismatched shape/chunks/
+        # codecs) inputs: create the new dim and concat, then order canonically.
+        expanded = [sim.expand_dims(dim) for sim in sims]
+        result = xr.concat(
+            expanded, dim=dim, combine_attrs=combine_attrs_func
+        )
+        new_dims = [d for d in SPATIAL_IMAGE_DIMS if d in result.dims]
+        if list(result.dims) != new_dims:
+            result = result.transpose(*new_dims)
+
+    if coords is not None:
+        result = result.assign_coords({dim: np.asarray(coords)})
+
+    return result
 
 
 def combine_by_coords(sims, **kwargs):

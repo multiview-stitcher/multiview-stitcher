@@ -10,6 +10,7 @@ from xarray import DataTree
 
 from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher import zarr_utils
 
 
 def is_msim(image):
@@ -26,13 +27,12 @@ def _chunk_sim(sim, chunks):
 
 
 def _sim_to_dataset(sim):
+    # Strip attrs (transforms are re-attached as data_vars at the msim level).
+    # Chunk hints live in xarray encoding, which survives to_dataset / DataTree,
+    # so no dim/chunk bookkeeping needs to be carried on attrs.
     dataset = sim.to_dataset(name="image")
     dataset.attrs = {}
-    dataset["image"].attrs = {
-        key: copy.deepcopy(dataset["image"].attrs[key])
-        for key in ["_zarr_chunks", "_zarr_dims"]
-        if key in dataset["image"].attrs
-    }
+    dataset["image"].attrs = {}
     return dataset
 
 
@@ -744,8 +744,56 @@ def correct_multiscale_origins(msim):
     return msim
 
 
+def _combined_msim_from_scale_sims(scale_sims):
+    """Assemble an msim DataTree from combined per-scale sims.
+
+    Each combined sim carries its transforms in ``attrs["transforms"]``; these
+    are re-attached as data_vars per scale (mirroring ``get_msim_from_sim``).
+    """
+    msim = DataTree.from_dict(
+        {sk: _sim_to_dataset(sim) for sk, sim in scale_sims.items()}
+    )
+    for sk, sim in scale_sims.items():
+        for transform_key, transform in sim.attrs.get("transforms", {}).items():
+            msim[sk][transform_key] = transform
+    return msim
+
+
+def _scale_sims_concatable(scale_sims, dim):
+    """True when every scale can be concatenated lazily along ``dim`` in zarr."""
+    for sims in scale_sims.values():
+        if not (len(sims) > 1 and dim in sims[0].dims):
+            return False
+        if not si_utils._zarr_backed_combine_applicable(sims):
+            return False
+        axis = list(sims[0].dims).index(dim)
+        zarrays = [si_utils._get_xarray_zarr_array(sim) for sim in sims]
+        if not zarr_utils.is_chunk_aligned_concat(zarrays, axis):
+            return False
+    return True
+
+
 # define a function to combine msims along a given dimension
 def concat(msims, concat_kwargs={}, dim='c'):
+
+    msims = list(msims)
+    scale_keys = get_sorted_scale_keys(msims[0])
+
+    # Lazy fast path: when every scale is zarr-backed and chunk-aligned along
+    # ``dim`` (always so for chunk-size-1 axes such as ``c``/``t``), combine each
+    # scale's image via the zarr-aware si_utils.concat so the result stays
+    # zarr-backed instead of being materialized by the dataset-level xr.concat.
+    scale_sims = {
+        sk: [get_sim_from_msim(msim, scale=sk) for msim in msims]
+        for sk in scale_keys
+    }
+    if scale_keys and _scale_sims_concatable(scale_sims, dim):
+        return _combined_msim_from_scale_sims(
+            {
+                sk: si_utils.concat(sims, dim=dim)
+                for sk, sims in scale_sims.items()
+            }
+        )
 
     with xr.set_options(keep_attrs=True):
         return xr.DataTree.from_dict(
@@ -757,3 +805,20 @@ def concat(msims, concat_kwargs={}, dim='c'):
                 **concat_kwargs)
                 for sk in list(msims)[0].keys()}
         )
+
+
+def stack(msims, dim="t"):
+    """Stack msims along a new dimension ``dim`` (default "t").
+
+    Each scale is stacked via the zarr-aware :func:`si_utils.stack`, so a stack
+    of zarr-backed msims stays lazily zarr-backed (new axis with chunk size 1).
+    """
+    msims = list(msims)
+    scale_keys = get_sorted_scale_keys(msims[0])
+    scale_sims = {
+        sk: [get_sim_from_msim(msim, scale=sk) for msim in msims]
+        for sk in scale_keys
+    }
+    return _combined_msim_from_scale_sims(
+        {sk: si_utils.stack(sims, dim=dim) for sk, sims in scale_sims.items()}
+    )

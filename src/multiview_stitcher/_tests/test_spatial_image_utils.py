@@ -178,7 +178,10 @@ def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
         info = si_utils.serialize_zarr_backed_sim(sim_sel)
         sim2 = si_utils.deserialize_zarr_backed_sim(info)
 
-        assert info["zarr_dims"] == ["c", "y", "x"]
+        # Singleton t expansion now yields a *real* 4D zarr array (t, c, y, x)
+        # whose axes match the sim dims 1:1, so the backing dims include t and
+        # the dropped t/c selections are captured as scalar isel entries.
+        assert info["zarr_dims"] == ["t", "c", "y", "x"]
         assert info["isel_dropped"] == {"t": 0, "c": 0}
         assert list(sim2.dims) == list(sim_sel.dims)
         assert si_utils.is_xarray_zarr_backed(sim2)
@@ -246,6 +249,157 @@ def test_deserialize_zarr_backed_sim_reconstruct_slice_reads_requested_region():
         np.testing.assert_array_equal(np.asarray(sim2.data), data[1, 1, 2:5, 3:5])
         assert sim2.coords["y"].values == pytest.approx([12.0, 13.0, 14.0])
         assert sim2.coords["x"].values == pytest.approx([23.0, 24.0])
+
+
+def _zarr_backed_sim(tmpdir, name, data, dims, chunks, **kwargs):
+    zarray = zarr.open_array(
+        os.path.join(tmpdir, name),
+        mode="w",
+        shape=data.shape,
+        chunks=chunks,
+        dtype=data.dtype,
+    )
+    zarray[:] = data
+    return si_utils.get_sim_from_array(zarray, dims=dims, **kwargs)
+
+
+def test_singleton_expansion_wraps_one_real_zarr_array():
+    """Adding singleton t/c yields a real zarr.Array matching the dims 1:1."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Input has c/y/x only; get_sim_from_array must add a singleton t axis.
+        sim = _zarr_backed_sim(
+            tmpdir,
+            "input.zarr",
+            np.ones((2, 8, 8), dtype=np.uint16),
+            dims=["c", "y", "x"],
+            chunks=(1, 4, 4),
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            c_coords=[0, 1],
+        )
+
+        assert list(sim.dims) == ["t", "c", "y", "x"]
+        assert si_utils.is_xarray_zarr_backed(sim)
+
+        # The backing must be a real zarr.Array (not a shim) whose axes and
+        # chunks match the DataArray dims 1:1 - the core refactor invariant.
+        zarr_array = si_utils._get_xarray_zarr_array(sim)
+        assert isinstance(zarr_array, zarr.Array)
+        assert zarr_array.ndim == sim.ndim
+        assert zarr_array.chunks == (1, 1, 4, 4)
+
+        # No internal dim/chunk bookkeeping is stored in attrs.
+        assert "_zarr_dims" not in sim.attrs
+        assert "_zarr_chunks" not in sim.attrs
+        # Chunk hints live only in encoding, in backing-zarr axis order.
+        assert tuple(sim.encoding["preferred_chunks"]) == ("t", "c", "y", "x")
+
+
+def test_concat_zarr_backed_sims_stays_zarr_backed():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        common = dict(
+            dims=["t", "c", "y", "x"],
+            chunks=(1, 1, 4, 4),
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[0.0],
+        )
+        s0 = _zarr_backed_sim(
+            tmpdir, "a.zarr",
+            np.full((1, 1, 8, 8), 10, np.uint16), c_coords=[0], **common
+        )
+        s1 = _zarr_backed_sim(
+            tmpdir, "b.zarr",
+            np.full((1, 1, 8, 8), 20, np.uint16), c_coords=[1], **common
+        )
+
+        concatenated = si_utils.concat([s0, s1], dim="c")
+
+        assert si_utils.is_xarray_zarr_backed(concatenated)
+        assert concatenated.sizes["c"] == 2
+        assert list(concatenated.coords["c"].values) == [0, 1]
+        # Backing stays a real, dims-matching zarr array.
+        zarr_array = si_utils._get_xarray_zarr_array(concatenated)
+        assert zarr_array.ndim == concatenated.ndim
+        # Data reads back correctly per channel.
+        np.testing.assert_array_equal(
+            np.asarray(concatenated.isel(t=0, c=0).data), np.full((8, 8), 10)
+        )
+        np.testing.assert_array_equal(
+            np.asarray(concatenated.isel(t=0, c=1).data), np.full((8, 8), 20)
+        )
+        # Transforms survive the combine.
+        assert "affine_metadata" in concatenated.attrs["transforms"]
+
+
+def _rank_matched_zarr_sim(tmpdir, name, data, dims, chunks):
+    """Build a zarr-backed sim whose backing zarr matches ``dims`` 1:1.
+
+    The public ``get_sim_from_array`` always auto-adds singleton t/c axes; this
+    helper wires the sim up directly so a genuinely-missing dim remains missing,
+    which is what the new-dimension ``stack`` needs to exercise its zarr path.
+    """
+    zarray = zarr.open_array(
+        os.path.join(tmpdir, name),
+        mode="w", shape=data.shape, chunks=chunks, dtype=data.dtype,
+    )
+    zarray[:] = data
+    xim = si_utils._zarr_array_to_dataarray(zarray, dims=dims)
+    sdims = [d for d in dims if d in si_utils.SPATIAL_DIMS]
+    sim = si_utils.to_spatial_image(
+        xim,
+        dims=dims,
+        scale={d: 1.0 for d in sdims},
+        translation={d: 0.0 for d in sdims},
+        c_coords=[0] if "c" in dims else None,
+    )
+    si_utils._copy_chunk_hints(xim, sim)
+    si_utils.set_sim_affine(
+        sim,
+        param_utils.identity_transform(len(sdims)),
+        transform_key="affine_metadata",
+    )
+    return sim
+
+
+def test_stack_zarr_backed_sims_stays_zarr_backed():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Sims with c/y/x (no t): stacking adds a new leading t axis lazily.
+        sims = [
+            _rank_matched_zarr_sim(
+                tmpdir, f"s{i}.zarr",
+                np.full((1, 8, 8), i + 1, np.uint16),
+                dims=["c", "y", "x"], chunks=(1, 4, 4),
+            )
+            for i in range(3)
+        ]
+
+        stacked = si_utils.stack(sims, dim="t", coords=[0.0, 1.0, 2.0])
+
+        assert list(stacked.dims) == ["t", "c", "y", "x"]
+        assert si_utils.is_xarray_zarr_backed(stacked)
+        # New axis placed canonically without a lazy transpose: backing matches.
+        zarr_array = si_utils._get_xarray_zarr_array(stacked)
+        assert zarr_array.ndim == stacked.ndim
+        assert stacked.sizes["t"] == 3
+        assert list(stacked.coords["t"].values) == [0.0, 1.0, 2.0]
+        for i in range(3):
+            np.testing.assert_array_equal(
+                np.asarray(stacked.isel(t=i, c=0).data), np.full((8, 8), i + 1)
+            )
+        assert "affine_metadata" in stacked.attrs["transforms"]
+
+
+def test_stack_rejects_existing_dim():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sim = _zarr_backed_sim(
+            tmpdir, "a.zarr",
+            np.ones((1, 1, 8, 8), np.uint16),
+            dims=["t", "c", "y", "x"], chunks=(1, 1, 4, 4),
+            scale={"y": 1.0, "x": 1.0}, translation={"y": 0.0, "x": 0.0},
+        )
+        with pytest.raises(ValueError):
+            si_utils.stack([sim, sim], dim="t")
 
 
 def test_max_project():
