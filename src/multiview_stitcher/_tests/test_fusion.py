@@ -1152,3 +1152,176 @@ def test_fuse_with_cupy_backend(data_backend):
 
     assert fused.dtype == sims[0].dtype
     assert isinstance(fused.data, np.ndarray)
+
+
+def _small_zarr_backed_sim(tmpdir, name, value, tx=0.0, c_coord=0, t_coord=0.0):
+    """Build a tiny zarr-backed sim (t=1, c=1) at x-offset ``tx``."""
+    sim = si_utils.get_sim_from_array(
+        np.full((1, 1, 16, 16), value, dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": float(tx)},
+        transform_key=METADATA_TRANSFORM_KEY,
+        c_coords=[c_coord],
+        t_coords=[t_coord],
+    )
+    return _sim_to_zarr_backed_sim(
+        sim, os.path.join(tmpdir, name), METADATA_TRANSFORM_KEY
+    )
+
+
+def test_fuse_concat_c_zarr_backed_sims(monkeypatch):
+    """Fusing a zarr-backed sim assembled by concat along c stays on the lazy
+    (input_is_zarr) path and produces the correct per-channel result."""
+    serialize_calls = []
+    original_serialize = si_utils.serialize_zarr_backed_sim
+
+    def counting_serialize(sim):
+        serialize_calls.append(sim)
+        return original_serialize(sim)
+
+    monkeypatch.setattr(
+        si_utils, "serialize_zarr_backed_sim", counting_serialize
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        s0 = _small_zarr_backed_sim(tmpdir, "c0.zarr", 10, c_coord=0)
+        s1 = _small_zarr_backed_sim(tmpdir, "c1.zarr", 30, c_coord=1)
+
+        combined = si_utils.concat([s0, s1], dim="c")
+        assert si_utils.is_xarray_zarr_backed(combined)
+
+        fused = fusion.fuse([combined], transform_key=METADATA_TRANSFORM_KEY)
+        result = np.asarray(fused.data)
+
+    # serialize_zarr_backed_sim is only called on the all-zarr fusion branch,
+    # confirming the concatenated input drove the lazy path.
+    assert serialize_calls
+    assert list(fused.coords["c"].values) == [0, 1]
+    assert result[0, 0].max() == 10
+    assert result[0, 1].max() == 30
+
+
+def test_fuse_concat_t_zarr_backed_sims():
+    """Fusing zarr-backed timepoints concatenated along t (chunk-1 axis)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        t0 = _small_zarr_backed_sim(tmpdir, "t0.zarr", 5, t_coord=0.0)
+        t1 = _small_zarr_backed_sim(tmpdir, "t1.zarr", 7, t_coord=1.0)
+
+        combined = si_utils.concat([t0, t1], dim="t")
+        assert si_utils.is_xarray_zarr_backed(combined)
+        assert list(combined.coords["t"].values) == [0.0, 1.0]
+
+        fused = fusion.fuse([combined], transform_key=METADATA_TRANSFORM_KEY)
+        result = np.asarray(fused.data)
+
+    assert result.shape[0] == 2
+    assert result[0, 0].max() == 5
+    assert result[1, 0].max() == 7
+
+
+def test_fuse_two_zarr_backed_tiles_concat_c_mosaic():
+    """A 2-channel concat of two overlapping tiles fuses into one mosaic."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Two tiles offset in x, each concatenated with a second channel.
+        tile_a = si_utils.concat(
+            [
+                _small_zarr_backed_sim(tmpdir, "a0.zarr", 10, tx=0.0, c_coord=0),
+                _small_zarr_backed_sim(tmpdir, "a1.zarr", 40, tx=0.0, c_coord=1),
+            ],
+            dim="c",
+        )
+        tile_b = si_utils.concat(
+            [
+                _small_zarr_backed_sim(tmpdir, "b0.zarr", 20, tx=8.0, c_coord=0),
+                _small_zarr_backed_sim(tmpdir, "b1.zarr", 50, tx=8.0, c_coord=1),
+            ],
+            dim="c",
+        )
+        assert si_utils.is_xarray_zarr_backed(tile_a)
+        assert si_utils.is_xarray_zarr_backed(tile_b)
+
+        fused = fusion.fuse(
+            [tile_a, tile_b], transform_key=METADATA_TRANSFORM_KEY
+        )
+        result = np.asarray(fused.data)
+
+    # Mosaic spans both tiles' x-extent; both channels present.
+    assert result.shape[1] == 2
+    assert result.shape[-1] > 16
+    assert result[0, 0].max() == 20
+    assert result[0, 1].max() == 50
+
+
+def test_fuse_msim_concat_c_zarr_backed():
+    """Fuse the highest scale of a zarr-backed msim concatenated along c."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        m0 = msi_utils.get_msim_from_sim(
+            _small_zarr_backed_sim(tmpdir, "m0.zarr", 11, c_coord=0),
+            scale_factors=[],
+        )
+        m1 = msi_utils.get_msim_from_sim(
+            _small_zarr_backed_sim(tmpdir, "m1.zarr", 22, c_coord=1),
+            scale_factors=[],
+        )
+
+        combined = msi_utils.concat([m0, m1], dim="c")
+        sim0 = msi_utils.get_sim_from_msim(combined)
+        assert si_utils.is_xarray_zarr_backed(sim0)
+        assert list(sim0.coords["c"].values) == [0, 1]
+
+        fused = fusion.fuse([sim0], transform_key=METADATA_TRANSFORM_KEY)
+        result = np.asarray(fused.data)
+
+    assert result[0, 0].max() == 11
+    assert result[0, 1].max() == 22
+
+
+def test_fuse_msim_concat_c_zarr_backed_multiscale():
+    """Concat two multiscale (pyramid) zarr-backed msims along c and fuse.
+
+    Exercises the get_msim_from_sims reassembly across genuine resolution
+    levels, all of which must stay zarr-backed.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def write_read(value, c_coord, name):
+            sim = si_utils.get_sim_from_array(
+                np.full((1, 1, 256, 256), value, dtype=np.uint16),
+                dims=["t", "c", "y", "x"],
+                scale={"y": 1.0, "x": 1.0},
+                translation={"y": 0.0, "x": 0.0},
+                transform_key=METADATA_TRANSFORM_KEY,
+                c_coords=[c_coord],
+                t_coords=[0.0],
+            )
+            ngff_utils.write_sim_to_ome_zarr(
+                sim,
+                os.path.join(tmpdir, name),
+                downscale_factors_per_spatial_dim={"y": 2, "x": 2},
+                show_progressbar=False,
+            )
+            return ngff_utils.read_msim_from_ome_zarr(
+                os.path.join(tmpdir, name),
+                transform_key=METADATA_TRANSFORM_KEY,
+            )
+
+        m0 = write_read(11, 0, "m0.zarr")
+        m1 = write_read(22, 1, "m1.zarr")
+
+        # More than one scale is required to exercise multiscale reassembly.
+        assert len(msi_utils.get_sorted_scale_keys(m0)) > 1
+
+        combined = msi_utils.concat([m0, m1], dim="c")
+
+        for scale_key in msi_utils.get_sorted_scale_keys(combined):
+            sim_scale = msi_utils.get_sim_from_msim(combined, scale=scale_key)
+            assert si_utils.is_xarray_zarr_backed(sim_scale)
+            # Channel labels round-trip through omero metadata as strings.
+            assert [str(c) for c in sim_scale.coords["c"].values] == ["0", "1"]
+
+        sim0 = msi_utils.get_sim_from_msim(combined, scale="scale0")
+        fused = fusion.fuse([sim0], transform_key=METADATA_TRANSFORM_KEY)
+        result = np.asarray(fused.data)
+
+    assert result[0, 0].max() == 11
+    assert result[0, 1].max() == 22

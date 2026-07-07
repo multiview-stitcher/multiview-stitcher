@@ -100,13 +100,6 @@ def _chunk_shape_from_sim(sim):
             for dim in sim.dims
         )
 
-    zarr_chunks = sim.attrs.get("_zarr_chunks")
-    if zarr_chunks is not None and len(zarr_chunks) == sim.ndim:
-        return tuple(
-            min(int(chunk), int(size))
-            for chunk, size in zip(zarr_chunks, sim.shape)
-        )
-
     return tuple(int(size) for size in sim.shape)
 
 
