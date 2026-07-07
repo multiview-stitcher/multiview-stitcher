@@ -724,6 +724,7 @@ def serialize_zarr_backed_sim(sim):
         "origin": get_origin_from_sim(sim),
         "c_coords": sim.coords["c"].values if "c" in sim.dims else None,
         "t_coords": sim.coords["t"].values if "t" in sim.dims else None,
+        "transforms": sim.attrs.get("transforms", {}),
     }
 
 
@@ -847,6 +848,9 @@ def deserialize_zarr_backed_sim(
             current_nsdim_coords[dim] = coord_values
     if current_nsdim_coords:
         sim = sim.assign_coords(current_nsdim_coords)
+
+    if info.get("transforms"):
+        sim.attrs["transforms"] = info["transforms"]
 
     return sim
 

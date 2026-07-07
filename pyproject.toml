@@ -115,6 +115,11 @@ playground = [
 gpu-cuda12 = [
     "cupy-cuda12x",
 ]
+distributed = [
+    "distributed",
+    "dask-jobqueue",
+    "bokeh",
+]
 
 
 [tool.setuptools]

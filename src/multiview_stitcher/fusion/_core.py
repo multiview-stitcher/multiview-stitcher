@@ -2,6 +2,7 @@ import itertools
 import os, shutil
 import warnings
 from collections.abc import Callable, Sequence
+from functools import partial
 from itertools import product
 from typing import Union
 from tqdm import tqdm
@@ -2024,6 +2025,121 @@ def get_interpolated_image(
     return interp_image
 
 
+def _fuse_chunk_to_zarr(
+    block_id,
+    *,
+    output_stack_properties,
+    ns_shape,
+    nsdims,
+    fuse_kwargs,
+    output_chunksize,
+    output_zarr_array,
+):
+    """
+    Fuse a single output chunk and write it into an existing Zarr array.
+
+    This is intentionally module-level so distributed schedulers can import and
+    pickle it.  The Zarr arrays inside ``fuse_kwargs`` and ``output_zarr_array``
+    stay live task arguments, preserving the existing zarr-backed workflow.
+    """
+
+    osp = output_stack_properties
+    sdims = list(osp["shape"].keys())
+
+    normalized_chunks = normalize_chunks(
+        shape=[ns_shape[dim] for dim in nsdims]
+        + [osp["shape"][dim] for dim in sdims],
+        chunks=(1,) * len(nsdims)
+        + tuple(output_chunksize[dim] for dim in sdims),
+    )
+
+    ns_coord = {dim: block_id[idim] for idim, dim in enumerate(nsdims)}
+    spatial_chunk_ind = block_id[len(nsdims) :]
+
+    chunk_offset = {
+        sdims[idim]: (
+            int(np.sum(normalized_chunks[len(nsdims) + idim][:b]))
+            if b > 0
+            else 0
+        )
+        for idim, b in enumerate(spatial_chunk_ind)
+    }
+    chunk_offset_phys = {
+        dim: chunk_offset[dim] * osp["spacing"][dim] + osp["origin"][dim]
+        for idim, dim in enumerate(sdims)
+    }
+    chunk_shape = {
+        sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
+        for idim, b in enumerate(spatial_chunk_ind)
+    }
+
+    serialized_sims = fuse_kwargs.get("_serialized_zarr_sims")
+    if serialized_sims is not None:
+        sims = [
+            si_utils.deserialize_zarr_backed_sim(info)
+            for info in serialized_sims
+        ]
+    else:
+        sims = fuse_kwargs.get("images")
+        if sims is None:
+            sims = fuse_kwargs.get("sims")
+
+    # Restrict to the requested non-spatial coordinate before building the
+    # per-chunk lazy fusion graph.
+    sims = [
+        si_utils.sim_sel_coords(
+            sim,
+            {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()},
+        )
+        for sim in sims
+    ]
+
+    logger.debug(
+        "Fusing chunk with block id %s, spatial chunk index %s",
+        block_id,
+        spatial_chunk_ind,
+    )
+    fused = fuse(
+        images=sims,
+        **{
+            k: v
+            for k, v in fuse_kwargs.items()
+            if k not in {"images", "sims", "_serialized_zarr_sims"}
+        },
+        output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
+        output_shape={dim: chunk_shape[dim] for dim in sdims},
+        output_spacing={dim: osp["spacing"][dim] for dim in sdims},
+    ).data
+
+    if cp is not None:
+        fused = fused.map_blocks(
+            lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x
+        )
+
+    # The outer scheduler may be distributed; keep this small inner graph local
+    # to the worker processing the chunk.
+    with dask_config.set(scheduler="single-threaded"):
+        da.to_zarr(
+            fused,
+            output_zarr_array,
+            region=tuple(
+                [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims]
+                + [
+                    slice(
+                        chunk_offset[dim],
+                        chunk_offset[dim] + chunk_shape[dim],
+                    )
+                    for dim in sdims
+                ]
+            ),
+        )
+
+    if cp is not None:
+        misc_utils.clear_cupy_memory()
+
+    return
+
+
 def prepare_block_fusion(
     output_zarr_url: str,
     fuse_kwargs: dict,
@@ -2098,7 +2214,9 @@ def prepare_block_fusion(
     output_zarr_array = zarr.create(
         shape=[int(i) for i in full_output_shape],
         chunks=[int(i) for i in full_output_chunksize],
-        dtype=sims[0].data.dtype,
+        # Use xarray's metadata-level dtype. Accessing ``.data`` can
+        # materialize zarr-backed xarray arrays.
+        dtype=sims[0].dtype,
         store=output_zarr_url,  # The path to the directory where the store will be created
         overwrite=True,  # Allows overwriting if the path exists
         **(
@@ -2108,106 +2226,26 @@ def prepare_block_fusion(
         ),
     )
 
-    def fuse_chunk(
-        block_id,
-        osp=output_stack_properties,
+    task_fuse_kwargs = fuse_kwargs
+    if all(si_utils.is_xarray_zarr_backed(sim) for sim in sims):
+        # Keep distributed task payloads compact while still passing live
+        # zarr.Array objects for interoperability.
+        task_fuse_kwargs = dict(fuse_kwargs)
+        task_fuse_kwargs["_serialized_zarr_sims"] = [
+            si_utils.serialize_zarr_backed_sim(sim) for sim in sims
+        ]
+        task_fuse_kwargs.pop("images", None)
+        task_fuse_kwargs.pop("sims", None)
+
+    fuse_chunk = partial(
+        _fuse_chunk_to_zarr,
+        output_stack_properties=output_stack_properties,
         ns_shape=ns_shape,
         nsdims=nsdims,
-        fuse_kwargs=fuse_kwargs,
+        fuse_kwargs=task_fuse_kwargs,
         output_chunksize=output_chunksize,
         output_zarr_array=output_zarr_array,
-    ):
-        """
-        Fuse a single chunk and write to zarr array.
-        """
-
-        sdims = list(osp["shape"].keys())
-
-        normalized_chunks = normalize_chunks(
-            shape=[ns_shape[dim] for dim in nsdims]
-            + [osp["shape"][dim] for dim in sdims],
-            chunks=(1,) * len(nsdims)
-            + tuple(output_chunksize[dim] for dim in sdims),
-        )
-
-        ns_coord = {dim: block_id[idim] for idim, dim in enumerate(nsdims)}
-
-        spatial_chunk_ind = block_id[len(nsdims) :]
-
-        chunk_offset = {
-            sdims[idim]: (
-                int(np.sum(normalized_chunks[len(nsdims) + idim][:b]))
-                if b > 0
-                else 0
-            )
-            for idim, b in enumerate(spatial_chunk_ind)
-        }
-        chunk_offset_phys = {
-            dim: chunk_offset[dim] * osp["spacing"][dim] + osp["origin"][dim]
-            for idim, dim in enumerate(sdims)
-        }
-        chunk_shape = {
-            sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
-            for idim, b in enumerate(spatial_chunk_ind)
-        }
-
-        sims = fuse_kwargs.get("images")
-        if sims is None:
-            sims = fuse_kwargs.get("sims")
-        # restrict sims to relevant non-spatial coordinates
-        sims = [
-            si_utils.sim_sel_coords(
-                sim,
-                {dim: sim.coords[dim][[ic]] for dim, ic in ns_coord.items()},
-            )
-            for sim in sims
-        ]
-
-        logger.debug(
-            "Fusing chunk with block id %s, spatial chunk index %s",
-            block_id,
-            spatial_chunk_ind,
-        )
-        fused = fuse(
-            images=sims,
-            **{
-                k: v
-                for k, v in fuse_kwargs.items()
-                if k not in {"images", "sims"}
-            },
-            output_origin={dim: chunk_offset_phys[dim] for dim in sdims},
-            output_shape={dim: chunk_shape[dim] for dim in sdims},
-            output_spacing={dim: osp["spacing"][dim] for dim in sdims},
-        ).data
-
-        input_is_cupy = cp is not None and isinstance(fused, cp.ndarray)
-
-        if cp is not None:
-            fused = fused.map_blocks(
-                lambda x: cp.asnumpy(x) if isinstance(x, cp.ndarray) else x
-            )
-
-        # Write the fused chunk to the appropriate location in the Zarr array
-        with dask_config.set(scheduler="single-threaded"):
-            da.to_zarr(
-                fused,
-                output_zarr_array,
-                region=tuple(
-                    [slice(ns_coord[dim], ns_coord[dim] + 1) for dim in nsdims]
-                    + [
-                        slice(
-                            chunk_offset[dim],
-                            chunk_offset[dim] + chunk_shape[dim],
-                        )
-                        for dim in sdims
-                    ]
-                ),
-            )
-
-        if cp is not None:
-            misc_utils.clear_cupy_memory()
-
-        return
+    )
 
     nblocks = [len(nc) for nc in normalized_chunks]
 

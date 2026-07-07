@@ -207,3 +207,28 @@ def process_batch_using_joblib(
         delayed(func)(block_id) for block_id in block_ids
     )
     return
+
+
+def process_batch_using_dask(
+    func,
+    block_ids,
+    compute_kwargs=None,
+):
+    """
+    Process a batch of block_ids using an existing dask.distributed client.
+    """
+
+    from dask import delayed, compute
+
+    if compute_kwargs is None:
+        compute_kwargs = {}
+
+    func_delayed = delayed(func)
+    
+    compute([
+        func_delayed(block_id) for block_id in block_ids
+    ],
+    **compute_kwargs
+    )
+
+    return
