@@ -753,7 +753,7 @@ def _scale_sims_concatable(scale_sims, dim):
             return False
         axis = list(sims[0].dims).index(dim)
         zarrays = [si_utils._get_xarray_zarr_array(sim) for sim in sims]
-        if not zarr_utils.is_chunk_aligned_concat(zarrays, axis):
+        if not zarr_utils.is_chunk_aligned_concatenate(zarrays, axis):
             return False
     return True
 

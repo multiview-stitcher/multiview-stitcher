@@ -247,7 +247,7 @@ def _open_virtual(template, out_shape, out_chunks, dispatch):
 # ---------------------------------------------------------------------------
 
 
-def virtual_expand_dims(zarray, n_leading_singletons):
+def expand_dims(zarray, n_leading_singletons):
     """Prepend ``n_leading_singletons`` size-1 axes to ``zarray`` (chunk 1 each).
 
     Returns a real ``zarr.Array`` of rank ``zarray.ndim + n`` whose leading axes
@@ -267,7 +267,7 @@ def virtual_expand_dims(zarray, n_leading_singletons):
     return _open_virtual(zarray, out_shape, out_chunks, dispatch)
 
 
-def virtual_stack(zarrays, axis=0):
+def stack(zarrays, axis=0):
     """Stack ``zarrays`` along a new ``axis`` with chunk size 1.
 
     All inputs must share shape, chunks, dtype and codecs. Returns a real
@@ -279,16 +279,16 @@ def virtual_stack(zarrays, axis=0):
     """
     zarrays = list(zarrays)
     if not zarrays:
-        raise ValueError("virtual_stack requires at least one array.")
+        raise ValueError("stack requires at least one array.")
 
     first = zarrays[0]
     for other in zarrays[1:]:
         if tuple(other.shape) != tuple(first.shape):
-            raise ValueError("virtual_stack requires identical shapes.")
+            raise ValueError("stack requires identical shapes.")
         if tuple(other.chunks) != tuple(first.chunks):
-            raise ValueError("virtual_stack requires identical chunks.")
+            raise ValueError("stack requires identical chunks.")
         if _codec_signature(other) != _codec_signature(first):
-            raise ValueError("virtual_stack requires identical dtype/codecs.")
+            raise ValueError("stack requires identical dtype/codecs.")
 
     axis = int(axis)
     shape = tuple(first.shape)
@@ -307,10 +307,10 @@ def virtual_stack(zarrays, axis=0):
 
 
 def is_stackable(zarrays):
-    """Return True when ``virtual_stack(zarrays)`` would succeed.
+    """Return True when ``stack(zarrays)`` would succeed.
 
     Lets callers fall back to an eager path (mirroring
-    :func:`is_chunk_aligned_concat`) instead of hitting a ``ValueError``.
+    :func:`is_chunk_aligned_concatenate`) instead of hitting a ``ValueError``.
     """
     zarrays = list(zarrays)
     if not zarrays:
@@ -326,7 +326,7 @@ def is_stackable(zarrays):
     return True
 
 
-def _concat_layout(zarrays, axis):
+def _concatenate_layout(zarrays, axis):
     """Validate a concat and return ``(out_shape, out_chunks, cum_counts)``.
 
     Raises :class:`NotChunkAlignedError` when the concat cannot be expressed as a
@@ -335,7 +335,7 @@ def _concat_layout(zarrays, axis):
     """
     zarrays = list(zarrays)
     if not zarrays:
-        raise ValueError("virtual_concat requires at least one array.")
+        raise ValueError("concatenate requires at least one array.")
 
     first = zarrays[0]
     axis = int(axis)
@@ -371,26 +371,26 @@ def _concat_layout(zarrays, axis):
     return tuple(out_shape), tuple(first.chunks), cum_counts
 
 
-def is_chunk_aligned_concat(zarrays, axis):
-    """Return True when ``virtual_concat(zarrays, axis)`` would succeed."""
+def is_chunk_aligned_concatenate(zarrays, axis):
+    """Return True when ``concatenate(zarrays, axis)`` would succeed."""
     try:
-        _concat_layout(zarrays, axis)
+        _concatenate_layout(zarrays, axis)
     except NotChunkAlignedError:
         return False
     return True
 
 
-def virtual_concat(zarrays, axis):
+def concatenate(zarrays, axis):
     """Concatenate ``zarrays`` along an existing ``axis`` by chunk-key remap.
 
-    Only valid when chunk-aligned (see :func:`is_chunk_aligned_concat`): axes
+    Only valid when chunk-aligned (see :func:`is_chunk_aligned_concatenate`): axes
     such as ``c``/``t`` with chunk size 1 always qualify. Output chunk index
     ``k`` along ``axis`` is routed to the owning source and its local chunk
     index; all other chunk indices pass through unchanged.
     """
     zarrays = list(zarrays)
     axis = int(axis)
-    out_shape, out_chunks, cum_counts = _concat_layout(zarrays, axis)
+    out_shape, out_chunks, cum_counts = _concatenate_layout(zarrays, axis)
 
     def dispatch(coords):
         k = coords[axis]

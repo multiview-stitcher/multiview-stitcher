@@ -274,7 +274,7 @@ def _expand_with_singleton_dims_lazily(xim, missing_dims):
     # DataArray. The result therefore wraps exactly one zarr.Array whose axes
     # match its dims 1:1 - no generic array-like shim and no bookkeeping attrs.
     zarray = _get_xarray_zarr_array(xim)
-    expanded_zarray = zarr_utils.virtual_expand_dims(zarray, len(missing_dims))
+    expanded_zarray = zarr_utils.expand_dims(zarray, len(missing_dims))
 
     dims = tuple(missing_dims) + tuple(xim.dims)
     coords = {dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims}
@@ -1368,12 +1368,12 @@ def _combine_zarr_backed_sims(sims, dim, new_dim):
             d for d in SPATIAL_IMAGE_DIMS if d in set(sims[0].dims) | {dim}
         )
         axis = result_dims.index(dim)
-        combined = zarr_utils.virtual_stack(zarrays, axis=axis)
+        combined = zarr_utils.stack(zarrays, axis=axis)
         combine_coord = np.arange(len(sims))
     else:
         result_dims = tuple(sims[0].dims)
         axis = result_dims.index(dim)
-        combined = zarr_utils.virtual_concat(zarrays, axis)
+        combined = zarr_utils.concatenate(zarrays, axis)
         combine_coord = (
             np.concatenate(
                 [np.asarray(sim.coords[dim].values) for sim in sims]
@@ -1459,7 +1459,7 @@ def concat(sims, dim, **kwargs):
     ):
         axis = list(sims[0].dims).index(dim)
         zarrays = [_get_xarray_zarr_array(sim) for sim in sims]
-        if zarr_utils.is_chunk_aligned_concat(zarrays, axis):
+        if zarr_utils.is_chunk_aligned_concatenate(zarrays, axis):
             return _combine_zarr_backed_sims(sims, dim, new_dim=False)
 
     return xr.concat(sims, dim=dim, combine_attrs=combine_attrs_func, **kwargs)
