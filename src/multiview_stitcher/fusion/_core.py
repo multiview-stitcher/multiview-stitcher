@@ -2214,7 +2214,9 @@ def prepare_block_fusion(
     output_zarr_array = zarr.create(
         shape=[int(i) for i in full_output_shape],
         chunks=[int(i) for i in full_output_chunksize],
-        dtype=sims[0].data.dtype,
+        # Use xarray's metadata-level dtype. Accessing ``.data`` can
+        # materialize zarr-backed xarray arrays.
+        dtype=sims[0].dtype,
         store=output_zarr_url,  # The path to the directory where the store will be created
         overwrite=True,  # Allows overwriting if the path exists
         **(
