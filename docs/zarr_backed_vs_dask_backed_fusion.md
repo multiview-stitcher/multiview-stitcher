@@ -14,8 +14,8 @@ In both cases, image data is read on demand and only from the regions needed for
 Typical ways to get zarr-backed inputs:
 
 - `si_utils.get_sim_from_array(zarr.open(...))`
-- `ngff_utils.read_sim_from_ome_zarr(..., use_dask=False)`
-- `ngff_utils.read_msim_from_ome_zarr(..., use_dask=False)`
+- `ngff_utils.read_sim_from_ome_zarr(..., array_backend="zarr")`
+- `ngff_utils.read_msim_from_ome_zarr(..., array_backend="zarr")`
 
 This is the default for the OME-Zarr helpers.
 
@@ -26,8 +26,8 @@ For fusion, this is often the best choice when our data is already stored in Zar
 Typical ways to get dask-backed inputs:
 
 - `si_utils.get_sim_from_array(da.from_zarr(...))`
-- `ngff_utils.read_sim_from_ome_zarr(..., use_dask=True)`
-- `ngff_utils.read_msim_from_ome_zarr(..., use_dask=True)`
+- `ngff_utils.read_sim_from_ome_zarr(..., array_backend="dask")`
+- `ngff_utils.read_msim_from_ome_zarr(..., array_backend="dask")`
 
 Here, `da.from_zarr(...)` is just the Zarr-specific example. More generally, `si_utils.get_sim_from_array(...)` can also be used with other NumPy or Dask arrays.
 

@@ -996,9 +996,9 @@ def fuse(
                         else si_utils.DEFAULT_TRANSFORM_KEY
                     ),
                     # The fusion write path should keep returning a dask-backed
-                    # msim even though the general OME-Zarr readers now default
-                    # to zarr-backed arrays.
-                    use_dask=True,
+                    # msim even though the general OME-Zarr readers default to
+                    # zarr-backed arrays.
+                    array_backend="dask",
                 )
 
             return msi_utils.get_msim_from_sim(fused, scale_factors=[])
