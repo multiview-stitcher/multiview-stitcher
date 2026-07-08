@@ -1603,8 +1603,8 @@
 <p>Typical ways to get zarr-backed inputs:</p>
 <ul>
 <li><code>si_utils.get_sim_from_array(zarr.open(...))</code></li>
-<li><code>ngff_utils.read_sim_from_ome_zarr(..., use_dask=False)</code></li>
-<li><code>ngff_utils.read_msim_from_ome_zarr(..., use_dask=False)</code></li>
+<li><code>ngff_utils.read_sim_from_ome_zarr(..., array_backend="zarr")</code></li>
+<li><code>ngff_utils.read_msim_from_ome_zarr(..., array_backend="zarr")</code></li>
 </ul>
 <p>This is the default for the OME-Zarr helpers.</p>
 <p>For fusion, this is often the best choice when our data is already stored in Zarr.</p>
@@ -1612,8 +1612,8 @@
 <p>Typical ways to get dask-backed inputs:</p>
 <ul>
 <li><code>si_utils.get_sim_from_array(da.from_zarr(...))</code></li>
-<li><code>ngff_utils.read_sim_from_ome_zarr(..., use_dask=True)</code></li>
-<li><code>ngff_utils.read_msim_from_ome_zarr(..., use_dask=True)</code></li>
+<li><code>ngff_utils.read_sim_from_ome_zarr(..., array_backend="dask")</code></li>
+<li><code>ngff_utils.read_msim_from_ome_zarr(..., array_backend="dask")</code></li>
 </ul>
 <p>Here, <code>da.from_zarr(...)</code> is just the Zarr-specific example. More generally, <code>si_utils.get_sim_from_array(...)</code> can also be used with other NumPy or Dask arrays.</p>
 <p>This is a good option when we already want to keep the data inside a larger Dask workflow before fusion.</p>

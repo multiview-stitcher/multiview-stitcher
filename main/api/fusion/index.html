@@ -2666,9 +2666,9 @@ Returns</p>
 </span><span id="__span-0-996"><a id="__codelineno-0-996" name="__codelineno-0-996"></a>                        <span class="k">else</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">DEFAULT_TRANSFORM_KEY</span>
 </span><span id="__span-0-997"><a id="__codelineno-0-997" name="__codelineno-0-997"></a>                    <span class="p">),</span>
 </span><span id="__span-0-998"><a id="__codelineno-0-998" name="__codelineno-0-998"></a>                    <span class="c1"># The fusion write path should keep returning a dask-backed</span>
-</span><span id="__span-0-999"><a id="__codelineno-0-999" name="__codelineno-0-999"></a>                    <span class="c1"># msim even though the general OME-Zarr readers now default</span>
-</span><span id="__span-0-1000"><a id="__codelineno-0-1000" name="__codelineno-0-1000"></a>                    <span class="c1"># to zarr-backed arrays.</span>
-</span><span id="__span-0-1001"><a id="__codelineno-0-1001" name="__codelineno-0-1001"></a>                    <span class="n">use_dask</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-0-999"><a id="__codelineno-0-999" name="__codelineno-0-999"></a>                    <span class="c1"># msim even though the general OME-Zarr readers default to</span>
+</span><span id="__span-0-1000"><a id="__codelineno-0-1000" name="__codelineno-0-1000"></a>                    <span class="c1"># zarr-backed arrays.</span>
+</span><span id="__span-0-1001"><a id="__codelineno-0-1001" name="__codelineno-0-1001"></a>                    <span class="n">array_backend</span><span class="o">=</span><span class="s2">&quot;dask&quot;</span><span class="p">,</span>
 </span><span id="__span-0-1002"><a id="__codelineno-0-1002" name="__codelineno-0-1002"></a>                <span class="p">)</span>
 </span><span id="__span-0-1003"><a id="__codelineno-0-1003" name="__codelineno-0-1003"></a>
 </span><span id="__span-0-1004"><a id="__codelineno-0-1004" name="__codelineno-0-1004"></a>            <span class="k">return</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">fused</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[])</span>

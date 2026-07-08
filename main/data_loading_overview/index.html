@@ -1929,7 +1929,7 @@ transform keys from the highest-resolution level to the coarser levels.</p>
 </span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_msim_from_ome_zarr</span><span class="p">(</span>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span>
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">use_dask</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">array_backend</span><span class="o">=</span><span class="s2">&quot;zarr&quot;</span><span class="p">,</span>
 </span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">)</span>
 </span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
 </span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># Read a single resolution level → SpatialImage</span>
@@ -1937,14 +1937,14 @@ transform keys from the highest-resolution level to the coarser levels.</p>
 </span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="s2">&quot;my_tile.ome.zarr&quot;</span><span class="p">,</span>
 </span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="n">resolution_level</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
 </span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;stage_metadata&quot;</span><span class="p">,</span>
-</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">use_dask</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">array_backend</span><span class="o">=</span><span class="s2">&quot;zarr&quot;</span><span class="p">,</span>
 </span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>By default, <code>use_dask=False</code>, so the returned image data stays <strong>zarr-backed</strong> (without wrapping in Dask arrays).
-Set <code>use_dask=True</code> if we explicitly want Dask arrays instead.</p>
+<p>By default, <code>array_backend="zarr"</code>, so the returned image data stays <strong>zarr-backed</strong> (without wrapping in Dask arrays).
+Set <code>array_backend="dask"</code> if we explicitly want Dask arrays instead.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>For fusion, the default <code>use_dask=False</code> mode is often the best starting point for OME-Zarr inputs. Both <code>use_dask=False</code> and <code>use_dask=True</code> read data on demand and only from the needed regions, but <code>use_dask=False</code> avoids an extra zarr-to-dask layer and often keeps the dask graph smaller.</p>
+<p>For fusion, the default <code>array_backend="zarr"</code> mode is often the best starting point for OME-Zarr inputs. Both <code>array_backend="zarr"</code> and <code>array_backend="dask"</code> read data on demand and only from the needed regions, but <code>array_backend="zarr"</code> avoids an extra zarr-to-dask layer and often keeps the dask graph smaller.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
