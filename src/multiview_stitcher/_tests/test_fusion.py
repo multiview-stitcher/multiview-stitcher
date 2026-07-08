@@ -264,10 +264,10 @@ def test_fuse_ome_zarr_dask_backed_matches_zarr_backed_reads():
             ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
 
             msim_zarr = ngff_utils.read_msim_from_ome_zarr(
-                zarr_path, use_dask=False
+                zarr_path, array_backend="zarr"
             )
             msim_dask = ngff_utils.read_msim_from_ome_zarr(
-                zarr_path, use_dask=True
+                zarr_path, array_backend="dask"
             )
 
             msi_utils.set_affine_transform(
@@ -1116,8 +1116,8 @@ def test_fuse_to_zarr():
         assert fused.max().compute() > 0
 
 
-@pytest.mark.parametrize("data_backend", ["dask", "zarr"])
-def test_fuse_with_cupy_backend(data_backend):
+@pytest.mark.parametrize("array_backend", ["dask", "zarr"])
+def test_fuse_with_cupy_backend(array_backend):
     try:
         import cupy as cp
     except ImportError:
@@ -1134,7 +1134,7 @@ def test_fuse_with_cupy_backend(data_backend):
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        if data_backend == "zarr":
+        if array_backend == "zarr":
             sims = [
                 _sim_to_zarr_backed_sim(
                     sim,

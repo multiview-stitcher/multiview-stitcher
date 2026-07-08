@@ -1,3 +1,4 @@
+import gc
 import os
 import tempfile
 
@@ -5,6 +6,7 @@ import numpy as np
 import pytest
 
 from multiview_stitcher import io, msi_utils, sample_data
+from multiview_stitcher import spatial_image_utils as si_utils
 
 
 @pytest.mark.parametrize(
@@ -58,6 +60,67 @@ def test_tiff_io(ndim, N_t, N_c):
             sims_io.coords[dim] = np.arange(len(sims_io.coords[dim]))
 
         assert (sims[0] == sims_io).min()
+
+
+@pytest.mark.parametrize("array_backend", ["numpy", "dask", "zarr"])
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_read_tif_into_msim(ndim, array_backend):
+    tile_size = 10
+    sims = sample_data.generate_tiled_dataset(
+        ndim=ndim,
+        overlap=0,
+        N_c=2,
+        N_t=1,
+        tile_size=tile_size,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+        spacing_x=0.5,
+        spacing_y=0.5,
+        spacing_z=0.5,
+        drift_scale=0,
+        shift_scale=0,
+    )
+    sim = sims[0]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = os.path.join(tmpdir, "test.tif")
+        io.save_sim_as_tif(filepath, sim)
+
+        msim = io.read_tif_into_msim(filepath, array_backend=array_backend)
+
+        assert msi_utils.get_sorted_scale_keys(msim) == ["scale0"]
+
+        sim_io = msi_utils.get_sim_from_msim(msim, scale="scale0")
+
+        assert sim_io.data.ndim == sim.data.ndim
+        assert sim_io.data.shape == sim.data.shape
+
+        np.testing.assert_array_equal(
+            np.asarray(sim_io.data), np.asarray(sim.data)
+        )
+
+        if array_backend in ("dask", "zarr"):
+            # non-spatial dims (t, c) should be chunked individually
+            non_spatial_dims = si_utils.get_nonspatial_dims_from_sim(sim_io)
+            dask_sim_io = si_utils.ensure_dask_backed_dataarray(sim_io)
+            for dim in non_spatial_dims:
+                axis = dask_sim_io.dims.index(dim)
+                assert set(dask_sim_io.data.chunks[axis]) == {1}
+            del dask_sim_io
+
+        if array_backend == "zarr":
+            # the zarr backend caches open file handles for reuse (see
+            # TiffPagesZarrV3Store); drop all references to the lazy array
+            # so those handles are released via TiffPagesZarrV3Store.__del__
+            # before the temp dir is removed below (Windows locks open files)
+            del msim, sim_io
+            gc.collect()
+
+
+def test_read_tif_into_msim_rejects_unknown_backend():
+    with pytest.raises(ValueError, match="array_backend"):
+        io.read_tif_into_msim("unused.tif", array_backend="cupy")
 
 
 def test_read_imaris_into_msim_synthetic_file():

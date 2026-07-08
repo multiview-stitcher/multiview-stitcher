@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import zarr
+import tifffile
 from tqdm import tqdm
 
 # aicsimageio is optional
@@ -16,6 +16,7 @@ except ImportError:
 
 from multiview_stitcher import czi_utils
 from multiview_stitcher.imaris_utils import read_imaris_into_msim
+from multiview_stitcher import msi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 METADATA_TRANSFORM_KEY = si_utils.DEFAULT_TRANSFORM_KEY
@@ -247,6 +248,61 @@ def read_mosaic_image_into_list_of_spatial_xarrays(filepath, scene_index=0):
     return read_mosaic_into_sims(filepath, scene_index=scene_index)
 
 
+def read_tif_into_msim(
+    filename: Union[str, Path],
+    dims: Optional[Union[list, tuple]] = None,
+    scale: Optional[dict[str, float]] = None,
+    translation: Optional[dict[str, float]] = None,
+    channel_names: Optional[Union[list, tuple]] = None,
+    transform_key: Optional[str] = METADATA_TRANSFORM_KEY,
+    array_backend="zarr",
+):
+    """
+    Read a tif file into a multiscale spatial image (msim).
+
+    Chunking is done in the plane dimensions (y, x) for dask and zarr backends.
+
+    TODO: add support for reading multiscale tifs into msim.
+
+    Parameters
+    ----------
+    filename : str or Path
+        Path to the tif file.
+    dims : tuple, optional
+        Axes dimensions, e.g. ('t', 'c', 'z', 'y', 'x'). If None, will try to be inferred from metadata.
+    scale : dict, optional
+        Pixel spacing
+    translation : dict, optional
+        Image offset in physical coordinates
+    channel_names : tuple of str, optional
+        Channel names
+    transform_key : str, optional
+        Key for the transform in the metadata. Default is METADATA_TRANSFORM_KEY.
+    array_backend : str, optional
+        Backend to use for reading the tif file.
+        Options are 'numpy', 'dask', or 'zarr'. Default is 'zarr'.
+
+    Returns
+    -------
+    msim : multiscale spatial image
+    """
+    
+    sim = read_tiff_into_spatial_xarray(
+        filename=filename,
+        scale=scale,
+        translation=translation,
+        dims=dims,
+        channel_names=channel_names,
+        transform_key=transform_key,
+        array_backend=array_backend,
+    )
+
+    msim = msi_utils.get_msim_from_sim(
+        sim, scale_factors=[]
+        )
+    return msim
+
+
 def read_tiff_into_spatial_xarray(
     filename: Union[str, Path],
     scale: Optional[dict] = None,
@@ -254,6 +310,8 @@ def read_tiff_into_spatial_xarray(
     affine_transform: Optional[Union[np.ndarray, list]] = None,
     dims: Optional[Union[list, tuple]] = None,
     channel_names: Optional[Union[list, tuple]] = None,
+    transform_key: Optional[str] = METADATA_TRANSFORM_KEY,
+    array_backend="dask",
 ):
     """
     Read tiff file into spatial image.
@@ -273,16 +331,31 @@ def read_tiff_into_spatial_xarray(
         If None, will try to be inferred from metadata.
     channel_names : tuple of str, optional
         Channel names
+    array_backend : str, optional
+        Backend to use for reading the tif file.
+        Options are 'numpy', 'dask', or 'zarr'. Default is 'dask'.
 
     Returns
     -------
     SpatialImage (multiview-stitcher flavor)
     """
-    from tifffile import TiffFile
+    
 
-    with TiffFile(filename) as tif:
-        data = tif.asarray()
-        axes = tif.series[0].axes
+    if array_backend not in ("numpy", "dask", "zarr"):
+        raise ValueError("array_backend must be 'numpy', 'dask' or 'zarr'.")
+
+    if array_backend == "numpy":
+        data = tifffile.imread(filename)
+    elif array_backend == "dask":
+        from multiview_stitcher.tif_utils import tif_to_dask_plane_chunks
+        data = tif_to_dask_plane_chunks(filename)
+    elif array_backend == "zarr":
+        from multiview_stitcher.tif_utils import tif_to_virtual_zarr_v3_plane_chunks
+        data = tif_to_virtual_zarr_v3_plane_chunks(filename)
+
+    from tifffile import TiffFile
+    with tifffile.TiffFile(filename) as tif:
+        axes = tif.series[0].axes.replace("I", "Z")
 
     if dims is None:
         # infer from metadata
@@ -294,7 +367,7 @@ def read_tiff_into_spatial_xarray(
         scale=scale,
         translation=translation,
         affine=affine_transform,
-        transform_key=METADATA_TRANSFORM_KEY,
+        transform_key=transform_key,
         c_coords=channel_names,
     )
 

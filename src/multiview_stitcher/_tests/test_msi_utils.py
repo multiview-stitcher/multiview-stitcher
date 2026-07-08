@@ -1,8 +1,10 @@
+import os
 import tempfile
 
 import numpy as np
 import pytest
 import xarray as xr
+import zarr
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -385,3 +387,37 @@ def test_concat_result_can_be_selected_with_multiscale_sel_coords():
         sim.isel(t=0, y=0, x=0).values,
         np.array([0, 1]),
     )
+
+
+def test_concat_single_msim_short_circuits_without_materializing():
+    """
+    A single-item concat is a no-op; it must not fall through to the eager
+    xr.concat path, which (unlike dask) doesn't keep zarr-backed sims lazy
+    and would materialize the whole array for nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=(1, 1, 8, 8),
+            chunks=(1, 1, 8, 8),
+            dtype=np.uint16,
+        )
+        zarray[:] = 7
+
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["t", "c", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[0.0],
+            c_coords=[0],
+        )
+        msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+        combined = msi_utils.concat([msim], dim="c")
+
+        assert combined is msim
+        sim_out = msi_utils.get_sim_from_msim(combined)
+        assert si_utils.is_xarray_zarr_backed(sim_out)
+        np.testing.assert_array_equal(np.asarray(sim_out.data), zarray[:])

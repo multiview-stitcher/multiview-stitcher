@@ -762,6 +762,13 @@ def _scale_sims_concatable(scale_sims, dim):
 def concat(msims, concat_kwargs={}, dim='c'):
 
     msims = list(msims)
+
+    # Nothing to concatenate: return as-is rather than routing a no-op
+    # through xr.concat, which (unlike dask) doesn't keep zarr-backed sims
+    # lazy and would materialize the whole array for no reason.
+    if len(msims) == 1:
+        return msims[0]
+
     scale_keys = get_sorted_scale_keys(msims[0])
 
     # Lazy fast path: when every scale is zarr-backed and chunk-aligned along

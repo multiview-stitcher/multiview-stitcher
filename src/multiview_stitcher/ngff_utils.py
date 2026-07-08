@@ -1531,7 +1531,7 @@ def read_sim_from_ome_zarr(
     zarr_path,
     resolution_level=0,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
-    use_dask=False,
+    array_backend="zarr",
 ):
     """
     Read a multiscale NGFF zarr file (v0.4/v0.5) into a spatial_image
@@ -1548,14 +1548,17 @@ def read_sim_from_ome_zarr(
         Resolution level to read, by default 0 (highest resolution)
     transform_key : str, optional
         By default si_utils.DEFAULT_TRANSFORM_KEY
-    use_dask : bool, optional
-        If True, keep the image data dask-backed as returned by ngff_zarr.
-        By default False, which reopens the on-disk array as a zarr-backed sim.
+    array_backend : str, optional
+        Backend to use for reading the zarr file.
+        Options are 'dask' or 'zarr'. Default is 'zarr'.
 
     Returns
     -------
     spatial_image with transform_key set
     """
+    if array_backend not in ("dask", "zarr"):
+        raise ValueError("array_backend must be 'dask' or 'zarr'.")
+
     ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
 
     if resolution_level >= len(ngff_multiscales.images):
@@ -1564,7 +1567,7 @@ def read_sim_from_ome_zarr(
         )
 
     data = None
-    if not use_dask:
+    if array_backend == "zarr":
         data = _open_ngff_dataset_arrays(zarr_path, ngff_multiscales)[
             resolution_level
         ]
@@ -1687,7 +1690,7 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
 def read_msim_from_ome_zarr(
     zarr_path,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
-    use_dask=False,
+    array_backend="zarr",
 ):
     """
     Read a multiscale NGFF zarr file (v0.4/v0.5) into a multiscale_spatial_image
@@ -1702,18 +1705,21 @@ def read_msim_from_ome_zarr(
         Path to the zarr file
     transform_key : str, optional
         By default si_utils.DEFAULT_TRANSFORM_KEY
-    use_dask : bool, optional
-        If True, keep the multiscale image data dask-backed as returned by
-        ngff_zarr. By default False, which reopens every scale as zarr-backed.
+    array_backend : str, optional
+        Backend to use for reading the zarr file.
+        Options are 'dask' or 'zarr'. Default is 'zarr'.
 
     Returns
     -------
     multiscale_spatial_image with transform_key set
     """
+    if array_backend not in ("dask", "zarr"):
+        raise ValueError("array_backend must be 'dask' or 'zarr'.")
+
     ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
 
     data_arrays = None
-    if not use_dask:
+    if array_backend == "zarr":
         data_arrays = _open_ngff_dataset_arrays(zarr_path, ngff_multiscales)
 
     msim = ngff_multiscales_to_msim(

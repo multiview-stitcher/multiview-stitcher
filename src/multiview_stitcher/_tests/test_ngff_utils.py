@@ -115,12 +115,12 @@ def test_round_trip(ndim, ngff_version, n_batch):
         )
 
 
-@pytest.mark.parametrize("use_dask", [False, True])
+@pytest.mark.parametrize("array_backend", ["zarr", "dask"])
 @pytest.mark.parametrize(
     "ndim, N_t, N_c",
     [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
 )
-def test_ome_zarr_read_write(ndim, N_t, N_c, use_dask):
+def test_ome_zarr_read_write(ndim, N_t, N_c, array_backend):
     """Write a sim to OME-Zarr and read it back, checking that dims, channel
     names and omero window metadata are preserved for various t/c combinations."""
     sim = sample_data.generate_tiled_dataset(
@@ -155,10 +155,12 @@ def test_ome_zarr_read_write(ndim, N_t, N_c, use_dask):
 
         sim_read = ngff_utils.read_sim_from_ome_zarr(
             zarr_path,
-            use_dask=use_dask,
+            array_backend=array_backend,
         )  # , resolution_level=0)
 
-        assert si_utils.is_dask_backed_dataarray(sim_read) == use_dask
+        assert si_utils.is_dask_backed_dataarray(sim_read) == (
+            array_backend == "dask"
+        )
 
         # check dims and channel names are the same
         # assert np.equal(sim.data, sim_read.data).all()
@@ -170,8 +172,8 @@ def test_ome_zarr_read_write(ndim, N_t, N_c, use_dask):
         )
 
 
-@pytest.mark.parametrize("use_dask", [False, True])
-def test_read_msim_from_ome_zarr(use_dask):
+@pytest.mark.parametrize("array_backend", ["zarr", "dask"])
+def test_read_msim_from_ome_zarr(array_backend):
     """Verify that read_msim_from_ome_zarr returns a multiscale image with
     correct pixel data, channel names and more than one resolution level."""
     sim = sample_data.generate_tiled_dataset(
@@ -193,11 +195,13 @@ def test_read_msim_from_ome_zarr(use_dask):
         sim = ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
 
         msim_read = ngff_utils.read_msim_from_ome_zarr(
-            zarr_path, use_dask=use_dask
+            zarr_path, array_backend=array_backend
         )
         sim_read = msi_utils.get_sim_from_msim(msim_read, scale="scale0")
 
-        assert si_utils.is_dask_backed_dataarray(sim_read) == use_dask
+        assert si_utils.is_dask_backed_dataarray(sim_read) == (
+            array_backend == "dask"
+        )
 
         assert np.array_equal(sim.dims, sim_read.dims)
         assert np.allclose(sim.data, sim_read.data)
@@ -247,12 +251,19 @@ def test_read_sim_from_ome_zarr_backends():
 
         sim_zarr = ngff_utils.read_sim_from_ome_zarr(zarr_path)
         sim_dask = ngff_utils.read_sim_from_ome_zarr(
-            zarr_path, use_dask=True
+            zarr_path, array_backend="dask"
         )
 
         assert si_utils.is_xarray_zarr_backed(sim_zarr)
         assert not si_utils.is_dask_backed_dataarray(sim_zarr)
         assert si_utils.is_dask_backed_dataarray(sim_dask)
+
+
+def test_read_sim_from_ome_zarr_rejects_unknown_backend():
+    with pytest.raises(ValueError, match="array_backend"):
+        ngff_utils.read_sim_from_ome_zarr(
+            "unused.ome.zarr", array_backend="numpy"
+        )
 
 
 def test_read_msim_from_ome_zarr_backends():
@@ -276,7 +287,7 @@ def test_read_msim_from_ome_zarr_backends():
 
         msim_zarr = ngff_utils.read_msim_from_ome_zarr(zarr_path)
         msim_dask = ngff_utils.read_msim_from_ome_zarr(
-            zarr_path, use_dask=True
+            zarr_path, array_backend="dask"
         )
 
         sim_zarr = msi_utils.get_sim_from_msim(msim_zarr, scale="scale0")
