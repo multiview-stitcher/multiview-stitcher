@@ -200,7 +200,7 @@ class TiffPagesZarrV3Store(Store):
         return np.ascontiguousarray(arr).tobytes(order="C")
 
 
-def tif_to_virtual_zarr_v3_page_chunks(path):
+def tif_to_virtual_zarr_v3_plane_chunks(path):
     store = TiffPagesZarrV3Store(path)
     z = zarr.open_array(store=store, mode="r")
     return z, store
