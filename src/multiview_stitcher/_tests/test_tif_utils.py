@@ -46,8 +46,11 @@ def test_tif_multi_axis_plane_chunks(backend):
             out = tif_to_dask_plane_chunks(filepath)
             out = np.asarray(out.compute())
         else:
-            out, _store = tif_to_virtual_zarr_v3_plane_chunks(filepath)
-            out = out[:]
+            zarr_array = tif_to_virtual_zarr_v3_plane_chunks(filepath)
+            out = zarr_array[:]
+            # release the cached per-thread TiffFile handles so the temp
+            # dir can be cleaned up (matters on Windows, which locks open files)
+            zarr_array.store.close()
 
         assert out.shape == data.shape
         np.testing.assert_array_equal(out, data)

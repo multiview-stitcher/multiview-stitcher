@@ -351,7 +351,7 @@ def read_tiff_into_spatial_xarray(
         data = tif_to_dask_plane_chunks(filename)
     elif array_backend == "zarr":
         from multiview_stitcher.tif_utils import tif_to_virtual_zarr_v3_plane_chunks
-        data, _ = tif_to_virtual_zarr_v3_plane_chunks(filename)
+        data = tif_to_virtual_zarr_v3_plane_chunks(filename)
 
     from tifffile import TiffFile
     with tifffile.TiffFile(filename) as tif:

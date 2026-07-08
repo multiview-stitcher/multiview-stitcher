@@ -1,3 +1,4 @@
+import gc
 import os
 import tempfile
 
@@ -106,6 +107,15 @@ def test_read_tif_into_msim(ndim, array_backend):
             for dim in non_spatial_dims:
                 axis = dask_sim_io.dims.index(dim)
                 assert set(dask_sim_io.data.chunks[axis]) == {1}
+            del dask_sim_io
+
+        if array_backend == "zarr":
+            # the zarr backend caches open file handles for reuse (see
+            # TiffPagesZarrV3Store); drop all references to the lazy array
+            # so those handles are released via TiffPagesZarrV3Store.__del__
+            # before the temp dir is removed below (Windows locks open files)
+            del msim, sim_io
+            gc.collect()
 
 
 def test_read_tif_into_msim_rejects_unknown_backend():

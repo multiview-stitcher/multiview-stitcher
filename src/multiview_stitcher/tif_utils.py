@@ -59,6 +59,14 @@ class TiffPagesZarrV3Store(Store):
         # local disks but becomes the dominant cost (and can look like a
         # hang) for many-page TIFFs on network filesystems.
         self._thread_local = threading.local()
+        # threading.local() only exposes the calling thread's own slot, so a
+        # separate list tracks every handle opened across threads (zarr reads
+        # pages via a shared thread pool) so close() can release them all.
+        # Without this, cached handles keep the file open indefinitely, which
+        # is harmless on POSIX but prevents deleting/moving the file on
+        # Windows.
+        self._open_handles = []
+        self._open_handles_lock = threading.Lock()
 
         with tifffile.TiffFile(self.path) as tif:
             (
@@ -107,17 +115,34 @@ class TiffPagesZarrV3Store(Store):
         return isinstance(other, type(self)) and self.path == other.path
 
     def __getstate__(self):
-        # threading.local isn't copyable/picklable; sims get deep-copied
-        # (e.g. in msi_utils.get_msim_from_sim) and the store may cross
-        # process boundaries with some dask schedulers, so drop it here and
-        # let each copy/process lazily build its own cache.
+        # threading.local/Lock and open file handles aren't copyable/picklable;
+        # sims get deep-copied (e.g. in msi_utils.get_msim_from_sim) and the
+        # store may cross process boundaries with some dask schedulers, so
+        # drop them here and let each copy/process lazily build its own cache.
         state = self.__dict__.copy()
         state.pop("_thread_local", None)
+        state.pop("_open_handles", None)
+        state.pop("_open_handles_lock", None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._thread_local = threading.local()
+        self._open_handles = []
+        self._open_handles_lock = threading.Lock()
+
+    def close(self):
+        super().close()
+        lock = getattr(self, "_open_handles_lock", None)
+        if lock is None:
+            return
+        with lock:
+            handles, self._open_handles = self._open_handles, []
+        for tif in handles:
+            tif.close()
+
+    def __del__(self):
+        self.close()
 
     @property
     def supports_writes(self):
@@ -228,6 +253,8 @@ class TiffPagesZarrV3Store(Store):
         if tif is None:
             tif = tifffile.TiffFile(self.path)
             self._thread_local.tif = tif
+            with self._open_handles_lock:
+                self._open_handles.append(tif)
         return tif
 
     def _read_page_bytes(self, i):
@@ -246,8 +273,7 @@ class TiffPagesZarrV3Store(Store):
 
 def tif_to_virtual_zarr_v3_plane_chunks(path):
     store = TiffPagesZarrV3Store(path)
-    z = zarr.open_array(store=store, mode="r")
-    return z, store
+    return zarr.open_array(store=store, mode="r")
 
 
 def tif_to_dask_plane_chunks(path):
