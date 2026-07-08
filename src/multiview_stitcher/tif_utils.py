@@ -14,6 +14,41 @@ import dask.array as da
 from dask import delayed
 
 
+def _get_tiff_layout(tif):
+    """
+    Derive the page layout of an open TiffFile.
+
+    Pages are written/read in row-major order over the non-spatial
+    (e.g. t/c/z) axes, as declared by the series shape. This splits that
+    leading part of the series shape off from the per-page (spatial) shape,
+    so that e.g. a Z*C multi-page TIFF can be exposed with separate Z and C
+    axes instead of a single flattened page axis.
+    """
+    n_pages = len(tif.pages)
+    if n_pages == 0:
+        raise ValueError("TIFF contains no pages")
+
+    plane_shape = tuple(tif.pages[0].shape)
+    dtype = np.dtype(tif.pages[0].dtype)
+
+    for page in tif.pages:
+        if tuple(page.shape) != plane_shape:
+            raise ValueError("All TIFF pages must have the same shape")
+        if np.dtype(page.dtype) != dtype:
+            raise ValueError("All TIFF pages must have the same dtype")
+
+    series_shape = tuple(tif.series[0].shape)
+    non_spatial_shape = series_shape[: len(series_shape) - len(plane_shape)]
+
+    expected_n_pages = int(np.prod(non_spatial_shape)) if non_spatial_shape else 1
+    if expected_n_pages != n_pages:
+        raise ValueError(
+            "TIFF series shape is inconsistent with the number of pages"
+        )
+
+    return non_spatial_shape, plane_shape, dtype, n_pages
+
+
 class TiffPagesZarrV3Store(Store):
     def __init__(self, path):
         super().__init__(read_only=True)
@@ -26,21 +61,15 @@ class TiffPagesZarrV3Store(Store):
         self._thread_local = threading.local()
 
         with tifffile.TiffFile(self.path) as tif:
-            self.n_pages = len(tif.pages)
-            if self.n_pages == 0:
-                raise ValueError("TIFF contains no pages")
+            (
+                self.non_spatial_shape,
+                self.page_shape,
+                self.dtype,
+                self.n_pages,
+            ) = _get_tiff_layout(tif)
 
-            self.page_shape = tuple(tif.pages[0].shape)
-            self.dtype = np.dtype(tif.pages[0].dtype)
-
-            for page in tif.pages:
-                if tuple(page.shape) != self.page_shape:
-                    raise ValueError("All TIFF pages must have the same shape")
-                if np.dtype(page.dtype) != self.dtype:
-                    raise ValueError("All TIFF pages must have the same dtype")
-
-        self.shape = (self.n_pages, *self.page_shape)
-        self.chunks = (1, *self.page_shape)
+        self.shape = (*self.non_spatial_shape, *self.page_shape)
+        self.chunks = (1,) * len(self.non_spatial_shape) + self.page_shape
         self.ndim = len(self.shape)
 
         self.metadata = json.dumps(
@@ -122,9 +151,14 @@ class TiffPagesZarrV3Store(Store):
     async def list(self):
         yield "zarr.json"
 
-        suffix = "/".join(["0"] * (self.ndim - 1))
+        spatial_zeros = ["0"] * len(self.page_shape)
         for i in range(self.n_pages):
-            yield f"c/{i}/{suffix}"
+            leading = (
+                [str(idx) for idx in np.unravel_index(i, self.non_spatial_shape)]
+                if self.non_spatial_shape
+                else []
+            )
+            yield "/".join(["c", *leading, *spatial_zeros])
 
     async def list_prefix(self, prefix):
         async for key in self.list():
@@ -158,7 +192,9 @@ class TiffPagesZarrV3Store(Store):
 
     def _page_index_from_key(self, key):
         # Root-array Zarr v3 chunk keys look like:
-        #   c/<z>/0/0/...
+        #   c/<i0>/<i1>/.../0/0/...
+        # where the leading indices address the non-spatial (t/c/z/...) axes
+        # and the trailing zeros address the (single) chunk per page.
         parts = key.split("/")
 
         if len(parts) != self.ndim + 1 or parts[0] != "c":
@@ -169,15 +205,23 @@ class TiffPagesZarrV3Store(Store):
         except ValueError:
             return None
 
-        z = chunk_indices[0]
+        n_leading = len(self.non_spatial_shape)
+        leading_indices = chunk_indices[:n_leading]
+        spatial_indices = chunk_indices[n_leading:]
 
-        if not 0 <= z < self.n_pages:
+        if any(i != 0 for i in spatial_indices):
             return None
 
-        if any(i != 0 for i in chunk_indices[1:]):
+        if not self.non_spatial_shape:
+            return 0
+
+        if any(
+            not (0 <= idx < dim)
+            for idx, dim in zip(leading_indices, self.non_spatial_shape)
+        ):
             return None
 
-        return z
+        return int(np.ravel_multi_index(leading_indices, self.non_spatial_shape))
 
     def _get_thread_local_tif(self):
         tif = getattr(self._thread_local, "tif", None)
@@ -210,23 +254,15 @@ def tif_to_dask_plane_chunks(path):
     """
     Lazily read a TIFF as a Dask array, with one Dask chunk per TIFF plane/page.
 
-    Returns shape:
-        (n_planes, y, x)              for grayscale planes
-        (n_planes, y, x, channels)    for RGB/multichannel planes
+    The non-spatial (t/c/z/...) axes are inferred from the TIFF series shape,
+    so e.g. a Z*C multi-page TIFF is returned with separate Z and C axes
+    rather than a single flattened plane axis.
     """
     path = Path(path)
 
     # Read metadata only
     with tifffile.TiffFile(path) as tif:
-        n_planes = len(tif.pages)
-        plane_shape = tif.pages[0].shape
-        dtype = tif.pages[0].dtype
-
-        for page in tif.pages:
-            if page.shape != plane_shape:
-                raise ValueError("All TIFF planes must have the same shape.")
-            if page.dtype != dtype:
-                raise ValueError("All TIFF planes must have the same dtype.")
+        non_spatial_shape, plane_shape, dtype, n_planes = _get_tiff_layout(tif)
 
     @delayed
     def read_plane(i):
@@ -242,4 +278,6 @@ def tif_to_dask_plane_chunks(path):
         for i in range(n_planes)
     ]
 
-    return da.concatenate(planes, axis=0)
+    data = da.concatenate(planes, axis=0)
+
+    return data.reshape(*non_spatial_shape, *plane_shape)
