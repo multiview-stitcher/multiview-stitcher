@@ -61,9 +61,9 @@ def test_tiff_io(ndim, N_t, N_c):
         assert (sims[0] == sims_io).min()
 
 
-@pytest.mark.parametrize("data_backend", ["numpy", "dask", "zarr"])
+@pytest.mark.parametrize("array_backend", ["numpy", "dask", "zarr"])
 @pytest.mark.parametrize("ndim", [2, 3])
-def test_read_tif_into_msim(ndim, data_backend):
+def test_read_tif_into_msim(ndim, array_backend):
     tile_size = 10
     sims = sample_data.generate_tiled_dataset(
         ndim=ndim,
@@ -86,7 +86,7 @@ def test_read_tif_into_msim(ndim, data_backend):
         filepath = os.path.join(tmpdir, "test.tif")
         io.save_sim_as_tif(filepath, sim)
 
-        msim = io.read_tif_into_msim(filepath, data_backend=data_backend)
+        msim = io.read_tif_into_msim(filepath, array_backend=array_backend)
 
         assert msi_utils.get_sorted_scale_keys(msim) == ["scale0"]
 
@@ -99,13 +99,18 @@ def test_read_tif_into_msim(ndim, data_backend):
             np.asarray(sim_io.data), np.asarray(sim.data)
         )
 
-        if data_backend in ("dask", "zarr"):
+        if array_backend in ("dask", "zarr"):
             # non-spatial dims (t, c) should be chunked individually
             non_spatial_dims = si_utils.get_nonspatial_dims_from_sim(sim_io)
             dask_sim_io = si_utils.ensure_dask_backed_dataarray(sim_io)
             for dim in non_spatial_dims:
                 axis = dask_sim_io.dims.index(dim)
                 assert set(dask_sim_io.data.chunks[axis]) == {1}
+
+
+def test_read_tif_into_msim_rejects_unknown_backend():
+    with pytest.raises(ValueError, match="array_backend"):
+        io.read_tif_into_msim("unused.tif", array_backend="cupy")
 
 
 def test_read_imaris_into_msim_synthetic_file():

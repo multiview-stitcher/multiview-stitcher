@@ -255,7 +255,7 @@ def read_tif_into_msim(
     translation: Optional[dict[str, float]] = None,
     channel_names: Optional[Union[list, tuple]] = None,
     transform_key: Optional[str] = METADATA_TRANSFORM_KEY,
-    data_backend="zarr",
+    array_backend="zarr",
 ):
     """
     Read a tif file into a multiscale spatial image (msim).
@@ -278,7 +278,7 @@ def read_tif_into_msim(
         Channel names
     transform_key : str, optional
         Key for the transform in the metadata. Default is METADATA_TRANSFORM_KEY.
-    data_backend : str, optional
+    array_backend : str, optional
         Backend to use for reading the tif file.
         Options are 'numpy', 'dask', or 'zarr'. Default is 'zarr'.
 
@@ -294,7 +294,7 @@ def read_tif_into_msim(
         dims=dims,
         channel_names=channel_names,
         transform_key=transform_key,
-        data_backend=data_backend,
+        array_backend=array_backend,
     )
 
     msim = msi_utils.get_msim_from_sim(
@@ -311,7 +311,7 @@ def read_tiff_into_spatial_xarray(
     dims: Optional[Union[list, tuple]] = None,
     channel_names: Optional[Union[list, tuple]] = None,
     transform_key: Optional[str] = METADATA_TRANSFORM_KEY,
-    data_backend="dask",
+    array_backend="dask",
 ):
     """
     Read tiff file into spatial image.
@@ -331,6 +331,9 @@ def read_tiff_into_spatial_xarray(
         If None, will try to be inferred from metadata.
     channel_names : tuple of str, optional
         Channel names
+    array_backend : str, optional
+        Backend to use for reading the tif file.
+        Options are 'numpy', 'dask', or 'zarr'. Default is 'dask'.
 
     Returns
     -------
@@ -338,12 +341,15 @@ def read_tiff_into_spatial_xarray(
     """
     
 
-    if data_backend == "numpy":
+    if array_backend not in ("numpy", "dask", "zarr"):
+        raise ValueError("array_backend must be 'numpy', 'dask' or 'zarr'.")
+
+    if array_backend == "numpy":
         data = tifffile.imread(filename)
-    elif data_backend == "dask":
+    elif array_backend == "dask":
         from multiview_stitcher.tif_utils import tif_to_dask_plane_chunks
         data = tif_to_dask_plane_chunks(filename)
-    elif data_backend == "zarr":
+    elif array_backend == "zarr":
         from multiview_stitcher.tif_utils import tif_to_virtual_zarr_v3_plane_chunks
         data, _ = tif_to_virtual_zarr_v3_plane_chunks(filename)
 
