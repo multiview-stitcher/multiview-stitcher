@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="320" height="320" viewBox="0 0 207.209 211.895" xmlns="http://www.w3.org/2000/svg" xmlns:bx="https://boxy-svg.com">
+  <defs>
+    <style>
+      .quad {
+        stroke: #1e293b;
+        stroke-width: 3;
+        stroke-linejoin: round;
+      }
+    </style>
+  </defs>
+
+  <!-- Shift artwork so its top-left is (0,0); bbox includes stroke extents -->
+  <g transform="translate(-60.898 -40.605)">
+    <g stroke="#1e293b" stroke-width="5" stroke-linejoin="round" fill-opacity="0.5">
+      <polygon points="
+          150,150
+          150,50
+          178.867,66.667
+          207.735,83.333
+          178.86666666666667,100
+          207.735,116.667
+          178.867,133.333
+          150,150
+        " fill="#FFB703"/>
+      <polygon points="
+          150,150
+          178.867,133.333
+          207.735,116.667
+          207.735,131.667
+          236.602,115
+          236.602,133.333
+          236.602,166.667
+          236.602,200
+          150,150
+        " fill="#FB8500"/>
+      <polygon points="150,150 236.602,200 150,250" fill="#8ECAE6"/>
+      <polygon points="150,150 150,250 63.398,200" fill="#219EBC"/>
+      <polygon points="150,150 63.398,200 63.398,100" fill="#023047"/>
+      <polygon points="150,150 63.398,100 150,50" fill="#2A9D8F"/>
+    </g>
+
+    <!-- Each quad gets one of the triangle colors -->
+    <polygon class="quad" fill="#FFB703" points="194.985 100.501 215.731 112.301 236.57 100.214 215.983 88.503"/>
+    <polygon class="quad" fill="#FB8500" points="209.792 75.37 224.766 83.49 239.809 75.173 224.949 67.114"/>
+    <polygon class="quad" fill="#8ECAE6" points="235.317 101.228 248.117 107.916 260.977 101.066 248.274 94.428"/>
+    <polygon class="quad" fill="#219EBC" points="236.763 88.048 248.897 93.746 261.089 87.909 249.047 82.253"/>
+    <polygon class="quad" fill="#023047" points="240.408 68.695 253.477 75.624 266.607 68.527 253.637 61.651"/>
+    <polygon class="quad" fill="#2A9D8F" points="229.267 49.563 241.702 56.897 254.196 49.385 241.855 42.105"/>
+  </g>
+</svg>
