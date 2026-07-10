@@ -1399,16 +1399,26 @@ def _combine_zarr_backed_sims(sims, dim, new_dim):
         combined, dims=result_dims, coords=coords, name=sims[0].name
     )
 
-    # Combine transforms so fusion's per-coordinate param selection resolves for
-    # the combined sim:
+    # Combine transforms, take the union of transform_keys across sims.
     #  - stacking a new dim, or concatenating a dim the transform already tracks:
-    #    concat the transforms along that dim (sizes line up) and align coords;
+    #    concat the transforms along that dim (sizes line up) and align coords.
+    #    This requires every sim to define the key, since there's no sensible
+    #    value to fill in for a sim that lacks it.
     #  - concatenating a dim the transform does not track (e.g. channels of one
-    #    view): the transform is shared, so keep it as-is.
+    #    view), or a key only some sims define: the transform is shared, so
+    #    keep the (single, assumed-consistent) value as-is.
+    transform_keys = {}
+    for sim in sims:
+        transform_keys.update(dict.fromkeys(sim.attrs.get("transforms", {})))
+
     transforms = {}
-    for transform_key in sims[0].attrs.get("transforms", {}):
-        parts = [sim.attrs["transforms"][transform_key] for sim in sims]
-        if new_dim or dim in parts[0].dims:
+    for transform_key in transform_keys:
+        parts = [
+            sim.attrs["transforms"][transform_key]
+            for sim in sims
+            if transform_key in sim.attrs.get("transforms", {})
+        ]
+        if len(parts) == len(sims) and (new_dim or dim in parts[0].dims):
             combined_tf = xr.concat(parts, dim=dim)
             if (
                 combine_coord is not None
