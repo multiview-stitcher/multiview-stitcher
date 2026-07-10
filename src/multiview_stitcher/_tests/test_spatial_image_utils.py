@@ -370,6 +370,41 @@ def test_concat_zarr_backed_sims_stays_zarr_backed():
         assert "affine_metadata" in concatenated.attrs["transforms"]
 
 
+def test_concat_zarr_backed_sims_unions_transform_keys():
+    """Concat must union transform_keys, not just take sims[0]'s.
+
+    Regression test: previously only sims[0]'s transform_keys were combined,
+    silently dropping any key unique to a later sim, and raising KeyError if
+    sims[0] had a key a later sim lacked.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        common = dict(
+            dims=["t", "c", "y", "x"],
+            chunks=(1, 1, 4, 4),
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[0.0],
+        )
+        s0 = _zarr_backed_sim(
+            tmpdir, "a.zarr",
+            np.full((1, 1, 8, 8), 10, np.uint16), c_coords=[0], **common
+        )
+        s1 = _zarr_backed_sim(
+            tmpdir, "b.zarr",
+            np.full((1, 1, 8, 8), 20, np.uint16), c_coords=[1], **common
+        )
+        # Only s1 was separately registered and carries this extra key.
+        si_utils.set_sim_affine(
+            s1, param_utils.identity_transform(2), transform_key="affine_registered"
+        )
+
+        for sims in ([s0, s1], [s1, s0]):
+            concatenated = si_utils.concat(sims, dim="c")
+            assert set(concatenated.attrs["transforms"]) == {
+                "affine_metadata", "affine_registered",
+            }
+
+
 def _rank_matched_zarr_sim(tmpdir, name, data, dims, chunks):
     """Build a zarr-backed sim whose backing zarr matches ``dims`` 1:1.
 
