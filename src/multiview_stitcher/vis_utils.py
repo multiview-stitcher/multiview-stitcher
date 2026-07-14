@@ -3,7 +3,10 @@ import os
 import ssl
 import urllib
 import urllib.parse
+import warnings
 import webbrowser
+from copy import deepcopy
+from dataclasses import asdict
 from functools import partial
 from http.server import (
     HTTPServer,
@@ -1331,6 +1334,7 @@ def generate_neuroglancer_json(
         full_affines = [None for _ in ome_zarr_urls]
         spacings_per_sim = [spacing] * len(ome_zarr_urls)
 
+    window = None
     if contrast_limits is not None:
         window = {
             "min": contrast_limits[0],
@@ -1338,9 +1342,7 @@ def generate_neuroglancer_json(
             "start": contrast_limits[0],
             "end": contrast_limits[1],
         }
-        channel_index = 0
-    # get contrast limits from first image
-    elif "c" in dims:
+    if "c" in dims:
         if channel_coord is None:
             channel_index = 0
         else:
@@ -1359,34 +1361,8 @@ def generate_neuroglancer_json(
             else:
                 channel_coords = sim.coords["c"].values
             channel_index = [str(c) for c in channel_coords].index(channel_coord)
-        if not virtual_ome_zarrs:
-            limits = np.array(
-                [
-                    sim_lims
-                    for sim_lims in [
-                        get_contrast_min_max_from_ome_zarr_omero_metadata(
-                            path, channel_coord
-                        )
-                        for path in ome_zarr_paths
-                    ]
-                    if sim_lims is not None
-                ]
-            )
-        else:
-            limits = np.array([])
-        if len(limits) == 0:
-            window = None
-        else:
-            vmin, vmax = (float(v) for v in [np.min(limits), np.max(limits)])
-            window = {
-                "min": vmin,
-                "max": vmax,
-                "start": vmin,
-                "end": vmax,
-            }
     else:
         channel_index = 0
-        window = None
 
     if not virtual_ome_zarrs:
         unit_specs = {
@@ -1557,6 +1533,189 @@ def get_neuroglancer_url(ng_json):
     return ng_url
 
 
+def _colormap_to_omero_color(colormap):
+    """Return a colormap's high-intensity color as an OMERO RRGGBB value."""
+    if isinstance(colormap, str):
+        cmap = colormaps.get_cmap(colormap)
+    else:
+        cmap = colormap
+    return colors.to_hex(cmap(1.0), keep_alpha=False)[1:]
+
+
+def _source_channel_info(sim=None, ome_zarr_path=None):
+    """Return channel labels and dtype for an image source."""
+    if sim is not None:
+        labels = (
+            [str(value) for value in sim.coords["c"].values]
+            if "c" in sim.dims
+            else ["0"]
+        )
+        return labels, sim.dtype
+
+    root = zarr.open_group(ome_zarr_path, mode="r")
+    multiscales = root.attrs["multiscales"][0]
+    axes = [
+        axis["name"] if isinstance(axis, dict) else axis
+        for axis in multiscales["axes"]
+    ]
+    array = root[multiscales["datasets"][0]["path"]]
+    n_channels = array.shape[axes.index("c")] if "c" in axes else 1
+    return [str(index) for index in range(n_channels)], array.dtype
+
+
+def _default_omero_window(dtype):
+    """Create a cheap display range without reading image data."""
+    dtype = np.dtype(dtype)
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        vmin, vmax = max(0, int(info.min)), int(info.max)
+    else:
+        vmin, vmax = 0.0, 1.0
+    return {"min": vmin, "max": vmax, "start": vmin, "end": vmax}
+
+
+def _temporary_omero_metadata(
+    base_omero,
+    colormap=None,
+    contrast_limits=None,
+    sim=None,
+    ome_zarr_path=None,
+):
+    """Build OMERO metadata for one source without changing the source."""
+    if sim is None and ome_zarr_path is None:
+        raise ValueError("Either sim or ome_zarr_path must be provided.")
+
+    omero = deepcopy(base_omero) if base_omero is not None else {}
+    if hasattr(omero, "__dataclass_fields__"):
+        omero = asdict(omero)
+
+    labels, dtype = _source_channel_info(
+        sim=sim, ome_zarr_path=ome_zarr_path
+    )
+    old_channels = omero.get("channels", [])
+    default_window = _default_omero_window(dtype)
+
+    if contrast_limits is None:
+        channel_limits = [None] * len(labels)
+    elif all(np.isscalar(value) for value in contrast_limits):
+        # A single pair is broadcast to every channel.
+        channel_limits = [contrast_limits] * len(labels)
+    else:
+        if len(contrast_limits) != len(labels):
+            raise ValueError(
+                "contrast_limits must contain one (min, max) pair per "
+                f"channel; expected {len(labels)}, got {len(contrast_limits)}."
+            )
+        channel_limits = contrast_limits
+
+    channels = []
+    for index, label in enumerate(labels):
+        old_channel = old_channels[index] if index < len(old_channels) else {}
+        limits = channel_limits[index]
+        if limits is not None:
+            vmin, vmax = limits
+            window = {
+                "min": vmin,
+                "max": vmax,
+                "start": vmin,
+                "end": vmax,
+            }
+        channel = {
+            **old_channel,
+            "label": old_channel.get("label", label),
+            "active": old_channel.get("active", True),
+            "window": (
+                window
+                if limits is not None
+                else old_channel.get("window", default_window)
+            ),
+        }
+        if colormap is not None:
+            channel["color"] = _colormap_to_omero_color(colormap)
+        else:
+            channel.setdefault("color", "ffffff")
+        channels.append(channel)
+
+    omero["channels"] = channels
+    return omero
+
+
+def _normalize_display_settings(colormaps, contrast_limits, n_sources):
+    """Validate and align display settings with the image sources."""
+    if colormaps is not None:
+        if not isinstance(colormaps, (list, tuple)):
+            raise TypeError("colormaps must be a list or tuple.")
+        if len(colormaps) != n_sources:
+            raise ValueError("colormaps must match the number of image sources.")
+        colormaps = list(colormaps)
+        # Validate before changing any on-disk metadata.
+        for colormap in colormaps:
+            _colormap_to_omero_color(colormap)
+    else:
+        colormaps = [None] * n_sources
+
+    if contrast_limits is None:
+        limits = None
+    elif (
+        len(contrast_limits) == 2
+        and all(np.isscalar(value) for value in contrast_limits)
+    ):
+        # Preserve the old API: one pair applies to every channel.
+        limits = tuple(contrast_limits)
+    else:
+        limits = [tuple(channel_limits) for channel_limits in contrast_limits]
+
+    limits_to_validate = [limits] if isinstance(limits, tuple) else limits or []
+    for channel_limits in limits_to_validate:
+        if len(channel_limits) != 2 or channel_limits[0] >= channel_limits[1]:
+            raise ValueError("Each contrast limit must satisfy min < max.")
+    return colormaps, limits
+
+
+def _apply_temporary_omero(
+    ome_zarr_paths, colormaps, contrast_limits, images=None
+):
+    """Replace local OMERO attrs and return enough state to restore them."""
+    backups = []
+    try:
+        for index, path in enumerate(ome_zarr_paths):
+            if str(path).startswith("http"):
+                warnings.warn(
+                    "Temporary OMERO display metadata cannot be applied to "
+                    f"the remote OME-Zarr {path!s}.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+
+            root = zarr.open_group(path, mode="a")
+            had_omero = "omero" in root.attrs
+            old_omero = deepcopy(root.attrs["omero"]) if had_omero else None
+            sim = images[index] if images is not None else None
+            root.attrs["omero"] = _temporary_omero_metadata(
+                old_omero,
+                colormap=colormaps[index],
+                contrast_limits=contrast_limits,
+                sim=sim,
+                ome_zarr_path=None if sim is not None else path,
+            )
+            backups.append((path, had_omero, old_omero))
+    except Exception:
+        _restore_omero(backups)
+        raise
+    return backups
+
+
+def _restore_omero(backups):
+    """Restore OMERO attrs changed by :func:`_apply_temporary_omero`."""
+    for path, had_omero, old_omero in reversed(backups):
+        root = zarr.open_group(path, mode="a")
+        if had_omero:
+            root.attrs["omero"] = old_omero
+        else:
+            del root.attrs["omero"]
+
+
 def view_neuroglancer(
     ome_zarr_paths=None,
     images=None,
@@ -1566,6 +1725,7 @@ def view_neuroglancer(
     channel_coord=None,
     single_layer=False,
     contrast_limits=None,
+    colormaps=None,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
     layout: str = None,
@@ -1603,13 +1763,20 @@ def view_neuroglancer(
     port : int, optional
         Port on which to serve local OME-Zarrs. By default 8000.
     channel_coord : str, optional
-        Which channel to use for initializing contrast limits, by default None.
+        Channel to select initially, by default the first channel.
     single_layer : bool, optional
         Whether to show all images in a single layer (True) or in separate
         layers per image (False, default).
-    contrast_limits : tuple, optional
-        Contrast limits (min, max) to use for visualization. If None, limits
-        are read from the OME-Zarr omero metadata if available, by default None.
+    contrast_limits : tuple or list of tuple, optional
+        Contrast limits ``(min, max)`` to expose through temporary OMERO
+        metadata. A single pair applies to every channel; a list supplies one
+        pair per channel and is applied to every image source. Existing
+        metadata is restored when serving stops.
+    colormaps : list, optional
+        One matplotlib colormap name or object per image. Each colormap's
+        high-intensity color is exposed through temporary OMERO metadata;
+        existing metadata is restored when serving stops. Temporary display
+        metadata cannot be applied to remote OME-Zarr URLs.
     layer_dicts : list of dict, optional
         Per-layer neuroglancer config overrides.
     global_dict : dict, optional
@@ -1623,7 +1790,6 @@ def view_neuroglancer(
     # Resolve the list of spatial images to use for transform lookup.
     # `images` takes precedence; fall back to the legacy `sims` parameter.
     if sims is not None and images is None:
-        import warnings
         warnings.warn(
             "The 'sims' parameter is deprecated and will be removed in a future "
             "version. Use 'images' instead.",
@@ -1637,6 +1803,7 @@ def view_neuroglancer(
     virtual_server = None
     resolved_images = None
     json_ome_zarr_paths = None
+    omero_backups = []
     if ome_zarr_paths is None:
         if input_images is None:
             raise ValueError(
@@ -1651,9 +1818,27 @@ def view_neuroglancer(
             else msi_utils.get_msim_from_sim(img, scale_factors=[])
             for img in input_images
         ]
+        source_colormaps, channel_limits = _normalize_display_settings(
+            colormaps, contrast_limits, len(virtual_msims)
+        )
+        override_omero = colormaps is not None or contrast_limits is not None
+        virtual_omero_channels = (
+            [
+                _temporary_omero_metadata(
+                    msim.attrs.get("omero"),
+                    colormap=source_colormaps[index],
+                    contrast_limits=channel_limits,
+                    sim=msi_utils.get_sim_from_msim(msim),
+                )
+                for index, msim in enumerate(virtual_msims)
+            ]
+            if override_omero
+            else None
+        )
         virtual_server = ngff_utils.serve_virtual_ome_zarrs(
             virtual_msims,
             port=port,
+            omero_channels=virtual_omero_channels,
         )
         ome_zarr_paths = virtual_server.urls
         ome_zarr_urls = [
@@ -1693,8 +1878,6 @@ def view_neuroglancer(
                 rel = os.path.relpath(os.path.abspath(path), dir_to_serve)
                 depth = len(rel.split(os.sep))
                 if dir_to_serve == os.sep or depth > _MAX_SERVE_DEPTH:
-                    import warnings
-
                     warnings.warn(
                         f"view_neuroglancer: the common ancestor directory "
                         f"'{dir_to_serve}' is too broad (depth {depth} > "
@@ -1723,48 +1906,69 @@ def view_neuroglancer(
             for path in ome_zarr_paths
         ]
 
-    ng_json = generate_neuroglancer_json(
-        ome_zarr_paths=json_ome_zarr_paths,
-        ome_zarr_urls=ome_zarr_urls,
-        sims=(
-            resolved_images
-            if json_ome_zarr_paths is None or transform_key is not None
-            else None
-        ),
-        transform_key=transform_key,
-        channel_coord=channel_coord,
-        single_layer=single_layer,
-        contrast_limits=contrast_limits,
-        layer_dicts=layer_dicts,
-        global_dict=global_dict,
-        layout=layout,
-    )
-    ng_url = get_neuroglancer_url(ng_json)
+        source_colormaps, channel_limits = _normalize_display_settings(
+            colormaps, contrast_limits, len(ome_zarr_paths)
+        )
+        if colormaps is not None or contrast_limits is not None:
+            metadata_images = (
+                resolved_images
+                if resolved_images is not None
+                and len(resolved_images) == len(ome_zarr_paths)
+                else None
+            )
+            omero_backups = _apply_temporary_omero(
+                ome_zarr_paths,
+                source_colormaps,
+                channel_limits,
+                metadata_images,
+            )
 
-    print("Neuroglancer configuration JSON:")
-    print(ng_json)
+    try:
+        ng_json = generate_neuroglancer_json(
+            ome_zarr_paths=json_ome_zarr_paths,
+            ome_zarr_urls=ome_zarr_urls,
+            sims=(
+                resolved_images
+                if json_ome_zarr_paths is None or transform_key is not None
+                else None
+            ),
+            transform_key=transform_key,
+            channel_coord=channel_coord,
+            single_layer=single_layer,
+            # Display overrides are read by Neuroglancer from OMERO metadata.
+            contrast_limits=None,
+            layer_dicts=layer_dicts,
+            global_dict=global_dict,
+            layout=layout,
+        )
+        ng_url = get_neuroglancer_url(ng_json)
 
-    print("Opening Neuroglancer in browser...")
-    print("URL:", ng_url)
-    print("Decoded URL:")
-    print(urllib.parse.unquote(ng_url))
-    print("Controls:")
-    print("All panels")
-    print("\t\tZoom: Ctrl + Mousewheel")
-    print("Projection panels:")
-    print("\t\tPan: Drag")
-    print("\t\tRotate: Shift + Drag")
-    print("3D view:")
-    print("\t\tPan: Shift + Drag")
-    print("\t\tRotate: Drag")
+        print("Neuroglancer configuration JSON:")
+        print(ng_json)
 
-    webbrowser.open(ng_url)
+        print("Opening Neuroglancer in browser...")
+        print("URL:", ng_url)
+        print("Decoded URL:")
+        print(urllib.parse.unquote(ng_url))
+        print("Controls:")
+        print("All panels")
+        print("\t\tZoom: Ctrl + Mousewheel")
+        print("Projection panels:")
+        print("\t\tPan: Drag")
+        print("\t\tRotate: Shift + Drag")
+        print("3D view:")
+        print("\t\tPan: Shift + Drag")
+        print("\t\tRotate: Drag")
 
-    # serve the local or virtual OME-Zarr files
-    if virtual_server is not None:
-        virtual_server.serve_forever()
-    elif dir_to_serve is not None:
-        serve_dir(dir_to_serve, port=port)
+        webbrowser.open(ng_url)
+
+        # serve the local or virtual OME-Zarr files
+        if virtual_server is not None:
+            virtual_server.serve_forever()
+        elif dir_to_serve is not None:
+            serve_dir(dir_to_serve, port=port)
+    finally:
+        _restore_omero(omero_backups)
 
 
 # Public URL of the OME-Zarr validator web app.
