@@ -146,12 +146,12 @@ def test_read_imaris_into_msim_synthetic_file():
             "X": 4,
             "Y": 3,
             "Z": 2,
-            "ExtMin0": 0.0,
-            "ExtMin1": 0.0,
-            "ExtMin2": 0.0,
-            "ExtMax0": 4.0,
-            "ExtMax1": 6.0,
-            "ExtMax2": 6.0,
+            "ExtMin0": 10.0,
+            "ExtMin1": -5.0,
+            "ExtMin2": 100.0,
+            "ExtMax0": 14.0,
+            "ExtMax1": 1.0,
+            "ExtMax2": 106.0,
         }.items():
             image_info.attrs[name] = _ims_attr(value)
 
@@ -181,9 +181,9 @@ def test_read_imaris_into_msim_synthetic_file():
     assert sim0.shape == (1, 1, 2, 3, 4)
     assert sim0.coords["c"].values.tolist() == [1]
     assert sim0.coords["t"].values.tolist() == [0]
-    np.testing.assert_allclose(sim0.coords["z"].values, [0.0, 3.0])
-    np.testing.assert_allclose(sim0.coords["y"].values, [0.0, 2.0, 4.0])
-    np.testing.assert_allclose(sim0.coords["x"].values, [0.0, 1.0, 2.0, 3.0])
+    np.testing.assert_allclose(sim0.coords["z"].values, [100.0, 103.0])
+    np.testing.assert_allclose(sim0.coords["y"].values, [-5.0, -3.0, -1.0])
+    np.testing.assert_allclose(sim0.coords["x"].values, [10.0, 11.0, 12.0, 13.0])
     np.testing.assert_array_equal(
         sim0.sel(t=0, c=1).data.compute(),
         data0 + 100,

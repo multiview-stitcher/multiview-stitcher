@@ -81,6 +81,17 @@ def get_spacing_from_ims(filename):
         }
 
 
+def get_origin_from_ims(filename):
+    h5py = _require_h5py()
+
+    with h5py.File(filename, "r") as f:
+        attrs = f["DataSetInfo/Image"].attrs
+        return {
+            dim: _decode_attr(attrs[f"ExtMin{idim}"], dtype=float)
+            for idim, dim in enumerate(IMARIS_SPATIAL_DIMS)
+        }
+
+
 def _read_hdf5_block(
     _template_block,
     *,
@@ -136,6 +147,7 @@ def _read_imaris_into_msim_single_field(filename, itime=0, ichannel=0):
         n_res = len(f["DataSet"].keys())
 
     spacing0 = get_spacing_from_ims(filename)
+    origin = get_origin_from_ims(filename)
     shape0 = get_shape_from_group(
         filename,
         get_group_path(ires=0, itime=itime, ichannel=ichannel),
@@ -162,6 +174,7 @@ def _read_imaris_into_msim_single_field(filename, itime=0, ichannel=0):
             )[spatial_selection],
             dims=SPATIAL_DIMS,
             scale=spacing,
+            translation=origin,
             c_coords=[ichannel],
             t_coords=[itime],
         )
