@@ -857,7 +857,7 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
 
 
 def test_view_neuroglancer_virtual_display_metadata(monkeypatch):
-    """Per-image display settings are exposed without mutating msims."""
+    """Multichannel colormaps are exposed without mutating msims."""
     import webbrowser
 
     monkeypatch.setattr(webbrowser, "open", lambda url: None)
@@ -925,6 +925,13 @@ def test_view_neuroglancer_virtual_display_metadata(monkeypatch):
         for omero in captured_omero_channels
     ] == [
         vis_utils._colormap_to_omero_color("Reds"),
+        vis_utils._colormap_to_omero_color("Reds"),
+    ]
+    assert [
+        omero["channels"][1]["color"]
+        for omero in captured_omero_channels
+    ] == [
+        vis_utils._colormap_to_omero_color("Greens"),
         vis_utils._colormap_to_omero_color("Greens"),
     ]
     assert captured_omero_channels[0]["channels"][0]["label"] == "existing"
@@ -940,9 +947,94 @@ def test_view_neuroglancer_virtual_display_metadata(monkeypatch):
         "start": 3,
         "end": 30,
     }
+    channel = captured_omero_channels[0]["channels"][0]
+    assert channel["color"] == channel["color"].upper()
+    assert channel["coefficient"] == 1
+    assert channel["family"] == "linear"
+    assert channel["inverted"] is False
     assert captured_omero_channels[1]["channels"][0]["window"]["end"] == 20
     assert captured_omero_channels[1]["channels"][1]["window"]["end"] == 30
     assert msims[0].attrs["omero"] == old_omero
+
+
+def test_view_neuroglancer_channel_coord_serves_selected_channel(monkeypatch):
+    """channel_coord slices every scale and forces virtual OME-Zarr serving."""
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+    monkeypatch.setattr(
+        vis_utils,
+        "get_neuroglancer_url",
+        lambda ng_json: "https://example.invalid/neuroglancer",
+    )
+    monkeypatch.setattr(
+        vis_utils,
+        "serve_dir",
+        lambda *args, **kwargs: pytest.fail("serve_dir must not be used"),
+    )
+
+    captured_msims = []
+    captured_omero_channels = []
+
+    class FakeVirtualServer:
+        urls = ["http://127.0.0.1:8126/image_0"]
+
+        def serve_forever(self):
+            pass
+
+    def fake_serve_virtual_ome_zarrs(msims, **kwargs):
+        captured_msims.extend(msims)
+        captured_omero_channels.extend(kwargs["omero_channels"])
+        return FakeVirtualServer()
+
+    monkeypatch.setattr(
+        ngff_utils,
+        "serve_virtual_ome_zarrs",
+        fake_serve_virtual_ome_zarrs,
+    )
+
+    sim = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0,
+        N_c=2,
+        N_t=1,
+        tile_size=10,
+        tiles_x=1,
+        tiles_y=1,
+        tiles_z=1,
+    )[0]
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    selected_channel = sim.coords["c"].values[1]
+
+    vis_utils.view_neuroglancer(
+        ome_zarr_paths=["unused-because-selection-is-virtual.zarr"],
+        images=[msim],
+        channel_coord=selected_channel,
+        colormaps=["Greens"],
+        port=8126,
+    )
+
+    served_sim = msi_utils.get_sim_from_msim(captured_msims[0])
+    assert served_sim.sizes["c"] == 1
+    assert str(served_sim.coords["c"].item()) == str(selected_channel)
+    assert sim.sizes["c"] == 2
+    assert captured_omero_channels[0]["channels"][0]["label"] == str(
+        selected_channel
+    )
+
+    with tempfile.TemporaryDirectory() as data_dir:
+        zarr_path = os.path.join(data_dir, "multichannel.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+        vis_utils.view_neuroglancer(
+            ome_zarr_paths=[zarr_path],
+            channel_coord=selected_channel,
+            colormaps=["Greens"],
+            port=8126,
+        )
+
+    path_served_sim = msi_utils.get_sim_from_msim(captured_msims[1])
+    assert path_served_sim.sizes["c"] == 1
+    assert str(path_served_sim.coords["c"].item()) == str(selected_channel)
 
 
 def test_view_neuroglancer_virtual_images_without_transform(monkeypatch):
@@ -1033,7 +1125,7 @@ def test_view_neuroglancer_local_display_metadata_is_restored(monkeypatch):
         # A single pair retains backward-compatible broadcast semantics.
         vis_utils.view_neuroglancer(
             [zarr_path],
-            colormaps=["Blues"],
+            colormaps=["Blues", "Reds"],
             contrast_limits=(4, 40),
             port=8125,
         )
@@ -1054,10 +1146,23 @@ def test_view_neuroglancer_local_display_metadata_is_restored(monkeypatch):
 
 def test_view_neuroglancer_display_setting_validation():
     with pytest.raises(ValueError, match="number of image sources"):
-        vis_utils._normalize_display_settings(["Reds"], None, 2)
+        vis_utils._normalize_display_settings(["Reds"], None, [1, 1])
 
     with pytest.raises(ValueError, match="min < max"):
-        vis_utils._normalize_display_settings(None, (10, 1), 2)
+        vis_utils._normalize_display_settings(None, (10, 1), [1, 1])
+
+    single_channel_colormaps, _ = vis_utils._normalize_display_settings(
+        ["Reds", "Greens"], None, [1, 1]
+    )
+    assert single_channel_colormaps == [["Reds"], ["Greens"]]
+
+    multichannel_colormaps, _ = vis_utils._normalize_display_settings(
+        ["Reds", "Greens"], None, [2, 2]
+    )
+    assert multichannel_colormaps == [
+        ["Reds", "Greens"],
+        ["Reds", "Greens"],
+    ]
 
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
