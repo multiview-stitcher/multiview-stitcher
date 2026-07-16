@@ -749,6 +749,22 @@ def test_generate_neuroglancer_json_xy_layout_for_3d():
     assert xy_config["layout"] == "xy"
 
 
+def test_get_neuroglancer_url_custom_base():
+    ng_json = {"layout": "xy"}
+
+    default_url = vis_utils.get_neuroglancer_url(ng_json)
+    assert default_url.startswith(
+        vis_utils._DEFAULT_NEUROGLANCER_URL + "/#!"
+    )
+
+    custom_url = vis_utils.get_neuroglancer_url(
+        ng_json, neuroglancer_url="https://ng.example.org/viewer/"
+    )
+    assert custom_url.startswith("https://ng.example.org/viewer/#!")
+    # the encoded state is identical regardless of the base URL
+    assert default_url.split("#!")[1] == custom_url.split("#!")[1]
+
+
 def test_view_neuroglancer_images_param(monkeypatch):
     """
     view_neuroglancer accepts `images=` with sims and msims, and emits a
@@ -798,6 +814,7 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
 
     served = []
     captured_json = []
+    captured_ng_url_kwargs = []
 
     class FakeVirtualServer:
         urls = ["http://127.0.0.1:8123/image_0"]
@@ -810,8 +827,9 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
         assert kwargs["port"] == 8123
         return FakeVirtualServer()
 
-    def capture_ng_url(ng_json):
+    def capture_ng_url(ng_json, **kwargs):
         captured_json.append(ng_json)
+        captured_ng_url_kwargs.append(kwargs)
         return "https://example.invalid/neuroglancer"
 
     monkeypatch.setattr(
@@ -838,11 +856,15 @@ def test_view_neuroglancer_virtual_images(monkeypatch):
         transform_key=io.METADATA_TRANSFORM_KEY,
         port=8123,
         layout="xy",
+        neuroglancer_url="https://ng.example.org",
     )
 
     assert served == [True]
     assert captured_json
     assert captured_json[0]["layout"] == "xy"
+    assert captured_ng_url_kwargs[0]["neuroglancer_url"] == (
+        "https://ng.example.org"
+    )
     source = captured_json[0]["layers"][0]["source"]
     assert source["url"] == "http://127.0.0.1:8123/image_0"
     assert "transform" in source
@@ -885,7 +907,7 @@ def test_view_neuroglancer_virtual_display_metadata(monkeypatch):
     monkeypatch.setattr(
         vis_utils,
         "get_neuroglancer_url",
-        lambda ng_json: "https://example.invalid/neuroglancer",
+        lambda ng_json, **kwargs: "https://example.invalid/neuroglancer",
     )
 
     sims = sample_data.generate_tiled_dataset(
@@ -957,6 +979,112 @@ def test_view_neuroglancer_virtual_display_metadata(monkeypatch):
     assert msims[0].attrs["omero"] == old_omero
 
 
+def test_view_neuroglancer_use_positional_colors(monkeypatch):
+    """use_positional_colors assigns different colors to overlapping tiles."""
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: None)
+
+    captured_omero_channels = []
+
+    class FakeVirtualServer:
+        urls = [
+            "http://127.0.0.1:8127/image_0",
+            "http://127.0.0.1:8127/image_1",
+        ]
+
+        def serve_forever(self):
+            pass
+
+    def fake_serve_virtual_ome_zarrs(msims, **kwargs):
+        captured_omero_channels.extend(kwargs["omero_channels"])
+        return FakeVirtualServer()
+
+    monkeypatch.setattr(
+        ngff_utils,
+        "serve_virtual_ome_zarrs",
+        fake_serve_virtual_ome_zarrs,
+    )
+    monkeypatch.setattr(
+        vis_utils,
+        "get_neuroglancer_url",
+        lambda ng_json, **kwargs: "https://example.invalid/neuroglancer",
+    )
+
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0.2,
+        N_c=1,
+        N_t=1,
+        tile_size=10,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+    )
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    vis_utils.view_neuroglancer(
+        images=msims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        use_positional_colors=True,
+        port=8127,
+    )
+
+    from matplotlib import colors as mpl_colors
+
+    result_colors = [
+        omero["channels"][0]["color"] for omero in captured_omero_channels
+    ]
+    # overlapping tiles must be assigned different colors
+    assert result_colors[0] != result_colors[1]
+    expected_hex_colors = {
+        mpl_colors.to_hex(name, keep_alpha=False)[1:].upper()
+        for name in vis_utils._POSITIONAL_COLOR_PALETTE
+    }
+    assert set(result_colors) <= expected_hex_colors
+
+
+def test_view_neuroglancer_use_positional_colors_validation():
+    sims = sample_data.generate_tiled_dataset(
+        ndim=2,
+        overlap=0.2,
+        N_c=2,
+        N_t=1,
+        tile_size=10,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+    )
+    msims = [
+        msi_utils.get_msim_from_sim(sim, scale_factors=[]) for sim in sims
+    ]
+
+    # mutually exclusive with colormaps
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        vis_utils.view_neuroglancer(
+            images=msims,
+            use_positional_colors=True,
+            colormaps=["Reds", "Greens"],
+        )
+
+    # requires images/sims to compute tile positions
+    with pytest.raises(ValueError, match="requires 'images' or 'sims'"):
+        vis_utils.view_neuroglancer(
+            ome_zarr_paths=["unused.zarr"],
+            use_positional_colors=True,
+        )
+
+    # only supported for single-channel images
+    with pytest.raises(ValueError, match="single-channel"):
+        vis_utils.view_neuroglancer(
+            images=msims,
+            transform_key=METADATA_TRANSFORM_KEY,
+            use_positional_colors=True,
+        )
+
+
 def test_view_neuroglancer_channel_coord_serves_selected_channel(monkeypatch):
     """channel_coord slices every scale and forces virtual OME-Zarr serving."""
     import webbrowser
@@ -965,7 +1093,7 @@ def test_view_neuroglancer_channel_coord_serves_selected_channel(monkeypatch):
     monkeypatch.setattr(
         vis_utils,
         "get_neuroglancer_url",
-        lambda ng_json: "https://example.invalid/neuroglancer",
+        lambda ng_json, **kwargs: "https://example.invalid/neuroglancer",
     )
     monkeypatch.setattr(
         vis_utils,
@@ -1059,7 +1187,7 @@ def test_view_neuroglancer_virtual_images_without_transform(monkeypatch):
     monkeypatch.setattr(
         vis_utils,
         "get_neuroglancer_url",
-        lambda ng_json: captured_json.append(ng_json)
+        lambda ng_json, **kwargs: captured_json.append(ng_json)
         or "https://example.invalid/neuroglancer",
     )
 
@@ -1095,7 +1223,7 @@ def test_view_neuroglancer_local_display_metadata_is_restored(monkeypatch):
     monkeypatch.setattr(
         vis_utils,
         "get_neuroglancer_url",
-        lambda ng_json: "https://example.invalid/neuroglancer",
+        lambda ng_json, **kwargs: "https://example.invalid/neuroglancer",
     )
 
     sim = sample_data.generate_tiled_dataset(

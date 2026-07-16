@@ -32,6 +32,23 @@ from multiview_stitcher import (
     spatial_image_utils,
 )
 
+# Palette cycled through by `use_positional_colors`, shared between
+# `plot_positions` and `view_neuroglancer` so that positional coloring
+# looks the same in both. The Okabe-Ito palette (Okabe & Ito, 2008; Wong,
+# Nature Methods 2011) is distinguishable under all common forms of color
+# blindness; black is dropped since it's invisible against dark viewer
+# backgrounds. Ordered so that the first two entries (used when the default
+# n_colors=2) are the most mutually distinct.
+_POSITIONAL_COLOR_PALETTE = [
+    "#E69F00",  # orange
+    "#56B4E9",  # sky blue
+    "#D55E00",  # vermillion
+    "#009E73",  # bluish green
+    "#CC79A7",  # reddish purple
+    "#0072B2",  # blue
+    "#F0E442",  # yellow
+]
+
 
 def plot_positions(
     sims,
@@ -129,14 +146,15 @@ def plot_positions(
                 sims[isim] = spatial_image_utils.sim_sel_coords(sim, nscoord)
 
     if use_positional_colors:
-        pos_colors = ["red", "green", "blue", "yellow"]
         greedy_colors = mv_graph.get_greedy_colors(
             sims,
             n_colors=n_colors,
             transform_key=transform_key,
         )
         pos_colors = [
-            pos_colors[greedy_colors[iview] % len(pos_colors)]
+            _POSITIONAL_COLOR_PALETTE[
+                greedy_colors[iview] % len(_POSITIONAL_COLOR_PALETTE)
+            ]
             for iview in range(len(sims))
         ]
 
@@ -1526,8 +1544,25 @@ def generate_neuroglancer_json(
     return ng_config
 
 
-def get_neuroglancer_url(ng_json):
-    ng_url = "https://neuroglancer-demo.appspot.com/#!" + urllib.parse.quote(
+# Public Neuroglancer instance used when no custom `neuroglancer_url` is given.
+_DEFAULT_NEUROGLANCER_URL = "https://neuroglancer-demo.appspot.com"
+
+
+def get_neuroglancer_url(ng_json, neuroglancer_url=None):
+    """Build a Neuroglancer link that encodes `ng_json` as URL state.
+
+    Parameters
+    ----------
+    ng_json : dict
+        Neuroglancer viewer state, as produced by
+        `generate_neuroglancer_json`.
+    neuroglancer_url : str, optional
+        Base URL of the Neuroglancer instance to link to, e.g. a
+        self-hosted deployment. By default, the public demo instance at
+        `_DEFAULT_NEUROGLANCER_URL` is used.
+    """
+    base_url = (neuroglancer_url or _DEFAULT_NEUROGLANCER_URL).rstrip("/")
+    ng_url = base_url + "/#!" + urllib.parse.quote(
         json.dumps(ng_json, separators=(",", ":"))
     )
     return ng_url
@@ -1787,6 +1822,28 @@ def _select_msim_channel(msim, channel_coord):
     return msi_utils.multiscale_sel_coords(msim, {"c": matches})
 
 
+def _positional_colormaps(sims, transform_key, n_colors):
+    """Return one solid-color colormap per sim, based on tile adjacency.
+
+    Uses the same greedy graph-coloring approach as `plot_positions`, so
+    that overlapping/neighboring tiles are assigned different colors from
+    `_POSITIONAL_COLOR_PALETTE`.
+    """
+    greedy_colors = mv_graph.get_greedy_colors(
+        sims, n_colors=n_colors, transform_key=transform_key
+    )
+    return [
+        colors.LinearSegmentedColormap.from_list(
+            "positional",
+            [_POSITIONAL_COLOR_PALETTE[
+                greedy_colors[iview] % len(_POSITIONAL_COLOR_PALETTE)
+            ]]
+            * 2,
+        )
+        for iview in range(len(sims))
+    ]
+
+
 def view_neuroglancer(
     ome_zarr_paths=None,
     images=None,
@@ -1797,9 +1854,12 @@ def view_neuroglancer(
     single_layer=False,
     contrast_limits=None,
     colormaps=None,
+    use_positional_colors=False,
+    n_colors=2,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
     layout: str = None,
+    neuroglancer_url: str = None,
 ):
     """
     Visualize a list of OME-Zarrs or in-memory images in Neuroglancer
@@ -1851,6 +1911,18 @@ def view_neuroglancer(
         colormap per image. Each colormap's high-intensity color is exposed
         through temporary OMERO metadata. Existing metadata is restored when
         serving stops; remote OME-Zarr metadata cannot be modified.
+    use_positional_colors : bool, optional
+        Color each image based on its spatial position, so that
+        neighboring / overlapping tiles are easier to tell apart. Uses the
+        same greedy graph-coloring approach as `plot_positions`'s
+        `use_positional_colors` option. As with passing one colormap per
+        image via `colormaps`, this only applies when every image has a
+        single channel, and requires `images` or `sims` (together with
+        `transform_key`) so that tile positions can be computed. Mutually
+        exclusive with `colormaps`. By default False.
+    n_colors : int, optional
+        Number of distinct colors to cycle through when
+        `use_positional_colors` is True, by default 2.
     layer_dicts : list of dict, optional
         Per-layer neuroglancer config overrides.
     global_dict : dict, optional
@@ -1859,6 +1931,10 @@ def view_neuroglancer(
         Initial Neuroglancer layout. Defaults to ``"xy"`` for 2D data and
         ``"4panel"`` for 3D data. Set to ``"xy"`` to start with only the XY
         projection.
+    neuroglancer_url : str, optional
+        Base URL of the Neuroglancer instance to open, e.g. a self-hosted
+        deployment. By default, the public demo instance at
+        ``https://neuroglancer-demo.appspot.com`` is used.
     """
 
     # Resolve the list of spatial images to use for transform lookup.
@@ -1910,6 +1986,37 @@ def view_neuroglancer(
         # Selected data cannot be represented by the original OME-Zarr URL;
         # serve the sliced msims through the read-only virtual server instead.
         ome_zarr_paths = None
+
+    if use_positional_colors:
+        if colormaps is not None:
+            raise ValueError(
+                "use_positional_colors and colormaps are mutually exclusive."
+            )
+        if input_images is None:
+            raise ValueError(
+                "use_positional_colors requires 'images' or 'sims' to be "
+                "provided so that tile positions can be computed."
+            )
+        sims_for_colors = [
+            msi_utils.get_sim_from_msim(image)
+            if msi_utils.is_msim(image)
+            else image
+            for image in input_images
+        ]
+        if any(
+            int(sim.sizes.get("c", 1)) > 1 for sim in sims_for_colors
+        ):
+            raise ValueError(
+                "use_positional_colors only supports single-channel images "
+                "(it colors tiles the same way 'colormaps' does when given "
+                "one colormap per image). Use 'channel_coord' to select a "
+                "single channel first."
+            )
+        # From here on, positional colors are just another `colormaps` value
+        # and flow through the existing colormap-per-image handling below.
+        colormaps = _positional_colormaps(
+            sims_for_colors, transform_key, n_colors
+        )
 
     virtual_server = None
     resolved_images = None
@@ -2078,7 +2185,9 @@ def view_neuroglancer(
             global_dict=global_dict,
             layout=layout,
         )
-        ng_url = get_neuroglancer_url(ng_json)
+        ng_url = get_neuroglancer_url(
+            ng_json, neuroglancer_url=neuroglancer_url
+        )
 
         print("Neuroglancer configuration JSON:")
         print(ng_json)
