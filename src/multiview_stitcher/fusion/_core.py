@@ -1602,16 +1602,27 @@ def fuse_np(
 
     input_dtype = sims[0].dtype
 
+    # A chunk can intersect a view in only one pixel along an axis. Coordinate
+    # differences cannot retain the spacing for such singleton slices, so use
+    # the known spacing of the full view when it is available.
+    if spacings is None:
+        spacings = (
+            [view_bb["spacing"] for view_bb in full_view_bbs]
+            if full_view_bbs is not None
+            else [None] * len(sims)
+        )
+
     # Transform input views
     field_ims_t = [
         transformation.transform_sim(
             sim.astype(np.float32),
             np.linalg.inv(param),
             output_stack_properties=output_properties,
+            input_spacing=spacing,
             order=interpolation_order,
             cval=np.nan,
         ).data
-        for sim, param in zip(sims, params)
+        for sim, param, spacing in zip(sims, params, spacings)
     ]
     field_ims_t = np.stack(field_ims_t)
 

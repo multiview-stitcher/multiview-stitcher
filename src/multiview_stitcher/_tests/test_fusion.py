@@ -477,6 +477,102 @@ def test_fuse_trim_overlap_keeps_fused_chunk_overlap(backend):
     )
 
 
+@pytest.mark.parametrize("backend", ["numpy", "dask", "zarr"])
+def test_fuse_singleton_view_slice_preserves_spacing(backend):
+    data = np.ones((2, 20), dtype=np.uint16)
+
+    if backend == "numpy":
+        array = data
+    elif backend == "dask":
+        array = da.from_array(data, chunks=data.shape)
+    else:
+        array = zarr.array(
+            data,
+            chunks=data.shape,
+            store=zarr.storage.MemoryStore(),
+        )
+
+    sim = si_utils.get_sim_from_array(
+        array,
+        dims=["y", "x"],
+        scale={"y": 0.3, "x": 0.3},
+        translation={"y": 0.0, "x": 0.0},
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+    output_properties = {
+        "origin": {"y": 0.0, "x": -2.7},
+        "spacing": {"y": 0.3, "x": 0.3},
+        "shape": {"y": 2, "x": 29},
+    }
+
+    fused = fusion.fuse(
+        [sim],
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.max_fusion,
+        interpolation_order=0,
+        output_stack_properties=output_properties,
+        output_chunksize={"y": 2, "x": 10},
+    )
+    fused_data = np.squeeze(
+        fused.data.compute(scheduler="single-threaded")
+    )
+
+    # The first output chunk sees only the first source pixel. Its spacing must
+    # still be 0.3 rather than the singleton-coordinate fallback of 1.0.
+    np.testing.assert_array_equal(
+        fused_data,
+        np.tile(
+            np.concatenate(
+                [np.zeros(9, dtype=np.uint16), np.ones(20, dtype=np.uint16)]
+            ),
+            (2, 1),
+        ),
+    )
+
+
+def test_fuse_grid_aligned_chunk_edge_tolerates_coordinate_roundoff():
+    # A large origin makes adjacent coordinate differences slightly noisier
+    # than the scale used to construct the full coordinate array.
+    origin = 861.5120670572916
+    scale = 0.13810709635416665
+    data = np.ones((2, 4084), dtype=np.uint16)
+    sim = si_utils.get_sim_from_array(
+        data,
+        dims=["y", "x"],
+        scale={"y": scale, "x": scale},
+        translation={"y": 0.0, "x": origin},
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+    inferred_scale = si_utils.get_spacing_from_sim(sim)["x"]
+    output_properties = {
+        "origin": {"y": 0.0, "x": origin - 9 * inferred_scale},
+        "spacing": {"y": inferred_scale, "x": inferred_scale},
+        "shape": {"y": 2, "x": 4093},
+    }
+
+    fused = fusion.fuse(
+        [sim],
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.max_fusion,
+        interpolation_order=0,
+        output_stack_properties=output_properties,
+        output_chunksize={"y": 2, "x": 4084},
+    )
+    fused_data = np.squeeze(
+        fused.data.compute(scheduler="single-threaded")
+    )
+
+    np.testing.assert_array_equal(
+        fused_data,
+        np.tile(
+            np.concatenate(
+                [np.zeros(9, dtype=np.uint16), np.ones(4084, dtype=np.uint16)]
+            ),
+            (2, 1),
+        ),
+    )
+
+
 def test_materialize_xarray_zarr_backend_retries_server_disconnect(
     monkeypatch,
 ):

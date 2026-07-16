@@ -17,6 +17,7 @@ def transform_sim(
     p=None,
     output_stack_properties=None,
     keep_transform_keys=False,
+    input_spacing=None,
     **affine_transform_kwargs,
 ):
     """
@@ -40,7 +41,9 @@ def transform_sim(
     Sx = np.diag(
         [output_stack_properties["spacing"][dim] for dim in spatial_dims]
     )
-    Sy = np.diag(spatial_image_utils.get_spacing_from_sim(sim, asarray=True))
+    if input_spacing is None:
+        input_spacing = spatial_image_utils.get_spacing_from_sim(sim)
+    Sy = np.diag([input_spacing[dim] for dim in spatial_dims])
 
     Ox = np.array(
         [output_stack_properties["origin"][dim] for dim in spatial_dims]
@@ -50,15 +53,15 @@ def transform_sim(
     # scipy.ndimage.affine_transform maps output pixel coordinates back into
     # input pixel coordinates. Convert the physical transform into that pixel
     # coordinate system before passing it to the backend-specific resampler.
-    matrix_prime = np.dot(np.linalg.inv(Sy), np.dot(matrix, Sx))
-    offset_prime = np.dot(
-        np.linalg.inv(Sy),
-        offset
-        - Oy
-        + np.dot(
-            matrix,
-            Ox,
-        ),
+    matrix_prime = np.linalg.solve(Sy, np.dot(matrix, Sx))
+
+    # Express both physical origins relative to the output origin. This avoids
+    # subtracting two transformed, potentially very large global coordinates.
+    local_input_origin = Oy - Ox
+    local_offset = offset + np.dot(matrix - np.eye(ndim), Ox)
+    offset_prime = np.linalg.solve(
+        Sy,
+        local_offset - local_input_origin,
     )
 
     # take care of floating point errors: round parameters to 10 decimals
@@ -69,6 +72,15 @@ def transform_sim(
     decimals = 10
     matrix_prime = np.around(matrix_prime, decimals=decimals)
     offset_prime = np.around(offset_prime, decimals=decimals)
+
+    # Coordinates with a large origin can accumulate tiny rounding errors.
+    # Snap only pixel offsets. Near-integer matrix coefficients can represent
+    # genuine small rotations, scales, or shears that grow across large images.
+    nearest_integer = np.round(offset_prime)
+    near_integer = np.isclose(
+        offset_prime, nearest_integer, rtol=0, atol=1e-6
+    )
+    offset_prime[near_integer] = nearest_integer[near_integer]
 
     affine_transform_kwargs = {
         "matrix": matrix_prime,
