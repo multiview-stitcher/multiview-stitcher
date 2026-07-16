@@ -17,6 +17,7 @@ def transform_sim(
     p=None,
     output_stack_properties=None,
     keep_transform_keys=False,
+    input_spacing=None,
     **affine_transform_kwargs,
 ):
     """
@@ -40,7 +41,9 @@ def transform_sim(
     Sx = np.diag(
         [output_stack_properties["spacing"][dim] for dim in spatial_dims]
     )
-    Sy = np.diag(spatial_image_utils.get_spacing_from_sim(sim, asarray=True))
+    if input_spacing is None:
+        input_spacing = spatial_image_utils.get_spacing_from_sim(sim)
+    Sy = np.diag([input_spacing[dim] for dim in spatial_dims])
 
     Ox = np.array(
         [output_stack_properties["origin"][dim] for dim in spatial_dims]
