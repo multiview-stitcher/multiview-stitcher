@@ -3,7 +3,10 @@ import os
 import ssl
 import urllib
 import urllib.parse
+import warnings
 import webbrowser
+from copy import deepcopy
+from dataclasses import asdict
 from functools import partial
 from http.server import (
     HTTPServer,
@@ -28,6 +31,23 @@ from multiview_stitcher import (
     param_utils,
     spatial_image_utils,
 )
+
+# Palette cycled through by `use_positional_colors`, shared between
+# `plot_positions` and `view_neuroglancer` so that positional coloring
+# looks the same in both. The Okabe-Ito palette (Okabe & Ito, 2008; Wong,
+# Nature Methods 2011) is distinguishable under all common forms of color
+# blindness; black is dropped since it's invisible against dark viewer
+# backgrounds. Ordered so that the first two entries (used when the default
+# n_colors=2) are the most mutually distinct.
+_POSITIONAL_COLOR_PALETTE = [
+    "#E69F00",  # orange
+    "#56B4E9",  # sky blue
+    "#D55E00",  # vermillion
+    "#009E73",  # bluish green
+    "#CC79A7",  # reddish purple
+    "#0072B2",  # blue
+    "#F0E442",  # yellow
+]
 
 
 def plot_positions(
@@ -126,14 +146,15 @@ def plot_positions(
                 sims[isim] = spatial_image_utils.sim_sel_coords(sim, nscoord)
 
     if use_positional_colors:
-        pos_colors = ["red", "green", "blue", "yellow"]
         greedy_colors = mv_graph.get_greedy_colors(
             sims,
             n_colors=n_colors,
             transform_key=transform_key,
         )
         pos_colors = [
-            pos_colors[greedy_colors[iview] % len(pos_colors)]
+            _POSITIONAL_COLOR_PALETTE[
+                greedy_colors[iview] % len(_POSITIONAL_COLOR_PALETTE)
+            ]
             for iview in range(len(sims))
         ]
 
@@ -1331,6 +1352,7 @@ def generate_neuroglancer_json(
         full_affines = [None for _ in ome_zarr_urls]
         spacings_per_sim = [spacing] * len(ome_zarr_urls)
 
+    window = None
     if contrast_limits is not None:
         window = {
             "min": contrast_limits[0],
@@ -1338,9 +1360,7 @@ def generate_neuroglancer_json(
             "start": contrast_limits[0],
             "end": contrast_limits[1],
         }
-        channel_index = 0
-    # get contrast limits from first image
-    elif "c" in dims:
+    if "c" in dims:
         if channel_coord is None:
             channel_index = 0
         else:
@@ -1359,34 +1379,8 @@ def generate_neuroglancer_json(
             else:
                 channel_coords = sim.coords["c"].values
             channel_index = [str(c) for c in channel_coords].index(channel_coord)
-        if not virtual_ome_zarrs:
-            limits = np.array(
-                [
-                    sim_lims
-                    for sim_lims in [
-                        get_contrast_min_max_from_ome_zarr_omero_metadata(
-                            path, channel_coord
-                        )
-                        for path in ome_zarr_paths
-                    ]
-                    if sim_lims is not None
-                ]
-            )
-        else:
-            limits = np.array([])
-        if len(limits) == 0:
-            window = None
-        else:
-            vmin, vmax = (float(v) for v in [np.min(limits), np.max(limits)])
-            window = {
-                "min": vmin,
-                "max": vmax,
-                "start": vmin,
-                "end": vmax,
-            }
     else:
         channel_index = 0
-        window = None
 
     if not virtual_ome_zarrs:
         unit_specs = {
@@ -1550,11 +1544,304 @@ def generate_neuroglancer_json(
     return ng_config
 
 
-def get_neuroglancer_url(ng_json):
-    ng_url = "https://neuroglancer-demo.appspot.com/#!" + urllib.parse.quote(
+# Public Neuroglancer instance used when no custom `neuroglancer_url` is given.
+_DEFAULT_NEUROGLANCER_URL = "https://neuroglancer-demo.appspot.com"
+
+
+def get_neuroglancer_url(ng_json, neuroglancer_url=None):
+    """Build a Neuroglancer link that encodes `ng_json` as URL state.
+
+    Parameters
+    ----------
+    ng_json : dict
+        Neuroglancer viewer state, as produced by
+        `generate_neuroglancer_json`.
+    neuroglancer_url : str, optional
+        Base URL of the Neuroglancer instance to link to, e.g. a
+        self-hosted deployment. By default, the public demo instance at
+        `_DEFAULT_NEUROGLANCER_URL` is used.
+    """
+    base_url = (neuroglancer_url or _DEFAULT_NEUROGLANCER_URL).rstrip("/")
+    ng_url = base_url + "/#!" + urllib.parse.quote(
         json.dumps(ng_json, separators=(",", ":"))
     )
     return ng_url
+
+
+def _colormap_to_omero_color(colormap):
+    """Return a colormap's high-intensity color as an OMERO RRGGBB value."""
+    if isinstance(colormap, str):
+        cmap = colormaps.get_cmap(colormap)
+    else:
+        cmap = colormap
+    return colors.to_hex(cmap(1.0), keep_alpha=False)[1:].upper()
+
+
+def _source_channel_info(sim=None, ome_zarr_path=None):
+    """Return channel labels and dtype for an image source."""
+    if sim is not None:
+        labels = (
+            [str(value) for value in sim.coords["c"].values]
+            if "c" in sim.dims
+            else ["0"]
+        )
+        return labels, sim.dtype
+
+    root = zarr.open_group(ome_zarr_path, mode="r")
+    multiscales = root.attrs["multiscales"][0]
+    axes = [
+        axis["name"] if isinstance(axis, dict) else axis
+        for axis in multiscales["axes"]
+    ]
+    array = root[multiscales["datasets"][0]["path"]]
+    n_channels = array.shape[axes.index("c")] if "c" in axes else 1
+    return [str(index) for index in range(n_channels)], array.dtype
+
+
+def _default_omero_window(dtype):
+    """Create a cheap display range without reading image data."""
+    dtype = np.dtype(dtype)
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        vmin, vmax = max(0, int(info.min)), int(info.max)
+    else:
+        vmin, vmax = 0.0, 1.0
+    return {"min": vmin, "max": vmax, "start": vmin, "end": vmax}
+
+
+def _temporary_omero_metadata(
+    base_omero,
+    channel_colormaps=None,
+    contrast_limits=None,
+    sim=None,
+    ome_zarr_path=None,
+):
+    """Build OMERO metadata for one source without changing the source."""
+    if sim is None and ome_zarr_path is None:
+        raise ValueError("Either sim or ome_zarr_path must be provided.")
+
+    omero = deepcopy(base_omero) if base_omero is not None else {}
+    if hasattr(omero, "__dataclass_fields__"):
+        omero = asdict(omero)
+
+    labels, dtype = _source_channel_info(
+        sim=sim, ome_zarr_path=ome_zarr_path
+    )
+    old_channels = omero.get("channels", [])
+    old_channels_by_label = {
+        str(channel.get("label")): channel
+        for channel in old_channels
+        if "label" in channel
+    }
+    default_window = _default_omero_window(dtype)
+
+    if channel_colormaps is None:
+        channel_colormaps = [None] * len(labels)
+    elif len(channel_colormaps) != len(labels):
+        raise ValueError(
+            "The number of colormaps must match the number of channels; "
+            f"expected {len(labels)}, got {len(channel_colormaps)}."
+        )
+
+    if contrast_limits is None:
+        channel_limits = [None] * len(labels)
+    elif all(np.isscalar(value) for value in contrast_limits):
+        # A single pair is broadcast to every channel.
+        channel_limits = [contrast_limits] * len(labels)
+    else:
+        if len(contrast_limits) != len(labels):
+            raise ValueError(
+                "contrast_limits must contain one (min, max) pair per "
+                f"channel; expected {len(labels)}, got {len(contrast_limits)}."
+            )
+        channel_limits = contrast_limits
+
+    channels = []
+    for index, label in enumerate(labels):
+        old_channel = old_channels_by_label.get(
+            str(label), old_channels[index] if index < len(old_channels) else {}
+        )
+        limits = channel_limits[index]
+        if limits is not None:
+            vmin, vmax = limits
+            window = {
+                "min": vmin,
+                "max": vmax,
+                "start": vmin,
+                "end": vmax,
+            }
+        channel = {
+            **old_channel,
+            "label": old_channel.get("label", label),
+            "active": old_channel.get("active", True),
+            # These rendering fields are used by Neuroglancer's OMERO reader.
+            "coefficient": old_channel.get("coefficient", 1),
+            "family": old_channel.get("family", "linear"),
+            "inverted": old_channel.get("inverted", False),
+            "window": (
+                window
+                if limits is not None
+                else old_channel.get("window", default_window)
+            ),
+        }
+        if channel_colormaps[index] is not None:
+            channel["color"] = _colormap_to_omero_color(
+                channel_colormaps[index]
+            )
+        else:
+            channel["color"] = str(
+                old_channel.get("color", "FFFFFF")
+            ).lstrip("#").upper()
+        channels.append(channel)
+
+    omero["channels"] = channels
+    return omero
+
+
+def _normalize_display_settings(colormaps, contrast_limits, channel_counts):
+    """Resolve colormaps to one value per source channel.
+
+    Multiple colormaps describe channels when the sources are multichannel,
+    and describe images when every source contains exactly one channel.
+    """
+    n_sources = len(channel_counts)
+    if colormaps is not None:
+        if not isinstance(colormaps, (list, tuple)):
+            raise TypeError("colormaps must be a list or tuple.")
+        colormaps = list(colormaps)
+        # Validate before changing any on-disk metadata.
+        for colormap in colormaps:
+            _colormap_to_omero_color(colormap)
+
+        if all(count == 1 for count in channel_counts):
+            if len(colormaps) != n_sources:
+                raise ValueError(
+                    "For single-channel images, colormaps must match the "
+                    "number of image sources."
+                )
+            source_colormaps = [[colormap] for colormap in colormaps]
+        else:
+            if len(set(channel_counts)) != 1:
+                raise ValueError(
+                    "All multichannel image sources must have the same "
+                    "number of channels."
+                )
+            n_channels = channel_counts[0]
+            if len(colormaps) != n_channels:
+                raise ValueError(
+                    "For multichannel images, colormaps must match the "
+                    "number of channels."
+                )
+            source_colormaps = [colormaps] * n_sources
+    else:
+        source_colormaps = [None] * n_sources
+
+    if contrast_limits is None:
+        limits = None
+    elif (
+        len(contrast_limits) == 2
+        and all(np.isscalar(value) for value in contrast_limits)
+    ):
+        # Preserve the old API: one pair applies to every channel.
+        limits = tuple(contrast_limits)
+    else:
+        limits = [tuple(channel_limits) for channel_limits in contrast_limits]
+
+    limits_to_validate = [limits] if isinstance(limits, tuple) else limits or []
+    for channel_limits in limits_to_validate:
+        if len(channel_limits) != 2 or channel_limits[0] >= channel_limits[1]:
+            raise ValueError("Each contrast limit must satisfy min < max.")
+    return source_colormaps, limits
+
+
+def _apply_temporary_omero(
+    ome_zarr_paths, colormaps, contrast_limits, images=None
+):
+    """Replace local OMERO attrs and return enough state to restore them."""
+    backups = []
+    try:
+        for index, path in enumerate(ome_zarr_paths):
+            if str(path).startswith("http"):
+                warnings.warn(
+                    "Temporary OMERO display metadata cannot be applied to "
+                    f"the remote OME-Zarr {path!s}.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+
+            root = zarr.open_group(path, mode="a")
+            had_omero = "omero" in root.attrs
+            old_omero = deepcopy(root.attrs["omero"]) if had_omero else None
+            sim = images[index] if images is not None else None
+            root.attrs["omero"] = _temporary_omero_metadata(
+                old_omero,
+                channel_colormaps=colormaps[index],
+                contrast_limits=contrast_limits,
+                sim=sim,
+                ome_zarr_path=None if sim is not None else path,
+            )
+            backups.append((path, had_omero, old_omero))
+    except Exception:
+        _restore_omero(backups)
+        raise
+    return backups
+
+
+def _restore_omero(backups):
+    """Restore OMERO attrs changed by :func:`_apply_temporary_omero`."""
+    for path, had_omero, old_omero in reversed(backups):
+        root = zarr.open_group(path, mode="a")
+        if had_omero:
+            root.attrs["omero"] = old_omero
+        else:
+            del root.attrs["omero"]
+
+
+def _select_msim_channel(msim, channel_coord):
+    """Select one channel from every scale while retaining the ``c`` axis."""
+    sim = msi_utils.get_sim_from_msim(msim)
+    if "c" not in sim.dims:
+        raise ValueError(
+            "channel_coord was provided, but the image has no channels."
+        )
+
+    matches = [
+        value
+        for value in sim.coords["c"].values
+        if str(value) == str(channel_coord)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Channel {channel_coord!r} was not found exactly once in "
+            f"{list(sim.coords['c'].values)!r}."
+        )
+
+    # List-based selection keeps a length-one channel dimension in the
+    # virtual OME-Zarr instead of turning the channel into a scalar coordinate.
+    return msi_utils.multiscale_sel_coords(msim, {"c": matches})
+
+
+def _positional_colormaps(sims, transform_key, n_colors):
+    """Return one solid-color colormap per sim, based on tile adjacency.
+
+    Uses the same greedy graph-coloring approach as `plot_positions`, so
+    that overlapping/neighboring tiles are assigned different colors from
+    `_POSITIONAL_COLOR_PALETTE`.
+    """
+    greedy_colors = mv_graph.get_greedy_colors(
+        sims, n_colors=n_colors, transform_key=transform_key
+    )
+    return [
+        colors.LinearSegmentedColormap.from_list(
+            "positional",
+            [_POSITIONAL_COLOR_PALETTE[
+                greedy_colors[iview] % len(_POSITIONAL_COLOR_PALETTE)
+            ]]
+            * 2,
+        )
+        for iview in range(len(sims))
+    ]
 
 
 def view_neuroglancer(
@@ -1566,9 +1853,13 @@ def view_neuroglancer(
     channel_coord=None,
     single_layer=False,
     contrast_limits=None,
+    colormaps=None,
+    use_positional_colors=False,
+    n_colors=2,
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
     layout: str = None,
+    neuroglancer_url: str = None,
 ):
     """
     Visualize a list of OME-Zarrs or in-memory images in Neuroglancer
@@ -1603,13 +1894,35 @@ def view_neuroglancer(
     port : int, optional
         Port on which to serve local OME-Zarrs. By default 8000.
     channel_coord : str, optional
-        Which channel to use for initializing contrast limits, by default None.
+        Restrict every image to this channel coordinate. Selected data is
+        always exposed through a virtual OME-Zarr, even when on-disk paths are
+        provided. By default, all channels are served.
     single_layer : bool, optional
         Whether to show all images in a single layer (True) or in separate
         layers per image (False, default).
-    contrast_limits : tuple, optional
-        Contrast limits (min, max) to use for visualization. If None, limits
-        are read from the OME-Zarr omero metadata if available, by default None.
+    contrast_limits : tuple or list of tuple, optional
+        Contrast limits ``(min, max)`` to expose through temporary OMERO
+        metadata. A single pair applies to every channel; a list supplies one
+        pair per channel and is applied to every image source. Existing
+        metadata is restored when serving stops.
+    colormaps : list, optional
+        Matplotlib colormap names or objects. For multichannel images, provide
+        one colormap per channel. If every image is single-channel, provide one
+        colormap per image. Each colormap's high-intensity color is exposed
+        through temporary OMERO metadata. Existing metadata is restored when
+        serving stops; remote OME-Zarr metadata cannot be modified.
+    use_positional_colors : bool, optional
+        Color each image based on its spatial position, so that
+        neighboring / overlapping tiles are easier to tell apart. Uses the
+        same greedy graph-coloring approach as `plot_positions`'s
+        `use_positional_colors` option. As with passing one colormap per
+        image via `colormaps`, this only applies when every image has a
+        single channel, and requires `images` or `sims` (together with
+        `transform_key`) so that tile positions can be computed. Mutually
+        exclusive with `colormaps`. By default False.
+    n_colors : int, optional
+        Number of distinct colors to cycle through when
+        `use_positional_colors` is True, by default 2.
     layer_dicts : list of dict, optional
         Per-layer neuroglancer config overrides.
     global_dict : dict, optional
@@ -1618,12 +1931,15 @@ def view_neuroglancer(
         Initial Neuroglancer layout. Defaults to ``"xy"`` for 2D data and
         ``"4panel"`` for 3D data. Set to ``"xy"`` to start with only the XY
         projection.
+    neuroglancer_url : str, optional
+        Base URL of the Neuroglancer instance to open, e.g. a self-hosted
+        deployment. By default, the public demo instance at
+        ``https://neuroglancer-demo.appspot.com`` is used.
     """
 
     # Resolve the list of spatial images to use for transform lookup.
     # `images` takes precedence; fall back to the legacy `sims` parameter.
     if sims is not None and images is None:
-        import warnings
         warnings.warn(
             "The 'sims' parameter is deprecated and will be removed in a future "
             "version. Use 'images' instead.",
@@ -1634,9 +1950,78 @@ def view_neuroglancer(
     if input_images is not None and not isinstance(input_images, (list, tuple)):
         input_images = [input_images]
 
+    force_virtual = channel_coord is not None
+    if force_virtual:
+        if input_images is None:
+            if ome_zarr_paths is None:
+                raise ValueError(
+                    "Either ome_zarr_paths or images must be provided."
+                )
+            paths = (
+                [ome_zarr_paths]
+                if isinstance(ome_zarr_paths, (str, os.PathLike))
+                else ome_zarr_paths
+            )
+            input_images = [
+                ngff_utils.read_msim_from_ome_zarr(
+                    path,
+                    transform_key=(
+                        transform_key
+                        or spatial_image_utils.DEFAULT_TRANSFORM_KEY
+                    ),
+                )
+                for path in paths
+            ]
+
+        virtual_msims = [
+            image
+            if msi_utils.is_msim(image)
+            else msi_utils.get_msim_from_sim(image, scale_factors=[])
+            for image in input_images
+        ]
+        input_images = [
+            _select_msim_channel(msim, channel_coord)
+            for msim in virtual_msims
+        ]
+        # Selected data cannot be represented by the original OME-Zarr URL;
+        # serve the sliced msims through the read-only virtual server instead.
+        ome_zarr_paths = None
+
+    if use_positional_colors:
+        if colormaps is not None:
+            raise ValueError(
+                "use_positional_colors and colormaps are mutually exclusive."
+            )
+        if input_images is None:
+            raise ValueError(
+                "use_positional_colors requires 'images' or 'sims' to be "
+                "provided so that tile positions can be computed."
+            )
+        sims_for_colors = [
+            msi_utils.get_sim_from_msim(image)
+            if msi_utils.is_msim(image)
+            else image
+            for image in input_images
+        ]
+        if any(
+            int(sim.sizes.get("c", 1)) > 1 for sim in sims_for_colors
+        ):
+            raise ValueError(
+                "use_positional_colors only supports single-channel images "
+                "(it colors tiles the same way 'colormaps' does when given "
+                "one colormap per image). Use 'channel_coord' to select a "
+                "single channel first."
+            )
+        # From here on, positional colors are just another `colormaps` value
+        # and flow through the existing colormap-per-image handling below.
+        colormaps = _positional_colormaps(
+            sims_for_colors, transform_key, n_colors
+        )
+
     virtual_server = None
     resolved_images = None
     json_ome_zarr_paths = None
+    omero_backups = []
     if ome_zarr_paths is None:
         if input_images is None:
             raise ValueError(
@@ -1651,9 +2036,35 @@ def view_neuroglancer(
             else msi_utils.get_msim_from_sim(img, scale_factors=[])
             for img in input_images
         ]
+        channel_counts = [
+            int(msi_utils.get_sim_from_msim(msim).sizes.get("c", 1))
+            for msim in virtual_msims
+        ]
+        source_colormaps, channel_limits = _normalize_display_settings(
+            colormaps, contrast_limits, channel_counts
+        )
+        override_omero = (
+            force_virtual
+            or colormaps is not None
+            or contrast_limits is not None
+        )
+        virtual_omero_channels = (
+            [
+                _temporary_omero_metadata(
+                    msim.attrs.get("omero"),
+                    channel_colormaps=source_colormaps[index],
+                    contrast_limits=channel_limits,
+                    sim=msi_utils.get_sim_from_msim(msim),
+                )
+                for index, msim in enumerate(virtual_msims)
+            ]
+            if override_omero
+            else None
+        )
         virtual_server = ngff_utils.serve_virtual_ome_zarrs(
             virtual_msims,
             port=port,
+            omero_channels=virtual_omero_channels,
         )
         ome_zarr_paths = virtual_server.urls
         ome_zarr_urls = [
@@ -1693,8 +2104,6 @@ def view_neuroglancer(
                 rel = os.path.relpath(os.path.abspath(path), dir_to_serve)
                 depth = len(rel.split(os.sep))
                 if dir_to_serve == os.sep or depth > _MAX_SERVE_DEPTH:
-                    import warnings
-
                     warnings.warn(
                         f"view_neuroglancer: the common ancestor directory "
                         f"'{dir_to_serve}' is too broad (depth {depth} > "
@@ -1723,48 +2132,89 @@ def view_neuroglancer(
             for path in ome_zarr_paths
         ]
 
-    ng_json = generate_neuroglancer_json(
-        ome_zarr_paths=json_ome_zarr_paths,
-        ome_zarr_urls=ome_zarr_urls,
-        sims=(
-            resolved_images
-            if json_ome_zarr_paths is None or transform_key is not None
-            else None
-        ),
-        transform_key=transform_key,
-        channel_coord=channel_coord,
-        single_layer=single_layer,
-        contrast_limits=contrast_limits,
-        layer_dicts=layer_dicts,
-        global_dict=global_dict,
-        layout=layout,
-    )
-    ng_url = get_neuroglancer_url(ng_json)
+        metadata_images = None
+        channel_counts = [None] * len(ome_zarr_paths)
+        if colormaps is not None:
+            metadata_images = (
+                resolved_images
+                if resolved_images is not None
+                and len(resolved_images) == len(ome_zarr_paths)
+                else None
+            )
+            channel_counts = [
+                len(
+                    _source_channel_info(
+                        sim=(
+                            metadata_images[index]
+                            if metadata_images is not None
+                            else None
+                        ),
+                        ome_zarr_path=(
+                            None if metadata_images is not None else path
+                        ),
+                    )[0]
+                )
+                for index, path in enumerate(ome_zarr_paths)
+            ]
+        source_colormaps, channel_limits = _normalize_display_settings(
+            colormaps, contrast_limits, channel_counts
+        )
+        if colormaps is not None or contrast_limits is not None:
+            omero_backups = _apply_temporary_omero(
+                ome_zarr_paths,
+                source_colormaps,
+                channel_limits,
+                metadata_images,
+            )
 
-    print("Neuroglancer configuration JSON:")
-    print(ng_json)
+    try:
+        ng_json = generate_neuroglancer_json(
+            ome_zarr_paths=json_ome_zarr_paths,
+            ome_zarr_urls=ome_zarr_urls,
+            sims=(
+                resolved_images
+                if json_ome_zarr_paths is None or transform_key is not None
+                else None
+            ),
+            transform_key=transform_key,
+            channel_coord=None if force_virtual else channel_coord,
+            single_layer=single_layer,
+            # Display overrides are read by Neuroglancer from OMERO metadata.
+            contrast_limits=None,
+            layer_dicts=layer_dicts,
+            global_dict=global_dict,
+            layout=layout,
+        )
+        ng_url = get_neuroglancer_url(
+            ng_json, neuroglancer_url=neuroglancer_url
+        )
 
-    print("Opening Neuroglancer in browser...")
-    print("URL:", ng_url)
-    print("Decoded URL:")
-    print(urllib.parse.unquote(ng_url))
-    print("Controls:")
-    print("All panels")
-    print("\t\tZoom: Ctrl + Mousewheel")
-    print("Projection panels:")
-    print("\t\tPan: Drag")
-    print("\t\tRotate: Shift + Drag")
-    print("3D view:")
-    print("\t\tPan: Shift + Drag")
-    print("\t\tRotate: Drag")
+        print("Neuroglancer configuration JSON:")
+        print(ng_json)
 
-    webbrowser.open(ng_url)
+        print("Opening Neuroglancer in browser...")
+        print("URL:", ng_url)
+        print("Decoded URL:")
+        print(urllib.parse.unquote(ng_url))
+        print("Controls:")
+        print("All panels")
+        print("\t\tZoom: Ctrl + Mousewheel")
+        print("Projection panels:")
+        print("\t\tPan: Drag")
+        print("\t\tRotate: Shift + Drag")
+        print("3D view:")
+        print("\t\tPan: Shift + Drag")
+        print("\t\tRotate: Drag")
 
-    # serve the local or virtual OME-Zarr files
-    if virtual_server is not None:
-        virtual_server.serve_forever()
-    elif dir_to_serve is not None:
-        serve_dir(dir_to_serve, port=port)
+        webbrowser.open(ng_url)
+
+        # serve the local or virtual OME-Zarr files
+        if virtual_server is not None:
+            virtual_server.serve_forever()
+        elif dir_to_serve is not None:
+            serve_dir(dir_to_serve, port=port)
+    finally:
+        _restore_omero(omero_backups)
 
 
 # Public URL of the OME-Zarr validator web app.

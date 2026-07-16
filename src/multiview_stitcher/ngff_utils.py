@@ -859,6 +859,7 @@ def serve_virtual_ome_zarrs(
     route_prefix="image",
     max_concurrent_chunks=None,
     compressor=None,
+    omero_channels=None,
 ):
     """Serve a list of msims or HCS plate DataTrees as virtual OME-Zarrs.
 
@@ -867,15 +868,28 @@ def serve_virtual_ome_zarrs(
     row/column/FOV depth are served as OME-Zarr HCS plates.
     Names are derived from the route keys inside :class:`VirtualOMEZarrServer`
     so the URL path and the embedded metadata name always stay in sync.
+
+    ``omero_channels``, when provided, supplies temporary OMERO metadata for
+    each image without modifying the input DataTrees.
     """
+    if omero_channels is not None and len(omero_channels) != len(msims):
+        raise ValueError("omero_channels must match the number of msims.")
+
     virtual_zarrs = []
-    for element in msims:
+    for index, element in enumerate(msims):
+        omero = None if omero_channels is None else omero_channels[index]
         if _is_hcs_plate_tree(element):
+            if omero is not None:
+                raise ValueError(
+                    "omero_channels are not supported for HCS plate trees."
+                )
             virtual_zarrs.append(
                 VirtualOMEZarrHCSPlate(element, compressor=compressor)
             )
         else:
-            virtual_zarrs.append(VirtualOMEZarr(element, compressor=compressor))
+            virtual_zarrs.append(
+                VirtualOMEZarr(element, compressor=compressor, omero=omero)
+            )
     return VirtualOMEZarrServer(
         virtual_zarrs,
         host=host,

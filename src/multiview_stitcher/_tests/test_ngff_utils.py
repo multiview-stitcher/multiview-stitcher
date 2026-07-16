@@ -346,6 +346,34 @@ def test_virtual_ome_zarr_metadata_and_numpy_chunk():
     assert consolidated["0/.zattrs"] == {}
 
 
+def test_serve_virtual_ome_zarrs_uses_omero_override():
+    sim = si_utils.to_spatial_image(
+        np.zeros((5, 6), dtype=np.uint16),
+        dims=["y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    omero = {
+        "channels": [
+            {
+                "color": "ff0000",
+                "label": "0",
+                "active": True,
+                "window": {"min": 0, "max": 10, "start": 1, "end": 9},
+            }
+        ]
+    }
+
+    server = ngff_utils.serve_virtual_ome_zarrs(
+        [_single_scale_msim_from_sim(sim)], omero_channels=[omero]
+    )
+    try:
+        virtual_zarr = next(iter(server.virtual_zarrs.values()))
+        assert virtual_zarr.root_zattrs()["omero"] == omero
+    finally:
+        server.stop()
+
+
 def test_virtual_ome_zarr_dask_edge_chunk_padding():
     data = np.arange(5 * 6, dtype=np.uint16).reshape(5, 6)
     dask_data = da.from_array(data, chunks=(3, 4))
