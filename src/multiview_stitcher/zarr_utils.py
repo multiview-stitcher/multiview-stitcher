@@ -2,11 +2,11 @@
 Dimension-name-agnostic virtual zarr array transformations.
 
 This module owns *payload-only* numeric shape transforms of zarr arrays:
-singleton axis expansion, stacking along a new axis, and chunk-aligned
-concatenation along an existing axis. Each transform is expressed purely as a
-remapping of output chunk keys onto source chunk keys and returns a **real**
-``zarr.Array`` (opened on a small in-memory read-only store), not a generic
-array-like shim.
+singleton axis expansion, scalar indexing on chunk-size-1 axes, transpose of
+chunk-size-1 axes, stacking along a new axis, and chunk-aligned concatenation
+along an existing axis. Each transform is expressed purely as a remapping of
+output chunk keys onto source chunk keys and returns a **real** ``zarr.Array``
+(opened on a small in-memory read-only store), not a generic array-like shim.
 
 Design contract
 ---------------
@@ -33,7 +33,7 @@ from zarr.core.buffer import default_buffer_prototype
 
 
 class NotChunkAlignedError(ValueError):
-    """Raised when a concat cannot be expressed as a pure chunk-key remap."""
+    """Raised when a transform cannot be expressed as a chunk-key remap."""
 
 
 def _json_default(obj):
@@ -159,16 +159,21 @@ class _VirtualZarrStore(Store):
     async def exists(self, key):
         return (await self.get(key, default_buffer_prototype())) is not None
 
-    async def set(self, key, value):  # pragma: no cover - read-only store
+    async def set(self, key, value):  # noqa: A003  # pragma: no cover
         raise NotImplementedError("virtual zarr store is read-only")
 
     async def delete(self, key):  # pragma: no cover - read-only store
         raise NotImplementedError("virtual zarr store is read-only")
 
-    async def list(self):
+    async def list(self):  # noqa: A003 - zarr Store interface
         yield self._meta_key
+        if not self._grid_shape:
+            yield "c" if self._meta_key == "zarr.json" else "0"
+            return
+
+        prefix = "c/" if self._meta_key == "zarr.json" else ""
         for coords in np.ndindex(*self._grid_shape):
-            yield "c/" + "/".join(str(c) for c in coords)
+            yield prefix + "/".join(str(c) for c in coords)
 
     async def list_dir(self, prefix):
         seen = set()
@@ -185,9 +190,10 @@ class _VirtualZarrStore(Store):
             if key.startswith(prefix):
                 yield key
 
-    @staticmethod
-    def _parse_chunk_key(key):
+    def _parse_chunk_key(self, key):
         # Output arrays always use separator "/"; v3 additionally prefixes "c/".
+        if not self._grid_shape and key in {"0", "c"}:
+            return ()
         body = key[2:] if key.startswith("c/") else key
         try:
             return tuple(int(part) for part in body.split("/"))
@@ -247,6 +253,25 @@ def _open_virtual(template, out_shape, out_chunks, dispatch):
 # ---------------------------------------------------------------------------
 
 
+def _normalize_axis(axis, ndim):
+    axis = int(axis)
+    if axis < 0:
+        axis += ndim
+    if axis < 0 or axis >= ndim:
+        raise IndexError(
+            f"axis {axis} is out of bounds for array of dimension {ndim}"
+        )
+    return axis
+
+
+def _normalize_axes(axes, ndim):
+    axes = (axes,) if np.isscalar(axes) else tuple(axes)
+    normalized = tuple(_normalize_axis(axis, ndim) for axis in axes)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("repeated axis")
+    return normalized
+
+
 def expand_dims(zarray, n_leading_singletons):
     """Prepend ``n_leading_singletons`` size-1 axes to ``zarray`` (chunk 1 each).
 
@@ -263,6 +288,175 @@ def expand_dims(zarray, n_leading_singletons):
 
     def dispatch(coords):
         return zarray, coords[n:]
+
+    return _open_virtual(zarray, out_shape, out_chunks, dispatch)
+
+
+def expand_dims_at(zarray, axes):
+    """Insert singleton axes at explicit positions without reading data.
+
+    ``axes`` follows :func:`numpy.expand_dims`: positions refer to the output
+    rank and may be negative. This complements :func:`expand_dims`, whose
+    integer argument is retained as the number of leading axes for backward
+    compatibility.
+    """
+    axes = tuple(axes) if not np.isscalar(axes) else (axes,)
+    if not axes:
+        return zarray
+
+    out_ndim = zarray.ndim + len(axes)
+    axes = _normalize_axes(axes, out_ndim)
+    axis_set = set(axes)
+
+    source_shape = iter(zarray.shape)
+    source_chunks = iter(zarray.chunks)
+    out_shape = tuple(
+        1 if axis in axis_set else next(source_shape)
+        for axis in range(out_ndim)
+    )
+    out_chunks = tuple(
+        1 if axis in axis_set else next(source_chunks)
+        for axis in range(out_ndim)
+    )
+
+    def dispatch(coords):
+        return zarray, tuple(
+            coord for axis, coord in enumerate(coords) if axis not in axis_set
+        )
+
+    return _open_virtual(zarray, out_shape, out_chunks, dispatch)
+
+
+def getitem(zarray, selection):
+    """Apply a basic scalar selection by remapping whole chunks.
+
+    Integer indices remove their axes, matching NumPy ``__getitem__``. Since an
+    encoded output chunk must map to exactly one encoded source chunk, integer
+    indexing is supported only on axes with chunk size 1. All retained axes
+    must use a full slice. These constraints cover lazy channel/time selection
+    while keeping the transform decode-free and composable.
+    """
+    if not isinstance(selection, tuple):
+        selection = (selection,)
+
+    ellipsis_count = sum(item is Ellipsis for item in selection)
+    if ellipsis_count > 1:
+        raise IndexError("an index can only have a single ellipsis")
+    if ellipsis_count:
+        ellipsis_index = selection.index(Ellipsis)
+        missing = zarray.ndim - (len(selection) - 1)
+        if missing < 0:
+            raise IndexError("too many indices for array")
+        selection = (
+            selection[:ellipsis_index]
+            + (slice(None),) * missing
+            + selection[ellipsis_index + 1 :]
+        )
+    elif len(selection) < zarray.ndim:
+        selection = selection + (slice(None),) * (zarray.ndim - len(selection))
+
+    if len(selection) != zarray.ndim:
+        raise IndexError("incorrect number of indices for array")
+
+    normalized = []
+    retained_axes = []
+    for axis, (item, size, chunk) in enumerate(
+        zip(selection, zarray.shape, zarray.chunks)
+    ):
+        if isinstance(item, (int, np.integer)) and not isinstance(
+            item, (bool, np.bool_)
+        ):
+            index = int(item)
+            if index < 0:
+                index += int(size)
+            if index < 0 or index >= size:
+                raise IndexError(
+                    f"index {item} is out of bounds for axis {axis} "
+                    f"with size {size}"
+                )
+            if chunk != 1:
+                raise NotChunkAlignedError(
+                    f"integer indexing requires chunk size 1 on axis {axis}; "
+                    f"got {chunk}."
+                )
+            normalized.append(index)
+            continue
+
+        if not (
+            isinstance(item, slice)
+            and item.indices(int(size)) == (0, int(size), 1)
+        ):
+            raise NotChunkAlignedError(
+                "retained axes must be selected with a full slice."
+            )
+        normalized.append(slice(None))
+        retained_axes.append(axis)
+
+    out_shape = tuple(zarray.shape[axis] for axis in retained_axes)
+    out_chunks = tuple(zarray.chunks[axis] for axis in retained_axes)
+
+    def dispatch(coords):
+        source_coords = []
+        output_coords = iter(coords)
+        for item in normalized:
+            # A scalar index is also its source chunk coordinate because scalar
+            # indexing is restricted to axes whose chunks have size one.
+            source_coords.append(
+                item if isinstance(item, int) else next(output_coords)
+            )
+        return zarray, tuple(source_coords)
+
+    return _open_virtual(zarray, out_shape, out_chunks, dispatch)
+
+
+def is_transposable(zarray, axes=None):
+    """Return whether ``transpose`` can pass encoded chunks through unchanged."""
+    if axes is None:
+        axes = tuple(reversed(range(zarray.ndim)))
+    try:
+        axes = _normalize_axes(axes, zarray.ndim)
+    except (IndexError, ValueError):
+        return False
+    if len(axes) != zarray.ndim:
+        return False
+
+    # Moving axes whose chunks are singleton does not change the flattened
+    # contents of a chunk. Axes with larger chunks must retain relative order.
+    fixed_axes = [
+        axis for axis, chunk in enumerate(zarray.chunks) if chunk != 1
+    ]
+    return [axis for axis in axes if zarray.chunks[axis] != 1] == fixed_axes
+
+
+def transpose(zarray, axes=None):
+    """Permute axes when only chunk-size-1 axes change relative position.
+
+    The restriction guarantees that the C-order contents of every encoded chunk
+    remain unchanged, allowing a pure chunk-key remap. It covers canonicalizing
+    channel/time axes while rejecting spatial transposes that require decoding.
+    """
+    if axes is None:
+        axes = tuple(reversed(range(zarray.ndim)))
+    axes = _normalize_axes(axes, zarray.ndim)
+    if len(axes) != zarray.ndim:
+        raise ValueError("axes must contain one entry per source dimension")
+    if not is_transposable(zarray, axes):
+        raise NotChunkAlignedError(
+            "transpose may only move axes with chunk size 1."
+        )
+    if axes == tuple(range(zarray.ndim)):
+        return zarray
+
+    out_shape = tuple(zarray.shape[axis] for axis in axes)
+    out_chunks = tuple(zarray.chunks[axis] for axis in axes)
+
+    def dispatch(coords):
+        # Invert the output-to-source axis permutation to recover the source
+        # chunk key without touching the encoded chunk contents.
+        source_coords = [None] * zarray.ndim
+        for output_axis, source_axis in enumerate(axes):
+            source_coords[source_axis] = coords[output_axis]
+        return zarray, tuple(source_coords)
 
     return _open_virtual(zarray, out_shape, out_chunks, dispatch)
 
@@ -290,7 +484,7 @@ def stack(zarrays, axis=0):
         if _codec_signature(other) != _codec_signature(first):
             raise ValueError("stack requires identical dtype/codecs.")
 
-    axis = int(axis)
+    axis = _normalize_axis(axis, first.ndim + 1)
     shape = tuple(first.shape)
     chunks = tuple(first.chunks)
     out_shape = shape[:axis] + (len(zarrays),) + shape[axis:]
@@ -338,7 +532,7 @@ def _concatenate_layout(zarrays, axis):
         raise ValueError("concatenate requires at least one array.")
 
     first = zarrays[0]
-    axis = int(axis)
+    axis = _normalize_axis(axis, first.ndim)
     chunk = int(first.chunks[axis])
 
     for other in zarrays[1:]:
@@ -389,7 +583,7 @@ def concatenate(zarrays, axis):
     index; all other chunk indices pass through unchanged.
     """
     zarrays = list(zarrays)
-    axis = int(axis)
+    axis = _normalize_axis(axis, zarrays[0].ndim)
     out_shape, out_chunks, cum_counts = _concatenate_layout(zarrays, axis)
 
     def dispatch(coords):
