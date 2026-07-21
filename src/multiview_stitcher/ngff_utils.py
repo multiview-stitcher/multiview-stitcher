@@ -1477,7 +1477,7 @@ def write_sim_to_ome_zarr(
         curr_res_array = write_and_return_downsampled_sim(
             curr_res_array,
             dims=dims,
-            chunksizes=sim.data.chunksize,
+            chunksizes=_chunk_shape_from_sim(sim),
             output_zarr_array_url=f"{output_zarr_url}/{res_level}",
             downscale_factors_per_spatial_dim=res_rel_factors[res_level],
             overwrite=overwrite,
