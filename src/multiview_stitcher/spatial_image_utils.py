@@ -52,6 +52,27 @@ class ZarrReprLazilyIndexedArray(indexing.LazilyIndexedArray):
     # Let xarray's notebook repr reuse Dask's existing array display.
     _repr_note = "Zarr-backed; using Dask-style repr."
 
+    def __getitem__(self, indexer):
+        self._check_and_raise_if_non_basic_indexer(indexer)
+        updated_key = self._updated_key(indexer)
+        zarray = getattr(self.array, "zarray", None)
+
+        # Xarray normally keeps scalar indexes in this wrapper while retaining
+        # the original-rank backend. Fold remappable indexes into a virtual
+        # zarr immediately so direct ``sim.sel(...)`` has a rank-matched payload.
+        if zarray is not None and any(
+            isinstance(item, (int, np.integer))
+            for item in updated_key.tuple
+        ):
+            try:
+                selected_zarray = zarr_utils.getitem(zarray, updated_key.tuple)
+            except zarr_utils.NotChunkAlignedError:
+                pass
+            else:
+                return type(self)(ZarrLazyBackendArray(selected_zarray))
+
+        return type(self)(self.array, updated_key)
+
     def _repr_target(self):
         for candidate in _iter_backend_arrays(self.array):
             if isinstance(candidate, zarr.Array):
@@ -268,15 +289,13 @@ def _get_preferred_chunks(xim):
 
 
 def _expand_with_singleton_dims_lazily(xim, missing_dims):
-    """Add leading singleton dims without materializing the zarr-backed data."""
-    # Build a *real* expanded zarr array (one leading singleton axis per missing
-    # dim) via the virtual-transform layer, then wrap it as a zarr-backed
-    # DataArray. The result therefore wraps exactly one zarr.Array whose axes
-    # match its dims 1:1 - no generic array-like shim and no bookkeeping attrs.
+    """Add singleton dims without materializing the zarr-backed data."""
+    # Prepend missing axes while preserving the source axes' actual order. The
+    # caller canonicalizes the labelled dimensions afterwards, using a virtual
+    # transpose when the moved axes have chunk size 1.
     zarray = _get_xarray_zarr_array(xim)
-    expanded_zarray = zarr_utils.expand_dims(zarray, len(missing_dims))
-
     dims = tuple(missing_dims) + tuple(xim.dims)
+    expanded_zarray = zarr_utils.expand_dims(zarray, len(missing_dims))
     coords = {dim: xim.coords[dim] for dim in xim.coords if dim in xim.dims}
     return _zarr_array_to_dataarray(
         expanded_zarray,
@@ -453,6 +472,7 @@ def get_sim_from_array(
 
     if isinstance(array, xr.DataArray):
         xim = array.copy(deep=False)
+        xim = normalize_zarr_backing(xim)
         if dims is None:
             dims = list(xim.dims)
         else:
@@ -495,8 +515,26 @@ def get_sim_from_array(
 
     # transpose to dim order supported by spatial-image
     new_dims = [dim for dim in SPATIAL_IMAGE_DIMS if dim in xim.dims]
-    if new_dims != xim.dims:
-        xim = xim.transpose(*new_dims)
+    if tuple(new_dims) != tuple(xim.dims):
+        backing_zarr = _get_xarray_zarr_array(xim)
+        backing_dims = (
+            _get_backing_zarr_dims(xim, backing_zarr)
+            if backing_zarr is not None
+            else None
+        )
+        axes = tuple(xim.dims.index(dim) for dim in new_dims)
+        if backing_dims == list(xim.dims) and zarr_utils.is_transposable(
+            backing_zarr, axes
+        ):
+            xim = _zarr_array_to_dataarray(
+                zarr_utils.transpose(backing_zarr, axes),
+                dims=new_dims,
+                coords=dict(xim.coords.items()),
+                name=xim.name,
+                attrs=xim.attrs,
+            )
+        else:
+            xim = xim.transpose(*new_dims)
 
     spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
     ndim = len(spatial_dims)
@@ -681,6 +719,79 @@ def _extract_isel_selections(sim, indexed_dims):
     return isel_indexers, isel_dropped
 
 
+def normalize_zarr_backing(xim):
+    """Reflect lazy dimension-dropping xarray indexes in the backing zarr.
+
+    Xarray represents ``sim.sel(c=value)`` by wrapping the original backend in a
+    lazy indexer; it does not replace the backend array. For chunk-size-1 axes,
+    rebuild that selection as a real virtual zarr array whose rank and axes
+    match the selected DataArray. Non-chunk-remappable indexes remain in
+    xarray's lazy wrapper.
+
+    The function is a no-op when the input is not zarr-backed or when any
+    dropped axis has chunks larger than 1.
+    """
+    if not is_xarray_zarr_backed(xim):
+        return xim
+
+    zarray = _get_xarray_zarr_array(xim)
+    zarr_dims = _get_backing_zarr_dims(xim, zarray)
+    indexed_dims = _get_indexed_dims(xim, zarr_dims)
+    key_tuple = _get_lazy_indexer_tuple(xim, indexed_dims)
+    if key_tuple is None or len(key_tuple) != len(zarr_dims):
+        return xim
+
+    selection = []
+    dropped_dims = []
+    residual_indexers = {}
+    for axis, (dim, indexer) in enumerate(zip(zarr_dims, key_tuple)):
+        if dim not in xim.dims:
+            scalar_index = _get_scalar_indexer_value(indexer)
+            if scalar_index is None or zarray.chunks[axis] != 1:
+                return xim
+            selection.append(scalar_index)
+            dropped_dims.append(dim)
+            continue
+
+        selection.append(slice(None))
+        if not _is_full_slice(indexer):
+            # Xarray may encode a transpose followed by scalar selection as
+            # broadcast identity grids. They do not need to be replayed once
+            # the dropped source axis is removed; the shape check below rejects
+            # any grid that also represented a real retained-axis selection.
+            if np.asarray(indexer).ndim > 1:
+                continue
+            residual_indexers[dim] = indexer
+
+    if not dropped_dims:
+        return xim
+
+    result_dims = tuple(dim for dim in zarr_dims if dim not in dropped_dims)
+    if result_dims != tuple(xim.dims):
+        # A transpose cannot be represented by scalar chunk-key remapping.
+        return xim
+
+    selected_zarray = zarr_utils.getitem(zarray, tuple(selection))
+    result = _zarr_array_to_dataarray(
+        selected_zarray,
+        dims=result_dims,
+        name=xim.name,
+        attrs=xim.attrs,
+    )
+    if residual_indexers:
+        result = result.isel(residual_indexers)
+
+    if result.shape != xim.shape:
+        return xim
+
+    # Reattach dimension and scalar coordinates from xarray's authoritative
+    # selection result. Coordinates are small metadata and remain in memory.
+    result = result.assign_coords(
+        {name: coord.copy(deep=False) for name, coord in xim.coords.items()}
+    )
+    return result
+
+
 def _coord_value_to_index(coords, value):
     """Return the integer index for a non-spatial coordinate value."""
     value_array = np.asarray(value)
@@ -710,6 +821,7 @@ def serialize_zarr_backed_sim(sim):
 
     Large coordinate arrays are omitted and rebuilt during deserialization.
     """
+    sim = normalize_zarr_backing(sim)
     zarr_array = _get_xarray_zarr_array(sim)
     zarr_dims = _get_backing_zarr_dims(sim, zarr_array)
     indexed_dims = _get_indexed_dims(sim, zarr_dims)
@@ -824,18 +936,30 @@ def deserialize_zarr_backed_sim(
         )
         return sim
 
-    sim = get_sim_from_array(
-        info["zarr_array"],
-        dims=info["zarr_dims"],
-        scale=info["spacing"],
-        translation=info["origin"],
-        c_coords=None,
-        t_coords=None,
+    # Do not use get_sim_from_array here: it would reinsert singleton t/c axes
+    # that a virtual scalar selection has intentionally removed.
+    xim = _zarr_array_to_dataarray(info["zarr_array"], dims=info["zarr_dims"])
+    spatial_dims = [dim for dim in xim.dims if dim in SPATIAL_DIMS]
+    sim = to_spatial_image(
+        xim,
+        dims=xim.dims,
+        scale={dim: info["spacing"][dim] for dim in spatial_dims},
+        translation={dim: info["origin"][dim] for dim in spatial_dims},
+    )
+    _copy_chunk_hints(xim, sim)
+    set_sim_affine(
+        sim,
+        param_utils.identity_transform(len(spatial_dims), t_coords=None),
+        transform_key=DEFAULT_TRANSFORM_KEY,
     )
     base_indexers = dict(info.get("isel_indexers", {}))
     base_indexers.update(info["isel_dropped"])
     if base_indexers:
         sim = sim.isel(base_indexers, drop=True)
+
+    canonical_dims = [dim for dim in SPATIAL_IMAGE_DIMS if dim in sim.dims]
+    if list(sim.dims) != canonical_dims:
+        sim = sim.transpose(*canonical_dims)
 
     current_nsdim_coords = {}
     for dim in ["t", "c"]:
@@ -1277,6 +1401,7 @@ def sim_sel_coords(sim, sel_dict):
 
     ssim = sim.copy(deep=True)
     ssim = ssim.sel(sel_dict)
+    ssim = normalize_zarr_backing(ssim)
 
     # sel transforms which are xr.Datasets in the msim attributes
     for data_var in sim.attrs["transforms"]:
@@ -1465,7 +1590,7 @@ def concat(sims, dim, **kwargs):
     dim : str
         dim to concatenate over
     """
-    sims = list(sims)
+    sims = [normalize_zarr_backing(sim) for sim in sims]
     if (
         len(sims) > 1
         and dim in sims[0].dims
@@ -1496,7 +1621,7 @@ def stack(sims, dim="t", coords=None):
     coords : array-like, optional
         Coordinate values for the new dimension. Defaults to ``range(len(sims))``.
     """
-    sims = list(sims)
+    sims = [normalize_zarr_backing(sim) for sim in sims]
     if dim in sims[0].dims:
         raise ValueError(
             f"Cannot stack along existing dimension {dim!r}; use concat instead."
