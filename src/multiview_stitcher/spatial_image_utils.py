@@ -559,6 +559,19 @@ def get_origin_from_sim(sim, asarray=False):
     return origin
 
 
+def set_origin(sim, origin):
+    """Return ``sim`` with a new origin and unchanged spacing."""
+    spatial_dims = get_spatial_dims_from_sim(sim)
+    origin = normalize_to_spatial_dict(origin, spatial_dims, name="origin")
+
+    return sim.assign_coords(
+        {
+            dim: sim.coords[dim] - sim.coords[dim].values[0] + origin[dim]
+            for dim in spatial_dims
+        }
+    )
+
+
 def get_shape_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
     shape = {dim: len(sim.coords[dim]) for dim in spatial_dims}
@@ -582,6 +595,20 @@ def get_spacing_from_sim(sim, asarray=False):
         spacing = np.array([spacing[sd] for sd in spatial_dims])
 
     return spacing
+
+
+def set_spacing(sim, spacing):
+    """Return ``sim`` with new spacing while keeping its origin fixed."""
+    spatial_dims = get_spatial_dims_from_sim(sim)
+    spacing = normalize_to_spatial_dict(spacing, spatial_dims, name="spacing")
+    origin = get_origin_from_sim(sim)
+
+    return sim.assign_coords(
+        {
+            dim: origin[dim] + spacing[dim] * np.arange(sim.sizes[dim])
+            for dim in spatial_dims
+        }
+    )
 
 
 def _get_backing_zarr_dims(sim, zarr_array):

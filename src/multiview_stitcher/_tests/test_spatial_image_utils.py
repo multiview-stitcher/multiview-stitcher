@@ -11,6 +11,23 @@ from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 
+def test_set_origin_and_spacing():
+    sim = si_utils.get_sim_from_array(
+        np.ones((4, 5)),
+        dims=["y", "x"],
+        scale={"y": 2.0, "x": 3.0},
+        translation={"y": 10.0, "x": 20.0},
+    )
+
+    sim = si_utils.set_origin(sim, {"y": -1.0, "x": -2.0})
+    assert si_utils.get_origin_from_sim(sim) == {"y": -1.0, "x": -2.0}
+    assert si_utils.get_spacing_from_sim(sim) == {"y": 2.0, "x": 3.0}
+
+    sim = si_utils.set_spacing(sim, {"y": 0.5, "x": 0.25})
+    assert si_utils.get_origin_from_sim(sim) == {"y": -1.0, "x": -2.0}
+    assert si_utils.get_spacing_from_sim(sim) == {"y": 0.5, "x": 0.25}
+
+
 @pytest.mark.parametrize(
     "xp, ndim", [(xp, ndim) for xp in [np, da] for ndim in [2, 3]]
 )

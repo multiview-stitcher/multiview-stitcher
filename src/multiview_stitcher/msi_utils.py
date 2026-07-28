@@ -717,6 +717,68 @@ def get_dims(msim):
     return get_sim_from_msim(msim).dims
 
 
+def set_origin(msim, origin):
+    """Return ``msim`` with a new finest-resolution origin."""
+    sim0 = get_sim_from_msim(msim, scale="scale0")
+    sdims = si_utils.get_spatial_dims_from_sim(sim0)
+    origin = si_utils.normalize_to_spatial_dict(origin, sdims, name="origin")
+    origin0 = si_utils.get_origin_from_sim(sim0)
+    shifts = {dim: origin[dim] - origin0[dim] for dim in sdims}
+
+    # Apply the same physical translation to every resolution level.
+    return msim.map_over_datasets(
+        lambda ds: (
+            xr.Dataset(
+                {
+                    "image": ds.image.assign_coords(
+                        {
+                            dim: ds.image.coords[dim] + shifts[dim]
+                            for dim in sdims
+                        }
+                    )
+                }
+                | {name: ds[name] for name in ds.data_vars if name != "image"}
+            )
+            if "image" in ds.data_vars
+            else ds
+        )
+    )
+
+
+def set_spacing(msim, spacing):
+    """Return ``msim`` with new finest-resolution spacing."""
+    sim0 = get_sim_from_msim(msim, scale="scale0")
+    sdims = si_utils.get_spatial_dims_from_sim(sim0)
+    spacing = si_utils.normalize_to_spatial_dict(
+        spacing, sdims, name="spacing"
+    )
+    spacing0 = si_utils.get_spacing_from_sim(sim0)
+    origin0 = si_utils.get_origin_from_sim(sim0)
+    factors = {dim: spacing[dim] / spacing0[dim] for dim in sdims}
+
+    # Scaling all coordinates about the finest origin preserves the relative
+    # spacing and pixel-center offsets of the coarser levels.
+    return msim.map_over_datasets(
+        lambda ds: (
+            xr.Dataset(
+                {
+                    "image": ds.image.assign_coords(
+                        {
+                            dim: origin0[dim]
+                            + (ds.image.coords[dim] - origin0[dim])
+                            * factors[dim]
+                            for dim in sdims
+                        }
+                    )
+                }
+                | {name: ds[name] for name in ds.data_vars if name != "image"}
+            )
+            if "image" in ds.data_vars
+            else ds
+        )
+    )
+
+
 def correct_multiscale_origins(msim):
     """
     Correct origins of all scales in msim to match the origin of the first scale,

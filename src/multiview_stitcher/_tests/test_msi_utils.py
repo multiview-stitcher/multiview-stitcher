@@ -10,6 +10,45 @@ from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 
+def test_set_origin_and_spacing():
+    sim = si_utils.get_sim_from_array(
+        np.ones((16, 16)),
+        dims=["y", "x"],
+        scale={"y": 2.0, "x": 3.0},
+        translation={"y": 10.0, "x": 20.0},
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[2])
+
+    old_origins = {
+        scale: si_utils.get_origin_from_sim(msim[f"{scale}/image"])
+        for scale in msi_utils.get_sorted_scale_keys(msim)
+    }
+    old_spacings = {
+        scale: si_utils.get_spacing_from_sim(msim[f"{scale}/image"])
+        for scale in msi_utils.get_sorted_scale_keys(msim)
+    }
+
+    msim = msi_utils.set_origin(msim, {"y": -1.0, "x": -2.0})
+    for scale in msi_utils.get_sorted_scale_keys(msim):
+        new_origin = si_utils.get_origin_from_sim(msim[f"{scale}/image"])
+        assert new_origin["y"] == pytest.approx(old_origins[scale]["y"] - 11)
+        assert new_origin["x"] == pytest.approx(old_origins[scale]["x"] - 22)
+
+    msim = msi_utils.set_spacing(msim, {"y": 0.5, "x": 0.25})
+    scale0 = msim["scale0/image"]
+    assert si_utils.get_origin_from_sim(scale0) == {"y": -1.0, "x": -2.0}
+    assert si_utils.get_spacing_from_sim(scale0) == {"y": 0.5, "x": 0.25}
+
+    scale1 = msim["scale1/image"]
+    spacing1 = si_utils.get_spacing_from_sim(scale1)
+    assert spacing1["y"] == pytest.approx(
+        old_spacings["scale1"]["y"] * 0.5 / old_spacings["scale0"]["y"]
+    )
+    assert spacing1["x"] == pytest.approx(
+        old_spacings["scale1"]["x"] * 0.25 / old_spacings["scale0"]["x"]
+    )
+
+
 @pytest.mark.parametrize(
     "dims",
     [
