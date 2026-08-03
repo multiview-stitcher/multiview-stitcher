@@ -28,6 +28,15 @@ def test_set_origin_and_spacing():
     assert si_utils.get_spacing_from_sim(sim) == {"y": 0.5, "x": 0.25}
 
 
+def test_origin_and_spacing_backward_compatible_aliases():
+    sim = si_utils.get_sim_from_array(np.ones((2, 2)))
+
+    assert si_utils.get_origin(sim) == si_utils.get_origin_from_sim(sim)
+    assert si_utils.get_spacing(sim) == si_utils.get_spacing_from_sim(sim)
+    assert si_utils.get_origin_from_sim is si_utils.get_origin
+    assert si_utils.get_spacing_from_sim is si_utils.get_spacing
+
+
 @pytest.mark.parametrize(
     "xp, ndim", [(xp, ndim) for xp in [np, da] for ndim in [2, 3]]
 )

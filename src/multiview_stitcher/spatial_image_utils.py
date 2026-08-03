@@ -549,7 +549,7 @@ def get_nonspatial_dims_from_sim(sim):
     return [dim for dim in sim.dims if dim not in sdims]
 
 
-def get_origin_from_sim(sim, asarray=False):
+def get_origin(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
     origin = {dim: float(sim.coords[dim][0]) for dim in spatial_dims}
 
@@ -582,7 +582,7 @@ def get_shape_from_sim(sim, asarray=False):
     return shape
 
 
-def get_spacing_from_sim(sim, asarray=False):
+def get_spacing(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
     spacing = {
         dim: float(sim.coords[dim][1] - sim.coords[dim][0])
@@ -597,11 +597,16 @@ def get_spacing_from_sim(sim, asarray=False):
     return spacing
 
 
+# Backward-compatible aliases.
+get_origin_from_sim = get_origin
+get_spacing_from_sim = get_spacing
+
+
 def set_spacing(sim, spacing):
     """Return ``sim`` with new spacing while keeping its origin fixed."""
     spatial_dims = get_spatial_dims_from_sim(sim)
     spacing = normalize_to_spatial_dict(spacing, spatial_dims, name="spacing")
-    origin = get_origin_from_sim(sim)
+    origin = get_origin(sim)
 
     return sim.assign_coords(
         {

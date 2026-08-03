@@ -36,6 +36,14 @@ def test_set_origin_and_spacing():
 
     msim = msi_utils.set_spacing(msim, {"y": 0.5, "x": 0.25})
     scale0 = msim["scale0/image"]
+    assert msi_utils.get_origin(msim) == {"y": -1.0, "x": -2.0}
+    assert msi_utils.get_spacing(msim) == {"y": 0.5, "x": 0.25}
+    np.testing.assert_array_equal(
+        msi_utils.get_origin(msim, asarray=True), [-1.0, -2.0]
+    )
+    np.testing.assert_array_equal(
+        msi_utils.get_spacing(msim, asarray=True), [0.5, 0.25]
+    )
     assert si_utils.get_origin_from_sim(scale0) == {"y": -1.0, "x": -2.0}
     assert si_utils.get_spacing_from_sim(scale0) == {"y": 0.5, "x": 0.25}
 
