@@ -10,12 +10,27 @@ serialised.
 
 import math
 
+from multiview_stitcher import msi_utils
 from multiview_stitcher.browser import serialization
 from multiview_stitcher.browser.bridge import get_bridge
 from multiview_stitcher.browser.specs import (
     PAIRWISE_REGISTRATION_FUNCS,
     FusionOptions,
 )
+
+
+def selected_channel(msim):
+    """The channel a view has already been reduced to, or None.
+
+    `registration.register` selects the registration channel *before* handing
+    the views to the pairwise step, so the executor can read the selection off
+    the views it is given instead of being told about it separately. Deriving
+    it here means the two can never disagree.
+    """
+    sim = msi_utils.get_sim_from_msim(msim)
+    if "c" not in sim.coords or "c" in sim.dims:
+        return None
+    return serialization.to_jsonable(sim.coords["c"].values)
 
 
 def _name_of_pairwise_reg_func(func):
@@ -65,19 +80,10 @@ class RemotePairwiseExecutor:
     worker busy even when the pairs differ a lot in cost.
     """
 
-    def __init__(
-        self,
-        session_spec,
-        bridge=None,
-        max_pairs_per_task=1,
-        reg_channel_index=None,
-    ):
+    def __init__(self, session_spec, bridge=None, max_pairs_per_task=1):
         self.session_spec = session_spec
         self.bridge = bridge or get_bridge()
         self.max_pairs_per_task = max(1, int(max_pairs_per_task))
-        # `register` selects the registration channel before dispatching, so
-        # workers must be told which channel to select on their own copies.
-        self.reg_channel_index = reg_channel_index
 
     def __call__(self, msims, edges, register_kwargs):
         if self.bridge is None:
@@ -95,6 +101,9 @@ class RemotePairwiseExecutor:
             else self.session_spec
         )
         options = serialize_register_kwargs(register_kwargs)
+        # Workers rebuild full views from the spec, so they have to repeat the
+        # channel selection that `register` already applied to `msims`.
+        reg_channel = selected_channel(msims[0])
 
         # One task per pair by default: the pool queues tasks over its workers,
         # which balances the load even when pairs differ a lot in cost.
@@ -109,7 +118,7 @@ class RemotePairwiseExecutor:
                 "session": spec,
                 "edges": [[int(a), int(b)] for a, b in group],
                 "register_kwargs": options,
-                "reg_channel_index": self.reg_channel_index,
+                "reg_channel": reg_channel,
             }
             for group in groups
         ]

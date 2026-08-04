@@ -22,9 +22,16 @@ Open the browser app
    needs the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API),
    which Firefox and Safari do not implement yet.
 2. Choose how many Python web workers to start.
-3. Drop a folder onto the landing area &mdash; either a single OME-Zarr, or a
-   folder containing one OME-Zarr per tile.
+3. Press **Load example** for a generated 3D 2&times;2 tile dataset, or drop a
+   folder onto the landing area &mdash; either a single OME-Zarr, or a folder
+   containing one OME-Zarr per tile.
 4. Press **Register**, then **Fuse (preview)**.
+
+Dropping further folders *adds* their images to the views already loaded, so a
+dataset can be assembled tile by tile from several places; dropping the same
+folder twice changes nothing. Each view has an individual remove button, and
+**Clear** starts over. The viewer's layers always mirror the list, in the same
+order and under the same names.
 
 The `transform_key` menu switches which coordinate system the loaded sources
 are shown in, e.g. from the positions stored in the file metadata
@@ -58,10 +65,14 @@ flowchart TB
   session.
 * Only metadata, user options, registration results and requested chunks cross
   the JavaScript boundary. Images are opened lazily and stay inside Python.
-* Input tiles are exposed to Neuroglancer as their **native OME-Zarr**, with
-  the selected `transform_key` attached as a Neuroglancer source transform.
-  The fused preview is exposed as a **virtual OME-Zarr** whose chunks are fused
-  on demand, spread over the worker pool.
+* Input tiles are exposed to Neuroglancer as their **native OME-Zarr** where
+  possible, with the selected `transform_key` attached as a Neuroglancer source
+  transform. Their chunks are read straight from your folder by the service
+  worker and never pass through Python. Anything the viewer cannot fetch on its own &mdash; the generated
+  example, or any image that only exists in the Python heap &mdash; is exposed
+  as a **virtual OME-Zarr** instead, so the viewer never needs to know the
+  difference. The fused preview is always virtual: its chunks are fused on
+  demand, spread over the worker pool.
 
 ### Cache invalidation
 
@@ -101,9 +112,16 @@ python -m http.server --directory docs 8000
 ```
 
 The build step adds the two pieces that are not checked in: a wheel of the
-current working tree (which the page installs into Pyodide) and a vendored
-Neuroglancer build. Neuroglancer must be served from the same origin as the
-app so that the service worker can answer its chunk requests.
+current working tree (which the page installs into Pyodide) and a Neuroglancer
+client, mirrored byte for byte from the [official hosted
+build](https://neuroglancer-demo.appspot.com/). The viewer has to be served
+from the same origin as the app, otherwise the service worker cannot answer its
+chunk requests &mdash; and without that it could not read your local files.
+
+The mirror follows every asset the bundle names, including the lazily loaded
+chunks that carry the blosc and zstd decoders. Missing one of those shows up
+only as a failed `importScripts` when a user first opens an image, so the build
+refuses to ship a mirror that does not cover every chunk id the code requests.
 
 ## Using the browser runtime from Python
 

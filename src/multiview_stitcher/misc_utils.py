@@ -232,3 +232,32 @@ def process_batch_using_dask(
     )
 
     return
+
+
+_process_scheduler_supported = None
+
+
+def supports_process_scheduler():
+    """Whether dask's ``scheduler="processes"`` can run here.
+
+    WebAssembly runtimes (Pyodide, JupyterLite) have no process support at all,
+    so attempting it there only produces a failed spawn per call. The result is
+    cached because this never changes within an interpreter.
+    """
+    global _process_scheduler_supported
+
+    if _process_scheduler_supported is None:
+        import sys
+
+        if sys.platform == "emscripten":
+            _process_scheduler_supported = False
+        else:
+            try:
+                import multiprocessing
+
+                multiprocessing.get_context("spawn")
+                _process_scheduler_supported = True
+            except Exception:  # noqa: BLE001 - any failure means "not usable"
+                _process_scheduler_supported = False
+
+    return _process_scheduler_supported

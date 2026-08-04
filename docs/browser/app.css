@@ -64,6 +64,16 @@ header h1 {
   white-space: nowrap;
 }
 
+#inactive {
+  font-size: 12.5px;
+  color: var(--bg);
+  background: var(--accent-2);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 #status.busy {
   color: var(--accent);
   border-color: var(--accent);
@@ -145,6 +155,10 @@ button:not(:disabled):hover {
   margin-top: 12px;
 }
 
+.actions-row {
+  grid-template-columns: 1fr auto;
+}
+
 .hint {
   margin: 8px 0 0;
   font-size: 11.5px;
@@ -199,8 +213,32 @@ button:not(:disabled):hover {
   background: var(--panel-2);
   margin-bottom: 5px;
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#views li > div {
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+#views .remove {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  line-height: 1.6;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+#views .remove:not(:disabled):hover {
+  color: var(--error);
+  border-color: var(--error);
 }
 
 #views strong {

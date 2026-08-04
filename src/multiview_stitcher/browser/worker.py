@@ -16,7 +16,7 @@ lazily fused preview render in parallel.
 import json
 import traceback
 
-from multiview_stitcher.browser import executors, serialization
+from multiview_stitcher.browser import example_data, executors, serialization
 from multiview_stitcher.browser.bridge import get_bridge
 from multiview_stitcher.browser.env import runtime_info
 from multiview_stitcher.browser.session import Session
@@ -59,10 +59,52 @@ class WorkerRuntime:
         return self.session
 
     def _cmd_load(self, payload):
-        self.session = Session(
-            session_id=payload.get("session_id"), fetch=self.fetch
+        """Open sources, replacing or extending whatever is already loaded."""
+        replace = payload.get("replace", True)
+
+        if self.session is None or replace:
+            # Swap only once the new session has opened successfully. Failing
+            # halfway used to leave an empty session in place of a working
+            # one, after which every URL the viewer still held answered "not
+            # found" - an image that silently emptied itself because an
+            # unrelated load failed.
+            session = Session(
+                session_id=payload.get("session_id"), fetch=self.fetch
+            )
+            described = session.load(payload["sources"])
+            self.session = session
+            return described
+
+        return self.session.add(payload["sources"])
+
+    def _cmd_load_example(self, payload):
+        """Load one of the generated example datasets."""
+        name = payload.get("name", "tiles-3d")
+        if name not in example_data.EXAMPLES:
+            raise ValueError(
+                f"Unknown example '{name}'. Available: "
+                f"{sorted(example_data.EXAMPLES)}."
+            )
+        return self._cmd_load(
+            {
+                "sources": example_data.example_sources(name),
+                "replace": payload.get("replace", True),
+            }
         )
-        return self.session.load(payload["sources"])
+
+    def _cmd_examples(self, payload):
+        return {
+            "examples": [
+                {"name": name, "label": spec["label"]}
+                for name, spec in example_data.EXAMPLES.items()
+            ]
+        }
+
+    def _cmd_remove(self, payload):
+        return self._require_session().remove(payload["index"])
+
+    def _cmd_clear(self, payload):
+        return self._require_session().clear()
 
     def _cmd_describe(self, payload):
         return self._require_session().describe()
@@ -84,7 +126,6 @@ class WorkerRuntime:
                     max_pairs_per_task=int(
                         payload.get("pairs_per_task", 1) or 1
                     ),
-                    reg_channel_index=options.reg_channel_index,
                 )
 
         return session.register(
@@ -119,6 +160,8 @@ class WorkerRuntime:
         return session.neuroglancer_state(
             transform_key=payload.get("transform_key"),
             base_url=payload.get("base_url", ""),
+            api_base=payload.get("api_base", ""),
+            serve_views=payload.get("serve_views", "auto"),
             include_views=payload.get("include_views", True),
             preview_route=payload.get("preview_route"),
             channel_coord=payload.get("channel_coord"),
@@ -133,9 +176,13 @@ class WorkerRuntime:
     def session_for(self, spec):
         """Return a cached read-only session rebuilt from ``spec``."""
         spec = SessionSpec.from_dict(spec)
+        # The preview belongs in the key: a cached session rebuilt before a
+        # preview existed cannot serve it, and answering "not found" would
+        # render as an empty layer rather than as an error.
         key = (
             tuple(source.url for source in spec.sources),
             spec.generation,
+            json.dumps(spec.preview, sort_keys=True),
         )
 
         if key not in self._session_cache:
@@ -169,7 +216,7 @@ class WorkerRuntime:
             "pairwise": session.compute_pairwise(
                 task["edges"],
                 register_kwargs,
-                reg_channel_index=task.get("reg_channel_index"),
+                reg_channel=task.get("reg_channel"),
             )
         }
 
@@ -243,16 +290,47 @@ def run_task_json(task_json):
 def serve_route(route, key, session_spec=None):
     """Answer one virtual OME-Zarr request.
 
+    ``session_spec`` is a JSON string, matching the other entry points. Taking
+    a live JavaScript object instead would let its nulls arrive as `JsNull`
+    proxies rather than None, which satisfy an ``is not None`` check and then
+    fail deep inside numeric code.
+
     Returns ``(status, content_type, body)`` where ``body`` is ``bytes`` for
-    chunks, JSON-encoded ``bytes`` for metadata, and ``None`` for 404s.
+    chunks, JSON-encoded ``bytes`` for metadata, and the reason for 404s.
     """
     runtime = get_runtime()
 
-    if session_spec is None:
-        kind, payload = runtime.serve(route, key)
-    else:
-        session = runtime.session_for(session_spec)
-        kind, payload = session.serve(route, key)
+    if isinstance(session_spec, str):
+        session_spec = json.loads(session_spec) if session_spec else None
+
+    try:
+        session = None
+        if session_spec is not None:
+            try:
+                session = runtime.session_for(session_spec)
+            except ValueError:
+                # A page can hand over a spec this worker cannot rebuild from,
+                # for instance when a cached script and a fresh wheel disagree.
+                # Answering from this worker's own session when it has one -
+                # and failing loudly when it does not, so the page retries
+                # elsewhere - beats refusing outright.
+                if runtime.session is None:
+                    raise
+                session = runtime.session
+
+        if session is None:
+            kind, payload = runtime.serve(route, key)
+        else:
+            kind, payload = session.serve(route, key)
+    except Exception as exc:  # noqa: BLE001 - reported over HTTP
+        # Reported as a server error rather than "not found": zarr reads a
+        # missing chunk as its fill value, so a failure answered with 404
+        # renders as a black image and is never seen.
+        return (
+            500,
+            "text/plain",
+            f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}".encode(),
+        )
 
     if kind == "json":
         return (
@@ -262,4 +340,5 @@ def serve_route(route, key, session_spec=None):
         )
     if kind == "bytes":
         return 200, "application/octet-stream", payload
-    return 404, "text/plain", None
+
+    return 404, "text/plain", str(payload or "not found").encode("utf-8")

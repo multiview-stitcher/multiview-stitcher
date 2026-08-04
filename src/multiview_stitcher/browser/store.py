@@ -58,9 +58,16 @@ def _xhr_fetch(url):  # pragma: no cover - requires a browser worker
     request.send(None)
 
     if request.status in (404, 403, 410):
+        # Genuinely absent: zarr reads an uninitialised chunk as its fill
+        # value, which is the correct behaviour for a sparse array.
         return None
-    if request.status >= 400:
-        raise FetchError(f"{request.status} for {url}")
+    if request.status >= 400 or request.status == 0:
+        # Anything else is a broken request path, and must not be mistaken for
+        # an empty chunk.
+        raise FetchError(
+            f"{request.status or 'network error'} for {url}: "
+            f"{request.responseText[:200]}"
+        )
 
     response = request.response
     if response is None:

@@ -169,7 +169,6 @@ def main():
         pairwise_executor=executors.RemotePairwiseExecutor(
             pool_session.spec(),
             bridge=LocalBridge(runner=pool_worker.run_task),
-            reg_channel_index=0,
         ),
     )
     np.testing.assert_allclose(
@@ -247,10 +246,11 @@ def main():
 
     # --- stale routes must not serve data -------------------------------
     session.register(RegistrationOptions(new_transform_key="registered2"))
+    stale_kind, stale_reason = session.serve(route, ".zattrs")
     check(
         "stale_route_invalidated",
-        session.serve(route, ".zattrs") == ("missing", None),
-        "old generation still served data",
+        stale_kind == "missing" and "retired generation" in str(stale_reason),
+        f"{stale_kind}: {stale_reason}",
     )
 
     # --- fuse to an OME-Zarr on disk ------------------------------------
@@ -276,6 +276,316 @@ def main():
         "fused_zarr_has_signal",
         float(np.asarray(fused_sim.data).max()) > 0,
         "fused output is empty",
+    )
+
+    # --- OME-Zarr read through the HTTP store, then fused ----------------
+    # The browser reads inputs over HTTP, not from a path, and a fused preview
+    # of them spans several chunks (unlike the single-chunk example). Both
+    # differences only bite under zarr v2, so they are checked here.
+    from multiview_stitcher.browser import Session as HttpSession
+    from multiview_stitcher.browser import store as browser_store
+
+    def service_worker_fetch(url):
+        """Stand in for the service worker: /__mvs__/fs/<mount>/<path>."""
+        marker = "/__mvs__/fs/"
+        index = url.index(marker) + len(marker)
+        relative = url[index:].split("/", 1)[1]
+        path = f"/data/{relative}"
+        try:
+            with open(path, "rb") as handle:
+                return handle.read()
+        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+            return None
+
+    http_session = HttpSession(session_id="httpsession", fetch=service_worker_fetch)
+    http_described = http_session.load(
+        [
+            {"url": f"/browser/__mvs__/fs/m1/tile_{index}.ome.zarr"}
+            for index in range(2)
+        ]
+    )
+    check(
+        "http_store_loaded",
+        http_described["n_views"] == 2
+        and {view["served"] for view in http_described["views"]} == {"native"},
+        http_described["views"][0]["served"],
+    )
+    check(
+        "http_store_is_v2_mapping",
+        isinstance(
+            browser_store.open_http_store("/x", fetch=service_worker_fetch),
+            browser_store.HttpZarrStoreV2,
+        ),
+        "expected the zarr v2 store in Pyodide",
+    )
+
+    http_session.register(RegistrationOptions(new_transform_key="registered"))
+    http_preview = http_session.fuse_preview(
+        FusionOptions(transform_key="registered")
+    )
+
+    kind, http_zattrs = http_session.serve(http_preview["route"], ".zattrs")
+    http_levels = [
+        dataset["path"]
+        for dataset in http_zattrs["multiscales"][0]["datasets"]
+    ]
+    check(
+        "http_preview_is_multiscale",
+        kind == "json" and len(http_levels) > 1,
+        http_levels,
+    )
+
+    # Neuroglancer renders the coarsest level first, so a level that fails to
+    # serve leaves the layer blank even when level 0 is perfectly fine.
+    level_reports = []
+    for level in http_levels:
+        level_kind, level_zarray = http_session.serve(
+            http_preview["route"], f"{level}/.zarray"
+        )
+        if level_kind != "json":
+            level_reports.append((level, "no .zarray", None))
+            continue
+
+        level_grid = [
+            int(np.ceil(size / chunk))
+            for size, chunk in zip(
+                level_zarray["shape"], level_zarray["chunks"]
+            )
+        ]
+        level_expected = int(np.prod(level_zarray["chunks"])) * np.dtype(
+            level_zarray["dtype"]
+        ).itemsize
+
+        bad = []
+        for index in np.ndindex(*level_grid):
+            chunk_kind, chunk = http_session.serve(
+                http_preview["route"],
+                f"{level}/" + "/".join(str(i) for i in index),
+            )
+            if chunk_kind != "bytes" or len(chunk) != level_expected:
+                bad.append((index, chunk_kind))
+        level_reports.append((level, level_grid, bad))
+
+    check(
+        "http_preview_every_level_serves",
+        all(
+            isinstance(report[1], list) and not report[2]
+            for report in level_reports
+        ),
+        level_reports,
+    )
+
+    kind, http_zarray = http_session.serve(http_preview["route"], "0/.zarray")
+    check("http_preview_zarray", kind == "json", kind)
+
+    grid = [
+        int(np.ceil(size / chunk))
+        for size, chunk in zip(http_zarray["shape"], http_zarray["chunks"])
+    ]
+    check(
+        "http_preview_is_multi_chunk",
+        int(np.prod(grid)) > 1,
+        f"grid={grid} - a single-chunk preview would not exercise this",
+    )
+
+    # Every chunk of the grid must serve, not just the first one.
+    served_chunks = []
+    for index in np.ndindex(*grid):
+        kind, chunk = http_session.serve(
+            http_preview["route"],
+            "0/" + "/".join(str(i) for i in index),
+        )
+        served_chunks.append((kind, len(chunk) if chunk else 0))
+
+    expected_bytes = int(np.prod(http_zarray["chunks"])) * np.dtype(
+        http_zarray["dtype"]
+    ).itemsize
+    check(
+        "http_preview_all_chunks_served",
+        all(
+            kind == "bytes" and size == expected_bytes
+            for kind, size in served_chunks
+        ),
+        f"{served_chunks} expected {len(served_chunks)}x{expected_bytes}",
+    )
+
+    totals = []
+    for index in np.ndindex(*grid):
+        _, chunk = http_session.serve(
+            http_preview["route"],
+            "0/" + "/".join(str(i) for i in index),
+        )
+        totals.append(
+            float(
+                np.frombuffer(chunk, dtype=np.dtype(http_zarray["dtype"])).max()
+            )
+        )
+    check(
+        "http_preview_chunks_have_signal",
+        sum(value > 0 for value in totals) >= len(totals) - 1,
+        totals,
+    )
+
+    # A compute worker must serve these chunks too. It rebuilds the session
+    # from the spec, which means re-opening the OME-Zarr over HTTP and
+    # reconstructing the fused image - the exact combination that the
+    # single-chunk, no-IO example never exercises.
+    http_worker = WorkerRuntime(fetch=service_worker_fetch)
+    http_spec = json.loads(json.dumps(http_session.spec().to_dict()))
+    check(
+        "http_spec_carries_preview",
+        http_spec["preview"] is not None,
+        "a worker cannot rebuild a preview it was never told about",
+    )
+
+    worker_reports = []
+    for level in http_levels:
+        level_response = http_worker.run_task(
+            {
+                "kind": "serve",
+                "session": http_spec,
+                "route": http_preview["route"],
+                "key": f"{level}/.zarray",
+            }
+        )
+        if level_response["kind"] != "json":
+            worker_reports.append((level, level_response["kind"], None))
+            continue
+
+        level_zarray = level_response["payload"]
+        level_grid = [
+            int(np.ceil(size / chunk))
+            for size, chunk in zip(
+                level_zarray["shape"], level_zarray["chunks"]
+            )
+        ]
+        bad = []
+        for index in np.ndindex(*level_grid):
+            chunk_response = http_worker.run_task(
+                {
+                    "kind": "serve",
+                    "session": http_spec,
+                    "route": http_preview["route"],
+                    "key": f"{level}/" + "/".join(str(i) for i in index),
+                }
+            )
+            if chunk_response["kind"] != "bytes":
+                bad.append((index, chunk_response["kind"]))
+        worker_reports.append((level, level_grid, bad))
+
+    check(
+        "http_preview_served_by_compute_worker",
+        all(
+            isinstance(report[1], list) and not report[2]
+            for report in worker_reports
+        ),
+        worker_reports,
+    )
+
+    # A worker that cached the session before the preview existed must still
+    # serve it: this failed as an empty layer with every key 404, and nothing
+    # in any log.
+    stale_worker = WorkerRuntime(fetch=service_worker_fetch)
+    stale_session = HttpSession(session_id="stale", fetch=service_worker_fetch)
+    stale_session.load(
+        [
+            {"url": f"/browser/__mvs__/fs/m1/tile_{index}.ome.zarr"}
+            for index in range(2)
+        ]
+    )
+    before_spec = json.loads(json.dumps(stale_session.spec().to_dict()))
+    stale_worker.run_task(
+        {
+            "kind": "serve",
+            "session": before_spec,
+            "route": stale_session.view_route(0),
+            "key": ".zattrs",
+        }
+    )
+
+    stale_preview = stale_session.fuse_preview(FusionOptions())
+    after_spec = json.loads(json.dumps(stale_session.spec().to_dict()))
+    stale_response = stale_worker.run_task(
+        {
+            "kind": "serve",
+            "session": after_spec,
+            "route": stale_preview["route"],
+            "key": ".zattrs",
+        }
+    )
+    check(
+        "preview_servable_by_worker_that_predates_it",
+        stale_response["kind"] == "json",
+        stale_response,
+    )
+
+    # --- the generated 3D example, served virtually ----------------------
+    # 3D registration takes a different path through the overlap graph than
+    # 2D, including one that reaches for a process pool that cannot exist in
+    # WebAssembly, so it is worth exercising here.
+    from multiview_stitcher.browser import example_data
+
+    example = Session()
+    described_example = example.load(
+        example_data.example_sources("tiles-3d")
+    )
+    check(
+        "example_loaded",
+        described_example["n_views"] == 4
+        and described_example["views"][0]["ndim"] == 3,
+        described_example["views"][0]["levels"][0]["shape"],
+    )
+    check(
+        "example_served_virtually",
+        {view["served"] for view in described_example["views"]} == {"virtual"},
+        {view["served"] for view in described_example["views"]},
+    )
+
+    example_route = example.view_route(0)
+    kind, example_zarray = example.serve(example_route, "0/.zarray")
+    check("example_view_zarray", kind == "json", kind)
+
+    example_key = "/".join("0" for _ in example_zarray["chunks"])
+    kind, example_chunk = example.serve(example_route, f"0/{example_key}")
+    check(
+        "example_view_chunk",
+        kind == "bytes"
+        and len(example_chunk)
+        == int(np.prod(example_zarray["chunks"]))
+        * np.dtype(example_zarray["dtype"]).itemsize,
+        kind,
+    )
+
+    example_result = example.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+    example_shifts = np.array(
+        [
+            np.asarray(param["data"])[0][:3, 3]
+            for param in example_result["params"]
+        ]
+    )
+    check(
+        "example_registered_3d",
+        np.all(np.isfinite(example_shifts))
+        and np.abs(example_shifts[:, 1:]).max() > 0.1,
+        example_shifts.round(2).tolist(),
+    )
+
+    example_state = example.neuroglancer_state(
+        transform_key="registered",
+        base_url="https://example.org",
+        api_base="/browser/__mvs__",
+    )
+    check(
+        "example_viewer_urls_in_sw_scope",
+        all(
+            layer["source"]["url"].startswith(
+                "zarr://https://example.org/browser/__mvs__/"
+            )
+            for layer in example_state["layers"]
+        ),
+        [layer["source"]["url"] for layer in example_state["layers"]],
     )
 
     # --- the JSON worker API JavaScript actually calls -------------------

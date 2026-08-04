@@ -19,7 +19,12 @@
 
 importScripts("routes.js");
 
-const TIMEOUT_MS = 10 * 60 * 1000;
+// A file read is quick and should fail loudly rather than hang. Anything that
+// runs Python - fusing a chunk, a whole registration - legitimately takes far
+// longer, especially on the first request to a worker, which opens the inputs.
+const FILE_TIMEOUT_MS = 60 * 1000;
+const COMPUTE_TIMEOUT_MS = 10 * 60 * 1000;
+const RPC_TIMEOUT_MS = 30 * 60 * 1000;
 
 self.addEventListener("install", (event) => {
   // Take over immediately: the page cannot read anything until we are active.
@@ -30,22 +35,18 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-/** Ask the controlling page to answer one request. */
-async function askPage(message, transfer = []) {
-  const clients = await self.clients.matchAll({
-    type: "window",
-    includeUncontrolled: true,
-  });
+function clientRank(client) {
+  if (client.focused) return 0;
+  if (client.visibilityState === "visible") return 1;
+  return 2;
+}
 
-  if (!clients.length) {
-    throw new Error("no page is available to serve this request");
-  }
-
-  return await new Promise((resolve, reject) => {
+function askClient(client, message, timeoutMs) {
+  return new Promise((resolve, reject) => {
     const channel = new MessageChannel();
     const timer = setTimeout(() => {
-      reject(new Error(`timed out after ${TIMEOUT_MS} ms`));
-    }, TIMEOUT_MS);
+      reject(new Error(`timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
 
     channel.port1.onmessage = (event) => {
       clearTimeout(timer);
@@ -54,12 +55,56 @@ async function askPage(message, transfer = []) {
       else resolve(data);
     };
 
-    // Prefer the client that triggered this request; fall back to any window.
-    clients[0].postMessage({ ...message, port: channel.port2 }, [
-      channel.port2,
-      ...transfer,
-    ]);
+    client.postMessage({ ...message, port: channel.port2 }, [channel.port2]);
   });
+}
+
+/**
+ * Ask a page to answer one request.
+ *
+ * Two things make this less obvious than it looks. The embedded Neuroglancer
+ * viewer is an iframe, and an iframe is a *window* client just like the page
+ * is - but it has no handler for our messages, so asking it means waiting for
+ * a reply that never comes; since the viewer issues most of the requests we
+ * serve, that deadlocks exactly when the app is busiest. And one service
+ * worker serves every tab, each of which owns its own directory handles and
+ * session, so a tab that does not recognise a mount or session replies
+ * `notMine` and the request moves on to the next one.
+ */
+async function askPage(message, timeoutMs = FILE_TIMEOUT_MS) {
+  const clients = (
+    await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+  )
+    .filter((client) =>
+      mvsRoutes.isAppPage(client.url, self.registration.scope),
+    )
+    // Ask the tab the user is actually looking at first. Older tabs may not
+    // decline requests they cannot serve, and whichever answers first wins -
+    // so preferring the visible one keeps a forgotten background tab from
+    // answering for the foreground one.
+    .sort((a, b) => clientRank(a) - clientRank(b));
+
+  if (!clients.length) {
+    throw new Error("no multiview-stitcher page is available to serve this");
+  }
+
+  let lastError = null;
+  for (const client of clients) {
+    try {
+      const response = await askClient(client, message, timeoutMs);
+      if (!response.notMine) return response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  // Never report this as "not found": zarr treats a missing chunk as a hole
+  // and quietly fills it with zeros, which turns a broken request path into a
+  // black image with nothing in any log.
+  throw (
+    lastError ||
+    new Error(`no page claimed this request (${message.type})`)
+  );
 }
 
 const NO_STORE = {
@@ -71,7 +116,15 @@ const NO_STORE = {
 };
 
 function notFound(detail) {
-  return new Response(detail || "not found", { status: 404, headers: NO_STORE });
+  return new Response(detail || "not found", {
+    status: 404,
+    headers: {
+      ...NO_STORE,
+      // Repeated as a header: the browser's network panel shows headers at a
+      // glance, while a 404 body usually has to be hunted for.
+      "X-Mvs-Reason": String(detail || "not found").slice(0, 200),
+    },
+  });
 }
 
 function serverError(error) {
@@ -90,7 +143,7 @@ async function handleFile(path, request) {
     mount: parsed.mount,
     path: parsed.path,
   });
-  if (!response.found) return notFound();
+  if (!response.found) return notFound(`no file at ${path}`);
 
   return new Response(request.method === "HEAD" ? null : response.data, {
     status: 200,
@@ -106,12 +159,11 @@ async function handleZarr(path, request) {
   const parsed = mvsRoutes.parseZarrPath(path);
   if (!parsed) return notFound("malformed virtual OME-Zarr route");
 
-  const response = await askPage({
-    type: "zarr.read",
-    route: parsed.route,
-    key: parsed.key,
-  });
-  if (!response.found) return notFound();
+  const response = await askPage(
+    { type: "zarr.read", route: parsed.route, key: parsed.key },
+    COMPUTE_TIMEOUT_MS,
+  );
+  if (!response.found) return notFound(response.reason);
 
   return new Response(request.method === "HEAD" ? null : response.data, {
     status: 200,
@@ -129,7 +181,10 @@ async function handleZarr(path, request) {
 
 async function handleRpc(endpoint, request) {
   const payload = await request.json();
-  const response = await askPage({ type: "rpc", endpoint, payload });
+  const response = await askPage(
+    { type: "rpc", endpoint, payload },
+    RPC_TIMEOUT_MS,
+  );
   return new Response(JSON.stringify(response.result), {
     status: 200,
     headers: { ...NO_STORE, "Content-Type": "application/json" },

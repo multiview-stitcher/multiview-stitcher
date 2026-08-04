@@ -10,6 +10,12 @@
 /** mount id -> { handle, dirCache } */
 const mounts = new Map();
 
+// Directory handles are cached so that reading a chunk does not re-walk the
+// path every time. Bounded because a deep pyramid has a directory per chunk
+// row, and an unbounded cache would grow with the dataset rather than with
+// what is being looked at.
+const MAX_CACHED_DIRECTORIES = 4096;
+
 function mountFor(id) {
   const mount = mounts.get(id);
   if (!mount) throw new Error(`unknown mount '${id}'`);
@@ -25,8 +31,23 @@ async function directoryAt(mount, segments) {
     handle = await handle.getDirectoryHandle(segment);
   }
 
+  if (mount.dirCache.size >= MAX_CACHED_DIRECTORIES) {
+    mount.dirCache.delete(mount.dirCache.keys().next().value);
+  }
   mount.dirCache.set(key, handle);
   return handle;
+}
+
+/** The id of an already-mounted directory identical to `handle`, if any. */
+async function findMount(handle) {
+  for (const [id, mount] of mounts) {
+    try {
+      if (await mount.handle.isSameEntry(handle)) return id;
+    } catch (error) {
+      /* handles from a previous session may no longer compare */
+    }
+  }
+  return null;
 }
 
 async function readFile(id, path) {
@@ -42,9 +63,14 @@ async function readFile(id, path) {
     const file = await fileHandle.getFile();
     return await file.arrayBuffer();
   } catch (error) {
-    // NotFoundError is the normal "this chunk was never written" answer that
-    // zarr relies on; anything else is worth surfacing.
-    if (error && error.name === "NotFoundError") return null;
+    // "No file here" is a normal answer, not a failure: zarr probes for keys
+    // that may not exist and reads an absent chunk as its fill value. A path
+    // that names a directory (TypeMismatchError) means the same thing - and
+    // reporting it as an error would abort a whole read in Python, which
+    // fetches strictly, even though Neuroglancer would shrug it off.
+    if (error && (error.name === "NotFoundError" || error.name === "TypeMismatchError")) {
+      return null;
+    }
     throw error;
   }
 }
@@ -90,15 +116,29 @@ async function discover(id) {
 
 self.onmessage = async (event) => {
   const { id, type, port } = event.data;
-  const reply = (payload) => (port ? port.postMessage(payload) : self.postMessage({ id, ...payload }));
+  // The transfer list matters: chunk buffers are handed over rather than
+  // copied, which halves the memory traffic of reading a large dataset.
+  const reply = (payload, transfer = []) =>
+    port
+      ? port.postMessage(payload, transfer)
+      : self.postMessage({ id, ...payload }, transfer);
 
   try {
     if (type === "mount") {
+      // Dropping the same folder twice must address the same mount, otherwise
+      // its images would be appended again under new URLs and appear as
+      // duplicate views.
+      const existing = await findMount(event.data.handle);
+      if (existing) {
+        reply({ ok: true, mount: existing });
+        return;
+      }
+
       mounts.set(event.data.mount, {
         handle: event.data.handle,
         dirCache: new Map(),
       });
-      reply({ ok: true });
+      reply({ ok: true, mount: event.data.mount });
       return;
     }
 

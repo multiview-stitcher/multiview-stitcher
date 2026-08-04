@@ -10,7 +10,9 @@
 
 /* global bootRuntime, callCommand, callServe, pyodide */
 
-importScripts("py-runtime.js");
+// Carry the build id on, so the shared runtime is not loaded from cache
+// while the worker itself is fresh.
+importScripts(`py-runtime.js${self.location.search}`);
 
 let ready = false;
 let outputMount = null;

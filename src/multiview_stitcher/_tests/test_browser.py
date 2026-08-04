@@ -263,9 +263,7 @@ def test_distributed_registration_matches_local(tiles_on_disk):
     remote_session.load(tiles_on_disk)
     worker = WorkerRuntime()
     executor = executors.RemotePairwiseExecutor(
-        remote_session.spec(),
-        bridge=_pool_bridge(worker),
-        reg_channel_index=0,
+        remote_session.spec(), bridge=_pool_bridge(worker)
     )
     remote = remote_session.register(
         RegistrationOptions(new_transform_key="registered"),
@@ -423,8 +421,11 @@ def test_registration_retires_previous_preview_routes(tiles_on_disk):
 
     session.register(RegistrationOptions(new_transform_key="registered"))
 
-    # The old URL must not answer with data computed before registration.
-    assert session.serve(stale_route, ".zattrs") == ("missing", None)
+    # The old URL must not answer with data computed before registration -
+    # and must say why, so an empty layer is never silent.
+    kind, reason = session.serve(stale_route, ".zattrs")
+    assert kind == "missing"
+    assert "retired generation" in reason
 
     fresh = session.fuse_preview(FusionOptions(transform_key="registered"))
     assert fresh["route"] != stale_route
@@ -572,7 +573,7 @@ def test_serve_route_returns_http_shaped_response(tiles_on_disk):
         preview["route"], "does/not/exist"
     )
     assert status == 404
-    assert body is None
+    assert b"is not a key" in body
 
     worker_module._runtime = None
 
@@ -585,13 +586,21 @@ def test_serve_route_returns_http_shaped_response(tiles_on_disk):
 def test_neuroglancer_state_uses_selected_transform_key(tiles_on_disk):
     session = Session()
     session.load(tiles_on_disk)
+    # Pretend the tiles arrived through the service worker, which is how the
+    # browser addresses a folder the user granted access to.
+    for index, source in enumerate(session.sources):
+        source.url = f"/app/__mvs__/fs/m1/tile_{index}.ome.zarr"
+
     session.register(RegistrationOptions(new_transform_key="registered"))
 
-    state = session.neuroglancer_state(transform_key="registered")
+    state = session.neuroglancer_state(
+        transform_key="registered", api_base="/app/__mvs__"
+    )
 
     assert len(state["layers"]) == 2
     for layer, source in zip(state["layers"], session.sources):
-        assert layer["source"]["url"].endswith(source.url)
+        # Served natively: the viewer reads the OME-Zarr bytes directly.
+        assert layer["source"]["url"] == f"zarr://{source.url}"
         assert "matrix" in layer["source"]["transform"]
     assert json.loads(json.dumps(state))
 
@@ -673,3 +682,670 @@ def test_route_format_matches_service_worker_fixtures():
     session.generation = 3
     assert session._route(PREVIEW_NAME) == fixtures["stale_request"]["route"]
     assert session._route(PREVIEW_NAME) != fixtures["route"]
+
+
+# ---------------------------------------------------------------------------
+# Example datasets
+# ---------------------------------------------------------------------------
+
+
+def test_example_generation_is_deterministic():
+    """Workers rebuild example tiles independently; they must agree exactly."""
+    from multiview_stitcher.browser import example_data
+
+    first = msi_utils.get_sim_from_msim(
+        example_data.build_msim("tiles-3d", 2)
+    )
+    second = msi_utils.get_sim_from_msim(
+        example_data.build_msim("tiles-3d", 2)
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(first.data), np.asarray(second.data)
+    )
+    assert si_utils.get_origin_from_sim(first) == si_utils.get_origin_from_sim(
+        second
+    )
+
+
+def test_example_dataset_is_3d_and_registrable():
+    from multiview_stitcher.browser import example_data
+
+    session = Session()
+    described = session.load(example_data.example_sources("tiles-3d"))
+
+    assert described["n_views"] == 4
+    assert described["views"][0]["ndim"] == 3
+    assert described["views"][0]["spatial_dims"] == ["z", "y", "x"]
+    assert len(described["views"][0]["levels"]) == 2
+    # Generated data cannot be streamed to the viewer directly.
+    assert {view["served"] for view in described["views"]} == {"virtual"}
+
+    result = session.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+    assert len(result["params"]) == 4
+
+    # The example applies a known in-plane offset per tile, so a registration
+    # that found nothing (all-zero shifts) would be a failure.
+    shifts = np.array(
+        [np.asarray(param["data"])[0][:3, 3] for param in result["params"]]
+    )
+    assert np.abs(shifts[:, 1:]).max() > 0.1
+    assert np.all(np.isfinite(shifts))
+
+
+def test_example_views_are_served_virtually(tmp_path):
+    from multiview_stitcher.browser import example_data
+
+    session = Session(session_id="deadbeef")
+    session.load(example_data.example_sources("tiles-3d"))
+
+    route = session.view_route(1)
+    kind, zattrs = session.serve(route, ".zattrs")
+    assert kind == "json"
+    assert [axis["name"] for axis in zattrs["multiscales"][0]["axes"]] == [
+        "t",
+        "c",
+        "z",
+        "y",
+        "x",
+    ]
+
+    kind, zarray = session.serve(route, "0/.zarray")
+    assert kind == "json"
+    chunk_key = "/".join("0" for _ in zarray["chunks"])
+    kind, chunk = session.serve(route, f"0/{chunk_key}")
+    assert kind == "bytes"
+    assert len(chunk) == int(np.prod(zarray["chunks"])) * np.dtype(
+        zarray["dtype"]
+    ).itemsize
+
+    # And any compute worker reproduces the identical bytes from the spec.
+    worker = WorkerRuntime()
+    response = worker.run_task(
+        {
+            "kind": "serve",
+            "session": json.loads(json.dumps(session.spec().to_dict())),
+            "route": route,
+            "key": f"0/{chunk_key}",
+        }
+    )
+    assert response["payload"] == chunk
+
+
+# ---------------------------------------------------------------------------
+# Viewer URLs
+# ---------------------------------------------------------------------------
+
+
+def test_viewer_urls_live_below_the_service_worker_scope(tiles_on_disk):
+    """Every viewer URL must sit inside the prefix the service worker claims.
+
+    The app can be published under a sub-path, where a service worker may only
+    intercept URLs below its own directory; a root-relative URL would simply
+    not be intercepted and the viewer would show an empty layer.
+    """
+    api_base = "/multiview-stitcher/main/browser/__mvs__"
+
+    session = Session()
+    session.load(tiles_on_disk)
+    preview = session.fuse_preview(FusionOptions())
+
+    state = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        base_url="https://example.org",
+        api_base=api_base,
+        preview_route=preview["route"],
+    )
+
+    urls = [layer["source"]["url"] for layer in state["layers"]]
+    assert len(urls) == 3
+
+    for url in urls:
+        assert url.startswith("zarr://https://example.org/multiview-stitcher/")
+
+    assert urls[-1] == (
+        f"zarr://https://example.org{api_base}/zarr/{preview['route']}"
+    )
+
+
+def test_sources_the_viewer_cannot_reach_get_a_virtual_route(tiles_on_disk):
+    """A source the viewer cannot fetch is exposed through Python instead."""
+    session = Session()
+    session.load(tiles_on_disk)
+
+    # A plain filesystem path exists only inside Python.
+    assert session.describe()["views"][0]["served"] == "virtual"
+    assert "/zarr/" in session.source_url(0, api_base="/app/__mvs__")
+
+    # A service-worker URL is readable by the viewer, so it is used as is.
+    session.sources[0].url = "/app/__mvs__/fs/m1/tile_0.ome.zarr"
+    assert session.describe()["views"][0]["served"] == "native"
+
+
+def test_serve_views_virtual_overrides_native_streaming(tiles_on_disk):
+    session = Session()
+    session.load(tiles_on_disk)
+    session.sources[0].url = "/app/__mvs__/fs/m1/tile_0.ome.zarr"
+
+    assert session.source_url(0, api_base="/app/__mvs__") == (
+        "/app/__mvs__/fs/m1/tile_0.ome.zarr"
+    )
+    assert "/zarr/" in session.source_url(
+        0, api_base="/app/__mvs__", serve_views="virtual"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Adding and clearing views
+# ---------------------------------------------------------------------------
+
+
+def test_loading_more_sources_appends(tiles_on_disk):
+    from multiview_stitcher.browser import example_data
+
+    session = Session()
+    session.load(tiles_on_disk[:1])
+    assert session.describe()["n_views"] == 1
+
+    described = session.add(tiles_on_disk[1:])
+    assert described["n_views"] == 2
+    assert [source.url for source in session.sources] == list(tiles_on_disk)
+
+    # Appending the same source again is a no-op rather than a duplicate view.
+    assert session.add(tiles_on_disk[1:])["n_views"] == 2
+
+    # Mixed inputs are rejected with a readable error, not deep inside a graph.
+    with pytest.raises(ValueError, match="same dimensionality"):
+        session.add(example_data.example_sources("tiles-3d")[:1])
+
+
+def test_clear_empties_the_session(tiles_on_disk):
+    session = Session()
+    session.load(tiles_on_disk)
+    generation = session.generation
+
+    described = session.clear()
+    assert described["n_views"] == 0
+    assert described["transform_keys"] == []
+    assert session.is_empty()
+    assert session.generation > generation
+
+    # The viewer state must still be renderable so the page can clear the view.
+    state = session.neuroglancer_state()
+    assert state["layers"] == []
+
+    # And loading afterwards works from the empty state.
+    assert session.load(tiles_on_disk)["n_views"] == 2
+
+
+def test_worker_load_replace_and_append(tiles_on_disk):
+    from multiview_stitcher.browser import worker as worker_module
+
+    worker_module._runtime = WorkerRuntime()
+
+    response = json.loads(
+        worker_module.handle_json(
+            "load", json.dumps({"sources": tiles_on_disk[:1]})
+        )
+    )
+    assert response["result"]["n_views"] == 1
+
+    response = json.loads(
+        worker_module.handle_json(
+            "load",
+            json.dumps({"sources": tiles_on_disk[1:], "replace": False}),
+        )
+    )
+    assert response["result"]["n_views"] == 2
+
+    response = json.loads(
+        worker_module.handle_json(
+            "load", json.dumps({"sources": tiles_on_disk[:1]})
+        )
+    )
+    assert response["result"]["n_views"] == 1
+
+    response = json.loads(worker_module.handle_json("examples", "{}"))
+    assert response["result"]["examples"][0]["name"] == "tiles-3d"
+
+    response = json.loads(worker_module.handle_json("clear", "{}"))
+    assert response["result"]["n_views"] == 0
+
+    worker_module._runtime = None
+
+
+# ---------------------------------------------------------------------------
+# The register command as JavaScript calls it
+# ---------------------------------------------------------------------------
+
+
+def _install_pool_bridge(runtime, max_workers=2):
+    """Make `get_bridge()` return a pool bridge, as the browser runtime does."""
+    from multiview_stitcher.browser import bridge as bridge_module
+
+    previous = bridge_module.get_bridge()
+    bridge_module.set_bridge(_pool_bridge(runtime, max_workers=max_workers))
+    return previous
+
+
+@pytest.mark.parametrize("sources_kind", ["ome_zarr", "example"])
+def test_register_command_distributed_end_to_end(tiles_on_disk, sources_kind):
+    """`register` with distribute=True, exactly as the page issues it.
+
+    This is the whole chain in one test: the JSON command surface, the worker
+    pool bridge, the executor's task payload and the compute-worker side. A
+    mismatch anywhere in it - for instance the registration channel not
+    reaching the workers - surfaces here and nowhere else, because calling
+    Session.register() directly never builds the executor.
+    """
+    from multiview_stitcher.browser import bridge as bridge_module
+    from multiview_stitcher.browser import example_data
+    from multiview_stitcher.browser import worker as worker_module
+
+    sources = (
+        tiles_on_disk
+        if sources_kind == "ome_zarr"
+        else example_data.example_sources("tiles-3d")
+    )
+
+    runtime = WorkerRuntime()
+    worker_module._runtime = runtime
+    previous = _install_pool_bridge(runtime)
+
+    try:
+        response = json.loads(
+            worker_module.handle_json(
+                "load", json.dumps({"sources": sources})
+            )
+        )
+        assert response["ok"], response
+
+        response = json.loads(
+            worker_module.handle_json(
+                "register", json.dumps({"options": {}, "distribute": True})
+            )
+        )
+        assert response["ok"], response.get("error")
+
+        params = response["result"]["params"]
+        assert len(params) == len(sources)
+
+        ndim = len(json.loads(
+            worker_module.handle_json("describe", "{}")
+        )["result"]["views"][0]["spatial_dims"])
+        for param in params:
+            matrix = np.asarray(param["data"])
+            assert matrix.shape[-2:] == (ndim + 1, ndim + 1)
+            assert np.all(np.isfinite(matrix))
+    finally:
+        bridge_module.set_bridge(previous)
+        worker_module._runtime = None
+
+
+def test_distributed_registration_matches_local_for_the_example():
+    """Distributed and local registration must agree on multi-channel data."""
+    from multiview_stitcher.browser import example_data, executors
+
+    sources = example_data.example_sources("tiles-3d")
+
+    local = Session()
+    local.load(sources)
+    local_result = local.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+
+    remote = Session()
+    remote.load(sources)
+    remote_result = remote.register(
+        RegistrationOptions(new_transform_key="registered"),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            remote.spec(), bridge=_pool_bridge(WorkerRuntime())
+        ),
+    )
+
+    for expected, actual in zip(
+        local_result["params"], remote_result["params"]
+    ):
+        np.testing.assert_allclose(
+            np.asarray(expected["data"]),
+            np.asarray(actual["data"]),
+            atol=1e-6,
+        )
+
+
+def test_executor_reads_the_channel_selection_off_the_views(tiles_on_disk):
+    """The channel is derived from the views, not passed in separately."""
+    from multiview_stitcher.browser import executors
+
+    session = Session()
+    session.load(tiles_on_disk)
+
+    assert executors.selected_channel(session.msims[0]) is None
+
+    reduced = session.registration_msims(reg_channel="channel 0")
+    assert executors.selected_channel(reduced[0]) == "channel 0"
+
+
+# ---------------------------------------------------------------------------
+# Keeping the view list and the viewer in step
+# ---------------------------------------------------------------------------
+
+
+def test_remove_view(tiles_on_disk):
+    session = Session()
+    session.load(tiles_on_disk)
+
+    generation = session.generation
+    described = session.remove(0)
+
+    assert described["n_views"] == 1
+    assert [source.url for source in session.sources] == [tiles_on_disk[1]]
+    assert session.generation > generation
+
+    with pytest.raises(IndexError, match="does not exist"):
+        session.remove(5)
+
+    assert session.remove(0)["n_views"] == 0
+    assert session.is_empty()
+
+
+def test_failed_append_leaves_the_session_untouched(tiles_on_disk):
+    """An incompatible source must not half-load into the session."""
+    from multiview_stitcher.browser import example_data
+
+    session = Session()
+    session.load(tiles_on_disk)
+    before = session.describe()
+
+    with pytest.raises(ValueError, match="same dimensionality"):
+        session.add(example_data.example_sources("tiles-3d")[:1])
+
+    after = session.describe()
+    assert after["n_views"] == before["n_views"]
+    assert [source.url for source in session.sources] == list(tiles_on_disk)
+    # And the session is still usable afterwards.
+    assert session.register(RegistrationOptions())["params"]
+
+
+def test_viewer_layers_track_the_view_list(tiles_on_disk):
+    """Whatever the app lists, the viewer shows - by name and in order."""
+    session = Session()
+    session.load(tiles_on_disk)
+
+    def layer_names(described):
+        state = session.neuroglancer_state(
+            transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+            api_base="/app/__mvs__",
+        )
+        assert len(state["layers"]) == described["n_views"]
+        return [layer["name"] for layer in state["layers"]]
+
+    described = session.describe()
+    expected = [
+        f"{index}: {view['name']}"
+        for index, view in enumerate(described["views"])
+    ]
+    assert layer_names(described) == expected
+
+    described = session.remove(0)
+    expected = [
+        f"{index}: {view['name']}"
+        for index, view in enumerate(described["views"])
+    ]
+    assert layer_names(described) == expected
+    assert len(expected) == 1
+
+
+def test_worker_remove_command(tiles_on_disk):
+    from multiview_stitcher.browser import worker as worker_module
+
+    worker_module._runtime = WorkerRuntime()
+    worker_module.handle_json("load", json.dumps({"sources": tiles_on_disk}))
+
+    response = json.loads(
+        worker_module.handle_json("remove", json.dumps({"index": 0}))
+    )
+    assert response["ok"], response
+    assert response["result"]["n_views"] == 1
+
+    response = json.loads(
+        worker_module.handle_json("remove", json.dumps({"index": 9}))
+    )
+    assert response["ok"] is False
+    assert "does not exist" in response["error"]
+
+    worker_module._runtime = None
+
+
+# ---------------------------------------------------------------------------
+# A preview must be servable by a worker that predates it
+# ---------------------------------------------------------------------------
+
+
+def test_preview_is_servable_by_a_worker_that_predates_it(tiles_on_disk):
+    """The regression behind an empty fused layer in the viewer.
+
+    A compute worker rebuilds a session from the spec and caches it. If a
+    preview created afterwards shares that session's generation, the cached
+    worker has never heard of it and answers "not found" for every key - which
+    zarr renders as an empty image, with no error anywhere.
+    """
+    session = Session()
+    session.load(tiles_on_disk)
+
+    worker = WorkerRuntime()
+
+    # The viewer reads something first, so the worker caches the session.
+    before = json.loads(json.dumps(session.spec().to_dict()))
+    assert before["preview"] is None
+    assert (
+        worker.run_task(
+            {
+                "kind": "serve",
+                "session": before,
+                "route": session.view_route(0),
+                "key": ".zattrs",
+            }
+        )["kind"]
+        == "json"
+    )
+
+    # Only now does the user fuse.
+    preview = session.fuse_preview(FusionOptions())
+    after = json.loads(json.dumps(session.spec().to_dict()))
+
+    for key in (".zattrs", ".zgroup", "0/.zarray"):
+        response = worker.run_task(
+            {
+                "kind": "serve",
+                "session": after,
+                "route": preview["route"],
+                "key": key,
+            }
+        )
+        assert response["kind"] == "json", (key, response)
+
+
+def test_fusing_retires_the_previous_preview_route(tiles_on_disk):
+    """Each fusion gets its own URLs, so a viewer never reads a stale one."""
+    session = Session()
+    session.load(tiles_on_disk)
+
+    first = session.fuse_preview(FusionOptions())
+    second = session.fuse_preview(FusionOptions())
+
+    assert first["route"] != second["route"]
+    assert second["generation"] > first["generation"]
+    assert session.serve(second["route"], ".zattrs")[0] == "json"
+    assert session.serve(first["route"], ".zattrs")[0] == "missing"
+
+
+def test_missing_routes_explain_themselves(tiles_on_disk):
+    """A 404 must say why, otherwise it renders as empty space in silence."""
+    from multiview_stitcher.browser import worker as worker_module
+
+    session = Session()
+    session.load(tiles_on_disk)
+    preview = session.fuse_preview(FusionOptions())
+
+    kind, reason = session.serve("someone-else/g1/fused.ome.zarr", ".zattrs")
+    assert kind == "missing"
+    assert "retired generation" in reason
+
+    kind, reason = session.serve(preview["route"], "nope/nope")
+    assert kind == "missing"
+    assert "not a key" in reason
+
+    worker_module._runtime = WorkerRuntime()
+    worker_module.handle_json("load", json.dumps({"sources": tiles_on_disk}))
+    status, _, body = worker_module.serve_route(
+        "someone-else/g1/fused.ome.zarr", ".zattrs"
+    )
+    assert status == 404
+    assert b"retired generation" in body
+    worker_module._runtime = None
+
+
+# ---------------------------------------------------------------------------
+# A failed load must not destroy a working session
+# ---------------------------------------------------------------------------
+
+
+def test_failed_load_keeps_the_previous_session_serving(tiles_on_disk):
+    """The regression behind a preview that emptied itself.
+
+    Replacing the loaded data used to install the new session before knowing
+    it would open. A load that then failed left an empty session behind, and
+    every URL the viewer still held - including the fused preview it was
+    displaying - answered "not found" from a session that had never loaded
+    anything.
+    """
+    from multiview_stitcher.browser import worker as worker_module
+
+    worker_module._runtime = WorkerRuntime()
+    try:
+        worker_module.handle_json(
+            "load", json.dumps({"sources": tiles_on_disk})
+        )
+        preview = json.loads(
+            worker_module.handle_json(
+                "fuse_preview", json.dumps({"options": {}})
+            )
+        )["result"]
+
+        session_before = worker_module._runtime.session
+        status, _, _ = worker_module.serve_route(preview["route"], ".zattrs")
+        assert status == 200
+
+        response = json.loads(
+            worker_module.handle_json(
+                "load",
+                json.dumps({"sources": ["/does/not/exist.ome.zarr"]}),
+            )
+        )
+        assert response["ok"] is False
+
+        # The working session is untouched, and still serving.
+        assert worker_module._runtime.session is session_before
+        status, _, _ = worker_module.serve_route(preview["route"], ".zattrs")
+        assert status == 200
+
+        described = json.loads(
+            worker_module.handle_json("describe", "{}")
+        )["result"]
+        assert described["n_views"] == 2
+    finally:
+        worker_module._runtime = None
+
+
+def test_failed_load_of_incompatible_views_keeps_the_session(tiles_on_disk):
+    from multiview_stitcher.browser import example_data
+    from multiview_stitcher.browser import worker as worker_module
+
+    worker_module._runtime = WorkerRuntime()
+    try:
+        worker_module.handle_json(
+            "load", json.dumps({"sources": tiles_on_disk})
+        )
+        session_before = worker_module._runtime.session
+
+        response = json.loads(
+            worker_module.handle_json(
+                "load",
+                json.dumps(
+                    {
+                        "sources": example_data.example_sources("tiles-3d"),
+                        "replace": False,
+                    }
+                ),
+            )
+        )
+        assert response["ok"] is False
+        assert "same dimensionality" in response["error"]
+
+        assert worker_module._runtime.session is session_before
+        assert (
+            json.loads(worker_module.handle_json("describe", "{}"))["result"][
+                "n_views"
+            ]
+            == 2
+        )
+    finally:
+        worker_module._runtime = None
+
+
+def test_rebuilding_from_an_empty_spec_is_an_error():
+    """An empty spec must fail loudly rather than answer as a blank session.
+
+    A session built from nothing gets a fresh id at generation 0 and then
+    reports every route as retired - a mute 404 in place of a plain bug.
+    """
+    with pytest.raises(ValueError, match="empty spec"):
+        Session.from_spec({})
+
+    with pytest.raises(ValueError, match="empty spec"):
+        Session.from_spec({"sources": [], "session_id": "abc", "generation": 3})
+
+    worker = WorkerRuntime()
+    with pytest.raises(ValueError, match="empty spec"):
+        worker.session_for({})
+
+
+def test_unusable_spec_falls_back_to_the_local_session(tiles_on_disk):
+    """A worker that holds the data answers even if the spec is unusable.
+
+    Pages and wheels can disagree about the spec format across builds. The
+    session worker holds the authoritative session, so it should answer from
+    it rather than refuse; a compute worker has nothing to fall back on and
+    must fail loudly so the page retries elsewhere.
+    """
+    from multiview_stitcher.browser import worker as worker_module
+
+    worker_module._runtime = WorkerRuntime()
+    try:
+        worker_module.handle_json(
+            "load", json.dumps({"sources": tiles_on_disk})
+        )
+        preview = json.loads(
+            worker_module.handle_json(
+                "fuse_preview", json.dumps({"options": {}})
+            )
+        )["result"]
+
+        # The session worker answers despite the useless spec.
+        status, _, body = worker_module.serve_route(
+            preview["route"], ".zattrs", {}
+        )
+        assert status == 200, body
+
+        # A worker without a session of its own reports the failure.
+        worker_module._runtime = WorkerRuntime()
+        status, _, body = worker_module.serve_route(
+            preview["route"], ".zattrs", {}
+        )
+        assert status == 500
+        assert b"empty spec" in body
+    finally:
+        worker_module._runtime = None

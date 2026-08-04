@@ -15,6 +15,8 @@
  * requests that this thread has to keep routing.
  */
 
+/* global mvsRoutes */
+
 const APP_BASE = new URL(".", window.location.href).pathname;
 const API_BASE = `${APP_BASE}__mvs__`;
 
@@ -40,16 +42,48 @@ function log(message, level = "info") {
   const box = $("#log");
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
+
+  // Mirrored so that everything is in one place: the viewer reports its own
+  // failures to the console, and correlating the two matters more than
+  // keeping the console clean.
+  if (level === "error") console.error("[multiview-stitcher]", message);
+  else if (level === "warn") console.warn("[multiview-stitcher]", message);
 }
+
+const reportedFailures = new Map();
+
+/** Log a serving failure once per distinct message, with a repeat count. */
+function logServingFailure(type, message) {
+  const key = `${type}: ${message}`;
+  const seen = (reportedFailures.get(key) || 0) + 1;
+  reportedFailures.set(key, seen);
+
+  if (seen === 1) {
+    log(key, "error");
+  } else if (seen === 5 || seen % 50 === 0) {
+    log(`${key} (${seen}x)`, "error");
+  }
+}
+
 
 function setStatus(message, busy = false) {
   $("#status").textContent = message;
   $("#status").classList.toggle("busy", busy);
 }
 
+function hasViews() {
+  return Boolean(state.session && state.session.n_views);
+}
+
 function setBusy(busy) {
   for (const button of document.querySelectorAll("button[data-action]")) {
-    button.disabled = busy || !state.session;
+    // Loading actions stay available while there is no data; the processing
+    // ones need views first.
+    const needsData = button.dataset.needsData !== "false";
+    button.disabled = busy || (needsData && !hasViews());
+  }
+  for (const button of document.querySelectorAll("button[data-load]")) {
+    button.disabled = busy;
   }
   $("#worker-count").disabled = busy;
 }
@@ -113,9 +147,23 @@ class ComputePool {
     const booting = [];
     while (this.workers.length < count) {
       const index = this.workers.length;
-      const channel = new WorkerChannel("compute-worker.js", `worker ${index}`);
+      const channel = new WorkerChannel(
+        `compute-worker.js?v=${config.build || "dev"}`,
+        `worker ${index}`,
+      );
+      // Held busy until its Python runtime is up: a worker that is dispatched
+      // to while still booting answers "the Python runtime is still starting",
+      // which surfaces as a chunk that silently fails to render.
+      channel.busy = true;
       this.workers.push(channel);
-      booting.push(channel.send({ type: "boot", config, name: `worker ${index}` }));
+      booting.push(
+        channel
+          .send({ type: "boot", config, name: `worker ${index}` })
+          .then(() => {
+            channel.busy = false;
+            this.pump();
+          }),
+      );
     }
 
     if (booting.length) {
@@ -124,10 +172,16 @@ class ComputePool {
     }
   }
 
-  /** Run one job on the next free worker, queueing when all are busy. */
-  run(job) {
+  /**
+   * Run one job on the next free worker, queueing when all are busy.
+   *
+   * `timeoutMs` bounds how long the caller waits, not the worker: a worker
+   * blocked inside Python cannot be interrupted, so the caller is released to
+   * try elsewhere while the worker is left to finish and free itself.
+   */
+  run(job, { timeoutMs } = {}) {
     return new Promise((resolve, reject) => {
-      this.queue.push({ job, resolve, reject });
+      this.queue.push({ job, resolve, reject, timeoutMs });
       this.pump();
     });
   }
@@ -141,13 +195,29 @@ class ComputePool {
     const entry = this.queue.shift();
     worker.busy = true;
 
-    worker
-      .send(entry.job.message, entry.job.transfer || [])
-      .then(entry.resolve, entry.reject)
-      .finally(() => {
-        worker.busy = false;
-        this.pump();
-      });
+    const sent = worker.send(entry.job.message, entry.job.transfer || []);
+
+    let guarded = sent;
+    if (entry.timeoutMs) {
+      guarded = Promise.race([
+        sent,
+        new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(`${worker.name} did not answer in ${entry.timeoutMs} ms`),
+              ),
+            entry.timeoutMs,
+          ),
+        ),
+      ]);
+    }
+
+    guarded.then(entry.resolve, entry.reject);
+    sent.finally(() => {
+      worker.busy = false;
+      this.pump();
+    });
   }
 
   /** Run every task, keeping all workers busy; results keep the input order. */
@@ -163,9 +233,52 @@ class ComputePool {
   }
 }
 
+// ---------------------------------------------------------------------------
+// One active tab
+// ---------------------------------------------------------------------------
+
+// A single service worker serves every open tab, and it answers with whichever
+// tab replies first. Each tab, though, owns its own directory handles, its own
+// session and its own Python workers - so a second tab can answer for the
+// first and there is no way for either to tell from the request alone. The
+// newest tab takes ownership and the others stand down.
+const TAB_ID = crypto.randomUUID();
+const tabChannel =
+  typeof BroadcastChannel === "undefined"
+    ? null
+    : new BroadcastChannel("multiview-stitcher");
+let tabIsActive = true;
+
+function standDown() {
+  if (!tabIsActive) return;
+  tabIsActive = false;
+  $("#inactive").hidden = false;
+  log("another tab took over; this one is now inactive", "warn");
+}
+
+function claimTab() {
+  if (!tabChannel) return;
+
+  tabChannel.onmessage = (event) => {
+    if (event.data && event.data.type === "claim" && event.data.id !== TAB_ID) {
+      standDown();
+    }
+  };
+  tabChannel.postMessage({ type: "claim", id: TAB_ID });
+}
+
 const pool = new ComputePool();
 let fsWorker = null;
 let sessionWorker = null;
+
+// How long to wait for a compute worker to answer a chunk request before
+// serving it from the session worker instead.
+const POOL_SERVE_TIMEOUT_MS = 90 * 1000;
+// After this many failures the pool stops being asked for chunks at all: a
+// viewer that renders slowly beats one that renders nothing.
+const POOL_SERVE_GIVE_UP_AFTER = 3;
+let poolServeFailures = 0;
+
 
 // ---------------------------------------------------------------------------
 // Service worker routing
@@ -184,6 +297,34 @@ async function handleServiceWorkerMessage(event) {
 
   const reply = (payload, transfer = []) => port.postMessage(payload, transfer);
 
+  // Decline anything this tab does not own, so the request is offered to the
+  // tab that does.
+  if (!tabIsActive) {
+    reply({ notMine: true });
+    return;
+  }
+  if (!fsWorker || !sessionWorker) {
+    reply({ notMine: true });
+    return;
+  }
+  if (type === "fs.read" && !state.mounts.includes(event.data.mount)) {
+    reply({ notMine: true });
+    return;
+  }
+  const sessionId = state.session && state.session.session_id;
+
+  if (
+    type === "zarr.read" &&
+    !mvsRoutes.ownsRoute(sessionId, event.data.route)
+  ) {
+    reply({ notMine: true });
+    return;
+  }
+  if (type === "rpc" && !sessionId) {
+    reply({ notMine: true });
+    return;
+  }
+
   try {
     if (type === "fs.read") {
       const response = await fsRequest({
@@ -199,12 +340,61 @@ async function handleServiceWorkerMessage(event) {
       const message = { type: "serve", route: event.data.route, key: event.data.key };
       let response;
 
-      if (pool.size && state.sessionSpec) {
-        response = await pool.run({
-          message: { ...message, session: state.sessionSpec },
-        });
+      // Metadata always comes from the session worker, which owns the live
+      // session and cannot be wrong about it. Only chunk bytes - the
+      // expensive part - go to the pool, where a worker has to reconstruct
+      // the image from a spec first. A layer whose metadata fails to load
+      // shows up as an empty source with nothing to render.
+      const isMetadata = mvsRoutes.isMetadataKey(event.data.key);
+      const usePool =
+        !isMetadata &&
+        pool.size &&
+        state.sessionSpec &&
+        state.sessionSpec.session_id &&
+        poolServeFailures < POOL_SERVE_GIVE_UP_AFTER;
+
+      if (usePool) {
+        try {
+          response = await pool.run(
+            { message: { ...message, session: state.sessionSpec } },
+            { timeoutMs: POOL_SERVE_TIMEOUT_MS },
+          );
+        } catch (error) {
+          // A compute worker rebuilds the session from the spec, which can
+          // fail for reasons the session worker is immune to - it already
+          // holds the opened data. Falling back keeps the viewer working, and
+          // the log names the side that failed.
+          poolServeFailures += 1;
+          logServingFailure("zarr.read on a compute worker", error.message);
+          if (poolServeFailures === POOL_SERVE_GIVE_UP_AFTER) {
+            log(
+              "serving chunks from the session worker only from now on",
+              "warn",
+            );
+          }
+          response = await sessionWorker.send(message);
+        }
       } else {
         response = await sessionWorker.send(message);
+      }
+
+      if (!response.found && response.reason) {
+        // Probing for keys that do not exist is normal; a route the app is
+        // currently showing coming back empty is not.
+        // Neuroglancer probes each source for both zarr formats, so a 404
+        // for `zarr.json` or a root `.zarray` on a group is the expected
+        // answer, not a failure.
+        const isFormatProbe =
+          event.data.key === "zarr.json" || event.data.key === ".zarray";
+        const isCurrent =
+          event.data.route === state.previewRoute ||
+          event.data.route.includes("/view_");
+        if (isCurrent && !isFormatProbe) {
+          logServingFailure(
+            `empty ${event.data.key} for ${event.data.route}`,
+            response.reason,
+          );
+        }
       }
 
       reply(
@@ -212,6 +402,7 @@ async function handleServiceWorkerMessage(event) {
           found: response.found,
           data: response.data,
           contentType: response.contentType,
+          reason: response.reason,
         },
         response.found ? [response.data] : [],
       );
@@ -230,9 +421,14 @@ async function handleServiceWorkerMessage(event) {
 
     throw new Error(`unknown service-worker message '${type}'`);
   } catch (error) {
-    reply({ error: String((error && error.message) || error) });
+    const message = String((error && error.message) || error);
+    // Requests the viewer makes are invisible unless we say something: a
+    // failed chunk otherwise just renders as empty space.
+    logServingFailure(type, message);
+    reply({ error: message });
   }
 }
+
 
 function fsRequest(message) {
   return new Promise((resolve, reject) => {
@@ -268,11 +464,14 @@ function showViewerState(ngState) {
 }
 
 async function refreshViewer() {
-  if (!state.session) return;
+  if (!hasViews()) return;
 
   const ngState = await command("neuroglancer_state", {
     transform_key: state.transformKey,
     base_url: window.location.origin,
+    // The service worker only claims URLs inside its own scope, so Python
+    // must build viewer URLs below this prefix rather than at the site root.
+    api_base: API_BASE,
     preview_route: state.previewRoute,
   });
 
@@ -293,7 +492,22 @@ async function command(name, payload) {
 }
 
 async function refreshSessionSpec() {
-  state.sessionSpec = await command("spec", {});
+  const spec = await command("spec", {});
+
+  // Only a spec a worker can actually rebuild from is worth dispatching. An
+  // unusable one would make every compute worker raise, and the request would
+  // land back on the session worker anyway - so keep the fallback and say so
+  // rather than failing once per chunk.
+  if (!spec || !spec.session_id || !(spec.sources || []).length) {
+    state.sessionSpec = null;
+    log(
+      `session spec is not usable by compute workers: ${JSON.stringify(spec)}`,
+      "warn",
+    );
+    return;
+  }
+
+  state.sessionSpec = spec;
 }
 
 function renderTransformKeys(keys) {
@@ -318,27 +532,55 @@ function renderViews(described) {
   const list = $("#views");
   list.innerHTML = "";
 
-  for (const view of described.views) {
+  described.views.forEach((view, index) => {
     const level = view.levels[0];
     const shape = Object.entries(level.shape)
       .map(([dim, size]) => `${dim}:${size}`)
       .join(" ");
-    const item = document.createElement("li");
-    item.innerHTML = `<strong>${view.name}</strong><span>${shape} · ${view.dtype} · ${view.levels.length} level(s)</span>`;
-    list.appendChild(item);
-  }
 
-  $("#dataset-summary").textContent =
-    `${described.n_views} view(s), ${described.views[0].ndim}D`;
+    const item = document.createElement("li");
+
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    // The viewer names its layers the same way, so the two lists line up.
+    name.textContent = `${index}: ${view.name}`;
+    const detail = document.createElement("span");
+    detail.textContent = `${shape} · ${view.dtype} · ${view.levels.length} level(s)`;
+    text.append(name, detail);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove";
+    remove.title = `Remove ${view.name}`;
+    remove.textContent = "×";
+    remove.addEventListener("click", async () => {
+      try {
+        await removeView(index, view.name);
+      } catch (error) {
+        log(error.message, "error");
+        setBusy(false);
+      }
+    });
+
+    item.append(text, remove);
+    list.appendChild(item);
+  });
+
+  $("#dataset-summary").textContent = described.n_views
+    ? `${described.n_views} view(s), ${described.views[0].ndim}D`
+    : "no data loaded";
 }
 
 async function applyDescribed(described) {
+  poolServeFailures = 0;
+  reportedFailures.clear();
   state.session = described;
   state.previewRoute = null;
   renderViews(described);
   renderTransformKeys(described.transform_keys);
   await refreshSessionSpec();
   await refreshViewer();
+  setBusy(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,9 +588,15 @@ async function applyDescribed(described) {
 // ---------------------------------------------------------------------------
 
 async function loadDirectory(handle) {
-  const mount = crypto.randomUUID().slice(0, 8);
-  await fsRequest({ type: "mount", mount, handle });
-  state.mounts.push(mount);
+  // The fs worker returns the existing mount when this folder is already
+  // known, so re-dropping it addresses the same URLs instead of duplicating.
+  const response = await fsRequest({
+    type: "mount",
+    mount: crypto.randomUUID().slice(0, 8),
+    handle,
+  });
+  const mount = response.mount;
+  if (!state.mounts.includes(mount)) state.mounts.push(mount);
 
   const { images } = await fsRequest({ type: "discover", mount });
   if (!images.length) {
@@ -362,14 +610,51 @@ async function loadDirectory(handle) {
     name: image.name,
   }));
 
-  log(`found ${sources.length} OME-Zarr image(s)`);
+  // Dropping more data adds tiles to the session instead of replacing it, so
+  // a dataset can be assembled from several folders. "Clear" starts over.
+  const append = Boolean(state.session && state.session.n_views);
+  log(
+    `found ${sources.length} OME-Zarr image(s); ` +
+      (append ? "adding to the loaded views" : "opening"),
+  );
   setStatus("opening images", true);
 
-  const described = await command("load", { sources });
+  const described = await command("load", { sources, replace: !append });
   await applyDescribed(described);
 
   setStatus(`${described.n_views} view(s) loaded`);
   setBusy(false);
+}
+
+async function loadExample(name) {
+  const append = Boolean(state.session && state.session.n_views);
+  setStatus("generating the example dataset", true);
+
+  const described = await command("load_example", { name, replace: !append });
+  await applyDescribed(described);
+
+  log(`loaded the '${name}' example: ${described.n_views} view(s)`);
+  setStatus(`${described.n_views} view(s) loaded`);
+  setBusy(false);
+}
+
+async function removeView(index, name) {
+  setStatus("removing view", true);
+  const described = await command("remove", { index });
+  state.previewRoute = null;
+  await applyDescribed(described);
+  log(`removed '${name}'`);
+  setStatus(
+    described.n_views ? `${described.n_views} view(s) loaded` : "drop a folder to begin",
+  );
+}
+
+async function clearSession() {
+  const described = await command("clear", {});
+  state.previewRoute = null;
+  await applyDescribed(described);
+  log("cleared all views");
+  setStatus("drop a folder to begin");
 }
 
 async function doRegister() {
@@ -453,13 +738,31 @@ async function doFuseToDisk() {
 // ---------------------------------------------------------------------------
 
 async function boot() {
-  state.config = await (await fetch("config.json")).json();
+  // Never from cache: these describe which build to load, so a stale copy
+  // would pin the whole app to an old one.
+  const noStore = { cache: "no-store" };
+  state.config = await (await fetch("config.json", noStore)).json();
+  // The page bootstrap already read this to version its own scripts.
+  const manifest =
+    window.__mvsManifest ||
+    (await (await fetch("packages/manifest.json", noStore)).json());
 
-  const manifest = await (await fetch("packages/manifest.json")).json();
+  // A rebuild of the same commit produces a wheel with the same filename, and
+  // micropip fetches it from inside a worker - where a page reload does not
+  // bypass the HTTP cache. Without this the runtime silently keeps running
+  // yesterday's Python behind today's JavaScript. The same applies to the
+  // worker scripts, which `new Worker`/`importScripts` also load from cache.
+  const build = String(manifest.sha256 || "dev").slice(0, 12);
+  state.build = build;
+
   const config = {
     ...state.config,
-    wheel_url: new URL(`packages/${manifest.wheel}`, window.location.href).href,
+    wheel_url: new URL(
+      `packages/${manifest.wheel}?v=${build}`,
+      window.location.href,
+    ).href,
     api_base: API_BASE,
+    build,
   };
   state.runtimeConfig = config;
 
@@ -480,14 +783,15 @@ async function boot() {
   registration.update().catch(() => {});
   navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
 
-  fsWorker = new WorkerChannel("fs-worker.js", "fs");
+  fsWorker = new WorkerChannel(`fs-worker.js?v=${build}`, "fs");
 
-  sessionWorker = new WorkerChannel("session-worker.js", "session");
+  sessionWorker = new WorkerChannel(`session-worker.js?v=${build}`, "session");
   setStatus("starting the Python runtime", true);
   const info = (await sessionWorker.send({ type: "boot", config })).result;
   log(
     `python ${info.python} · numpy ${info.numpy} · zarr ${info.zarr} · ` +
-      `dask ${info.dask} · multiview-stitcher ${info.multiview_stitcher}`,
+      `dask ${info.dask} · multiview-stitcher ${info.multiview_stitcher} · ` +
+      `build ${build}`,
   );
 
   const select = $("#worker-count");
@@ -503,6 +807,15 @@ async function boot() {
     Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
   );
   select.value = String(Math.min(suggested, state.config.default_n_workers));
+
+  claimTab();
+
+  const { examples } = await command("examples", {});
+  if (examples.length) {
+    $("#example").textContent = `Load example: ${examples[0].label}`;
+    $("#example").dataset.example = examples[0].name;
+    $("#example").disabled = false;
+  }
 
   setStatus("drop a folder to begin");
   $("#dropzone").classList.remove("disabled");
@@ -536,7 +849,11 @@ function wireUi() {
       await withPool(() => loadDirectory(handle));
     } catch (error) {
       log(error.message, "error");
-      setStatus("failed to open the dropped folder");
+      setStatus(
+        hasViews()
+          ? "could not open that folder; the loaded views are unchanged"
+          : "failed to open the dropped folder",
+      );
     }
   });
 
@@ -545,7 +862,13 @@ function wireUi() {
       const handle = await window.showDirectoryPicker({ mode: "read" });
       await withPool(() => loadDirectory(handle));
     } catch (error) {
-      if (error.name !== "AbortError") log(error.message, "error");
+      if (error.name === "AbortError") return;
+      log(error.message, "error");
+      setStatus(
+        hasViews()
+          ? "could not open that folder; the loaded views are unchanged"
+          : "failed to open the folder",
+      );
     }
   });
 
@@ -553,6 +876,24 @@ function wireUi() {
     state.transformKey = event.target.value;
     log(`showing transform key '${state.transformKey}'`);
     await refreshViewer();
+  });
+
+  $("#example").addEventListener("click", async () => {
+    try {
+      await withPool(() => loadExample($("#example").dataset.example));
+    } catch (error) {
+      log(error.message, "error");
+      setStatus("failed to load the example");
+      setBusy(false);
+    }
+  });
+
+  $("#clear").addEventListener("click", async () => {
+    try {
+      await clearSession();
+    } catch (error) {
+      log(error.message, "error");
+    }
   });
 
   for (const [action, handler] of Object.entries({

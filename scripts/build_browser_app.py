@@ -17,24 +17,55 @@ Usage::
 """
 
 import argparse
+import gzip
 import hashlib
-import io
 import json
+import re
 import shutil
 import subprocess
 import sys
-import tarfile
+import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urljoin
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = REPO_ROOT / "docs" / "browser"
 PACKAGES_DIR = APP_DIR / "packages"
 NEUROGLANCER_DIR = APP_DIR / "neuroglancer"
 
-#: Prebuilt Neuroglancer bundle published on npm.
-NEUROGLANCER_PACKAGE = "neuroglancer"
-NEUROGLANCER_VERSION = "2.41.0"
+#: Official hosted Neuroglancer build, mirrored into the app.
+#:
+#: The `neuroglancer` npm package ships ES module sources only, so vendoring a
+#: *client* from it would mean running a bundler. Mirroring the build Google
+#: already publishes keeps this script dependency-free, and the app needs the
+#: viewer on its own origin so the service worker can answer its requests.
+NEUROGLANCER_URL = "https://neuroglancer-demo.appspot.com/"
+NEUROGLANCER_LICENSE_URL = (
+    "https://raw.githubusercontent.com/google/neuroglancer/master/LICENSE"
+)
+
+#: Entry points that the bundle links to but never names in its own code.
+NEUROGLANCER_EXTRA_PAGES = ("bossauth.html", "google_oauth2_redirect.html")
+
+#: Assets referenced from markup: <script src>, <link href>.
+_MARKUP_ASSET_RE = re.compile(
+    r"""(?:src|href)\s*=\s*["']([^"'#?]+\.(?:js|css|wasm))["']""",
+    re.IGNORECASE,
+)
+#: Asset names appearing as string literals inside the bundle itself.
+_LITERAL_ASSET_RE = re.compile(
+    r"""["'`]([A-Za-z0-9_.-]+\.(?:js|css|wasm))["'`]"""
+)
+#: Webpack's chunk-url template, e.g. `.u=e=>""+e+".4aba060a495df99f.js"`.
+_CHUNK_TEMPLATE_RE = re.compile(
+    r"""\.u\s*=\s*\w+\s*=>\s*["']([^"']*)["']\s*\+\s*\w+\s*\+\s*["']([^"']*)["']"""
+)
+#: The other form Webpack emits when chunks do not share one content hash:
+#: a chunk id -> hash table, e.g. `({34:"f9e3...",586:"deac..."})[e]+".js"`.
+_CHUNK_TABLE_RE = re.compile(r"""(\d+)\s*:\s*["']([0-9a-f]{8,})["']""")
+#: Call sites naming a chunk id: `i.u("145")` and `r.e("586")`.
+_CHUNK_ID_RE = re.compile(r"""\.[ue]\(\s*["']?(\d+)["']?\s*[,)]""")
 
 #: Static files that must exist for the app to work.
 REQUIRED_FILES = (
@@ -90,9 +121,17 @@ def write_manifest(wheel):
     """Record the wheel the page should install, with its checksum."""
     config = json.loads((APP_DIR / "config.json").read_text())
 
+    digest = _sha256(wheel)
+
     manifest = {
         "wheel": wheel.name,
-        "sha256": _sha256(wheel),
+        # The page appends this to the wheel URL. A rebuild of the same commit
+        # produces an identically named wheel, and micropip fetches it from
+        # inside a worker, where a page reload does not bypass the HTTP cache -
+        # so without a changing URL the browser keeps running the previous
+        # build's Python behind the current JavaScript.
+        "sha256": digest,
+        "build": digest[:12],
         "size": wheel.stat().st_size,
         "pyodide_version": config["pyodide_version"],
         "browser_dependencies": config["browser_dependencies"],
@@ -103,47 +142,171 @@ def write_manifest(wheel):
     return path
 
 
-def vendor_neuroglancer(version=NEUROGLANCER_VERSION):
-    """Download a Neuroglancer build and unpack it below the app.
+def _download(url, optional=False):
+    """Fetch a URL, returning its bytes (or None when optional and missing)."""
+    request = urllib.request.Request(
+        url,
+        # Ask for no transfer encoding so responses need no post-processing;
+        # some fronts ignore this, so gzip is still handled below.
+        headers={"Accept-Encoding": "identity", "User-Agent": "multiview-stitcher"},
+    )
+
+    try:
+        with urllib.request.urlopen(request) as response:  # noqa: S310
+            payload = response.read()
+            if response.headers.get("Content-Encoding") == "gzip":
+                payload = gzip.decompress(payload)
+            return payload
+    except urllib.error.HTTPError as error:
+        if optional and error.code in (403, 404):
+            return None
+        raise
+
+
+def _referenced_assets(payload, from_markup):
+    """Return ``(names, chunk_templates, chunk_ids)`` referenced by one file.
+
+    Bundled code names its lazily loaded pieces in two ways: directly, as
+    string literals (the WebAssembly decoders live in the lazy chunks, which is
+    why the crawl has to be iterative), and indirectly, by passing a chunk id
+    to a url template that each entry bundle defines for itself.
+    """
+    text = payload.decode("utf-8", errors="ignore")
+
+    if from_markup:
+        return set(_MARKUP_ASSET_RE.findall(text)), set(), set()
+
+    names = {
+        name
+        for name in _LITERAL_ASSET_RE.findall(text)
+        if not name.startswith((".", "/"))
+    }
+    # A chunk id -> hash table names its chunks outright.
+    names |= {
+        f"{chunk_id}.{digest}.js"
+        for chunk_id, digest in _CHUNK_TABLE_RE.findall(text)
+    }
+    return (
+        names,
+        set(_CHUNK_TEMPLATE_RE.findall(text)),
+        set(_CHUNK_ID_RE.findall(text)),
+    )
+
+
+def vendor_neuroglancer(base_url=NEUROGLANCER_URL):
+    """Mirror a hosted Neuroglancer build into the app.
 
     Serving the viewer from our own origin is what allows the service worker to
     intercept its chunk requests; a hosted instance could not read the user's
     local files.
-    """
-    url = (
-        f"https://registry.npmjs.org/{NEUROGLANCER_PACKAGE}/-/"
-        f"{NEUROGLANCER_PACKAGE}-{version}.tgz"
-    )
-    print(f"downloading {url}")
 
-    with urllib.request.urlopen(url) as response:  # noqa: S310 - pinned URL
-        payload = response.read()
+    Starting from ``index.html``, every asset the bundle names is followed:
+    markup references first, then the string literals and Webpack chunk table
+    inside the downloaded code, which is where the lazily loaded chunks and the
+    WebAssembly decoders appear. Candidates that do not exist are skipped, so a
+    changed build layout degrades to a smaller mirror rather than a crash.
+    """
+    base_url = base_url if base_url.endswith("/") else base_url + "/"
+    print(f"mirroring {base_url}")
+
+    index = _download(urljoin(base_url, "index.html"))
+
+    names, _, _ = _referenced_assets(index, from_markup=True)
+    if not names:
+        raise RuntimeError(f"no assets referenced by {base_url}index.html")
+
+    pending = list(names) + list(NEUROGLANCER_EXTRA_PAGES)
+    downloaded = {"index.html": index}
+    seen = {"index.html"}
+    templates = set()
+    chunk_ids = set()
+
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+
+        payload = _download(urljoin(base_url, name), optional=True)
+        if payload is None:
+            continue
+
+        downloaded[name] = payload
+        names, new_templates, new_ids = _referenced_assets(
+            payload, from_markup=name.endswith(".html")
+        )
+        templates |= new_templates
+        chunk_ids |= new_ids
+
+        # Any template may be paired with any chunk id: each entry bundle
+        # carries its own runtime, and they share the require object at run
+        # time. Combinations that do not exist simply 404 and are skipped.
+        for prefix, suffix in templates:
+            names |= {
+                f"{prefix}{chunk_id}{suffix}" for chunk_id in chunk_ids
+            }
+
+        pending += [
+            candidate for candidate in names if candidate not in seen
+        ]
+
+    license_text = _download(NEUROGLANCER_LICENSE_URL, optional=True)
+    if license_text is not None:
+        downloaded["LICENSE"] = license_text
+
+    # Recorded beside the mirror rather than injected into it, so every file
+    # stays byte-identical to upstream and can be diffed against it.
+    downloaded["PROVENANCE.txt"] = (
+        "Neuroglancer client mirrored by scripts/build_browser_app.py\n"
+        f"source:  {base_url}\n"
+        f"files:   {len(downloaded)}\n"
+        "license: Apache-2.0 (see LICENSE)\n"
+    ).encode()
 
     if NEUROGLANCER_DIR.exists():
         shutil.rmtree(NEUROGLANCER_DIR)
     NEUROGLANCER_DIR.mkdir(parents=True)
 
-    prefix = "package/dist/client/"
-    extracted = 0
-    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
-        for member in archive.getmembers():
-            if not member.isfile() or not member.name.startswith(prefix):
-                continue
-            relative = Path(member.name[len(prefix) :])
-            target = NEUROGLANCER_DIR / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.extractfile(member) as source:
-                target.write_bytes(source.read())
-            extracted += 1
+    for name, payload in sorted(downloaded.items()):
+        target = NEUROGLANCER_DIR / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
 
-    if not extracted:
+    missing = _missing_chunks(downloaded)
+    if missing:
+        # A chunk the viewer loads at run time but that we did not mirror shows
+        # up only as "failed to execute importScripts" once a user opens an
+        # image, so refuse to ship an incomplete mirror.
         raise RuntimeError(
-            f"no client bundle found under '{prefix}' in the "
-            f"{NEUROGLANCER_PACKAGE} {version} package."
+            "the Neuroglancer mirror is incomplete: no file for chunk id(s) "
+            + ", ".join(sorted(missing))
+            + ". The build's chunk naming has probably changed; update the "
+            "chunk regexes in this script."
         )
 
-    print(f"vendored {extracted} Neuroglancer file(s) into {NEUROGLANCER_DIR}")
+    print(
+        f"vendored {len(downloaded)} Neuroglancer file(s) into "
+        f"{NEUROGLANCER_DIR.relative_to(REPO_ROOT)}"
+    )
     return NEUROGLANCER_DIR
+
+
+def _missing_chunks(downloaded):
+    """Chunk ids the mirrored code loads at run time but that we do not have.
+
+    Every lazily loaded chunk is fetched as ``<id>.<hash>.js``, so a chunk id
+    is covered when some mirrored filename starts with ``<id>.``.
+    """
+    requested = set()
+    for name, payload in downloaded.items():
+        if not name.endswith(".js"):
+            continue
+        requested |= set(
+            _CHUNK_ID_RE.findall(payload.decode("utf-8", errors="ignore"))
+        )
+
+    prefixes = {name.split(".", 1)[0] for name in downloaded if name.endswith(".js")}
+    return requested - prefixes
 
 
 def check():
@@ -188,9 +351,12 @@ def main(argv=None):
         help="also download and vendor the Neuroglancer client",
     )
     parser.add_argument(
-        "--neuroglancer-version",
-        default=NEUROGLANCER_VERSION,
-        help=f"Neuroglancer version to vendor (default {NEUROGLANCER_VERSION})",
+        "--neuroglancer-url",
+        default=NEUROGLANCER_URL,
+        help=(
+            "hosted Neuroglancer build to mirror "
+            f"(default {NEUROGLANCER_URL})"
+        ),
     )
     parser.add_argument(
         "--check",
@@ -208,7 +374,7 @@ def main(argv=None):
     print(f"manifest: {manifest.relative_to(REPO_ROOT)}")
 
     if args.neuroglancer:
-        vendor_neuroglancer(args.neuroglancer_version)
+        vendor_neuroglancer(args.neuroglancer_url)
     elif not (NEUROGLANCER_DIR / "index.html").is_file():
         print(
             "note: no Neuroglancer build found - "

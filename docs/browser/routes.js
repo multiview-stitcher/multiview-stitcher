@@ -58,7 +58,55 @@
     };
   }
 
-  const routes = { SEGMENT, parseRequest, parseFilePath, parseZarrPath };
+  /**
+   * Is a window client one of our app pages, rather than the viewer iframe?
+   *
+   * The embedded Neuroglancer viewer is a window client too, but it has no
+   * handler for our messages, so a request sent to it is never answered.
+   */
+  function isAppPage(clientUrl, scope) {
+    const path = new URL(clientUrl).pathname;
+    const viewer = new URL("neuroglancer/", scope).pathname;
+    return !path.startsWith(viewer);
+  }
+
+  /**
+   * Is this key a zarr metadata document rather than chunk data?
+   *
+   * Metadata is answered by the worker that owns the session, chunk data by
+   * whichever worker is free: a layer whose metadata fails to load has
+   * nothing to render at all, so it must not depend on a worker being able to
+   * reconstruct the session first.
+   */
+  const METADATA_KEY =
+    /(^|\/)(\.zattrs|\.zgroup|\.zarray|\.zmetadata|zarr\.json)$/;
+
+  function isMetadataKey(key) {
+    return METADATA_KEY.test(key || "");
+  }
+
+  /**
+   * Does the tab holding `sessionId` own `route`?
+   *
+   * One service worker serves every open tab, and it takes the first one that
+   * does not decline. A tab that owns no session owns no route either -
+   * without this it would answer for another tab's images out of its own
+   * empty session, and no amount of fixing the *right* tab would help.
+   */
+  function ownsRoute(sessionId, route) {
+    if (!sessionId || !route) return false;
+    return String(route).startsWith(`${sessionId}/`);
+  }
+
+  const routes = {
+    SEGMENT,
+    isMetadataKey,
+    ownsRoute,
+    parseRequest,
+    parseFilePath,
+    parseZarrPath,
+    isAppPage,
+  };
 
   if (typeof module !== "undefined" && module.exports) module.exports = routes;
   else root.mvsRoutes = routes;

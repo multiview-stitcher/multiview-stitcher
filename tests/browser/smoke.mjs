@@ -76,6 +76,45 @@ smoke.main()
   process.exit(1);
 }
 
+// Call serve_route the way the browser workers do: across the JavaScript
+// boundary, with the session spec as a JSON string. Handing over a live JS
+// object instead turns its nulls into `JsNull` proxies, which pass Python's
+// `is not None` checks and then fail deep inside numeric code - a failure
+// that only exists on this boundary and cannot be reproduced from Python.
+const jsBoundary = await (async () => {
+  const worker = pyodide.pyimport("multiview_stitcher.browser.worker");
+  const setup = JSON.parse(
+    await pyodide.runPythonAsync(`
+import json
+from multiview_stitcher.browser import example_data, worker as w
+w._runtime = w.WorkerRuntime()
+w.handle_json("load", json.dumps({"sources": example_data.example_sources("tiles-3d")}))
+preview = json.loads(w.handle_json("fuse_preview", json.dumps({"options": {}})))["result"]
+json.dumps({"route": preview["route"], "spec": json.loads(w.handle_json("spec", "{}"))["result"]})
+`),
+  );
+
+  // A fresh runtime, so the spec is the only way to reach the image - exactly
+  // a compute worker's situation.
+  await pyodide.runPythonAsync(
+    "from multiview_stitcher.browser import worker as w; w._runtime = w.WorkerRuntime()",
+  );
+
+  const results = {};
+  for (const key of [".zattrs", "0/.zarray"]) {
+    const result = worker.serve_route(setup.route, key, JSON.stringify(setup.spec));
+    const [status] = result.toJs();
+    result.destroy();
+    results[key] = status;
+  }
+  return results;
+})();
+
+report.checks.serve_route_across_the_js_boundary = {
+  ok: Object.values(jsBoundary).every((status) => status === 200),
+  detail: JSON.stringify(jsBoundary),
+};
+
 const checks = Object.entries(report.checks);
 for (const [name, result] of checks) {
   console.log(`  ${result.ok ? "ok  " : "FAIL"} ${name}${result.detail ? ` - ${result.detail}` : ""}`);

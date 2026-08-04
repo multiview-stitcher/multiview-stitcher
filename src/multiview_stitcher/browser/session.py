@@ -33,6 +33,9 @@ from multiview_stitcher.browser.specs import (
 #: Route name of the lazily fused preview image.
 PREVIEW_NAME = "fused"
 
+#: Route name prefix of the virtual OME-Zarrs exposing input views.
+VIEW_PREFIX = "view_"
+
 
 class Session:
     """Opened views plus everything derived from them."""
@@ -51,13 +54,58 @@ class Session:
     # Dataset
     # ------------------------------------------------------------------
 
-    def load(self, sources):
-        """Open the given OME-Zarr sources as the session's views."""
-        self.sources = [SourceSpec.from_dict(source) for source in sources]
-        self.msims = browser_dataset.open_msims(
-            self.sources, fetch=self.fetch
-        )
-        browser_dataset.check_compatible(self.msims)
+    def load(self, sources, replace=True):
+        """Open sources as the session's views.
+
+        With ``replace=False`` the sources are appended to those already open,
+        which is what dropping a further tile onto a loaded session does. Only
+        the new sources are opened; the existing views keep their transforms.
+
+        The result is validated before anything is committed, so a source that
+        does not fit the loaded views raises without leaving the session in a
+        half-updated state.
+        """
+        added = [SourceSpec.from_dict(source) for source in sources]
+
+        if replace:
+            sources_after, msims_before = [], []
+        else:
+            known = {source.url for source in self.sources}
+            added = [source for source in added if source.url not in known]
+            sources_after, msims_before = list(self.sources), list(self.msims)
+
+        new_msims = browser_dataset.open_msims(added, fetch=self.fetch)
+
+        sources_after = sources_after + added
+        msims_after = msims_before + new_msims
+        browser_dataset.check_compatible(msims_after)
+
+        self.sources, self.msims = sources_after, msims_after
+        self.bump_generation()
+        return self.describe()
+
+    def add(self, sources):
+        """Append sources to the ones already open."""
+        return self.load(sources, replace=False)
+
+    def remove(self, index):
+        """Drop a single view."""
+        index = int(index)
+        if not 0 <= index < len(self.msims):
+            raise IndexError(
+                f"View {index} does not exist; the session has "
+                f"{len(self.msims)} view(s)."
+            )
+
+        del self.sources[index]
+        del self.msims[index]
+        self.bump_generation()
+        return self.describe()
+
+    def clear(self):
+        """Drop every view, returning the session to its empty state."""
+        self.sources = []
+        self.msims = []
         self.bump_generation()
         return self.describe()
 
@@ -72,7 +120,14 @@ class Session:
                 serialization.msim_metadata(
                     msim, name=source.resolved_name(index)
                 )
-                | {"url": source.url}
+                | {
+                    "url": source.url,
+                    "served": (
+                        "native"
+                        if browser_dataset.is_directly_servable(source)
+                        else "virtual"
+                    ),
+                }
                 for index, (source, msim) in enumerate(
                     zip(self.sources, self.msims)
                 )
@@ -97,6 +152,9 @@ class Session:
         ordered = [default] if default in common else []
         ordered += sorted(common - {default})
         return ordered
+
+    def is_empty(self):
+        return not self.msims
 
     def default_transform_key(self):
         """The coordinate system new work starts from.
@@ -145,6 +203,16 @@ class Session:
             if isinstance(spec, SessionSpec)
             else SessionSpec.from_dict(spec)
         )
+        if not spec.sources or not spec.session_id:
+            # An empty spec would build a session with a fresh random id at
+            # generation 0, which then answers "retired generation" for every
+            # route it is asked about - a mute 404 in place of a plain bug.
+            raise ValueError(
+                "Cannot rebuild a session from an empty spec "
+                f"(sources: {len(spec.sources)}, "
+                f"session_id: {spec.session_id!r})."
+            )
+
         # Routes are derived from the session id and generation, so a rebuilt
         # session must reuse both to answer the viewer's existing URLs.
         session = cls(session_id=session_id or spec.session_id, fetch=fetch)
@@ -250,22 +318,18 @@ class Session:
             "generation": self.generation,
         }
 
-    def registration_msims(self, reg_channel_index=None):
+    def registration_msims(self, reg_channel=None):
         """Views as `register` prepares them, i.e. reduced to one channel.
 
         `registration.register` selects the registration channel before
         computing pairwise registrations. Compute workers must apply the same
         selection, otherwise they would register multi-channel stacks and
-        return transforms of the wrong rank.
+        return transforms of the wrong rank. The channel is identified by its
+        coordinate value rather than an index, so it cannot drift out of step
+        with what the caller actually selected.
         """
-        if reg_channel_index is None or not self.msims:
+        if reg_channel is None or not self.msims:
             return self.msims
-
-        if "c" not in msi_utils.get_dims(self.msims[0]):
-            return self.msims
-
-        sim = msi_utils.get_sim_from_msim(self.msims[0])
-        reg_channel = sim.coords["c"][int(reg_channel_index)]
 
         return [
             msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
@@ -274,15 +338,13 @@ class Session:
             for msim in self.msims
         ]
 
-    def compute_pairwise(
-        self, edges, register_kwargs, reg_channel_index=None
-    ):
+    def compute_pairwise(self, edges, register_kwargs, reg_channel=None):
         """Compute a subset of pairwise registrations - the compute-worker side.
 
         Runs the exact same code path as a local registration; only the set of
         edges differs.
         """
-        msims = self.registration_msims(reg_channel_index)
+        msims = self.registration_msims(reg_channel)
 
         results = []
         for pair in edges:
@@ -312,6 +374,23 @@ class Session:
                 "output_zarr_url."
             )
 
+        # A new fusion changes what the preview URL should return, so it gets a
+        # new generation - the same rule that retires routes after a
+        # registration. Without it the preview would share a generation with
+        # the state that preceded it, and a worker that had already rebuilt
+        # that state would answer "not found" for every key of an image it has
+        # never been told about.
+        self.bump_generation()
+
+        return self._build_preview(options)
+
+    def _build_preview(self, options):
+        """Construct the preview image for the *current* generation.
+
+        Separate from `fuse_preview` because rebuilding an existing preview -
+        which is what a compute worker does on its first chunk request - must
+        reproduce the route it was asked for, not mint a new one.
+        """
         fused_msim = browser_fusion.preview(self.msims, options)
         route = self._route(PREVIEW_NAME)
         self._virtual_zarrs[route] = ngff_utils.VirtualOMEZarr(
@@ -381,6 +460,21 @@ class Session:
     # Serving virtual OME-Zarr to the viewer
     # ------------------------------------------------------------------
 
+    def view_route(self, index):
+        """Route of the virtual OME-Zarr exposing input view ``index``."""
+        return self._route(f"{VIEW_PREFIX}{int(index)}")
+
+    def _view_index_of(self, route):
+        """The view index a route addresses, or None if it is not a view."""
+        name = route.rsplit("/", 1)[-1]
+        if not name.startswith(VIEW_PREFIX) or not name.endswith(".ome.zarr"):
+            return None
+        try:
+            index = int(name[len(VIEW_PREFIX) : -len(".ome.zarr")])
+        except ValueError:
+            return None
+        return index if 0 <= index < len(self.msims) else None
+
     def ensure_route(self, route):
         """Return the virtual OME-Zarr for ``route``, rebuilding it if needed.
 
@@ -398,25 +492,50 @@ class Session:
             # mixing results computed before and after a registration.
             return None
 
+        index = self._view_index_of(route)
+        if index is not None:
+            # An input view that the viewer cannot read directly, e.g. a
+            # generated example. Every worker rebuilds the same image from the
+            # session spec, so any of them can answer.
+            virtual_zarr = ngff_utils.VirtualOMEZarr(
+                self.msims[index], name=route.rsplit("/", 1)[-1]
+            )
+            self._virtual_zarrs[route] = virtual_zarr
+            return virtual_zarr
+
         if route == self._route(PREVIEW_NAME) and self._preview_options:
-            self.fuse_preview(self._preview_options)
+            self._build_preview(self._preview_options)
             return self._virtual_zarrs.get(route)
 
         return None
+
+    def why_missing(self, route):
+        """Explain why ``route`` cannot be served, for diagnostics."""
+        if self._is_current(route):
+            return (
+                f"no image is registered at '{route}' in generation "
+                f"{self.generation} "
+                f"(preview options: {self._preview_options is not None}, "
+                f"views: {len(self.msims)})"
+            )
+        return (
+            f"'{route}' belongs to a retired generation; this session is at "
+            f"{self.route_prefix()} with {len(self.msims)} view(s)"
+        )
 
     def serve(self, route, key):
         """Answer one virtual OME-Zarr request.
 
         Returns ``(kind, payload)`` where ``kind`` is 'json', 'bytes' or
-        'missing'.
+        'missing'. For 'missing', the payload is a human-readable reason.
         """
         virtual_zarr = self.ensure_route(route)
         if virtual_zarr is None:
-            return "missing", None
+            return "missing", self.why_missing(route)
 
         key = str(key).strip("/")
         if not key:
-            return "missing", None
+            return "missing", "empty key"
 
         try:
             return "json", virtual_zarr.get_json_key(key)
@@ -427,16 +546,35 @@ class Session:
             path, chunk_key = virtual_zarr._parse_data_key(key)
             return "bytes", virtual_zarr.read_chunk(path, chunk_key)
         except KeyError:
-            return "missing", None
+            return "missing", f"'{key}' is not a key of '{route}'"
 
     # ------------------------------------------------------------------
     # Viewer state
     # ------------------------------------------------------------------
 
+    def source_url(self, index, origin="", api_base="", serve_views="auto"):
+        """The URL the viewer should read view ``index`` from.
+
+        With ``serve_views="auto"`` (the default), OME-Zarr behind the service
+        worker is streamed straight to the viewer, and anything else - a
+        generated example, or any source that only exists in the Python heap -
+        is exposed as a virtual OME-Zarr. ``serve_views="virtual"`` routes every
+        view through Python instead, which is slower but works for any input.
+        """
+        source = self.sources[index]
+        native = serve_views != "virtual" and browser_dataset.is_directly_servable(
+            source
+        )
+        if native:
+            return f"{origin}{source.url}"
+        return f"{origin}{api_base}/zarr/{self.view_route(index)}"
+
     def neuroglancer_state(
         self,
         transform_key=None,
         base_url="",
+        api_base="",
+        serve_views="auto",
         include_views=True,
         preview_route=None,
         channel_coord=None,
@@ -445,16 +583,33 @@ class Session:
     ):
         """Build the Neuroglancer viewer state for the current session.
 
-        Input views are served as their native OME-Zarr and carry the selected
-        transform key as a Neuroglancer source transform, so switching
-        transform keys never rewrites image data.
+        Views carry the selected transform key as a Neuroglancer source
+        transform, so switching transform keys never rewrites image data.
+
+        ``api_base`` is the service worker's path prefix. It has to be supplied
+        by the page rather than assumed: when the app is published under a
+        sub-path, a service worker may only claim URLs inside its own scope,
+        so a root-relative guess here would produce URLs nothing intercepts.
         """
+        if self.is_empty():
+            # Nothing to show yet; return a state the viewer accepts rather
+            # than failing, so the page can clear the viewer the same way it
+            # updates it.
+            return {"layers": [], "layout": "4panel"}
+
         urls = []
         sims = []
 
         if include_views:
             urls += [
-                f"zarr://{base_url}{source.url}" for source in self.sources
+                "zarr://"
+                + self.source_url(
+                    index,
+                    origin=base_url,
+                    api_base=api_base,
+                    serve_views=serve_views,
+                )
+                for index in range(len(self.sources))
             ]
             sims += [
                 msi_utils.get_sim_from_msim(msim) for msim in self.msims
@@ -468,24 +623,30 @@ class Session:
             channel_coord=channel_coord,
             contrast_limits=contrast_limits,
             layout=layout,
+            # Name the layers as the app lists the views, so the two can be
+            # read side by side and a removed view is unambiguous.
+            layer_dicts=[
+                {"name": f"{index}: {source.resolved_name(index)}"}
+                for index, source in enumerate(self.sources)
+            ]
+            if include_views
+            else None,
         )
 
-        if preview_route:
-            virtual_zarr = self._virtual_zarrs.get(preview_route)
-            if virtual_zarr is not None:
-                state["layers"] = list(state.get("layers", [])) + [
-                    {
-                        "type": "image",
-                        "source": {
-                            "url": (
-                                f"zarr://{base_url}/__mvs__/zarr/"
-                                f"{preview_route}"
-                            )
-                        },
-                        "tab": "rendering",
-                        "opacity": 1.0,
-                        "name": PREVIEW_NAME,
-                    }
-                ]
+        if preview_route and self.ensure_route(preview_route) is not None:
+            state["layers"] = list(state.get("layers", [])) + [
+                {
+                    "type": "image",
+                    "source": {
+                        "url": (
+                            f"zarr://{base_url}{api_base}/zarr/"
+                            f"{preview_route}"
+                        )
+                    },
+                    "tab": "rendering",
+                    "opacity": 1.0,
+                    "name": PREVIEW_NAME,
+                }
+            ]
 
         return state

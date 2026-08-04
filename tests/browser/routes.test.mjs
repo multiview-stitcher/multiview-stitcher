@@ -74,3 +74,101 @@ test("a route from a retired generation is still parseable", () => {
   const parsed = routes.parseZarrPath(fixtures.stale_request.path);
   assert.equal(parsed.route, fixtures.stale_request.route);
 });
+
+test("the viewer iframe is not treated as an app page", () => {
+  // The Neuroglancer iframe is a window client of the same scope, but it has
+  // no handler for the service worker's messages: sending it a chunk request
+  // means waiting for a reply that never arrives, which stalls the viewer
+  // exactly when it is fetching most.
+  const scope = "http://localhost:8000/browser/";
+
+  assert.equal(routes.isAppPage(`${scope}`, scope), true);
+  assert.equal(routes.isAppPage(`${scope}index.html`, scope), true);
+  assert.equal(routes.isAppPage(`${scope}index.html?x=1`, scope), true);
+
+  assert.equal(routes.isAppPage(`${scope}neuroglancer/index.html`, scope), false);
+  assert.equal(
+    routes.isAppPage(`${scope}neuroglancer/index.html#!%7B%7D`, scope),
+    false,
+  );
+});
+
+test("app pages are recognised under a sub-path deployment", () => {
+  const scope = "https://example.org/multiview-stitcher/main/browser/";
+
+  assert.equal(routes.isAppPage(`${scope}index.html`, scope), true);
+  assert.equal(routes.isAppPage(`${scope}neuroglancer/index.html`, scope), false);
+});
+
+test("metadata keys are told apart from chunk data", () => {
+  // Metadata must be answered by the worker that owns the session; a layer
+  // whose .zattrs fails to load has nothing to render, however well the chunk
+  // path works.
+  for (const key of [".zattrs", ".zgroup", ".zmetadata", "zarr.json", "0/.zarray", "1/.zattrs"]) {
+    assert.equal(routes.isMetadataKey(key), true, key);
+  }
+
+  for (const key of ["0/0/0/0/0", "1/0/0/3/2", "0/0.0.0.0", ""]) {
+    assert.equal(routes.isMetadataKey(key), false, key);
+  }
+});
+
+test("the wheel URL changes when the wheel does", async () => {
+  // A rebuild of the same commit produces an identically named wheel, and
+  // micropip fetches it from inside a worker - where a page reload does not
+  // bypass the HTTP cache. Only a changing URL keeps the Python runtime in
+  // step with the JavaScript.
+  const { readFileSync } = await import("node:fs");
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "docs", "browser", "packages", "manifest.json"), "utf8"),
+  );
+
+  assert.ok(manifest.sha256, "the manifest must carry a wheel checksum");
+  assert.equal(manifest.build, manifest.sha256.slice(0, 12));
+
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  assert.match(app, /packages\/\$\{manifest\.wheel\}\?v=\$\{build\}/);
+  // Worker scripts are loaded the same way and need the same treatment.
+  for (const worker of ["fs-worker.js", "session-worker.js", "compute-worker.js"]) {
+    assert.match(
+      app,
+      new RegExp(`${worker.replace(".", "\\.")}\\?v=`),
+      `${worker} must be cache-busted`,
+    );
+  }
+  assert.match(app, /fetch\("config\.json", noStore\)/);
+  assert.match(app, /fetch\("packages\/manifest\.json", noStore\)/);
+});
+
+test("a tab owns only the routes of its own session", () => {
+  // The service worker asks every open tab and takes the first that does not
+  // decline. A tab with no session must decline everything: otherwise it
+  // answers for another tab's images out of an empty session, and the tab
+  // that actually holds the data is never asked.
+  assert.equal(routes.ownsRoute("abc123", "abc123/g2/fused.ome.zarr"), true);
+  assert.equal(routes.ownsRoute("abc123", "abc123/g9/view_0.ome.zarr"), true);
+
+  assert.equal(routes.ownsRoute("abc123", "other/g2/fused.ome.zarr"), false);
+  assert.equal(routes.ownsRoute(null, "abc123/g2/fused.ome.zarr"), false);
+  assert.equal(routes.ownsRoute(undefined, "abc123/g2/fused.ome.zarr"), false);
+  assert.equal(routes.ownsRoute("", "abc123/g2/fused.ome.zarr"), false);
+  assert.equal(routes.ownsRoute("abc123", ""), false);
+
+  // A session id that is a prefix of another must not match it.
+  assert.equal(routes.ownsRoute("abc", "abc123/g2/fused.ome.zarr"), false);
+});
+
+test("the page loads its own scripts at the build version", async () => {
+  // A cached app.js behind a freshly cache-busted wheel means running two
+  // halves of different builds, which fails in ways that resemble neither.
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+
+  // No unversioned script tags for our own code.
+  assert.doesNotMatch(html, /<script src="(routes|app)\.js"><\/script>/);
+  assert.match(html, /packages\/manifest\.json", \{ cache: "no-store" \}/);
+  assert.match(html, /\$\{src\}\?v=\$\{build\}/);
+  for (const src of ["routes.js", "app.js"]) {
+    assert.ok(html.includes(`"${src}"`), `${src} must be loaded by the bootstrap`);
+  }
+});

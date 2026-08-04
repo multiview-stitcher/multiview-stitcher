@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>multiview-stitcher · browser</title>
-    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="app.css" id="app-stylesheet" />
   </head>
   <body>
     <header>
@@ -13,6 +13,9 @@
         Registration and fusion in the browser &mdash; your data never leaves
         your machine.
       </p>
+      <span id="inactive" hidden>
+        inactive &mdash; another tab took over
+      </span>
       <span id="status">starting&hellip;</span>
     </header>
 
@@ -24,10 +27,18 @@
             <p>Drop a folder here</p>
             <p class="hint">
               either one OME-Zarr, or a folder holding several of them (the
-              tiles)
+              tiles). Dropping more adds to the loaded views.
             </p>
-            <button id="browse" type="button">Browse&hellip;</button>
+            <button id="browse" type="button" data-load>Browse&hellip;</button>
           </div>
+
+          <div class="actions actions-row">
+            <button id="example" type="button" data-load disabled>
+              Load example
+            </button>
+            <button id="clear" type="button" data-load>Clear</button>
+          </div>
+
           <p id="dataset-summary" class="summary">no data loaded</p>
           <ul id="views"></ul>
         </section>
@@ -82,6 +93,35 @@
       ></iframe>
     </main>
 
-    <script src="app.js"></script>
+    <script>
+      // The page's own scripts are versioned from the build manifest, exactly
+      // as the wheel and the workers are. Without this a reload can pick up a
+      // fresh Python wheel behind a cached app.js - two halves of different
+      // builds, which fails in ways that look like neither.
+      (async () => {
+        let build = "dev";
+        try {
+          const manifest = await (
+            await fetch("packages/manifest.json", { cache: "no-store" })
+          ).json();
+          build = manifest.build || manifest.sha256 || build;
+          window.__mvsManifest = manifest;
+        } catch (error) {
+          console.error("[multiview-stitcher] cannot read the build manifest", error);
+        }
+
+        document.getElementById("app-stylesheet").href = `app.css?v=${build}`;
+
+        for (const src of ["routes.js", "app.js"]) {
+          await new Promise((resolve, reject) => {
+            const element = document.createElement("script");
+            element.src = `${src}?v=${build}`;
+            element.onload = resolve;
+            element.onerror = () => reject(new Error(`cannot load ${src}`));
+            document.body.appendChild(element);
+          });
+        }
+      })();
+    </script>
   </body>
 </html>

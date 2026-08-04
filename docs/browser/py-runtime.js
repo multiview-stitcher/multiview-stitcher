@@ -68,7 +68,11 @@ function callTask(task) {
  * and set in compute workers, which rebuild a read-only copy on demand.
  */
 function callServe(route, key, sessionSpec) {
-  const spec = sessionSpec ? api.pyodide.toPy(sessionSpec) : null;
+  // JSON, like every other call into Python. Handing over a live JS object
+  // instead would convert its nulls to `JsNull` proxies rather than to None,
+  // and those pass an `is not None` check and then fail deep inside numeric
+  // code - far from the boundary that produced them.
+  const spec = sessionSpec ? JSON.stringify(sessionSpec) : null;
   let result = null;
 
   try {
@@ -77,7 +81,20 @@ function callServe(route, key, sessionSpec) {
     // converts to a Uint8Array view on the WebAssembly heap.
     const [status, contentType, body] = result.toJs();
 
-    if (status !== 200 || !body) return { found: false };
+    if (status >= 500) {
+      // Carries the Python traceback; surfacing it is the difference between
+      // a debuggable failure and a silently empty layer.
+      throw new Error(new TextDecoder().decode(body));
+    }
+    if (status !== 200 || !body) {
+      // A 404 explains itself. Some are routine - the viewer probes for keys
+      // that legitimately do not exist - so the page decides what is worth
+      // reporting rather than treating every one as a failure.
+      return {
+        found: false,
+        reason: body ? new TextDecoder().decode(body) : "not found",
+      };
+    }
 
     // Copy out of the heap: the view is invalidated as soon as Python frees
     // the object, and the buffer is transferred to another thread from here.
@@ -88,6 +105,5 @@ function callServe(route, key, sessionSpec) {
     };
   } finally {
     if (result) result.destroy();
-    if (spec) spec.destroy();
   }
 }

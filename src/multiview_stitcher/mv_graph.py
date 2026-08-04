@@ -20,7 +20,7 @@ from scipy.spatial import (
 )
 from skimage.filters import threshold_otsu
 
-from multiview_stitcher import msi_utils, transformation
+from multiview_stitcher import misc_utils, msi_utils, transformation
 from multiview_stitcher import spatial_image_utils as si_utils
 
 BoundingBox = dict[str, dict[str, Union[float, int]]]
@@ -152,14 +152,21 @@ def build_view_adjacency_graph_from_msims(
 
     # multithreading doesn't improve performance here (need to check whether
     # this is still true after removing Geometry3D). Using multiprocessing instead.
-    if "scheduler" not in dask.config.config:
+    use_processes = (
+        "scheduler" not in dask.config.config
+        and misc_utils.supports_process_scheduler()
+    )
+
+    if use_processes:
         try:
             overlap_results = compute(overlap_results, scheduler="processes")[
                 0
             ]
-        except ValueError:
-            # if multiprocessing fails, try default scheduler
-            # (e.g. when running in JupyterLite)
+        except Exception:  # noqa: BLE001
+            # The process scheduler is an optimisation, not a requirement:
+            # spawning can fail for reasons ranging from an unavailable start
+            # method to a daemonic parent process. The default scheduler
+            # computes the same result.
             overlap_results = compute(overlap_results)[0]
     else:
         overlap_results = compute(overlap_results)[0]
