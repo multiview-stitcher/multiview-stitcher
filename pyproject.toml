@@ -112,6 +112,14 @@ playground = [
     "lxml",
     "xmltodict",
 ]
+browser = [
+    # Versions installable in Pyodide, matching docs/browser/config.json.
+    # ngff-zarr / ome-zarr-py have no WebAssembly build; multiview-stitcher
+    # falls back to its own NGFF reader/writer when they are absent.
+    "zarr ==2.18.3",
+    "dask[array] ==2025.2.0",
+    "dask-image ==2024.5.3",
+]
 gpu-cuda12 = [
     "cupy-cuda12x",
 ]

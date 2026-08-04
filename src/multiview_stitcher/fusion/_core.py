@@ -2155,10 +2155,23 @@ def prepare_block_fusion(
     output_zarr_url: str,
     fuse_kwargs: dict,
     zarr_array_creation_kwargs: dict = None,
+    create_output: bool = True,
+    verbose: bool = True,
 ):
     """
     Prepare chunkwise fusion function and number of blocks
     for embarrassingly parallel fusion
+
+    Parameters
+    ----------
+    create_output : bool, optional
+        If True (default), create (and overwrite) the output Zarr array.
+        Set to False to attach to an array that already exists, which is what
+        additional workers do when the blocks of a single fusion are spread
+        over several processes / web workers: one process creates the store,
+        the others open it for writing and fuse a disjoint subset of blocks.
+    verbose : bool, optional
+        If True (default), print a summary of the output stack.
     """
 
     sims = fuse_kwargs.get("images")
@@ -2199,43 +2212,54 @@ def prepare_block_fusion(
         shape=full_output_shape, chunks=full_output_chunksize
     )
 
-    print("Fusing into an output stack:")
-    print(
-        "- shape: ",
-        {
-            dim: (
-                int(output_stack_properties["shape"][dim])
-                if dim in sdims
-                else ns_shape[dim]
-            )
-            for dim in dims
-        },
-    )
-    print(
-        "- spacing: ",
-        {k: float(v) for k, v in output_stack_properties["spacing"].items()},
-    )
-    print(
-        "- origin: ",
-        {k: float(v) for k, v in output_stack_properties["origin"].items()},
-    )
-    # print(f"- chunksize: {fuse_kwargs.get('output_chunksize', None)}")
+    if verbose:
+        print("Fusing into an output stack:")
+        print(
+            "- shape: ",
+            {
+                dim: (
+                    int(output_stack_properties["shape"][dim])
+                    if dim in sdims
+                    else ns_shape[dim]
+                )
+                for dim in dims
+            },
+        )
+        print(
+            "- spacing: ",
+            {
+                k: float(v)
+                for k, v in output_stack_properties["spacing"].items()
+            },
+        )
+        print(
+            "- origin: ",
+            {
+                k: float(v)
+                for k, v in output_stack_properties["origin"].items()
+            },
+        )
+        # print(f"- chunksize: {fuse_kwargs.get('output_chunksize', None)}")
 
-    # Create the Zarr array store on disk
-    output_zarr_array = zarr.create(
-        shape=[int(i) for i in full_output_shape],
-        chunks=[int(i) for i in full_output_chunksize],
-        # Use xarray's metadata-level dtype. Accessing ``.data`` can
-        # materialize zarr-backed xarray arrays.
-        dtype=sims[0].dtype,
-        store=output_zarr_url,  # The path to the directory where the store will be created
-        overwrite=True,  # Allows overwriting if the path exists
-        **(
-            zarr_array_creation_kwargs
-            if zarr_array_creation_kwargs is not None
-            else {}
-        ),
-    )
+    if create_output:
+        # Create the Zarr array store on disk
+        output_zarr_array = zarr.create(
+            shape=[int(i) for i in full_output_shape],
+            chunks=[int(i) for i in full_output_chunksize],
+            # Use xarray's metadata-level dtype. Accessing ``.data`` can
+            # materialize zarr-backed xarray arrays.
+            dtype=sims[0].dtype,
+            store=output_zarr_url,  # The path to the directory where the store will be created
+            overwrite=True,  # Allows overwriting if the path exists
+            **(
+                zarr_array_creation_kwargs
+                if zarr_array_creation_kwargs is not None
+                else {}
+            ),
+        )
+    else:
+        # Attach to an array created by another process / worker.
+        output_zarr_array = zarr.open_array(output_zarr_url, mode="r+")
 
     task_fuse_kwargs = fuse_kwargs
     if all(si_utils.is_xarray_zarr_backed(sim) for sim in sims):

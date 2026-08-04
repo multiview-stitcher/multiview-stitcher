@@ -1,0 +1,12 @@
+{
+  "name": "multiview-stitcher-browser-tests",
+  "private": true,
+  "type": "module",
+  "description": "Pyodide smoke test for the multiview-stitcher browser runtime",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "pyodide": "0.28.3"
+  }
+}

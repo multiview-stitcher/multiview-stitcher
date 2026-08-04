@@ -1,0 +1,27 @@
+{
+  "pyodide_version": "0.28.3",
+  "pyodide_index_url": "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/",
+  "pyodide_packages": [
+    "micropip",
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "networkx",
+    "xarray",
+    "numcodecs",
+    "toolz",
+    "cloudpickle",
+    "packaging",
+    "pyyaml",
+    "click",
+    "fsspec",
+    "tqdm"
+  ],
+  "browser_dependencies": [
+    "zarr==2.18.3",
+    "dask[array]==2025.2.0",
+    "dask-image==2024.5.3"
+  ],
+  "default_n_workers": 3,
+  "max_n_workers": 12
+}

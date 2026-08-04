@@ -203,14 +203,16 @@ def _zarr_array_uses_http_store(zarray):
 
 
 def _materialize_xarray_zarr_backend(xim, max_retries=3):
-    # Public HTTP-backed stores have been prone to disconnects when one slice
-    # fans out into several concurrent chunk fetches inside zarr.
-    from aiohttp.client_exceptions import ServerDisconnectedError
-
     zarray = _get_xarray_zarr_array(xim)
     backend_data = _get_backend_data(xim)
 
     if _zarr_array_uses_http_store(zarray):
+        # Public HTTP-backed stores have been prone to disconnects when one
+        # slice fans out into several concurrent chunk fetches inside zarr.
+        # Imported here so that reading local stores needs no HTTP stack at
+        # all - the browser runtime has neither aiohttp nor sockets.
+        from aiohttp.client_exceptions import ServerDisconnectedError
+
         last_error = None
         for _ in range(max_retries):
             try:

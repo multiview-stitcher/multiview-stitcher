@@ -5,6 +5,7 @@ from multiview_stitcher.fusion._core import (
     calc_stack_properties_from_volume,
     fuse,
     max_fusion,
+    prepare_block_fusion,
     process_output_chunksize,
     process_output_stack_properties,
     simple_average_fusion,
@@ -19,6 +20,7 @@ __all__ = [
     "calc_fusion_stack_properties",
     "calc_stack_properties_from_view_properties_and_params",
     "calc_stack_properties_from_volume",
+    "prepare_block_fusion",
     "process_output_chunksize",
     "process_output_stack_properties",
 

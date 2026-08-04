@@ -10,18 +10,29 @@ import threading
 import uuid
 
 import dask
-import ngff_zarr
 import numpy as np
-import xarray as xr
 import zarr
 from tqdm import tqdm
 from dask import array as da
 import dask.diagnostics
-from ome_zarr import writer
 from xarray import DataTree
 
-from multiview_stitcher import msi_utils, param_utils, misc_utils
+from multiview_stitcher import _ngff_meta, msi_utils, param_utils, misc_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+
+# ngff-zarr and ome-zarr-py are the reference NGFF implementations and are used
+# whenever they are importable. Neither has a WebAssembly build, so in Pyodide
+# multiview-stitcher falls back to the equivalent readers/writers in
+# `_ngff_meta`. Both paths are covered by the test suite.
+try:
+    import ngff_zarr
+except ImportError:  # pragma: no cover - exercised in the Pyodide environment
+    ngff_zarr = None
+
+try:
+    from ome_zarr import writer
+except ImportError:  # pragma: no cover - exercised in the Pyodide environment
+    writer = None
 
 
 def _drop_none_values(value):
@@ -928,14 +939,20 @@ def sim_to_ngff_image(sim, transform_key):
         for isdim, sdim in enumerate(sdims):
             origin[sdim] = origin[sdim] + transform_translation[isdim]
 
-    ngff_im = ngff_zarr.to_ngff_image(
-        sim.data,
-        dims=sim.dims,
+    if ngff_zarr is not None:
+        return ngff_zarr.to_ngff_image(
+            sim.data,
+            dims=sim.dims,
+            scale=si_utils.get_spacing_from_sim(sim),
+            translation=origin,
+        )
+
+    return _ngff_meta.NgffImage(
+        data=sim.data,
+        dims=tuple(sim.dims),
         scale=si_utils.get_spacing_from_sim(sim),
         translation=origin,
     )
-
-    return ngff_im
 
 
 def msim_to_ngff_multiscales(msim, transform_key):
@@ -947,6 +964,11 @@ def msim_to_ngff_multiscales(msim, transform_key):
     the given transform_key will be added to the
     `translate` coordinateTransformation of the NGFF image(s).
     """
+
+    if ngff_zarr is None:  # pragma: no cover - Pyodide environment
+        raise ImportError(
+            "msim_to_ngff_multiscales() requires the ngff-zarr package."
+        )
 
     ngff_ims = []
     for scale_key in msi_utils.get_sorted_scale_keys(msim):
@@ -1059,9 +1081,29 @@ def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
     # ngff_zarr currently reads image data as dask arrays. For the zarr-backed
     # default path, reuse its parsed metadata but reopen the on-disk arrays.
     return [
-        zarr.open_array(os.path.join(zarr_path, dataset.path), mode="r")
+        _ngff_meta.open_zarr_array(zarr_path, dataset.path, mode="r")
         for dataset in ngff_multiscales.metadata.datasets
     ]
+
+
+def _open_ngff_dataset_array_as_dask(source, path):
+    return da.from_zarr(_ngff_meta.open_zarr_array(source, path, mode="r"))
+
+
+def read_ngff_multiscales(zarr_path):
+    """Parse the NGFF multiscales metadata of an OME-Zarr v0.4/v0.5 store.
+
+    Uses ``ngff-zarr`` when it is installed and the source is a path/URL, and
+    the built-in reader otherwise (Pyodide, or when a zarr store object is
+    passed instead of a path - which is how the browser runtime routes reads
+    through its service worker).
+    """
+    if ngff_zarr is not None and _ngff_meta._is_pathlike(zarr_path):
+        return ngff_zarr.from_ngff_zarr(zarr_path)
+
+    return _ngff_meta.read_ngff_multiscales(
+        zarr_path, array_opener=_open_ngff_dataset_array_as_dask
+    )
 
 
 def update_zarr_array_creation_kwargs_for_ngff_version(
@@ -1493,17 +1535,27 @@ def write_sim_to_ome_zarr(
         output_zarr_url, mode="a", **zarr_group_creation_kwargs
     )
 
-    writer.write_multiscales_metadata(
-        group=output_group,
-        axes=axes,
-        datasets=[
-            {
-                "path": f"{res_level}",
-                "coordinateTransformations": coordtfs[res_level],
-            }
-            for res_level in range(n_resolutions)
-        ],
-    )
+    multiscales_datasets = [
+        {
+            "path": f"{res_level}",
+            "coordinateTransformations": coordtfs[res_level],
+        }
+        for res_level in range(n_resolutions)
+    ]
+
+    if writer is not None:
+        writer.write_multiscales_metadata(
+            group=output_group,
+            axes=axes,
+            datasets=multiscales_datasets,
+        )
+    else:  # pragma: no cover - exercised in the Pyodide environment
+        _ngff_meta.write_multiscales_metadata(
+            output_group,
+            axes=axes,
+            datasets=multiscales_datasets,
+            ngff_version=ngff_version,
+        )
 
     if "c" in sim.dims:
         contrast_min = np.array(
@@ -1573,7 +1625,7 @@ def read_sim_from_ome_zarr(
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
 
-    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    ngff_multiscales = read_ngff_multiscales(zarr_path)
 
     if resolution_level >= len(ngff_multiscales.images):
         raise ValueError(
@@ -1593,7 +1645,7 @@ def read_sim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = zarr.open_group(zarr_path, mode="r")
+    root = _ngff_meta.open_zarr_group(zarr_path, mode="r")
 
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
@@ -1630,7 +1682,7 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
         If the on-disk OME-Zarr is not v0.4 or v0.5, or if the number of
         resolution levels in msim does not match the on-disk zarr.
     """
-    root = zarr.open_group(zarr_path, mode="a")
+    root = _ngff_meta.open_zarr_group(zarr_path, mode="a")
     attrs = dict(root.attrs)
 
     # Detect OME-Zarr version and retrieve the multiscales list
@@ -1730,7 +1782,7 @@ def read_msim_from_ome_zarr(
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
 
-    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    ngff_multiscales = read_ngff_multiscales(zarr_path)
 
     data_arrays = None
     if array_backend == "zarr":
@@ -1743,13 +1795,17 @@ def read_msim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = zarr.open_group(zarr_path, mode="r")
+    root = _ngff_meta.open_zarr_group(zarr_path, mode="r")
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
         ch_coords = [ch["label"] for ch in omero["channels"]]
         if "c" in msim['scale0']["image"].dims:
-            msim = msim.map_over_datasets(
-                xr.DataArray.assign_coords,
-                kwargs={'c': ch_coords})
+            # A closure keeps this working across xarray releases:
+            # DataTree.map_over_datasets() only grew its `kwargs` parameter
+            # after the version shipped with Pyodide.
+            def _assign_channel_coords(ds):
+                return ds.assign_coords(c=ch_coords)
+
+            msim = msim.map_over_datasets(_assign_channel_coords)
 
     return msim

@@ -1,0 +1,74 @@
+name: Browser runtime
+
+# Runs the browser execution environment end to end inside Pyodide: boot the
+# runtime, write a miniature multiscale OME-Zarr, register two views, request a
+# fused chunk and check its dimensions. This catches WebAssembly-specific
+# integration failures (zarr v2, older xarray, no ngff-zarr / ome-zarr-py)
+# that the CPython suite cannot see.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  pyodide-smoke:
+    name: Pyodide end-to-end smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # setuptools_scm needs the tags to derive a version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/browser/package.json
+
+      - name: Build the wheel that the browser loads
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
+      - name: Install the Pyodide runtime
+        working-directory: tests/browser
+        run: npm install
+
+      - name: Check the service-worker routing contract
+        working-directory: tests/browser
+        run: node --test routes.test.mjs
+
+      - name: Run the smoke test
+        working-directory: tests/browser
+        run: node smoke.mjs
+
+  browser-package-tests:
+    name: CPython tests for the browser package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Test
+        run: python -m pytest src/multiview_stitcher/_tests/test_browser.py -v

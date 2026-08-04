@@ -98,3 +98,8 @@ notebooks/*zarr
 src/multiview_stitcher/_benchmarks/data
 
 .devcontainer
+
+# Browser app: the static client is tracked, the build outputs are not
+docs/browser/packages/
+docs/browser/neuroglancer/
+tests/browser/node_modules/

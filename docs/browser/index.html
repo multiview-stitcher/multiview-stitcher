@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>multiview-stitcher · browser</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header>
+      <h1>multiview-stitcher</h1>
+      <p class="subtitle">
+        Registration and fusion in the browser &mdash; your data never leaves
+        your machine.
+      </p>
+      <span id="status">starting&hellip;</span>
+    </header>
+
+    <main>
+      <aside id="panel">
+        <section>
+          <h2>Data</h2>
+          <div id="dropzone" class="disabled">
+            <p>Drop a folder here</p>
+            <p class="hint">
+              either one OME-Zarr, or a folder holding several of them (the
+              tiles)
+            </p>
+            <button id="browse" type="button">Browse&hellip;</button>
+          </div>
+          <p id="dataset-summary" class="summary">no data loaded</p>
+          <ul id="views"></ul>
+        </section>
+
+        <section>
+          <h2>Coordinate system</h2>
+          <label for="transform-key">transform_key</label>
+          <select id="transform-key" disabled></select>
+          <p class="hint">
+            Applied to every loaded source. Switching does not touch the image
+            data.
+          </p>
+        </section>
+
+        <section>
+          <h2>Compute</h2>
+          <label for="worker-count">Python web workers</label>
+          <select id="worker-count" disabled></select>
+          <p class="hint">
+            Pairwise registrations and fused preview chunks are spread over
+            these.
+          </p>
+
+          <div class="actions">
+            <button type="button" data-action="register" disabled>
+              Register
+            </button>
+            <button type="button" data-action="fuse-preview" disabled>
+              Fuse (preview)
+            </button>
+            <button type="button" data-action="fuse-disk" disabled>
+              Fuse to OME-Zarr&hellip;
+            </button>
+          </div>
+          <p class="hint">
+            The preview is computed lazily: only the chunks the viewer asks for
+            are fused.
+          </p>
+        </section>
+
+        <section class="grow">
+          <h2>Log</h2>
+          <div id="log"></div>
+        </section>
+      </aside>
+
+      <iframe
+        id="viewer"
+        title="Neuroglancer"
+        src="about:blank"
+        allow="cross-origin-isolated"
+      ></iframe>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
