@@ -206,6 +206,12 @@ class WorkerRuntime:
             tuple(source.url for source in spec.sources),
             spec.generation,
             json.dumps(spec.preview, sort_keys=True),
+            # A registration adds transforms without changing what any view
+            # route serves, so it deliberately does not move the generation.
+            # They still have to be part of the key: fusing reads them, and a
+            # session cached before a registration would otherwise go on
+            # fusing with the transforms it was built with.
+            json.dumps(spec.transforms, sort_keys=True),
         )
 
         if key not in self._session_cache:

@@ -34,8 +34,74 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+      // Drop caches from an older layout rather than leaving tens of
+      // megabytes of unreachable entries behind.
+      for (const name of await caches.keys()) {
+        if (name !== RUNTIME_CACHE) await caches.delete(name);
+      }
+    })(),
+  );
 });
+
+// ---------------------------------------------------------------------------
+// The Python runtime cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Pyodide, its packages and the wheels micropip pulls from PyPI.
+ *
+ * Every worker installs an identical runtime - around 60 MB - and they boot at
+ * the same time, so without this they all miss the HTTP cache together and the
+ * same bytes are fetched once per worker. Serving them from here makes the
+ * network see each file once ever: concurrent requests for a file that is on
+ * its way are joined to the one in flight, and a later visit is served from
+ * disk.
+ *
+ * These URLs all carry their version in the path, so an entry can never go
+ * stale - a different Pyodide or a different wheel is simply a different URL.
+ */
+const RUNTIME_CACHE = "mvs-python-runtime-v1";
+
+const RUNTIME_ASSET = /\.(whl|wasm|zip|data|js|mjs|json)$/;
+
+/** Fetches in progress, so that N workers wanting one file make one request. */
+const inFlight = new Map();
+
+async function serveRuntimeAsset(request) {
+  const url = request.url;
+  const cache = await caches.open(RUNTIME_CACHE);
+
+  const cached = await cache.match(url);
+  if (cached) return cached;
+
+  let pending = inFlight.get(url);
+  if (!pending) {
+    pending = (async () => {
+      const response = await fetch(request);
+      // An opaque response has no readable body to hand on to several
+      // callers, and storing one costs far more quota than it is worth.
+      if (!response.ok || (response.type !== "cors" && response.type !== "basic")) {
+        return false;
+      }
+      await cache.put(url, response.clone());
+      return true;
+    })();
+    pending.finally(() => inFlight.delete(url));
+    inFlight.set(url, pending);
+  }
+
+  // Quota errors and network failures are not worth failing a boot over.
+  const stored = await pending.catch(() => false);
+  if (stored) {
+    const hit = await cache.match(url);
+    if (hit) return hit;
+  }
+
+  return fetch(request);
+}
 
 function clientRank(client) {
   if (client.focused) return 0;
@@ -212,6 +278,18 @@ async function handleRpc(endpoint, request) {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+
+  // The Python runtime comes from a CDN and from PyPI; everything else
+  // cross-origin is left alone.
+  if (
+    url.origin !== self.location.origin &&
+    event.request.method === "GET" &&
+    RUNTIME_ASSET.test(url.pathname)
+  ) {
+    event.respondWith(serveRuntimeAsset(event.request));
+    return;
+  }
+
   if (url.origin !== self.location.origin) return;
 
   const parsed = mvsRoutes.parseRequest(url.pathname);

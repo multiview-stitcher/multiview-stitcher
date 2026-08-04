@@ -204,6 +204,7 @@ def test_session_register_adds_transform_key(tiles_on_disk):
     session = Session()
     session.load(tiles_on_disk)
     generation_before = session.generation
+    views_generation_before = session.views_generation
 
     result = session.register(
         RegistrationOptions(new_transform_key="registered")
@@ -212,7 +213,10 @@ def test_session_register_adds_transform_key(tiles_on_disk):
     assert result["transform_key"] == "registered"
     assert "registered" in session.transform_keys()
     assert len(result["params"]) == 2
+    # Derived images are retired, because they were computed from the
+    # transforms; the views themselves are untouched, so their URLs are not.
     assert session.generation > generation_before
+    assert session.views_generation == views_generation_before
 
     restored = serialization.params_from_json(result["params"])
     assert restored[0].shape[-2:] == (3, 3)
@@ -517,6 +521,8 @@ def test_worker_does_not_serve_a_retired_route(tiles_on_disk):
     # The stale spec still describes the generation the route belongs to, so it
     # answers - which is why the page always dispatches the current spec.
     assert stale_spec["generation"] < fresh_spec["generation"]
+    # The views were not touched, so their URLs survive the registration.
+    assert stale_spec["views_generation"] == fresh_spec["views_generation"]
 
 
 def test_worker_session_cache_is_bounded(tiles_on_disk):
@@ -640,6 +646,40 @@ def test_neuroglancer_state_includes_preview_layer(tiles_on_disk):
     names = [layer["name"] for layer in state["layers"]]
     assert "fused" in names
     assert preview["route"] in state["layers"][-1]["source"]["url"]
+
+
+def test_preview_layer_is_hidden_under_another_transform_key(tiles_on_disk):
+    """A fused image only means anything in the space it was fused in.
+
+    Shown under a different transform key it would sit where the views are
+    not, so it stays loaded - switching back must not refuse it - but hidden.
+    """
+    session = Session()
+    session.load(tiles_on_disk)
+    session.register(RegistrationOptions(new_transform_key="registered"))
+
+    preview = session.fuse_preview(FusionOptions(transform_key="registered"))
+
+    def preview_layer(transform_key):
+        state = session.neuroglancer_state(
+            transform_key=transform_key, preview_route=preview["route"]
+        )
+        return next(
+            layer for layer in state["layers"] if layer["name"] == "fused"
+        )
+
+    assert preview_layer("registered")["visible"] is True
+    assert preview_layer(si_utils.DEFAULT_TRANSFORM_KEY)["visible"] is False
+
+    # The views themselves exist under every key, so they stay visible.
+    state = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        preview_route=preview["route"],
+    )
+    views = [layer for layer in state["layers"] if layer["name"] != "fused"]
+    assert views and all(
+        layer.get("visible", True) for layer in views
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1417,3 +1457,300 @@ def test_read_only_store_refuses_writes(tmp_path):
     )
     with pytest.raises(NotImplementedError, match="read-only"):
         store.write_key(".zattrs", b"{}")
+
+
+# ---------------------------------------------------------------------------
+# Dispatching work in batches
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_sends_work_in_batches():
+    """One request must not stay open for a whole fusion.
+
+    A browser terminates a service worker whose event outruns its budget, so a
+    single request covering every block is eventually killed mid-flight.
+    """
+    calls = []
+
+    class RecordingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            calls.append(len(payload["tasks"]))
+            return super().call(endpoint, payload)
+
+    bridge = RecordingBridge(runner=lambda task: {"n_blocks": 1})
+    tasks = [{"kind": "fuse_blocks"} for _ in range(10)]
+
+    results = bridge.dispatch(tasks, batch_size=3)
+    assert len(results) == 10
+    assert calls == [3, 3, 3, 1]
+
+    # Without a batch size the behaviour is unchanged: one request.
+    calls.clear()
+    assert len(bridge.dispatch(tasks)) == 10
+    assert calls == [10]
+
+
+def test_dispatch_reports_a_failing_batch_immediately():
+    from multiview_stitcher.browser.bridge import TaskError
+
+    seen = []
+
+    def runner(task):
+        seen.append(task)
+        if len(seen) > 2:
+            raise ValueError("boom")
+        return {"n_blocks": 1}
+
+    bridge = LocalBridge(runner=runner)
+    with pytest.raises(TaskError, match="boom"):
+        bridge.dispatch([{"kind": "x"} for _ in range(9)], batch_size=2)
+
+    # Stopped at the failing batch rather than running everything first.
+    assert len(seen) < 9
+
+
+def test_fusion_executor_splits_levels_into_small_tasks(tiles_on_disk):
+    from multiview_stitcher.browser import executors
+
+    session = Session()
+    session.load(tiles_on_disk)
+
+    dispatched = []
+
+    class CountingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            dispatched.append(len(payload["tasks"]))
+            return super().call(endpoint, payload)
+
+    worker = WorkerRuntime()
+    executor = executors.RemoteFusionExecutor(
+        session.spec(),
+        bridge=CountingBridge(runner=worker.run_task),
+        n_workers=2,
+    )
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as output:
+        options = FusionOptions(
+            output_zarr_url=f"{output}/fused.ome.zarr"
+        )
+        plan = session.fusion_plan(options)
+        written = executor(plan["options"], plan["levels"])
+
+    assert written == plan["n_blocks"]
+    # Batched: several requests, none of them the whole job.
+    assert len(dispatched) > 1
+    assert max(dispatched) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_reports_progress_per_batch():
+    """The page can only learn about progress from the batches it is handed.
+
+    The work itself runs inside one blocking call in the session worker, so
+    each dispatch carries how much of the job is already done.
+    """
+    seen = []
+
+    class ReportingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            seen.append(payload.get("progress"))
+            return super().call(endpoint, payload)
+
+    bridge = ReportingBridge(runner=lambda task: {"n_blocks": task["units"]})
+    tasks = [{"kind": "fuse_blocks", "units": 3} for _ in range(4)]
+
+    bridge.dispatch(
+        tasks, batch_size=2, progress={"label": "fusing", "unit": "block"}
+    )
+
+    # Each payload also says what its own batch is worth, so the page can
+    # finish the bar: the last batch's completion is never reported here.
+    assert seen == [
+        {"label": "fusing", "unit": "block",
+         "completed": 0, "total": 12, "batch": 6},
+        {"label": "fusing", "unit": "block",
+         "completed": 6, "total": 12, "batch": 6},
+    ]
+    assert seen[-1]["completed"] + seen[-1]["batch"] == seen[-1]["total"]
+
+
+def test_progress_counts_blocks_not_tasks(tiles_on_disk, tmp_path):
+    """Grouping blocks into tasks must not change what the bar counts."""
+    from multiview_stitcher.browser import executors
+
+    reported = []
+
+    class ReportingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            if payload.get("progress"):
+                reported.append(payload["progress"])
+            return super().call(endpoint, payload)
+
+    session = Session()
+    session.load(tiles_on_disk)
+    options = FusionOptions(
+        output_zarr_url=str(tmp_path / "fused.ome.zarr")
+    )
+    plan = session.fusion_plan(options)
+
+    executor = executors.RemoteFusionExecutor(
+        session.spec(),
+        bridge=ReportingBridge(runner=WorkerRuntime().run_task),
+        n_workers=2,
+    )
+    executor(plan["options"], plan["levels"])
+
+    assert reported, "a multi-batch job must report progress"
+    assert all(item["total"] == plan["n_blocks"] for item in reported)
+    assert reported[0]["completed"] == 0
+    # Monotonic, and never beyond the total.
+    completed = [item["completed"] for item in reported]
+    assert completed == sorted(completed)
+    assert max(completed) < plan["n_blocks"]
+
+
+def test_registration_reports_progress_in_pairs(tiles_on_disk):
+    from multiview_stitcher.browser import executors
+
+    reported = []
+
+    class ReportingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            if payload.get("progress"):
+                reported.append(payload["progress"])
+            return super().call(endpoint, payload)
+
+    session = Session()
+    session.load(tiles_on_disk)
+    session.register(
+        RegistrationOptions(),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            session.spec(), bridge=ReportingBridge(runner=WorkerRuntime().run_task)
+        ),
+    )
+
+    assert reported
+    assert reported[0]["unit"] == "pair"
+    assert reported[0]["label"] == "registering"
+    assert reported[0]["total"] >= 1
+
+
+def test_registration_does_not_retire_view_routes(tiles_on_disk):
+    """A registration must leave the viewer's layers exactly where they are.
+
+    The result reaches Neuroglancer as a source transform, so not one byte of
+    what a view route serves changes. Minting new URLs would force the viewer
+    to drop every layer and build it again - losing the shader, its contrast
+    range and the layout, and refetching data it already holds.
+    """
+    session = Session()
+    session.load(tiles_on_disk)
+
+    def served():
+        out = {}
+        for index in range(len(session.sources)):
+            route = session.view_route(index)
+            kind, attrs = session.serve(route, ".zattrs")
+            assert kind == "json"
+            out[route] = attrs
+            for dataset in attrs["multiscales"][0]["datasets"]:
+                path = dataset["path"]
+                kind, zarray = session.serve(route, f"{path}/.zarray")
+                assert kind == "json"
+                out[f"{route}/{path}"] = zarray
+                sep = zarray.get("dimension_separator", ".")
+                origin = sep.join("0" * len(zarray["shape"]))
+                kind, chunk = session.serve(route, f"{path}/{origin}")
+                assert kind == "bytes", chunk
+                out[f"{route}/{path}/chunk"] = chunk
+        return out
+
+    before = served()
+    views_generation = session.views_generation
+
+    session.register(RegistrationOptions(new_transform_key="registered"))
+
+    assert session.views_generation == views_generation
+    assert served() == before
+    assert "registered" in session.transform_keys()
+
+    # Which is what the viewer sees: same layer names, same URLs.
+    def layers(key):
+        state = session.neuroglancer_state(transform_key=key, api_base="/b")
+        return [
+            (layer["name"], layer["source"]["url"])
+            for layer in state["layers"]
+        ]
+
+    assert layers("registered") == layers(si_utils.DEFAULT_TRANSFORM_KEY)
+
+
+def test_worker_session_cache_tracks_transforms(tiles_on_disk):
+    """Registering must invalidate a compute worker's cached session.
+
+    It is no longer the generation that tells a worker its copy is out of
+    date, so the transforms themselves have to be part of the cache key -
+    otherwise a worker cached before a registration would go on fusing with
+    the transforms it was built with.
+    """
+    runtime = WorkerRuntime()
+
+    session = Session()
+    session.load(tiles_on_disk)
+    stale = runtime.session_for(session.spec().to_dict())
+    assert stale.transform_keys() == [si_utils.DEFAULT_TRANSFORM_KEY]
+
+    session.register(RegistrationOptions(new_transform_key="registered"))
+    fresh = runtime.session_for(session.spec().to_dict())
+
+    assert fresh is not stale
+    assert "registered" in fresh.transform_keys()
+
+    # Asking again with the same spec still reuses the rebuilt session.
+    assert runtime.session_for(session.spec().to_dict()) is fresh
+
+
+def test_progress_reports_enough_to_reach_the_total(tiles_on_disk, tmp_path):
+    """A job small enough for one batch must still be able to show 100%.
+
+    Progress can only travel with a dispatch, so the last batch's completion
+    is never reported by Python. Each payload carries what its own batch is
+    worth, which is what lets the page finish the bar.
+    """
+    from multiview_stitcher.browser import executors
+
+    reported = []
+
+    class ReportingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            if payload.get("progress"):
+                reported.append(payload["progress"])
+            return super().call(endpoint, payload)
+
+    session = Session()
+    session.load(tiles_on_disk)
+    options = FusionOptions(output_zarr_url=str(tmp_path / "fused.ome.zarr"))
+    plan = session.fusion_plan(options)
+
+    executor = executors.RemoteFusionExecutor(
+        session.spec(),
+        bridge=ReportingBridge(runner=WorkerRuntime().run_task),
+        n_workers=2,
+    )
+    executor(plan["options"], plan["levels"])
+
+    assert reported
+    for item in reported:
+        assert item["batch"] >= 1
+        assert item["completed"] + item["batch"] <= item["total"]
+
+    last = reported[-1]
+    assert last["completed"] + last["batch"] == last["total"], (
+        "the final batch must account for the rest of the work"
+    )

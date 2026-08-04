@@ -206,6 +206,10 @@ class SessionSpec:
     sources: list = field(default_factory=list)
     transforms: dict = field(default_factory=dict)
     generation: int = 0
+    #: Generation of the *view* routes, which only moves when the set of
+    #: views does. Registration changes no view's data, so its URLs stay put
+    #: and the viewer can keep the layers it already has.
+    views_generation: Optional[int] = None
     session_id: Optional[str] = None
     #: Options of the fused preview the viewer is currently reading, so that a
     #: compute worker can rebuild the same lazily fused image on demand.
@@ -216,6 +220,11 @@ class SessionSpec:
             "sources": [source.to_dict() for source in self.sources],
             "transforms": self.transforms,
             "generation": int(self.generation),
+            "views_generation": int(
+                self.generation
+                if self.views_generation is None
+                else self.views_generation
+            ),
             "session_id": self.session_id,
             "preview": self.preview,
         }
@@ -232,6 +241,11 @@ class SessionSpec:
             ],
             transforms=dict(payload.get("transforms", {})),
             generation=int(payload.get("generation", 0)),
+            views_generation=(
+                None
+                if payload.get("views_generation") is None
+                else int(payload["views_generation"])
+            ),
             session_id=payload.get("session_id"),
             preview=payload.get("preview"),
         )

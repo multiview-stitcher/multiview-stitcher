@@ -9,10 +9,17 @@ are handed work, so the same Python code runs everywhere and image data never
 crosses a worker boundary.
 
 Cache invalidation is explicit and structural. Every URL a viewer is given
-carries the session *generation*; anything that changes what those URLs should
-return (new registration results, a new fusion) bumps the generation, which
-retires the old routes and gives Neuroglancer URLs it has never seen. Stale
-requests are answered with "not found" instead of stale pixels.
+carries a *generation*; anything that changes what those URLs should return
+bumps it, which retires the old routes and gives Neuroglancer URLs it has
+never seen. Stale requests are answered with "not found" instead of stale
+pixels.
+
+Views and derived images are counted separately. A fused preview depends on
+the transforms and on the fusion options, so registering retires it. A view
+does not: registration reaches the viewer as a Neuroglancer source transform
+and changes nothing a view route serves, so those URLs stay put - which is
+what lets the viewer re-aim the layers it already has instead of discarding
+them, their shaders and their contrast ranges.
 """
 
 import uuid
@@ -49,6 +56,7 @@ class Session:
         self.sources = []
         self.msims = []
         self.generation = 0
+        self.views_generation = 0
         # route -> VirtualOMEZarr, valid only for the current generation
         self._virtual_zarrs = {}
         self._preview_options = None
@@ -84,7 +92,7 @@ class Session:
         browser_dataset.check_compatible(msims_after)
 
         self.sources, self.msims = sources_after, msims_after
-        self.bump_generation()
+        self.bump_generation(views=True)
         return self.describe()
 
     def add(self, sources):
@@ -102,14 +110,14 @@ class Session:
 
         del self.sources[index]
         del self.msims[index]
-        self.bump_generation()
+        self.bump_generation(views=True)
         return self.describe()
 
     def clear(self):
         """Drop every view, returning the session to its empty state."""
         self.sources = []
         self.msims = []
-        self.bump_generation()
+        self.bump_generation(views=True)
         return self.describe()
 
     def describe(self):
@@ -190,6 +198,7 @@ class Session:
             sources=list(self.sources),
             transforms=self.transforms_json(),
             generation=self.generation,
+            views_generation=self.views_generation,
             session_id=self.session_id,
             preview=(
                 self._preview_options.to_dict()
@@ -226,6 +235,11 @@ class Session:
             session.sources, fetch=fetch
         )
         session.generation = spec.generation
+        session.views_generation = (
+            spec.generation
+            if spec.views_generation is None
+            else spec.views_generation
+        )
 
         for transform_key, params in spec.transforms.items():
             session.set_params(
@@ -266,9 +280,18 @@ class Session:
     # Cache invalidation
     # ------------------------------------------------------------------
 
-    def bump_generation(self):
-        """Retire every URL previously handed to the viewer."""
+    def bump_generation(self, views=False):
+        """Retire the URLs previously handed to the viewer.
+
+        Derived images - the fused preview - are always retired: they are
+        computed from the transforms and the options in force when they were
+        made. Set ``views`` when the set of views itself changed; a
+        registration does not, and reusing those URLs is what lets the viewer
+        update in place instead of rebuilding every layer.
+        """
         self.generation += 1
+        if views:
+            self.views_generation = self.generation
         self._virtual_zarrs.clear()
         self._preview_options = None
         return self.generation
@@ -276,10 +299,17 @@ class Session:
     def route_prefix(self):
         return f"{self.session_id}/g{self.generation}"
 
+    def views_route_prefix(self):
+        return f"{self.session_id}/g{self.views_generation}"
+
     def _route(self, name):
         return f"{self.route_prefix()}/{name}.ome.zarr"
 
     def _is_current(self, route):
+        # A view route is judged against the generation of the view set, not
+        # against the one derived images use.
+        if self._view_index_of(route) is not None:
+            return route.startswith(f"{self.views_route_prefix()}/")
         return route.startswith(f"{self.route_prefix()}/")
 
     # ------------------------------------------------------------------
@@ -312,9 +342,14 @@ class Session:
             **options.register_kwargs(),
         )
 
-        # register() already wrote the result onto the msims under
-        # new_transform_key; the viewer now needs fresh URLs for it.
-        self.bump_generation()
+        # Anything derived from the transforms - a fused preview - is now out
+        # of date and its URLs are retired. The views are not: the result
+        # reaches the viewer as a Neuroglancer source transform, so not a byte
+        # of what a view route serves has changed. Keeping those URLs is what
+        # lets the viewer re-aim the layers it already has rather than
+        # discarding them, their shaders and their contrast ranges, and
+        # refetching data it holds.
+        self.bump_generation(views=False)
 
         return {
             "transform_key": options.new_transform_key,
@@ -470,7 +505,10 @@ class Session:
 
     def view_route(self, index):
         """Route of the virtual OME-Zarr exposing input view ``index``."""
-        return self._route(f"{VIEW_PREFIX}{int(index)}")
+        return (
+            f"{self.views_route_prefix()}/"
+            f"{VIEW_PREFIX}{int(index)}.ome.zarr"
+        )
 
     def _view_index_of(self, route):
         """The view index a route addresses, or None if it is not a view."""
@@ -654,7 +692,20 @@ class Session:
                     "tab": "rendering",
                     "opacity": 1.0,
                     "name": PREVIEW_NAME,
+                    # A fused image exists only in the coordinate system it
+                    # was fused in. Shown under a different transform key it
+                    # would sit somewhere the views are not, so it stays
+                    # loaded but hidden until that key is selected again.
+                    "visible": self.preview_matches(transform_key),
                 }
             ]
 
         return state
+
+    def preview_matches(self, transform_key):
+        """Whether the fused preview belongs to ``transform_key``."""
+        if self._preview_options is None:
+            return True
+        if transform_key is None:
+            transform_key = self.default_transform_key()
+        return self._preview_options.transform_key == transform_key

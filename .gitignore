@@ -103,3 +103,4 @@ src/multiview_stitcher/_benchmarks/data
 docs/browser/packages/
 docs/browser/neuroglancer/
 tests/browser/node_modules/
+.ng-build/

@@ -24,12 +24,15 @@ Open the browser app
 2. Choose how many Python web workers to start.
 3. Press **Load example** for a generated 3D 2&times;2 tile dataset, or drop a
    folder onto the landing area &mdash; either a single OME-Zarr, or a folder
-   containing one OME-Zarr per tile.
+   containing one OME-Zarr per tile. Several folders can be dropped together,
+   in which case each one must itself be an OME-Zarr.
 4. Press **Register**, then **Fuse (preview)**.
 
 Dropping further folders *adds* their images to the views already loaded, so a
 dataset can be assembled tile by tile from several places; dropping the same
-folder twice changes nothing. Each view has an individual remove button, and
+folder twice changes nothing. Registration and fusion show their progress in
+the header, and the compute workers start as soon as you pick how many to use
+rather than on the first action. Each view has an individual remove button, and
 **Clear** starts over. The viewer's layers always mirror the list, in the same
 order and under the same names.
 
@@ -65,6 +68,10 @@ flowchart TB
   session.
 * Only metadata, user options, registration results and requested chunks cross
   the JavaScript boundary. Images are opened lazily and stay inside Python.
+* The viewer is driven through its documented **viewer state** - the same JSON
+  a Neuroglancer link carries - applied to the running instance. Switching
+  `transform_key` therefore updates the view immediately: nothing reloads, and
+  the camera, the WebGL context and everything already fetched survive.
 * Input tiles are exposed to Neuroglancer as their **native OME-Zarr** where
   possible, with the selected `transform_key` attached as a Neuroglancer source
   transform. Their chunks are read straight from your folder by the service
@@ -106,22 +113,29 @@ URLs it has never seen. Requests for a retired route are answered with
 ## Running it locally
 
 ```bash
-python scripts/build_browser_app.py --neuroglancer
+python scripts/build_browser_app.py --neuroglancer   # needs Node/npm
 python -m http.server --directory docs 8000
 # then open http://localhost:8000/browser/
 ```
 
+`--neuroglancer` bundles the viewer and is the only step that needs Node. If
+npm is not on your `PATH`, point at it with `--npm /path/to/npm` or `MVS_NPM`.
+Leave the flag off to rebuild just the wheel and keep the viewer bundle you
+already have; `--check` reports whether it is complete.
+
 The build step adds the two pieces that are not checked in: a wheel of the
 current working tree (which the page installs into Pyodide) and a Neuroglancer
-client, mirrored byte for byte from the [official hosted
-build](https://neuroglancer-demo.appspot.com/). The viewer has to be served
-from the same origin as the app, otherwise the service worker cannot answer its
-chunk requests &mdash; and without that it could not read your local files.
+bundle, built from its npm package with esbuild (so this step needs Node).
 
-The mirror follows every asset the bundle names, including the lazily loaded
-chunks that carry the blosc and zstd decoders. Missing one of those shows up
-only as a failed `importScripts` when a user first opens an image, so the build
-refuses to ship a mirror that does not cover every chunk id the code requests.
+The viewer is **embedded in the page**, not framed: `docs/browser/viewer.js`
+imports Neuroglancer's public API and is the only module that knows anything
+about it. It is still served from our own origin, because Neuroglancer starts
+its Web Workers from those files and a worker cannot be created cross-origin.
+
+Neuroglancer fetches a few assets by URL at run time - its worker bundles and
+the WebAssembly decoders. Missing one shows up only when a user first opens an
+image, so the build refuses to ship a bundle that does not carry every asset
+its code references.
 
 ## Using the browser runtime from Python
 

@@ -27,8 +27,10 @@ self.onmessage = async (event) => {
   try {
     if (type === "boot") {
       await bootRuntime(event.data.config, {
-        log: (message) =>
-          self.postMessage({ type: "log", message, worker: event.data.name }),
+        log: (message, progress) =>
+          self.postMessage({
+            type: "log", message, worker: event.data.name, ...progress,
+          }),
       });
       ready = true;
       post(id, { ok: true });

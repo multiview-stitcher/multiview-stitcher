@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>multiview-stitcher · browser</title>
+    <!-- Neuroglancer's own stylesheet, emitted next to its bundle. The
+         iframe used to carry this; an embedded viewer needs it linked. -->
+    <link
+      rel="stylesheet"
+      href="neuroglancer/neuroglancer.css"
+      id="viewer-stylesheet"
+    />
     <link rel="stylesheet" href="app.css" id="app-stylesheet" />
   </head>
   <body>
@@ -90,12 +97,7 @@
         </section>
       </aside>
 
-      <iframe
-        id="viewer"
-        title="Neuroglancer"
-        src="about:blank"
-        allow="cross-origin-isolated"
-      ></iframe>
+      <div id="viewer" aria-label="Neuroglancer viewer"></div>
     </main>
 
     <script>
@@ -115,11 +117,16 @@
           console.error("[multiview-stitcher] cannot read the build manifest", error);
         }
 
+        document.getElementById("viewer-stylesheet").href =
+          `neuroglancer/neuroglancer.css?v=${build}`;
         document.getElementById("app-stylesheet").href = `app.css?v=${build}`;
 
-        for (const src of ["routes.js", "app.js"]) {
+        // routes.js is a plain script that publishes a global; app.js is a
+        // module because it imports the viewer integration.
+        for (const [src, type] of [["routes.js", ""], ["app.js", "module"]]) {
           await new Promise((resolve, reject) => {
             const element = document.createElement("script");
+            if (type) element.type = type;
             element.src = `${src}?v=${build}`;
             element.onload = resolve;
             element.onerror = () => reject(new Error(`cannot load ${src}`));

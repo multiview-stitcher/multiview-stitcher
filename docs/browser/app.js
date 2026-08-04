@@ -17,6 +17,12 @@
 
 /* global mvsRoutes */
 
+// index.html loads this module as `app.js?v=<build>`; the same tag is passed
+// to viewer.js so the two can never come from different builds.
+const { NeuroglancerViewer } = await import(
+  `./viewer.js${new URL(import.meta.url).search}`
+);
+
 const APP_BASE = new URL(".", window.location.href).pathname;
 const API_BASE = `${APP_BASE}__mvs__`;
 
@@ -24,8 +30,10 @@ const state = {
   config: null,
   session: null, // most recent `describe()` result
   sessionSpec: null, // snapshot compute workers rebuild from
+  position: null, // where the user is looking, reported by the viewer
   previewRoute: null,
   transformKey: null,
+  layerSources: null, // name -> url of what the viewer currently shows
   mounts: [],
 };
 
@@ -103,6 +111,41 @@ function clearProgress() {
   setProgress(null);
 }
 
+/**
+ * How far the Python runtimes have got.
+ *
+ * Booting is the longest wait in the app - tens of seconds, most of it
+ * downloading - and it happens before there is anything else to look at, so
+ * the workers report which step they are on and the bar shows the total.
+ */
+const bootPhases = new Map();
+
+function noteBootPhase(worker, phase, phases) {
+  bootPhases.set(worker, { phase, phases });
+
+  let completed = 0;
+  let total = 0;
+  for (const entry of bootPhases.values()) {
+    completed += entry.phase;
+    total += entry.phases;
+  }
+
+  if (completed >= total) {
+    // Every runtime that has started is up. A pool that grows later starts
+    // its own count rather than reviving this one.
+    bootPhases.clear();
+    clearProgress();
+    return;
+  }
+
+  setProgress({
+    label: "starting Python",
+    unit: "step",
+    completed,
+    total,
+  });
+}
+
 function setBusy(busy) {
   for (const button of document.querySelectorAll("button[data-action]")) {
     // Loading actions stay available while there is no data; the processing
@@ -129,6 +172,9 @@ class WorkerChannel {
       const { id, type } = event.data;
       if (type === "log") {
         log(`${name}: ${event.data.message}`);
+        if (event.data.phase) {
+          noteBootPhase(name, event.data.phase, event.data.phases);
+        }
         return;
       }
       const entry = this.pending.get(id);
@@ -485,6 +531,18 @@ async function handleServiceWorkerMessage(event) {
       if (payload.progress) setProgress(payload.progress);
 
       const results = await pool.dispatch(payload.tasks || [], state.sessionSpec);
+
+      // Python can only report progress when it dispatches, so the last
+      // batch's completion never arrives on its own - and a job that fits in
+      // a single batch would sit at 0% and then disappear. This batch is
+      // finished now, so count it here.
+      if (payload.progress && payload.progress.batch) {
+        setProgress({
+          ...payload.progress,
+          completed: payload.progress.completed + payload.progress.batch,
+        });
+      }
+
       reply({ result: { results } });
       return;
     }
@@ -518,26 +576,81 @@ function fsRequest(message, transfer = []) {
 // Neuroglancer
 // ---------------------------------------------------------------------------
 
-function showViewerState(ngState) {
-  const frame = $("#viewer");
-  const hash = "#!" + encodeURIComponent(JSON.stringify(ngState));
+const viewer = new NeuroglancerViewer();
 
-  if (frame.dataset.loaded === "true") {
+function mountViewer() {
+  if (viewer.mounted) return;
+
+  viewer.mount($("#viewer"));
+
+  // The viewer is the source of truth for where the user is looking; the app
+  // only needs to know when that changes.
+  viewer.onPositionChanged((position) => {
+    state.position = position;
+  });
+}
+
+/** The layers a state describes, as `name -> source url`. */
+function layerSources(ngState) {
+  const sources = {};
+  for (const layer of ngState.layers || []) {
+    const source = layer.source;
+    sources[layer.name] = typeof source === "string" ? source : source.url;
+  }
+  return sources;
+}
+
+function sameLayers(a, b) {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length &&
+    names.every((name) => a[name] === b[name])
+  );
+}
+
+function showViewerState(ngState) {
+  mountViewer();
+
+  const sources = layerSources(ngState);
+
+  // A transform_key switch changes only where each layer sits. Handing the
+  // whole state over would rebuild every layer, taking the user's shader
+  // settings, the selected layer and the chosen layout with it - so when the
+  // layers themselves are unchanged, only their transforms and visibility
+  // are applied.
+  if (state.layerSources && sameLayers(sources, state.layerSources)) {
+    const transforms = {};
+    const visibility = {};
+    for (const layer of ngState.layers || []) {
+      const source = layer.source;
+      transforms[layer.name] =
+        typeof source === "string" ? null : source.transform || null;
+      visibility[layer.name] = layer.visible !== false;
+    }
     try {
-      // Updating the hash keeps the camera; reloading the iframe would not.
-      frame.contentWindow.location.hash = hash;
+      viewer.setLayerTransforms(transforms);
+      viewer.setLayerVisibility(visibility);
       return;
     } catch (error) {
-      log(`could not update the viewer in place: ${error.message}`, "warn");
+      // The viewer's layers are not the ones we last applied - the user can
+      // rename or remove them in Neuroglancer's own UI. Fall back to applying
+      // the whole state rather than leaving a half-updated view.
+      log(`re-applying the full viewer state: ${error.message}`, "warn");
     }
   }
 
-  frame.src = `neuroglancer/index.html${hash}`;
-  frame.dataset.loaded = "true";
+  state.layerSources = sources;
+  // Applied to the running viewer: the camera, the WebGL context and anything
+  // already fetched all survive, so switching transform_key is immediate.
+  viewer.setState(ngState);
 }
 
 async function refreshViewer() {
-  if (!hasViews()) return;
+  if (!hasViews()) {
+    if (viewer.mounted) viewer.setLayers([]);
+    state.layerSources = null;
+    return;
+  }
 
   const ngState = await command("neuroglancer_state", {
     transform_key: state.transformKey,
@@ -881,7 +994,10 @@ async function boot() {
   // bypass the HTTP cache. Without this the runtime silently keeps running
   // yesterday's Python behind today's JavaScript. The same applies to the
   // worker scripts, which `new Worker`/`importScripts` also load from cache.
-  const build = String(manifest.sha256 || "dev").slice(0, 12);
+  // `build` covers the app's own sources as well as the wheel, so a change to
+  // any worker script busts its cache too - index.html versions itself the
+  // same way.
+  const build = String(manifest.build || manifest.sha256 || "dev").slice(0, 12);
   state.build = build;
 
   const config = {
@@ -890,6 +1006,15 @@ async function boot() {
       `packages/${manifest.wheel}?v=${build}`,
       window.location.href,
     ).href,
+    // A lockfile of our own, if the build produced one: it saves every worker
+    // ~10 MB of matplotlib that nothing here imports. Pyodide's own lock is
+    // used when it is absent, so an older deployment still boots.
+    lock_url: manifest.pyodide_lock
+      ? new URL(
+          `packages/${manifest.pyodide_lock}?v=${build}`,
+          window.location.href,
+        ).href
+      : null,
     api_base: API_BASE,
     build,
   };
@@ -916,12 +1041,11 @@ async function boot() {
 
   sessionWorker = new WorkerChannel(`session-worker.js?v=${build}`, "session");
   setStatus("starting the Python runtime", true);
-  const info = (await sessionWorker.send({ type: "boot", config })).result;
-  log(
-    `python ${info.python} · numpy ${info.numpy} · zarr ${info.zarr} · ` +
-      `dask ${info.dask} · multiview-stitcher ${info.multiview_stitcher} · ` +
-      `build ${build}`,
-  );
+  // Not awaited yet. Every worker installs the same ~60 MB runtime, and the
+  // service worker now collapses concurrent requests for a file into one
+  // download, so booting them together costs one download instead of one per
+  // worker - and their unpacking overlaps rather than queueing.
+  const sessionBoot = sessionWorker.send({ type: "boot", config });
 
   const select = $("#worker-count");
   select.innerHTML = "";
@@ -944,6 +1068,13 @@ async function boot() {
   // Boot them now rather than on the first action: a Pyodide runtime takes
   // seconds to start, and there is no reason for the user to wait for it.
   startWorkers();
+
+  const info = (await sessionBoot).result;
+  log(
+    `python ${info.python} · numpy ${info.numpy} · zarr ${info.zarr} · ` +
+      `dask ${info.dask} · multiview-stitcher ${info.multiview_stitcher} · ` +
+      `build ${build}`,
+  );
 
   claimTab();
 

@@ -29,7 +29,8 @@ self.onmessage = async (event) => {
   try {
     if (type === "boot") {
       await bootRuntime(event.data.config, {
-        log: (message) => self.postMessage({ type: "log", message }),
+        log: (message, progress) =>
+          self.postMessage({ type: "log", message, ...progress }),
       });
       ready = true;
       post(id, { ok: true, result: callCommand("info", {}).result });

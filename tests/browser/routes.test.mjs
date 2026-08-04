@@ -124,7 +124,17 @@ test("the wheel URL changes when the wheel does", async () => {
   );
 
   assert.ok(manifest.sha256, "the manifest must carry a wheel checksum");
-  assert.equal(manifest.build, manifest.sha256.slice(0, 12));
+
+  // The build id covers the page's own sources as well as the wheel. A id
+  // derived from the wheel alone would not move when only JavaScript changed,
+  // leaving every such fix hidden behind the cached copy of the very file it
+  // was meant to replace.
+  assert.match(manifest.build, /^[0-9a-f]{12}$/);
+  assert.notEqual(
+    manifest.build,
+    manifest.sha256.slice(0, 12),
+    "the build id should not be the wheel checksum on its own",
+  );
 
   const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
   assert.match(app, /packages\/\$\{manifest\.wheel\}\?v=\$\{build\}/);
@@ -204,4 +214,162 @@ test("dropped folders are claimed before any await", async () => {
   assert.ok(claim > 0, "handles must be claimed from the item list");
   assert.ok(claim < firstAwait, "handles must be claimed before the first await");
   assert.match(handler, /loadDirectories\(directories\)/);
+});
+
+test("Neuroglancer is embedded, not framed", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.doesNotMatch(html, /<iframe/i, "the viewer must not be an iframe");
+  assert.match(html, /<div id="viewer"/);
+  // Its stylesheet came with the iframe before; an embedded viewer needs it.
+  assert.match(html, /neuroglancer\/neuroglancer\.css/);
+
+  // The app drives a mounted viewer rather than a document location.
+  assert.doesNotMatch(app, /contentWindow/);
+  assert.doesNotMatch(app, /neuroglancer\/index\.html/);
+  assert.match(app, /viewer\.setState\(ngState\)/);
+});
+
+test("Neuroglancer-specific code stays in the viewer module", async () => {
+  // The point of the module: upgrading the viewer means reading one file.
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const dir = join(repoRoot, "docs", "browser");
+
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+    if (name === "viewer.js") continue;
+    const source = readFileSync(join(dir, name), "utf8");
+    assert.doesNotMatch(
+      source,
+      /from "\.\/neuroglancer\//,
+      `${name} must not import neuroglancer directly`,
+    );
+  }
+
+  const viewer = readFileSync(join(dir, "viewer.js"), "utf8");
+  assert.match(viewer, /from "\.\/neuroglancer\/neuroglancer\.js"/);
+
+  // Only the public API surface.
+  for (const symbol of ["setupDefaultViewer", "StatusMessage"]) {
+    assert.ok(viewer.includes(symbol), `${symbol} should be imported`);
+  }
+  // The required capabilities are all present.
+  for (const method of [
+    "mount(", "dispose(", "setLayers(", "updateLayers(",
+    "setLayerVisibility(", "getPosition(", "onStateChanged(",
+    "onPositionChanged(",
+  ]) {
+    assert.ok(viewer.includes(method), `viewer.js should expose ${method}`);
+  }
+  assert.match(viewer, /export function withTransform/);
+});
+
+test("applying a state keeps the camera, so updates do not reload", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // restoreState on the live viewer, not a fresh mount.
+  assert.match(viewer, /viewer\.state\.restoreState\(state\)/);
+
+  // The camera survives because `restoreState` only touches the keys it is
+  // given - not because they are copied over. Resetting first would send the
+  // camera to the origin, and nothing brings it back when the layer URLs are
+  // unchanged, which is what made a transform-key switch render nothing.
+  const setState = viewer.slice(
+    viewer.indexOf("setState(state, {"),
+    viewer.indexOf("// Layers"),
+  );
+  assert.ok(
+    /if \(!preserveView\) viewer\.state\.reset\(\)/.test(setState),
+    "the state should only be reset when the caller gives up the view",
+  );
+  assert.equal(
+    (setState.match(/state\.reset\(\)/g) || []).length,
+    1,
+    "setState should not reset the viewer on the default path",
+  );
+});
+
+test("the camera is carried across a rebuilt coordinate space", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // Neuroglancer remaps the camera by dimension index when it rebuilds the
+  // coordinate space from the layers; the viewer has to correct that by name.
+  assert.match(viewer, /coordinateSpace\.changed\.add/);
+  assert.match(viewer, /coordinateSpace\.changed\.remove/);
+  assert.match(viewer, /carryCameraOver/);
+});
+
+test("a transform_key switch patches transforms instead of rebuilding layers", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // Restoring a `layers` array clears the layer list and builds every layer
+  // again, which loses the shader and its contrast range, the selected layer
+  // and the chosen layout. When only the transforms changed, they are applied
+  // to the loaded sources instead.
+  assert.match(app, /setLayerTransforms\(/);
+  assert.match(app, /sameLayers\(/);
+  assert.match(viewer, /setLayerTransforms\(transforms\)/);
+  // The transform of a loaded source is separately watchable.
+  assert.match(viewer, /loadState\.transform\.restoreState/);
+  // A source that has not loaded yet gets the transform when it arrives.
+  assert.match(viewer, /dataSource\.changed\.add/);
+});
+
+test("the Python runtime is fetched once, not once per worker", async () => {
+  const { readFileSync } = await import("node:fs");
+  const sw = readFileSync(join(repoRoot, "docs", "browser", "sw.js"), "utf8");
+
+  // Every worker installs the same ~60 MB runtime and they boot together, so
+  // without a cache and single-flight the same bytes are fetched once per
+  // worker.
+  assert.match(sw, /RUNTIME_CACHE/);
+  assert.match(sw, /inFlight/);
+  assert.match(sw, /caches\.open\(RUNTIME_CACHE\)/);
+  // Cross-origin runtime assets are intercepted; everything else is not.
+  assert.match(sw, /RUNTIME_ASSET\.test\(url\.pathname\)/);
+  assert.match(sw, /url\.origin !== self\.location\.origin/);
+});
+
+test("the shipped pyodide lockfile drops the dependency nothing imports", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const lockPath = join(
+    repoRoot, "docs", "browser", "packages", "pyodide-lock.json",
+  );
+  if (!existsSync(lockPath)) return; // built artifact; absent in a fresh clone
+
+  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+  // Pyodide declares matplotlib a dependency of networkx, which drags ~10 MB
+  // of it and its font stack into every worker for a module nothing calls.
+  assert.ok(lock.packages.networkx, "networkx should be in the lockfile");
+  assert.ok(
+    !lock.packages.networkx.depends.includes("matplotlib"),
+    "matplotlib should not be pulled in via networkx",
+  );
+  // Only the dependency graph is trimmed; packages themselves are untouched.
+  assert.ok(lock.packages.matplotlib, "matplotlib itself should still exist");
+  assert.ok(Object.keys(lock.packages).length > 100);
+});
+
+test("a custom pyodide lockfile is loaded with an explicit package base", async () => {
+  const { readFileSync } = await import("node:fs");
+  const runtime = readFileSync(
+    join(repoRoot, "docs", "browser", "py-runtime.js"), "utf8",
+  );
+
+  // Pyodide defaults `packageBaseUrl` to the directory the lockfile came
+  // from. Ours is served from `packages/`, so without an explicit base every
+  // wheel is looked for there - producing a wall of SRI failures and a
+  // runtime with no micropip, nowhere near the lockfile that caused it.
+  if (runtime.includes("lockFileURL")) {
+    assert.match(
+      runtime,
+      /packageBaseUrl:\s*config\.pyodide_index_url/,
+      "lockFileURL must be accompanied by packageBaseUrl",
+    );
+  }
 });

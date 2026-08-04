@@ -12,25 +12,46 @@
 let pyodide = null;
 let api = null;
 
+//: Boot is slow enough - tens of seconds, most of it downloading - that the
+//: page has to be able to show how far along it is. Reporting the step number
+//: rather than matching on the message keeps the two ends independent.
+const BOOT_PHASES = 4;
+
 /** Load Pyodide, the pinned dependencies and the multiview-stitcher wheel. */
 async function bootRuntime(config, { log = () => {} } = {}) {
   if (api) return api;
 
+  const phase = (message, step) =>
+    log(message, { phase: step, phases: BOOT_PHASES });
+
   importScripts(`${config.pyodide_index_url}pyodide.js`);
 
-  log("booting Python runtime");
+  phase("booting Python runtime", 1);
   pyodide = await loadPyodide({
     indexURL: config.pyodide_index_url,
+    // Our lockfile only differs from Pyodide's in the dependency graph; see
+    // `write_pyodide_lock` in scripts/build_browser_app.py.
+    //
+    // `packageBaseUrl` has to be given with it. Pyodide otherwise defaults it
+    // to the directory the lockfile came from, and would look for every wheel
+    // next to our copy rather than in the distribution - where the files do
+    // not exist, and whose checksums could not match if they did.
+    ...(config.lock_url
+      ? {
+          lockFileURL: config.lock_url,
+          packageBaseUrl: config.pyodide_index_url,
+        }
+      : {}),
     packages: config.pyodide_packages,
   });
 
-  log("installing dependencies");
+  phase("installing dependencies", 2);
   await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${JSON.stringify(config.browser_dependencies)})
 `);
 
-  log("installing multiview-stitcher");
+  phase("installing multiview-stitcher", 3);
   await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(${JSON.stringify(config.wheel_url)}, deps=False)
@@ -47,7 +68,7 @@ set_bridge(XHRBridge(base_url=${JSON.stringify(config.api_base)}))
   const worker = pyodide.pyimport("multiview_stitcher.browser.worker");
   api = { pyodide, worker };
 
-  log("ready");
+  phase("ready", 4);
   return api;
 }
 

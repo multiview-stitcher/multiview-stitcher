@@ -58,10 +58,17 @@ class Bridge:
             payload = {"tasks": batch}
 
             if progress:
+                batch_units = sum(units[start : start + size])
                 payload["progress"] = {
                     **progress,
                     "completed": done,
                     "total": sum(units),
+                    # What this batch is worth. Progress can only travel with
+                    # a dispatch, so the last batch's completion would never
+                    # be reported: the page adds this on when the batch
+                    # resolves. Without it a job small enough to fit in one
+                    # batch shows 0% for its whole duration and then vanishes.
+                    "batch": batch_units,
                 }
 
             response = self.call("dispatch", payload)
