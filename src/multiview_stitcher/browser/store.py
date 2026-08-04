@@ -53,32 +53,75 @@ def _urllib_fetch(url):
         raise FetchError(f"{exc.reason} for {url}") from exc
 
 
+#: A synchronous request can fail outright (status 0) when the service worker
+#: that answers it is restarted, which browsers do routinely under load. That
+#: is transient, so retry before giving up.
+_XHR_RETRIES = 3
+
+
+def _xhr_error_detail(request):  # pragma: no cover - requires a browser worker
+    """Best-effort error text from a finished XHR.
+
+    ``responseText`` may only be read when ``responseType`` is '' or 'text';
+    reading it on an arraybuffer request raises, which would replace the real
+    error with a confusing one.
+    """
+    try:
+        if request.responseType in ("", "text"):
+            return str(request.responseText)[:200]
+
+        import js
+
+        response = request.response
+        if response is None:
+            return ""
+        return (
+            js.Uint8Array.new(response)
+            .to_bytes()[:200]
+            .decode("utf-8", "replace")
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never mask the error
+        return ""
+
+
 def _xhr_fetch(url):  # pragma: no cover - requires a browser worker
     import js
 
-    request = js.XMLHttpRequest.new()
-    # Synchronous: only legal off the main thread, which is exactly where the
-    # Python runtime lives.
-    request.open("GET", url, False)
-    request.responseType = "arraybuffer"
-    request.send(None)
+    for attempt in range(_XHR_RETRIES):
+        request = js.XMLHttpRequest.new()
+        # Synchronous: only legal off the main thread, which is exactly where
+        # the Python runtime lives.
+        request.open("GET", url, False)
+        request.responseType = "arraybuffer"
+        try:
+            request.send(None)
+        except Exception as exc:  # noqa: BLE001 - retried below
+            if attempt + 1 == _XHR_RETRIES:
+                raise FetchError(f"network error for {url}: {exc}") from exc
+            continue
 
-    if request.status in (404, 403, 410):
-        # Genuinely absent: zarr reads an uninitialised chunk as its fill
-        # value, which is the correct behaviour for a sparse array.
-        return None
-    if request.status >= 400 or request.status == 0:
-        # Anything else is a broken request path, and must not be mistaken for
-        # an empty chunk.
-        raise FetchError(
-            f"{request.status or 'network error'} for {url}: "
-            f"{request.responseText[:200]}"
-        )
+        if request.status in (404, 403, 410):
+            # Genuinely absent: zarr reads an uninitialised chunk as its fill
+            # value, which is the correct behaviour for a sparse array.
+            return None
 
-    response = request.response
-    if response is None:
-        return b""
-    return js.Uint8Array.new(response).to_bytes()
+        if request.status == 0 and attempt + 1 < _XHR_RETRIES:
+            continue
+
+        if request.status >= 400 or request.status == 0:
+            # Anything else is a broken request path, and must not be mistaken
+            # for an empty chunk.
+            raise FetchError(
+                f"{request.status or 'network error'} for {url}: "
+                f"{_xhr_error_detail(request)}"
+            )
+
+        response = request.response
+        if response is None:
+            return b""
+        return js.Uint8Array.new(response).to_bytes()
+
+    raise FetchError(f"network error for {url}")
 
 
 def _urllib_write(url, data):
@@ -105,6 +148,8 @@ def _xhr_write(url, data):  # pragma: no cover - requires a browser worker
 
     request = js.XMLHttpRequest.new()
     request.open("DELETE" if data is None else "PUT", url, False)
+    # Left as text so that an error body can be read back; see
+    # `_xhr_error_detail`.
 
     if data is None:
         request.send(None)
@@ -118,7 +163,7 @@ def _xhr_write(url, data):  # pragma: no cover - requires a browser worker
     if request.status >= 400 or request.status == 0:
         raise FetchError(
             f"{request.status or 'network error'} writing {url}: "
-            f"{request.responseText[:200]}"
+            f"{_xhr_error_detail(request)}"
         )
 
 

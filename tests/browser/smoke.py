@@ -332,7 +332,7 @@ def main():
     check(
         "parallel_write_produced_every_level",
         len(written_levels) == len(plan["levels"]),
-        f"{written_levels} vs {[l['path'] for l in plan['levels']]}",
+        f"{written_levels} vs {[lvl['path'] for lvl in plan['levels']]}",
     )
 
     level_maxima = [

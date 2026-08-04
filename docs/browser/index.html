@@ -17,6 +17,10 @@
         inactive &mdash; another tab took over
       </span>
       <span id="status">starting&hellip;</span>
+      <div id="progress" hidden>
+        <div class="track"><div id="progress-bar"></div></div>
+        <span id="progress-label"></span>
+      </div>
     </header>
 
     <main>
@@ -26,8 +30,9 @@
           <div id="dropzone" class="disabled">
             <p>Drop a folder here</p>
             <p class="hint">
-              either one OME-Zarr, or a folder holding several of them (the
-              tiles). Dropping more adds to the loaded views.
+              one OME-Zarr, or a folder holding several of them. Drop
+              several folders at once and each must be a single OME-Zarr.
+              Dropping more adds to the loaded views.
             </p>
             <button id="browse" type="button" data-load>Browse&hellip;</button>
           </div>

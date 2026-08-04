@@ -20,9 +20,8 @@ options, so the block grids agree by construction.
 
 import numpy as np
 
-from multiview_stitcher import _ngff_meta
+from multiview_stitcher import _ngff_meta, msi_utils, ngff_utils
 from multiview_stitcher import fusion as core_fusion
-from multiview_stitcher import msi_utils, ngff_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import store as browser_store
 

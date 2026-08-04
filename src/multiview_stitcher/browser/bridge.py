@@ -29,27 +29,62 @@ class Bridge:
     def call(self, endpoint, payload):
         raise NotImplementedError
 
-    def dispatch(self, tasks):
+    def dispatch(self, tasks, batch_size=None, progress=None):
         """Run ``tasks`` on the worker pool and return their results in order.
+
+        Work is sent in batches rather than as one request. A request is held
+        open for as long as its batch runs, and a browser will terminate a
+        service worker whose event outlives its budget - so one request
+        covering a whole fusion is eventually killed mid-flight. Batching
+        keeps each request to roughly one pass over the pool.
+
+        ``progress`` names the job and the unit of work being counted; each
+        batch carries how much of it is finished, which is what lets the page
+        show progress for work that is otherwise one blocking call.
 
         Raises :class:`TaskError` if any task failed.
         """
-        response = self.call("dispatch", {"tasks": list(tasks)})
-        results = response.get("results", [])
+        tasks = list(tasks)
+        if not tasks:
+            return []
 
-        if len(results) != len(tasks):
-            raise TaskError(
-                f"worker pool returned {len(results)} results for "
-                f"{len(tasks)} tasks"
-            )
+        size = max(1, int(batch_size or len(tasks)))
+        results = []
+        units = [int(task.get("units", 1)) for task in tasks]
+        done = 0
 
-        errors = [
-            result["error"]
-            for result in results
-            if isinstance(result, dict) and result.get("error")
-        ]
-        if errors:
-            raise TaskError(errors[0] if len(errors) == 1 else str(errors))
+        for start in range(0, len(tasks), size):
+            batch = tasks[start : start + size]
+            payload = {"tasks": batch}
+
+            if progress:
+                payload["progress"] = {
+                    **progress,
+                    "completed": done,
+                    "total": sum(units),
+                }
+
+            response = self.call("dispatch", payload)
+            batch_results = response.get("results", [])
+
+            if len(batch_results) != len(batch):
+                raise TaskError(
+                    f"worker pool returned {len(batch_results)} results for "
+                    f"{len(batch)} tasks"
+                )
+
+            errors = [
+                result["error"]
+                for result in batch_results
+                if isinstance(result, dict) and result.get("error")
+            ]
+            if errors:
+                raise TaskError(
+                    errors[0] if len(errors) == 1 else str(errors)
+                )
+
+            results += batch_results
+            done += sum(units[start : start + size])
 
         return results
 

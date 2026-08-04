@@ -119,11 +119,16 @@ class RemotePairwiseExecutor:
                 "edges": [[int(a), int(b)] for a, b in group],
                 "register_kwargs": options,
                 "reg_channel": reg_channel,
+                "units": len(group),
             }
             for group in groups
         ]
 
-        results = self.bridge.dispatch(tasks)
+        results = self.bridge.dispatch(
+            tasks,
+            batch_size=max(1, self.max_pairs_per_task * 4),
+            progress={"label": "registering", "unit": "pair"},
+        )
 
         pairwise = []
         for result in results:
@@ -143,6 +148,11 @@ class RemotePairwiseExecutor:
 
 class RemoteFusionExecutor:
     """Fuse the blocks of a Zarr output across the worker pool."""
+
+    #: Blocks per task. Small tasks keep each dispatch request short, which
+    #: matters because a service worker is killed if one of its events runs
+    #: too long - and a whole fusion easily does.
+    blocks_per_task = 4
 
     def __init__(self, session_spec, bridge=None, n_workers=None):
         self.session_spec = session_spec
@@ -175,16 +185,26 @@ class RemoteFusionExecutor:
 
         tasks = []
         for level in levels:
-            for group in split_evenly(level["block_ids"], self.n_workers):
+            ids = list(level["block_ids"])
+            for start in range(0, len(ids), self.blocks_per_task):
                 tasks.append(
                     {
                         "kind": "fuse_blocks",
                         "session": spec,
                         "options": options_payload,
                         "level": level["level"],
-                        "block_ids": group,
+                        "block_ids": ids[start : start + self.blocks_per_task],
+                        # Progress counts blocks, not tasks, so a bar advances
+                        # evenly regardless of how work is grouped.
+                        "units": len(ids[start : start + self.blocks_per_task]),
                     }
                 )
 
-        results = self.bridge.dispatch(tasks)
+        # One batch per pass over the pool: every worker stays busy, and no
+        # single request outlives what a service worker is allowed to run.
+        results = self.bridge.dispatch(
+            tasks,
+            batch_size=self.n_workers,
+            progress={"label": "fusing", "unit": "block"},
+        )
         return sum(int(result.get("n_blocks", 0)) for result in results)

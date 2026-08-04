@@ -172,3 +172,36 @@ test("the page loads its own scripts at the build version", async () => {
     assert.ok(html.includes(`"${src}"`), `${src} must be loaded by the bootstrap`);
   }
 });
+
+test("the page starts its workers eagerly and without blocking", async () => {
+  // Booting a Pyodide runtime takes seconds; doing it on the first action
+  // makes the whole UI wait for something it already knew it would need.
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(app, /function startWorkers\(\)/);
+  // Fired at start-up and on every change of the worker count.
+  assert.match(app, /select\.addEventListener\("change", \(\) => \{[\s\S]*?startWorkers\(\);/);
+  // Not awaited: the promise is only observed to report failure.
+  assert.match(app, /pool\s*\n?\s*\.resize\(requested, state\.runtimeConfig\)\s*\n?\s*\.catch\(/);
+  // Work still waits for a pool that is still coming up.
+  assert.match(app, /await pool\.ready\(\)/);
+});
+
+test("dropped folders are claimed before any await", async () => {
+  // A DataTransferItemList is only valid during the event; reading it after a
+  // yield returns nothing, so every handle must be claimed synchronously.
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  const handler = app.slice(
+    app.indexOf('dropzone.addEventListener("drop"'),
+    app.indexOf("$(\"#browse\").addEventListener"),
+  );
+
+  const claim = handler.indexOf("items.map((item) => item.getAsFileSystemHandle())");
+  const firstAwait = handler.indexOf("await ");
+  assert.ok(claim > 0, "handles must be claimed from the item list");
+  assert.ok(claim < firstAwait, "handles must be claimed before the first await");
+  assert.match(handler, /loadDirectories\(directories\)/);
+});

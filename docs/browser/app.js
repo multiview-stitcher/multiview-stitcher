@@ -75,6 +75,34 @@ function hasViews() {
   return Boolean(state.session && state.session.n_views);
 }
 
+/**
+ * Show how far a long job has got.
+ *
+ * The work runs inside one blocking call in the session worker, so the page
+ * cannot observe it directly. It learns instead from each batch of tasks the
+ * pool is handed, which is why work is dispatched in batches at all.
+ */
+function setProgress(progress) {
+  const container = $("#progress");
+  if (!progress || !progress.total) {
+    container.hidden = true;
+    $("#progress-bar").style.width = "0";
+    return;
+  }
+
+  const { label, unit, completed, total } = progress;
+  const fraction = Math.max(0, Math.min(1, completed / total));
+
+  container.hidden = false;
+  $("#progress-bar").style.width = `${(fraction * 100).toFixed(1)}%`;
+  $("#progress-label").textContent =
+    `${label} ${completed}/${total} ${unit}${total === 1 ? "" : "s"}`;
+}
+
+function clearProgress() {
+  setProgress(null);
+}
+
 function setBusy(busy) {
   for (const button of document.querySelectorAll("button[data-action]")) {
     // Loading actions stay available while there is no data; the processing
@@ -132,14 +160,33 @@ class ComputePool {
   constructor() {
     this.workers = [];
     this.queue = [];
+    this.pending = null;
   }
 
   get size() {
     return this.workers.length;
   }
 
-  /** Grow or shrink the pool to `count` booted workers. */
-  async resize(count, config) {
+  /**
+   * Grow or shrink the pool to `count` booted workers.
+   *
+   * Resizes are serialised through `this.pending` so that starting workers in
+   * the background cannot race a later change of mind; callers that need a
+   * ready pool await `ready()` instead of resizing again.
+   */
+  resize(count, config) {
+    this.pending = Promise.resolve(this.pending)
+      .catch(() => {})
+      .then(() => this._resize(count, config));
+    return this.pending;
+  }
+
+  /** Resolves once any in-flight resize has finished. */
+  async ready() {
+    await Promise.resolve(this.pending).catch(() => {});
+  }
+
+  async _resize(count, config) {
     while (this.workers.length > count) {
       this.workers.pop().worker.terminate();
     }
@@ -169,6 +216,7 @@ class ComputePool {
     if (booting.length) {
       log(`starting ${booting.length} compute worker(s)`);
       await Promise.all(booting);
+      log(`${this.workers.length} compute worker(s) ready`);
     }
   }
 
@@ -434,6 +482,8 @@ async function handleServiceWorkerMessage(event) {
       if (event.data.endpoint !== "dispatch") {
         throw new Error(`unknown rpc endpoint '${event.data.endpoint}'`);
       }
+      if (payload.progress) setProgress(payload.progress);
+
       const results = await pool.dispatch(payload.tasks || [], state.sessionSpec);
       reply({ result: { results } });
       return;
@@ -610,7 +660,8 @@ async function applyDescribed(described) {
 // Actions
 // ---------------------------------------------------------------------------
 
-async function loadDirectory(handle) {
+/** Mount one folder and describe the OME-Zarr images it holds. */
+async function collectSources(handle, requireSingleImage) {
   // The fs worker returns the existing mount when this folder is already
   // known, so re-dropping it addresses the same URLs instead of duplicating.
   const response = await fsRequest({
@@ -624,20 +675,48 @@ async function loadDirectory(handle) {
   const { images } = await fsRequest({ type: "discover", mount });
   if (!images.length) {
     throw new Error(
-      "no OME-Zarr found - drop either an OME-Zarr directory or a folder containing several of them",
+      requireSingleImage
+        ? `'${handle.name}' is not an OME-Zarr; when several folders are ` +
+          "dropped at once each one must be a single OME-Zarr"
+        : "no OME-Zarr found - drop either an OME-Zarr directory or a " +
+          "folder containing several of them",
     );
   }
 
-  const sources = images.map((image) => ({
+  if (requireSingleImage && !(images.length === 1 && images[0].path === "")) {
+    throw new Error(
+      `'${handle.name}' holds ${images.length} image(s); when several ` +
+        "folders are dropped at once each one must itself be an OME-Zarr",
+    );
+  }
+
+  return images.map((image) => ({
     url: `${API_BASE}/fs/${mount}${image.path ? "/" + image.path : ""}`,
     name: image.name,
   }));
+}
+
+/**
+ * Open one or more dropped folders.
+ *
+ * A single folder may be an OME-Zarr or a directory holding several of them.
+ * When more than one is dropped the intent is unambiguous - each is one
+ * image - so anything else is reported rather than guessed at.
+ */
+async function loadDirectories(handles) {
+  const requireSingleImage = handles.length > 1;
+
+  const sources = [];
+  for (const handle of handles) {
+    sources.push(...(await collectSources(handle, requireSingleImage)));
+  }
 
   // Dropping more data adds tiles to the session instead of replacing it, so
   // a dataset can be assembled from several folders. "Clear" starts over.
   const append = Boolean(state.session && state.session.n_views);
   log(
-    `found ${sources.length} OME-Zarr image(s); ` +
+    `found ${sources.length} OME-Zarr image(s) in ${handles.length} ` +
+      `folder(s); ` +
       (append ? "adding to the loaded views" : "opening"),
   );
   setStatus("opening images", true);
@@ -705,6 +784,7 @@ async function doRegister() {
     await refreshViewer();
     setStatus("registered");
   } finally {
+    clearProgress();
     setBusy(false);
   }
 }
@@ -727,6 +807,7 @@ async function doFusePreview() {
     log(`fused preview ready (${shape}); chunks are computed on demand`);
     setStatus("fused preview added to the viewer");
   } finally {
+    clearProgress();
     setBusy(false);
   }
 }
@@ -776,6 +857,7 @@ async function doFuseToDisk() {
     );
     setStatus("fused image written to disk");
   } finally {
+    clearProgress();
     setBusy(false);
   }
 }
@@ -854,6 +936,14 @@ async function boot() {
     Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
   );
   select.value = String(Math.min(suggested, state.config.default_n_workers));
+  select.addEventListener("change", () => {
+    log(`compute workers: ${select.value}`);
+    startWorkers();
+  });
+
+  // Boot them now rather than on the first action: a Pyodide runtime takes
+  // seconds to start, and there is no reason for the user to wait for it.
+  startWorkers();
 
   claimTab();
 
@@ -881,19 +971,34 @@ function wireUi() {
     event.preventDefault();
     dropzone.classList.remove("dragging");
 
-    const item = event.dataTransfer.items[0];
-    if (!item || !item.getAsFileSystemHandle) {
+    const items = Array.from(event.dataTransfer.items || []);
+    if (!items.length || !items[0].getAsFileSystemHandle) {
       log("this browser cannot read dropped folders; use the browse button", "error");
       return;
     }
 
+    // Claim every handle before awaiting anything: a DataTransferItemList is
+    // only valid for the duration of the event, so reading it after a yield
+    // returns nothing.
+    const claimed = items.map((item) => item.getAsFileSystemHandle());
+
     try {
-      const handle = await item.getAsFileSystemHandle();
-      if (handle.kind !== "directory") {
-        log("drop a folder, not a single file", "error");
+      const handles = (await Promise.all(claimed)).filter(Boolean);
+      const directories = handles.filter((handle) => handle.kind === "directory");
+
+      if (!directories.length) {
+        log("drop one or more folders, not single files", "error");
         return;
       }
-      await withPool(() => loadDirectory(handle));
+      if (directories.length < handles.length) {
+        log(
+          `ignoring ${handles.length - directories.length} dropped file(s); ` +
+            "only folders are read",
+          "warn",
+        );
+      }
+
+      await withPool(() => loadDirectories(directories));
     } catch (error) {
       log(error.message, "error");
       setStatus(
@@ -907,7 +1012,7 @@ function wireUi() {
   $("#browse").addEventListener("click", async () => {
     try {
       const handle = await window.showDirectoryPicker({ mode: "read" });
-      await withPool(() => loadDirectory(handle));
+      await withPool(() => loadDirectories([handle]));
     } catch (error) {
       if (error.name === "AbortError") return;
       log(error.message, "error");
@@ -960,13 +1065,31 @@ function wireUi() {
   }
 }
 
+/**
+ * Start the workers the current selection asks for, without blocking.
+ *
+ * Booting a Pyodide runtime takes seconds, so it happens as soon as the count
+ * is known - at start-up, and whenever it changes - rather than on the first
+ * action. Nothing awaits it here; the UI stays responsive and `withPool` only
+ * waits if work arrives before the pool is up.
+ */
+function startWorkers() {
+  const requested = Number($("#worker-count").value);
+  if (!state.runtimeConfig || requested === pool.size) return;
+
+  pool
+    .resize(requested, state.runtimeConfig)
+    .catch((error) => log(`could not start workers: ${error.message}`, "error"));
+}
+
 /** Make sure the compute pool matches the current selection, then act. */
 async function withPool(action) {
   const requested = Number($("#worker-count").value);
   if (requested !== pool.size) {
     setStatus("starting compute workers", true);
-    await pool.resize(requested, state.runtimeConfig);
+    startWorkers();
   }
+  await pool.ready();
   return await action();
 }
 
