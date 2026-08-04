@@ -1,10 +1,17 @@
 /**
  * Owns the File System Access API handles for directories the user granted.
  *
- * Reads happen here rather than on the page so that the main thread stays free
- * while Python workers block on synchronous requests for chunks. Directory
- * handles are structured-cloneable, so the page transfers them here once and
- * never touches file contents itself.
+ * Reads and writes happen here rather than on the page so that the main thread
+ * stays free while Python workers block on synchronous requests. Directory
+ * handles are structured-cloneable, so the page hands them over once and never
+ * touches file contents itself.
+ *
+ * Writing one zarr chunk means creating one file, writing it and closing it,
+ * which commits it on its own. Distinct files can therefore be written
+ * concurrently by any number of Python workers sharing this one directory
+ * handle - there is no flush step to coordinate. Two workers must never write
+ * the *same* file, which the fusion planner guarantees by giving each of them
+ * a disjoint set of blocks.
  */
 
 /** mount id -> { handle, dirCache } */
@@ -48,6 +55,53 @@ async function findMount(handle) {
     }
   }
   return null;
+}
+
+async function writeFile(id, path, data) {
+  const mount = mountFor(id);
+  const segments = path.split("/").filter(Boolean);
+  if (!segments.length) throw new Error("cannot write the mount root");
+
+  const name = segments.pop();
+
+  // Create intermediate directories as needed. Concurrent creation of the
+  // same directory is safe: getDirectoryHandle({create:true}) resolves to the
+  // existing one rather than failing.
+  let directory = mount.handle;
+  for (const segment of segments) {
+    directory = await directory.getDirectoryHandle(segment, { create: true });
+  }
+
+  const fileHandle = await directory.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.write(data);
+  } finally {
+    // close() is what commits the file.
+    await writable.close();
+  }
+}
+
+async function removeEntry(id, path) {
+  const mount = mountFor(id);
+  const segments = path.split("/").filter(Boolean);
+  if (!segments.length) throw new Error("cannot remove the mount root");
+
+  const name = segments.pop();
+
+  let directory = mount.handle;
+  try {
+    for (const segment of segments) {
+      directory = await directory.getDirectoryHandle(segment);
+    }
+    await directory.removeEntry(name, { recursive: true });
+  } catch (error) {
+    // Removing something that is not there is the desired end state anyway.
+    if (!error || error.name !== "NotFoundError") throw error;
+  }
+
+  // Paths below the removed entry may be cached.
+  mount.dirCache.clear();
 }
 
 async function readFile(id, path) {
@@ -154,6 +208,18 @@ self.onmessage = async (event) => {
       } else {
         reply({ found: true, data }, [data]);
       }
+      return;
+    }
+
+    if (type === "write") {
+      await writeFile(event.data.mount, event.data.path, event.data.data);
+      reply({ ok: true });
+      return;
+    }
+
+    if (type === "remove") {
+      await removeEntry(event.data.mount, event.data.path);
+      reply({ ok: true });
       return;
     }
 

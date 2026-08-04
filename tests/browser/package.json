@@ -7,6 +7,6 @@
     "smoke": "node smoke.mjs"
   },
   "dependencies": {
-    "pyodide": "0.28.3"
+    "pyodide": "0.29.4"
   }
 }

@@ -1106,6 +1106,21 @@ def read_ngff_multiscales(zarr_path):
     )
 
 
+def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
+    """Keyword arguments for creating the zarr group of an NGFF version.
+
+    NGFF v0.4 is a Zarr v2 hierarchy and v0.5 a Zarr v3 one; under zarr-python
+    v2 there is nothing to choose.
+    """
+    if str(ngff_version).startswith("0.4"):
+        if zarr.__version__ >= "3":
+            return {"zarr_format": 2}
+        return {}
+    if str(ngff_version).startswith("0.5"):
+        return {"zarr_format": 3}
+    raise ValueError(f"ngff_version {ngff_version} not supported")
+
+
 def update_zarr_array_creation_kwargs_for_ngff_version(
     ngff_version, zarr_array_creation_kwargs):
 
@@ -1470,18 +1485,9 @@ def write_sim_to_ome_zarr(
         update_zarr_array_creation_kwargs_for_ngff_version(
             ngff_version, zarr_array_creation_kwargs)
 
-    zarr_group_creation_kwargs = {}
-    if ngff_version == "0.4":
-        if zarr.__version__ >= "3":
-            zarr_group_creation_kwargs = {
-                "zarr_format": 2,
-            }
-    elif ngff_version == "0.5":
-        zarr_group_creation_kwargs = {
-            "zarr_format": 3,
-        }
-    else:
-        raise ValueError(f"ngff_version {ngff_version} not supported")
+    zarr_group_creation_kwargs = zarr_group_creation_kwargs_for_ngff_version(
+        ngff_version
+    )
 
     dims = sim.dims
     nsdims = si_utils.get_nonspatial_dims_from_sim(sim)

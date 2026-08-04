@@ -51,34 +51,6 @@ self.onmessage = async (event) => {
       return;
     }
 
-    // Fusing to disk needs a writable filesystem. The chosen output directory
-    // is mounted into this worker's Emscripten filesystem, so Python writes
-    // ordinary paths; `sync_output` flushes them back to the real directory.
-    // Only this worker mounts it, which keeps the writes serialised - unlike
-    // reads, concurrent mounts of one directory are not safe to reconcile.
-    if (type === "mount_output") {
-      if (outputMount) {
-        await outputMount.syncfs();
-        pyodide.FS.unmount(OUTPUT_PATH);
-        outputMount = null;
-      }
-      try {
-        pyodide.FS.mkdirTree(OUTPUT_PATH);
-      } catch (error) {
-        /* already exists */
-      }
-      outputMount = await pyodide.mountNativeFS(OUTPUT_PATH, event.data.handle);
-      post(id, { ok: true });
-      return;
-    }
-
-    if (type === "sync_output") {
-      if (!outputMount) throw new Error("no output directory is mounted");
-      await outputMount.syncfs();
-      post(id, { ok: true });
-      return;
-    }
-
     throw new Error(`unknown session-worker message '${type}'`);
   } catch (error) {
     post(id, { error: String((error && error.message) || error) });

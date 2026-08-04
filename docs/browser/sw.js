@@ -7,6 +7,8 @@
  *
  *   GET  <base>/__mvs__/fs/<mount>/<path>     -> a read from a local directory
  *                                               the user granted access to
+ *   PUT/DELETE  same                          -> a write to, or removal from,
+ *                                               that directory
  *   GET  <base>/__mvs__/zarr/<route>/<key>    -> a chunk computed in Python
  *   POST <base>/__mvs__/rpc/<endpoint>        -> work farmed out to the pool
  *
@@ -137,6 +139,23 @@ function serverError(error) {
 async function handleFile(path, request) {
   const parsed = mvsRoutes.parseFilePath(path);
   if (!parsed) return notFound("missing mount id");
+
+  if (request.method === "PUT" || request.method === "DELETE") {
+    // One request writes or removes exactly one file, so many can be in
+    // flight at once as long as they name different files.
+    const body =
+      request.method === "PUT" ? await request.arrayBuffer() : null;
+    await askPage(
+      {
+        type: "fs.write",
+        mount: parsed.mount,
+        path: parsed.path,
+        data: body,
+      },
+      FILE_TIMEOUT_MS,
+    );
+    return new Response(null, { status: 204, headers: NO_STORE });
+  }
 
   const response = await askPage({
     type: "fs.read",

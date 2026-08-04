@@ -341,7 +341,7 @@ def test_preview_is_lazy(tiles_on_disk):
     assert hasattr(virtual_zarr.sims[0].data, "compute")
 
 
-def test_fuse_to_ome_zarr_on_disk(tiles_on_disk, tmp_path):
+def test_fuse_to_ome_zarr_writes_every_level(tiles_on_disk, tmp_path):
     session = Session()
     session.load(tiles_on_disk)
     session.register(RegistrationOptions(new_transform_key="registered"))
@@ -352,58 +352,80 @@ def test_fuse_to_ome_zarr_on_disk(tiles_on_disk, tmp_path):
     )
 
     plan = session.fusion_plan(options)
-    assert plan["block_ids"]
-    session.fuse_blocks(plan["options"], plan["block_ids"])
-    session.finalize_fusion(
-        plan["options"], plan["output_stack_properties"]
-    )
+    assert len(plan["levels"]) > 1, "a pyramid is what makes this worth testing"
+
+    for level in plan["levels"]:
+        session.fuse_blocks(
+            plan["options"], level["level"], level["block_ids"]
+        )
+    session.finalize_fusion(plan["options"])
 
     fused = ngff_utils.read_msim_from_ome_zarr(output_url)
-    fused_sim = msi_utils.get_sim_from_msim(fused)
-    expected_shape = plan["output_stack_properties"]["shape"]
-    for dim, size in expected_shape.items():
-        assert fused_sim.sizes[dim] == size
-    assert float(np.asarray(fused_sim.data).max()) > 0
+    scale_keys = msi_utils.get_sorted_scale_keys(fused)
+    assert len(scale_keys) == len(plan["levels"])
+
+    # Every level must hold data, not just the first.
+    for scale_key in scale_keys:
+        level_sim = msi_utils.get_sim_from_msim(fused, scale=scale_key)
+        assert float(np.asarray(level_sim.data).max()) > 0
 
 
-def test_fuse_blocks_split_over_pool_matches_single_worker(
-    tiles_on_disk, tmp_path
-):
-    """Blocks fused by several workers into one store match a single writer."""
-    reference_url = str(tmp_path / "reference.ome.zarr")
-    split_url = str(tmp_path / "split.ome.zarr")
+def test_parallel_block_writes_match_sequential(tiles_on_disk, tmp_path):
+    """Concurrent workers writing one output directory agree with one worker.
 
-    def run(output_url, n_parts):
+    Each block is a distinct chunk file, which is what makes this safe; if
+    that ever stopped holding, the two outputs would differ.
+    """
+    reference_url = str(tmp_path / "sequential.ome.zarr")
+    parallel_url = str(tmp_path / "parallel.ome.zarr")
+
+    def build(output_url, n_workers):
         session = Session()
         session.load(tiles_on_disk)
         options = FusionOptions(output_zarr_url=output_url)
         plan = session.fusion_plan(options)
 
-        from multiview_stitcher.browser.executors import split_evenly
+        if n_workers == 1:
+            for level in plan["levels"]:
+                session.fuse_blocks(
+                    plan["options"], level["level"], level["block_ids"]
+                )
+        else:
+            from multiview_stitcher.browser import executors
 
-        for group in split_evenly(plan["block_ids"], n_parts):
-            # Each group stands in for one worker attaching to the store
-            # created by fusion_plan().
-            worker_session = Session.from_spec(session.spec())
-            worker_session.fuse_blocks(plan["options"], group)
+            worker = WorkerRuntime()
+            executor = executors.RemoteFusionExecutor(
+                session.spec(),
+                bridge=_pool_bridge(worker, max_workers=n_workers),
+                n_workers=n_workers,
+            )
+            written = executor(plan["options"], plan["levels"])
+            assert written == plan["n_blocks"]
 
-        session.finalize_fusion(
-            plan["options"], plan["output_stack_properties"]
+        session.finalize_fusion(plan["options"])
+        return plan
+
+    plan = build(reference_url, 1)
+    build(parallel_url, 4)
+
+    reference = ngff_utils.read_msim_from_ome_zarr(reference_url)
+    parallel = ngff_utils.read_msim_from_ome_zarr(parallel_url)
+
+    assert msi_utils.get_sorted_scale_keys(
+        reference
+    ) == msi_utils.get_sorted_scale_keys(parallel)
+
+    for scale_key in msi_utils.get_sorted_scale_keys(reference):
+        np.testing.assert_array_equal(
+            np.asarray(
+                msi_utils.get_sim_from_msim(reference, scale=scale_key).data
+            ),
+            np.asarray(
+                msi_utils.get_sim_from_msim(parallel, scale=scale_key).data
+            ),
         )
-        return output_url
 
-    run(reference_url, 1)
-    run(split_url, 3)
-
-    reference = msi_utils.get_sim_from_msim(
-        ngff_utils.read_msim_from_ome_zarr(reference_url)
-    )
-    split = msi_utils.get_sim_from_msim(
-        ngff_utils.read_msim_from_ome_zarr(split_url)
-    )
-    np.testing.assert_array_equal(
-        np.asarray(reference.data), np.asarray(split.data)
-    )
+    assert plan["n_blocks"] > 1
 
 
 # ---------------------------------------------------------------------------
@@ -1349,3 +1371,49 @@ def test_unusable_spec_falls_back_to_the_local_session(tiles_on_disk):
         assert b"empty spec" in body
     finally:
         worker_module._runtime = None
+
+
+def test_fusion_writes_through_the_service_worker_store(tiles_on_disk, tmp_path):
+    """Fusing to disk through the write path the browser actually uses.
+
+    In the browser the output directory is reached over HTTP - a PUT per chunk
+    file - rather than as a filesystem path. Exercising that store here is
+    what makes the parallel write path testable at all.
+    """
+    from multiview_stitcher.browser import store as browser_store
+
+    output = tmp_path / "written"
+    output.mkdir()
+
+    fetch = browser_store.directory_fetch(output)
+    write = browser_store.directory_write(output)
+
+    session = Session(fetch=fetch, write=write)
+    session.load(tiles_on_disk)
+
+    options = FusionOptions(output_zarr_url="/__mvs__/fs/out/fused.ome.zarr")
+    plan = session.fusion_plan(options)
+
+    for level in plan["levels"]:
+        session.fuse_blocks(plan["options"], level["level"], level["block_ids"])
+    session.finalize_fusion(plan["options"])
+
+    # Read it back off the real filesystem: the store wrote genuine files.
+    written_root = output / "__mvs__" / "fs" / "out" / "fused.ome.zarr"
+    assert (written_root / ".zattrs").is_file()
+
+    fused = ngff_utils.read_msim_from_ome_zarr(str(written_root))
+    assert len(msi_utils.get_sorted_scale_keys(fused)) == len(plan["levels"])
+    assert float(
+        np.asarray(msi_utils.get_sim_from_msim(fused).data).max()
+    ) > 0
+
+
+def test_read_only_store_refuses_writes(tmp_path):
+    from multiview_stitcher.browser import store as browser_store
+
+    store = browser_store.open_http_store(
+        "/x", fetch=browser_store.directory_fetch(tmp_path)
+    )
+    with pytest.raises(NotImplementedError, match="read-only"):
+        store.write_key(".zattrs", b"{}")

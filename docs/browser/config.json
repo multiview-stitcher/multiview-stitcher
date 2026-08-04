@@ -1,6 +1,6 @@
 {
-  "pyodide_version": "0.28.3",
-  "pyodide_index_url": "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/",
+  "pyodide_version": "0.29.4",
+  "pyodide_index_url": "https://cdn.jsdelivr.net/pyodide/v0.29.4/full/",
   "pyodide_packages": [
     "micropip",
     "numpy",
@@ -15,12 +15,15 @@
     "pyyaml",
     "click",
     "fsspec",
-    "tqdm"
+    "tqdm",
+    "crc32c",
+    "donfig",
+    "typing-extensions"
   ],
   "browser_dependencies": [
     "zarr==2.18.3",
-    "dask[array]==2025.2.0",
-    "dask-image==2024.5.3"
+    "dask[array]!=2025.11.0",
+    "dask-image"
   ],
   "default_n_workers": 3,
   "max_n_workers": 12

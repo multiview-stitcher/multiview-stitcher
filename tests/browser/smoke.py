@@ -253,29 +253,100 @@ def main():
         f"{stale_kind}: {stale_reason}",
     )
 
-    # --- fuse to an OME-Zarr on disk ------------------------------------
-    options = FusionOptions(
-        transform_key="registered", output_zarr_url="/data/fused.ome.zarr"
-    )
-    plan = session.fusion_plan(options)
-    session.fuse_blocks(plan["options"], plan["block_ids"])
-    session.finalize_fusion(plan["options"], plan["output_stack_properties"])
+    # --- fuse to an OME-Zarr on disk, in parallel ------------------------
+    # The browser writes each chunk as its own file through the service
+    # worker, so several workers can write one output directory at once.
+    import os
 
-    fused_msim = ngff_utils.read_msim_from_ome_zarr("/data/fused.ome.zarr")
-    fused_sim = msi_utils.get_sim_from_msim(fused_msim)
-    expected_shape = plan["output_stack_properties"]["shape"]
-    check(
-        "fused_zarr_shape",
-        all(
-            fused_sim.sizes[dim] == size
-            for dim, size in expected_shape.items()
-        ),
-        f"{dict(fused_sim.sizes)} vs {expected_shape}",
+    from multiview_stitcher.browser import Session as HttpSession
+
+    def _sw_relative(url):
+        marker = "/__mvs__/fs/"
+        index = url.index(marker) + len(marker)
+        return url[index:].split("/", 1)[1]
+
+    def service_worker_fetch(url):
+        """Stand in for the service worker reading a granted directory."""
+        path = f"/out/{_sw_relative(url)}" if "/fs/out/" in url else (
+            f"/data/{_sw_relative(url)}"
+        )
+        try:
+            with open(path, "rb") as handle:
+                return handle.read()
+        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+            return None
+
+    def service_worker_write(url, data):
+        """Stand in for the fs worker: one file created, written and closed."""
+        path = f"/out/{_sw_relative(url)}"
+
+        if data is None:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(bytes(data))
+
+    os.makedirs("/out", exist_ok=True)
+
+    write_session = HttpSession(
+        session_id="writer",
+        fetch=service_worker_fetch,
+        write=service_worker_write,
     )
+    write_session.load(
+        [
+            {"url": f"/browser/__mvs__/fs/m1/tile_{index}.ome.zarr"}
+            for index in range(2)
+        ]
+    )
+    disk_options = FusionOptions(
+        output_zarr_url="/browser/__mvs__/fs/out/fused.ome.zarr"
+    )
+    plan = write_session.fusion_plan(disk_options)
     check(
-        "fused_zarr_has_signal",
-        float(np.asarray(fused_sim.data).max()) > 0,
-        "fused output is empty",
+        "fusion_plan_is_multiscale",
+        len(plan["levels"]) > 1 and plan["n_blocks"] > 1,
+        f"{len(plan['levels'])} level(s), {plan['n_blocks']} block(s)",
+    )
+
+    # Split every level's blocks over several "workers", each rebuilding the
+    # session from the spec exactly as a compute worker does.
+    from multiview_stitcher.browser.executors import split_evenly
+
+    write_spec = json.loads(json.dumps(write_session.spec().to_dict()))
+    for level in plan["levels"]:
+        for group in split_evenly(level["block_ids"], 3):
+            worker_session = HttpSession.from_spec(
+                write_spec,
+                fetch=service_worker_fetch,
+                write=service_worker_write,
+            )
+            worker_session.fuse_blocks(
+                plan["options"], level["level"], group
+            )
+
+    write_session.finalize_fusion(plan["options"])
+
+    written = ngff_utils.read_msim_from_ome_zarr("/out/fused.ome.zarr")
+    written_levels = msi_utils.get_sorted_scale_keys(written)
+    check(
+        "parallel_write_produced_every_level",
+        len(written_levels) == len(plan["levels"]),
+        f"{written_levels} vs {[l['path'] for l in plan['levels']]}",
+    )
+
+    level_maxima = [
+        float(
+            np.asarray(
+                msi_utils.get_sim_from_msim(written, scale=scale_key).data
+            ).max()
+        )
+        for scale_key in written_levels
+    ]
+    check(
+        "parallel_write_levels_have_signal",
+        all(value > 0 for value in level_maxima),
+        level_maxima,
     )
 
     # --- OME-Zarr read through the HTTP store, then fused ----------------

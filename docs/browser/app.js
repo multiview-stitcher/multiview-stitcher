@@ -307,7 +307,10 @@ async function handleServiceWorkerMessage(event) {
     reply({ notMine: true });
     return;
   }
-  if (type === "fs.read" && !state.mounts.includes(event.data.mount)) {
+  if (
+    (type === "fs.read" || type === "fs.write") &&
+    !state.mounts.includes(event.data.mount)
+  ) {
     reply({ notMine: true });
     return;
   }
@@ -333,6 +336,23 @@ async function handleServiceWorkerMessage(event) {
         path: event.data.path,
       });
       reply(response, response.found ? [response.data] : []);
+      return;
+    }
+
+    if (type === "fs.write") {
+      const data = event.data.data;
+      await fsRequest(
+        data === null
+          ? { type: "remove", mount: event.data.mount, path: event.data.path }
+          : {
+              type: "write",
+              mount: event.data.mount,
+              path: event.data.path,
+              data,
+            },
+        data === null ? [] : [data],
+      );
+      reply({ ok: true });
       return;
     }
 
@@ -430,14 +450,17 @@ async function handleServiceWorkerMessage(event) {
 }
 
 
-function fsRequest(message) {
+function fsRequest(message, transfer = []) {
   return new Promise((resolve, reject) => {
     const channel = new MessageChannel();
     channel.port1.onmessage = (event) => {
       if (event.data && event.data.error) reject(new Error(event.data.error));
       else resolve(event.data);
     };
-    fsWorker.worker.postMessage({ ...message, port: channel.port2 }, [channel.port2]);
+    fsWorker.worker.postMessage({ ...message, port: channel.port2 }, [
+      channel.port2,
+      ...transfer,
+    ]);
   });
 }
 
@@ -708,25 +731,49 @@ async function doFusePreview() {
   }
 }
 
+const OUTPUT_NAME = "fused.ome.zarr";
+
 async function doFuseToDisk() {
   const handle = await window.showDirectoryPicker({ mode: "readwrite" });
 
   setBusy(true);
-  setStatus("fusing to OME-Zarr", true);
+  setStatus("preparing the output", true);
 
   try {
-    // Writing needs a real filesystem, so the output directory is mounted into
-    // the session worker's Emscripten filesystem and flushed when done.
-    await sessionWorker.send({ type: "mount_output", handle });
+    // The output directory is mounted like any other, and written through the
+    // same service worker that serves reads: one HTTP request per chunk file.
+    // Every worker shares this one handle, and because each writes a distinct
+    // file they can all write at once, with no flush step to coordinate.
+    const mounted = await fsRequest({
+      type: "mount",
+      mount: crypto.randomUUID().slice(0, 8),
+      handle,
+    });
+    const mount = mounted.mount;
+    if (!state.mounts.includes(mount)) state.mounts.push(mount);
+
+    // Clear any previous output first: an HTTP-backed zarr store cannot list
+    // its contents, so it cannot replace an existing array by itself.
+    await fsRequest({ type: "remove", mount, path: OUTPUT_NAME });
+
+    const started = performance.now();
+    setStatus("fusing to OME-Zarr", true);
+
     const result = await command("fuse_to_zarr", {
       options: {
         transform_key: state.transformKey,
-        output_zarr_url: "/output/fused.ome.zarr",
+        output_zarr_url: `${API_BASE}/fs/${mount}/${OUTPUT_NAME}`,
       },
+      distribute: pool.size > 0,
+      n_workers: pool.size || 1,
     });
-    await sessionWorker.send({ type: "sync_output" });
 
-    log(`wrote ${result.n_blocks} block(s) to fused.ome.zarr`);
+    log(
+      `wrote ${result.n_blocks} block(s) across ${result.levels.length} ` +
+        `resolution level(s) to ${OUTPUT_NAME} in ` +
+        `${((performance.now() - started) / 1000).toFixed(1)}s` +
+        (pool.size ? ` on ${pool.size} worker(s)` : ""),
+    );
     setStatus("fused image written to disk");
   } finally {
     setBusy(false);

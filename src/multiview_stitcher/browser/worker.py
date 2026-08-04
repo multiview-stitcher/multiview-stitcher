@@ -33,8 +33,9 @@ class WorkerRuntime:
     #: How many rebuilt sessions a compute worker keeps around.
     cache_size = 2
 
-    def __init__(self, fetch=None, bridge=None):
+    def __init__(self, fetch=None, write=None, bridge=None):
         self.fetch = fetch
+        self.write = write
         self.bridge = bridge
         self.session = None
         self._session_cache = {}
@@ -69,7 +70,9 @@ class WorkerRuntime:
             # found" - an image that silently emptied itself because an
             # unrelated load failed.
             session = Session(
-                session_id=payload.get("session_id"), fetch=self.fetch
+                session_id=payload.get("session_id"),
+                fetch=self.fetch,
+                write=self.write,
             )
             described = session.load(payload["sources"])
             self.session = session
@@ -145,11 +148,31 @@ class WorkerRuntime:
             )
 
         plan = session.fusion_plan(options)
-        session.fuse_blocks(plan["options"], plan["block_ids"])
-        result = session.finalize_fusion(
-            plan["options"], plan["output_stack_properties"]
-        )
-        result["n_blocks"] = len(plan["block_ids"])
+
+        # Every block of every level is an independent chunk file, so the pool
+        # can write them all at once into the one output directory.
+        executor = None
+        if payload.get("distribute", True):
+            bridge = self.bridge or get_bridge()
+            if bridge is not None:
+                executor = executors.RemoteFusionExecutor(
+                    session.spec(),
+                    bridge=bridge,
+                    n_workers=int(payload.get("n_workers", 1) or 1),
+                )
+
+        if executor is not None:
+            n_blocks = executor(plan["options"], plan["levels"])
+        else:
+            n_blocks = sum(
+                session.fuse_blocks(
+                    plan["options"], level["level"], level["block_ids"]
+                )
+                for level in plan["levels"]
+            )
+
+        result = session.finalize_fusion(plan["options"])
+        result["n_blocks"] = n_blocks
         return result
 
     def _cmd_transform_keys(self, payload):
@@ -191,7 +214,7 @@ class WorkerRuntime:
                 # evicted one is the least likely to be asked for again.
                 self._session_cache.pop(next(iter(self._session_cache)))
             self._session_cache[key] = Session.from_spec(
-                spec, fetch=self.fetch
+                spec, fetch=self.fetch, write=self.write
             )
 
         return self._session_cache[key]
@@ -222,7 +245,9 @@ class WorkerRuntime:
 
     def _task_fuse_blocks(self, task):
         session = self.session_for(task["session"])
-        n_blocks = session.fuse_blocks(task["options"], task["block_ids"])
+        n_blocks = session.fuse_blocks(
+            task["options"], task["level"], task["block_ids"]
+        )
         return {"n_blocks": n_blocks}
 
     def _task_serve(self, task):

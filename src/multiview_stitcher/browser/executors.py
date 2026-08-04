@@ -149,7 +149,13 @@ class RemoteFusionExecutor:
         self.bridge = bridge or get_bridge()
         self.n_workers = n_workers or 1
 
-    def __call__(self, options, block_ids):
+    def __call__(self, options, levels):
+        """Fuse every block of every level across the pool.
+
+        Blocks are split so that each task writes a disjoint set of chunk
+        files, which is what makes concurrent writes to one output directory
+        safe: no two workers ever open the same file.
+        """
         if self.bridge is None:
             raise RuntimeError(
                 "No bridge is installed; cannot dispatch fusion blocks to "
@@ -167,16 +173,18 @@ class RemoteFusionExecutor:
             else dict(options)
         )
 
-        groups = split_evenly(block_ids, self.n_workers)
-        tasks = [
-            {
-                "kind": "fuse_blocks",
-                "session": spec,
-                "options": options_payload,
-                "block_ids": group,
-            }
-            for group in groups
-        ]
+        tasks = []
+        for level in levels:
+            for group in split_evenly(level["block_ids"], self.n_workers):
+                tasks.append(
+                    {
+                        "kind": "fuse_blocks",
+                        "session": spec,
+                        "options": options_payload,
+                        "level": level["level"],
+                        "block_ids": group,
+                    }
+                )
 
         results = self.bridge.dispatch(tasks)
         return sum(int(result.get("n_blocks", 0)) for result in results)

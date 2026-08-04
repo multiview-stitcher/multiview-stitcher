@@ -40,9 +40,12 @@ VIEW_PREFIX = "view_"
 class Session:
     """Opened views plus everything derived from them."""
 
-    def __init__(self, session_id=None, fetch=None):
+    def __init__(self, session_id=None, fetch=None, write=None):
         self.session_id = session_id or uuid.uuid4().hex[:12]
         self.fetch = fetch
+        # Writing is only needed when fusing to disk; the browser supplies it
+        # through the same service worker that serves reads.
+        self.write = write
         self.sources = []
         self.msims = []
         self.generation = 0
@@ -196,7 +199,7 @@ class Session:
         )
 
     @classmethod
-    def from_spec(cls, spec, session_id=None, fetch=None):
+    def from_spec(cls, spec, session_id=None, fetch=None, write=None):
         """Rebuild a read-only equivalent of a session in another worker."""
         spec = (
             spec
@@ -215,7 +218,9 @@ class Session:
 
         # Routes are derived from the session id and generation, so a rebuilt
         # session must reuse both to answer the viewer's existing URLs.
-        session = cls(session_id=session_id or spec.session_id, fetch=fetch)
+        session = cls(
+            session_id=session_id or spec.session_id, fetch=fetch, write=write
+        )
         session.sources = list(spec.sources)
         session.msims = browser_dataset.open_msims(
             session.sources, fetch=fetch
@@ -419,41 +424,44 @@ class Session:
         return options
 
     def fusion_plan(self, options):
-        """Create the output OME-Zarr array and list the blocks to fuse."""
+        """Create every output array and list the blocks each one needs.
+
+        Only array metadata is written here; the pixels are fused afterwards,
+        in parallel, by whichever workers are free.
+        """
         options = self._fusion_options(options)
-        info = browser_fusion.prepare(
-            self.msims, options, create_output=True
+        levels = browser_fusion.create_output_arrays(
+            self.msims, options, fetch=self.fetch, write=self.write
         )
         return {
             "options": options.to_dict(),
-            "nblocks": [int(n) for n in info["nblocks"]],
-            "block_ids": browser_fusion.block_ids(info["nblocks"]),
-            "output_stack_properties": (
-                serialization.stack_properties_to_json(
-                    info["output_stack_properties"]
-                )
-            ),
+            "levels": levels,
+            "n_blocks": sum(len(level["block_ids"]) for level in levels),
         }
 
-    def fuse_blocks(self, options, ids):
-        """Fuse a subset of blocks - the compute-worker side."""
+    def fuse_blocks(self, options, level, ids):
+        """Fuse a subset of one level's blocks - the compute-worker side."""
         options = self._fusion_options(options)
-        return browser_fusion.fuse_blocks(self.msims, options, ids)
-
-    def finalize_fusion(self, options, output_stack_properties):
-        """Write NGFF metadata and pyramid levels once all blocks are done."""
-        options = self._fusion_options(options)
-        browser_fusion.finalize(
+        return browser_fusion.fuse_blocks(
             self.msims,
             options,
-            serialization.stack_properties_from_json(
-                output_stack_properties
-            ),
+            level,
+            ids,
+            fetch=self.fetch,
+            write=self.write,
+        )
+
+    def finalize_fusion(self, options):
+        """Write the multiscales metadata once every block has been fused."""
+        options = self._fusion_options(options)
+        written = browser_fusion.write_multiscales_metadata(
+            self.msims, options, fetch=self.fetch, write=self.write
         )
         self.bump_generation()
         return {
             "output_zarr_url": options.output_zarr_url,
             "generation": self.generation,
+            **written,
         }
 
     # ------------------------------------------------------------------

@@ -2156,6 +2156,7 @@ def prepare_block_fusion(
     fuse_kwargs: dict,
     zarr_array_creation_kwargs: dict = None,
     create_output: bool = True,
+    overwrite: bool = True,
     verbose: bool = True,
 ):
     """
@@ -2170,6 +2171,10 @@ def prepare_block_fusion(
         additional workers do when the blocks of a single fusion are spread
         over several processes / web workers: one process creates the store,
         the others open it for writing and fuse a disjoint subset of blocks.
+    overwrite : bool, optional
+        If True (default), replace an existing output array. Set to False for
+        stores that cannot enumerate their contents - an HTTP-backed store,
+        for instance - where the caller clears the destination itself.
     verbose : bool, optional
         If True (default), print a summary of the output stack.
     """
@@ -2250,7 +2255,7 @@ def prepare_block_fusion(
             # materialize zarr-backed xarray arrays.
             dtype=sims[0].dtype,
             store=output_zarr_url,  # The path to the directory where the store will be created
-            overwrite=True,  # Allows overwriting if the path exists
+            overwrite=overwrite,
             **(
                 zarr_array_creation_kwargs
                 if zarr_array_creation_kwargs is not None
