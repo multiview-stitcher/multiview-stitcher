@@ -277,6 +277,60 @@ def test_session_persists_neuroglancer_placement_edits():
     )
 
 
+def test_session_reads_a_neuroglancer_rotation_in_physical_units():
+    """A Neuroglancer source transform is not in one set of units.
+
+    Its linear coefficients act on physical coordinates - Neuroglancer
+    rescales them by the dimension scales itself - while only its translation
+    is in output pixels. Rescaling the linear block here as well turns a
+    rotation into a shear, and only in a plane whose axes have different
+    spacings: an xy drag looks perfect while an xz one is visibly wrong.
+    """
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d")[:1])
+    sim = msi_utils.get_sim_from_msim(session.msims[0])
+    spacing = si_utils.get_spacing_from_sim(sim)
+    assert spacing["z"] != spacing["y"], "the fixture must be anisotropic"
+
+    session.copy_transform(si_utils.DEFAULT_TRANSFORM_KEY, "manual")
+    state = session.neuroglancer_state(transform_key="manual")
+    transform = json.loads(
+        json.dumps(state["layers"][0]["source"]["transform"])
+    )
+    output_dims = list(transform["outputDimensions"])
+    z_row, y_row = output_dims.index("z"), output_dims.index("y")
+
+    # A physical quarter turn in the zy plane, with no reference to either
+    # spacing - which is exactly how Neuroglancer reads it.
+    for row in (z_row, y_row):
+        for column in (z_row, y_row):
+            transform["matrix"][row][column] = 0.0
+    transform["matrix"][z_row][y_row] = -1.0
+    transform["matrix"][y_row][z_row] = 1.0
+
+    session.update_neuroglancer_transforms(
+        "manual", [{"index": 0, "transform": transform}]
+    )
+    after = msi_utils.get_transform_from_msim(session.msims[0], "manual")
+    dims = list(after.coords["x_in"].values)
+    linear = np.asarray(after.sel(t=0) if "t" in after.dims else after)[
+        : len(dims), : len(dims)
+    ]
+
+    # Orthonormal: a rotation preserves lengths and angles, a shear does not.
+    np.testing.assert_allclose(
+        linear @ linear.T, np.eye(len(dims)), atol=1e-10
+    )
+    np.testing.assert_allclose(np.linalg.det(linear), 1.0, atol=1e-10)
+
+    # And it is that quarter turn, not merely some rotation.
+    expected = np.eye(len(dims))
+    z, y = dims.index("z"), dims.index("y")
+    expected[z, z] = expected[y, y] = 0.0
+    expected[z, y], expected[y, z] = -1.0, 1.0
+    np.testing.assert_allclose(linear, expected, atol=1e-10)
+
+
 def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
     session = Session()
     session.load(tiles_on_disk)

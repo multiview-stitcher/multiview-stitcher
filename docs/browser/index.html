@@ -88,7 +88,7 @@
               <span id="dataset-summary" class="count-label">None</span>
             </div>
           </div>
-          <ul id="views" class="view-list"></ul>
+          <ul id="views" class="view-list" role="listbox" aria-label="Loaded views"></ul>
           <p id="empty-views" class="empty-state">Your loaded image views will appear here.</p>
         </section>
 
@@ -147,6 +147,26 @@
             Create transform
           </button>
           <p class="field-help">The new coordinate system becomes active immediately for interactive placement.</p>
+
+          <fieldset id="manual-placement-section">
+            <legend>Manual placement</legend>
+            <label class="option-check" for="manual-placement">
+              <input id="manual-placement" type="checkbox" disabled />
+              <span>Activate manual placement</span>
+            </label>
+            <dl class="gesture-list">
+              <dt><kbd>Ctrl</kbd> + drag</dt>
+              <dd>Move a tile within the plane of the view.</dd>
+              <dt><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + drag</dt>
+              <dd>Turn a tile about its centre, in that same plane.</dd>
+            </dl>
+            <p class="field-help">
+              Orthogonal views only. The tile under the pointer is the one that
+              moves; where tiles overlap, the one selected in the views list does.
+              The new placement is saved when you release.
+            </p>
+            <p id="manual-placement-target" class="field-help warning" hidden></p>
+          </fieldset>
         </section>
 
         <section id="registration-panel" class="operation-panel" role="tabpanel" aria-labelledby="registration-tab" hidden>

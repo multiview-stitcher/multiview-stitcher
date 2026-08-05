@@ -32,13 +32,41 @@ import {
 // means a rebuilt camera.js cannot be served from cache behind a fresh
 // viewer.js - two halves of different builds fail in ways that look like
 // neither.
+const buildTag = new URL(import.meta.url).search;
 const { carryCameraOver, centreOnData } = await import(
-  `./camera.js${new URL(import.meta.url).search}`
+  `./camera.js${buildTag}`
 );
+const {
+  boundsContain,
+  composeAffine,
+  dragAngle,
+  fromPhysicalMatrix,
+  pickDragTarget,
+  pixelOffset,
+  planeRotation,
+  rotationMatrix,
+  toPhysical,
+  toPhysicalMatrix,
+  translateMatrix,
+  translationForDrag,
+} = await import(`./placement.js${buildTag}`);
 
 //: Events that mean the user is driving the camera. Until one arrives, the
 //: viewer keeps the camera on the data as the layers report their bounds.
 const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown"];
+
+//: Neuroglancer action a ctrl+drag raises while manual placement is on. Bound
+//: on the app's own slice-view map, so it applies in the cross-sections only.
+//: Modifiers are matched exactly, so the two gestures need a binding each -
+//: adding alt to the translation binding would not match it.
+const MOVE_LAYER_ACTION = "mvs-move-layer";
+const MOVE_LAYER_EVENTS = [
+  "at:control+mousedown0",
+  "at:control+alt+mousedown0",
+];
+
+//: Viewport pixels a rotation's plane basis is measured over. See `#planeBasis`.
+const BASIS_SPAN = 256;
 
 const POSITIONAL_COLOR_SHADER = `#uicontrol invlerp contrast
 #uicontrol vec3 color color
@@ -69,6 +97,9 @@ export class NeuroglancerViewer {
   #lastNames = null;
   #lastPosition = null;
   #positionalBackups = new Map();
+  #placement = null;
+  #onMoveLayer = null;
+  #drag = null;
 
   /**
    * Mount a viewer into `target`.
@@ -261,6 +292,10 @@ export class NeuroglancerViewer {
   dispose() {
     if (!this.#viewer) return;
 
+    // Cleared first: a teardown is not a placement the app should be told to
+    // save. `reset()` re-mounts, and the app re-applies its placement then.
+    this.#placement = null;
+    this.#unbindManualPlacement();
     this.#viewer.state.changed.remove(this.#onStateChanged);
     this.#viewer.navigationState.position.changed.remove(
       this.#onPositionChanged,
@@ -510,6 +545,407 @@ export class NeuroglancerViewer {
     }
 
     this.setState({ ...state, layers });
+  }
+
+  // -------------------------------------------------------------------
+  // Manual placement
+  // -------------------------------------------------------------------
+
+  /**
+   * Let the user place tiles by hand.
+   *
+   * Pass null to switch it off. While it is on, in any *orthogonal* panel:
+   *
+   *   - ctrl+drag moves one layer within the plane of that panel;
+   *   - ctrl+alt+drag turns it about its own centre, in the same plane.
+   *
+   * The perspective panel is left alone, since a drag across a projection does
+   * not name a position in the volume. The layer follows the pointer as it
+   * goes - the transform of its loaded source is what changes, so nothing is
+   * rebuilt and nothing is refetched - and `onDragEnd` fires once, when the
+   * pointer is released, which is when the app has a placement worth saving.
+   *
+   * `placement` carries:
+   *   - `movableUrls`: the layers a drag may move, by source URL. Derived
+   *     images are simply left out rather than guarded against here.
+   *   - `selectedUrl`: the layer the app has selected, used where tiles
+   *     overlap. Re-supply it by calling this again when the selection moves.
+   *   - `onDragStart(url, mode)`, `onDragEnd(url, mode)`: the boundaries of one
+   *     drag, where `mode` is "translate" or "rotate".
+   *   - `onRefused(reason)`: a drag that could not be resolved to one layer,
+   *     so the app can say why instead of appearing to ignore the user.
+   */
+  setManualPlacement(placement) {
+    const viewer = this.#require();
+
+    if (!placement) {
+      // Unbound first, so a drag still in progress ends through the callbacks
+      // the app is expecting: the tile has already moved on screen, and that
+      // placement is worth saving whatever turned the mode off.
+      this.#unbindManualPlacement();
+      this.#placement = null;
+      return;
+    }
+
+    const wasOff = this.#placement === null;
+    this.#placement = {
+      movableUrls: new Set(placement.movableUrls ?? []),
+      selectedUrl: placement.selectedUrl ?? null,
+      onDragStart: placement.onDragStart ?? (() => {}),
+      onDragEnd: placement.onDragEnd ?? (() => {}),
+      onRefused: placement.onRefused ?? (() => {}),
+    };
+
+    if (wasOff) {
+      // Bound on the app's own slice-view map, whose parent is Neuroglancer's
+      // default map at the lowest priority - so this wins over the `annotate`
+      // it ships with, and removing it again restores that default. The
+      // perspective panel has a separate map and never sees this binding.
+      for (const binding of MOVE_LAYER_EVENTS) {
+        viewer.inputEventBindings.sliceView.set(binding, {
+          action: MOVE_LAYER_ACTION,
+          stopPropagation: true,
+        });
+      }
+      // Neuroglancer raises actions as ordinary bubbling DOM events, so no
+      // further API is needed to hear about one.
+      this.#onMoveLayer = (event) => this.#beginDrag(event);
+      this.#target.addEventListener(
+        `action:${MOVE_LAYER_ACTION}`,
+        this.#onMoveLayer,
+      );
+    }
+  }
+
+  #unbindManualPlacement() {
+    this.#endDrag();
+    if (!this.#onMoveLayer) return;
+
+    for (const binding of MOVE_LAYER_EVENTS) {
+      this.#viewer?.inputEventBindings.sliceView.delete(binding);
+    }
+    this.#target?.removeEventListener(
+      `action:${MOVE_LAYER_ACTION}`,
+      this.#onMoveLayer,
+    );
+    this.#onMoveLayer = null;
+  }
+
+  /** True while a tile is being dragged. */
+  get dragging() {
+    return this.#drag !== null;
+  }
+
+  /**
+   * Start a drag, having worked out which layer it moves.
+   *
+   * Everything the drag needs is captured here - the panel, the untranslated
+   * matrices, the geometry of the space - so that each pointer move is
+   * arithmetic on a fixed starting point rather than an accumulation of
+   * increments, which would drift.
+   */
+  #beginDrag(actionEvent) {
+    const placement = this.#placement;
+    const viewer = this.#viewer;
+    if (!placement || !viewer || this.#drag) return;
+
+    const event = actionEvent.detail;
+    const panel = this.#orthogonalPanelAt(event.target);
+    if (!panel) return;
+
+    const space = viewer.navigationState.coordinateSpace.value;
+    const mouse = viewer.mouseState;
+    if (!space?.valid || !mouse.active) return;
+
+    const position = Array.from(
+      mouse.unsnappedPosition?.length === space.rank
+        ? mouse.unsnappedPosition
+        : mouse.position,
+    );
+    if (position.length !== space.rank) return;
+
+    const globalNames = Array.from(space.names);
+    const globalScales = Array.from(space.scales);
+
+    const { url, reason } = pickDragTarget(
+      this.#urlsAtPosition(position, globalNames, globalScales),
+      placement.selectedUrl,
+    );
+    if (!url) {
+      placement.onRefused(reason);
+      return;
+    }
+
+    const sources = this.#sourcesReading(url).filter(
+      (dataSource) => dataSource.loadState && !dataSource.loadState.error,
+    );
+    if (!sources.length) return;
+
+    const { displayDimensionIndices } =
+      viewer.navigationState.pose.displayDimensions.value;
+    const origin = displayCoordinates(position, displayDimensionIndices);
+    // Alt turns the tile instead of moving it. Read from the event rather than
+    // from a second action, so the two gestures share one code path up to here
+    // - the target is picked the same way either way.
+    const mode = event.altKey ? "rotate" : "translate";
+
+    this.#drag = {
+      url,
+      panel,
+      mode,
+      originX: event.clientX,
+      originY: event.clientY,
+      globalNames,
+      globalScales,
+      displayDimensionIndices: Array.from(displayDimensionIndices),
+      origin,
+      // Captured, not read as the drag goes: a tile's bounds move with it, and
+      // a rotation centre recomputed from them would chase its own tail.
+      bases: sources.map((dataSource) => {
+        const { transform } = dataSource.loadState;
+        const { outputSpace } = transform.value;
+        const outputNames = Array.from(outputSpace.names);
+        return {
+          dataSource,
+          matrix: Float64Array.from(transform.value.transform),
+          outputNames,
+          outputScales: Array.from(outputSpace.scales),
+          centre: tileCentre(outputSpace),
+          axes: Array.from(displayDimensionIndices, (global) =>
+            global < 0 ? -1 : outputNames.indexOf(globalNames[global]),
+          ),
+        };
+      }),
+      onMove: (moveEvent) => this.#moveDrag(moveEvent),
+      onUp: () => this.#endDrag(),
+    };
+
+    if (mode === "rotate") {
+      const plane = this.#planeBasis(panel, origin);
+      const centre = this.#tileCentreOffset(this.#drag.bases[0], plane, origin);
+      if (!centre) {
+        this.#drag = null;
+        placement.onRefused("uncentred");
+        return;
+      }
+      Object.assign(this.#drag, { plane, centre });
+    }
+
+    // Listened for on the window, so a drag that leaves the panel - or the
+    // page - still ends, instead of leaving a tile stuck to the pointer.
+    window.addEventListener("pointermove", this.#drag.onMove);
+    window.addEventListener("pointerup", this.#drag.onUp);
+    window.addEventListener("pointercancel", this.#drag.onUp);
+
+    placement.onDragStart(url, mode);
+  }
+
+  #moveDrag(event) {
+    const drag = this.#drag;
+    if (!drag) return;
+
+    const dx = event.clientX - drag.originX;
+    const dy = event.clientY - drag.originY;
+
+    if (drag.mode === "rotate") this.#rotateBy(drag, dx, dy);
+    else this.#translateBy(drag, dx, dy);
+  }
+
+  #translateBy(drag, dx, dy) {
+    const displayDelta = this.#displayDelta(drag, dx, dy);
+
+    for (const base of drag.bases) {
+      const { transform } = base.dataSource.loadState;
+      const translation = translationForDrag({
+        displayDelta,
+        displayDimensionIndices: drag.displayDimensionIndices,
+        globalNames: drag.globalNames,
+        globalScales: drag.globalScales,
+        outputNames: base.outputNames,
+        outputScales: base.outputScales,
+      });
+      // Assigning the matrix of a *loaded* source moves the data where it is,
+      // leaving the layer, its shader and its contrast range untouched.
+      transform.transform = translateMatrix(
+        base.matrix,
+        transform.value.rank,
+        translation,
+      );
+    }
+  }
+
+  /**
+   * Turn the tile by the angle the pointer has swept around its centre.
+   *
+   * The whole drag is one rotation of the matrix captured at mousedown, not a
+   * rotation composed onto the last frame's: composing every pointer move
+   * would accumulate rounding, and the tile would creep in scale as it turned.
+   */
+  #rotateBy(drag, dx, dy) {
+    const angle = dragAngle(drag.centre, { x: 0, y: 0 }, { x: dx, y: dy });
+    const rotation = planeRotation(drag.plane.u, drag.plane.v, angle);
+
+    for (const base of drag.bases) {
+      const { transform } = base.dataSource.loadState;
+      const rank = transform.value.rank;
+      const turn = rotationMatrix({
+        rotation,
+        centre: base.centre,
+        axes: base.axes,
+        outputScales: base.outputScales,
+        rank,
+      });
+      // Composed in physical units and converted back. A Neuroglancer matrix
+      // mixes them - physical linear coefficients, a translation in output
+      // pixels - and that mixture does not survive a matrix product.
+      transform.transform = fromPhysicalMatrix(
+        composeAffine(
+          turn,
+          toPhysicalMatrix(base.matrix, rank, base.outputScales),
+          rank,
+        ),
+        rank,
+        base.outputScales,
+      );
+    }
+  }
+
+  #endDrag() {
+    const drag = this.#drag;
+    if (!drag) return;
+
+    window.removeEventListener("pointermove", drag.onMove);
+    window.removeEventListener("pointerup", drag.onUp);
+    window.removeEventListener("pointercancel", drag.onUp);
+    this.#drag = null;
+
+    this.#placement?.onDragEnd(drag.url, drag.mode);
+  }
+
+  /** How far a drag of `dx, dy` viewport pixels reaches, in display units. */
+  #displayDelta(drag, dx, dy) {
+    const moved = drag.panel.translateDataPointByViewportPixels(
+      new Float32Array(3),
+      Float32Array.from(drag.origin),
+      dx,
+      dy,
+    );
+    return Array.from(moved, (value, i) => value - drag.origin[i]);
+  }
+
+  /**
+   * The physical vectors one viewport pixel spans, across and down.
+   *
+   * The panel's projection is affine, so one pixel's worth of each axis
+   * describes all of it. In physical units rather than voxels: a rotation
+   * applied to anisotropic voxel counts is a shear.
+   *
+   * Measured over a long step and divided down. Neuroglancer projects through
+   * `vec3`, which is float32, so a single pixel next to a coordinate in the
+   * hundreds is close to the rounding: taken directly, the two axes come back
+   * neither quite orthogonal nor quite equal in length, and the rotation built
+   * from them carries that error as a slight scale.
+   */
+  #planeBasis(panel, origin) {
+    const drag = { panel, origin };
+    const scales = this.#displayScales();
+    const perPixel = (dx, dy) =>
+      toPhysical(
+        this.#displayDelta(drag, dx * BASIS_SPAN, dy * BASIS_SPAN),
+        scales,
+      ).map((value) => value / BASIS_SPAN);
+
+    return { u: perPixel(1, 0), v: perPixel(0, 1), scales };
+  }
+
+  /** The global scale of each of the three display axes. */
+  #displayScales() {
+    const space = this.#viewer.navigationState.coordinateSpace.value;
+    const { displayDimensionIndices } =
+      this.#viewer.navigationState.pose.displayDimensions.value;
+    return Array.from({ length: 3 }, (_, display) => {
+      const global = displayDimensionIndices[display];
+      return global === undefined || global < 0 ? 1 : space.scales[global];
+    });
+  }
+
+  /**
+   * Where a tile's centre sits relative to the pointer, in viewport pixels.
+   *
+   * The angle a rotation drag turns through is measured around this point, so
+   * it is fixed when the drag starts.
+   */
+  #tileCentreOffset(base, plane, origin) {
+    // The centre, as an offset from the pointer, along each display axis and
+    // in the physical units the plane basis is expressed in.
+    const offset = Array.from({ length: 3 }, (_, display) => {
+      const output = base.axes[display];
+      if (output === undefined || output < 0) return 0;
+      return (
+        base.centre[output] * base.outputScales[output] -
+        origin[display] * plane.scales[display]
+      );
+    });
+
+    const pixels = pixelOffset(offset, plane.u, plane.v);
+    return Number.isFinite(pixels.x) && Number.isFinite(pixels.y)
+      ? pixels
+      : null;
+  }
+
+  /**
+   * The cross-section panel an event happened in, if it was one.
+   *
+   * Panels are told apart by whether they own a slice view: the perspective
+   * panel does not, and a drag there is refused rather than guessed at.
+   */
+  #orthogonalPanelAt(target) {
+    if (!(target instanceof Node)) return null;
+    for (const panel of this.#viewer.display.panels) {
+      if (!panel.sliceView) continue;
+      if (panel.element === target || panel.element?.contains(target)) {
+        return panel;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The movable layers whose data covers a global position.
+   *
+   * Judged from each layer's own transformed bounds rather than from what was
+   * drawn, so a tile counts as being under the pointer wherever it *is* -
+   * including where it is hidden behind another one, or dark.
+   */
+  #urlsAtPosition(position, globalNames, globalScales) {
+    const urls = [];
+
+    for (const managed of this.#viewer.layerManager.managedLayers) {
+      for (const dataSource of managed.layer?.dataSources ?? []) {
+        const url = dataSource.spec?.url;
+        if (!this.#placement.movableUrls.has(url)) continue;
+        if (urls.includes(url)) continue;
+
+        const loadState = dataSource.loadState;
+        if (!loadState || loadState.error) continue;
+
+        const { outputSpace } = loadState.transform.value;
+        const contained = boundsContain(
+          {
+            names: Array.from(outputSpace.names),
+            scales: Array.from(outputSpace.scales),
+            lowerBounds: Array.from(outputSpace.bounds.lowerBounds),
+            upperBounds: Array.from(outputSpace.bounds.upperBounds),
+          },
+          position,
+          globalNames,
+          globalScales,
+        );
+        if (contained) urls.push(url);
+      }
+    }
+
+    return urls;
   }
 
   /**
@@ -781,6 +1217,35 @@ export class NeuroglancerViewer {
   showStatus(message, { timeoutMs = 5000 } = {}) {
     StatusMessage.showTemporaryMessage(String(message), timeoutMs);
   }
+}
+
+/**
+ * The middle of a layer's data, in its own output coordinates.
+ *
+ * The bounds are the transformed ones, so this is where the tile is now - and
+ * that, not the origin of its voxel grid, is what a rotation turns about.
+ */
+function tileCentre(outputSpace) {
+  const { lowerBounds, upperBounds } = outputSpace.bounds;
+  return Array.from(lowerBounds, (lower, i) => {
+    const upper = upperBounds[i];
+    return Number.isFinite(lower) && Number.isFinite(upper)
+      ? (lower + upper) / 2
+      : 0;
+  });
+}
+
+/**
+ * The three on-screen coordinates of a global position.
+ *
+ * A display axis that is not drawn from any dimension - a 2D dataset has no
+ * third - contributes nothing, which is what keeps a drag inside the plane.
+ */
+function displayCoordinates(position, displayDimensionIndices) {
+  return Array.from({ length: 3 }, (_, display) => {
+    const global = displayDimensionIndices[display];
+    return global === undefined || global < 0 ? 0 : position[global];
+  });
 }
 
 /**

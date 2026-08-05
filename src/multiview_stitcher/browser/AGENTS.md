@@ -38,6 +38,7 @@ Data visualization and control panel
     - Remove
     - Short info (shape per dim, number of res levels)
     - Visibility toggle
+    - layers can be selected by clicking on them, and the selected layer is subtly highlighted
 - Coordinate system selection
   - dropdown menu to select transform_key to show in neuroglancer viewer
 - Display options
@@ -57,7 +58,13 @@ Different tabs for different types of operations:
 
 - Interactive tile placement
   - "New transform_key" button to create a new transform_key, with text for user to enter name of new transform_key (by default, the new transform_key is created as a copy of the currently selected transform_key)
-
+  - Section "Manual placement":
+    - Checkbox: "Activate manual placement". In this case, the user can modify transform_keys by dragging the mouse in the viewer
+      - drag tiles manually when holding down ctrl (translation)
+      - drag tiles manually when holding down ctrl + option/alt (rotation)
+      - only the orthogonal views can be used for manual placement, the oblique view is disabled. in each orthogonal view, the user can drag tiles in the plane of the view, and the tile will be moved in 3D space accordingly. for rotation, a given tile is rotated around its center in 2D (that panel's projection plane)
+      - After a drag is completed, the transform_key is updated, and the user can see the updated transform_key in the neuroglancer viewer. The layer moves in real time, but the transform_key is only updated after the drag is completed
+      - Which layer is being dragged? If it's unique because of the mouse position, then that layer is being dragged. If multiple layers are under the mouse position, the currently selected layer is being dragged. If no layer is under the mouse position, then no layer is being dragged. Layers are selected by clicking on them in the layers list in the left panel
 - Registration
   - sub tabs:
     - Common options

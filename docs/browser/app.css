@@ -189,6 +189,12 @@ button { color: inherit; }
 .view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
 .view-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
 .view-list li:hover { border-color: var(--line-strong); }
+.view-list li.selectable { cursor: pointer; }
+/* Subtle on purpose: which tile is selected only decides where a ctrl+drag
+   goes when tiles overlap, so it should not read as louder than visibility. */
+.view-list li.selected { border-color: var(--accent); background: var(--accent-soft); }
+.view-list li.selected strong { color: var(--accent-bright); }
+.view-list li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .view-list li.derived-view { border-color: #26515a; background: rgba(45, 179, 196, 0.06); }
 .view-list li > div { min-width: 0; }
 .view-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 620; }
@@ -197,7 +203,13 @@ button { color: inherit; }
 .view-list .remove { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; color: var(--faint); background: transparent; font-size: 17px; cursor: pointer; }
 .view-list .remove:hover { color: var(--error); background: rgba(255, 121, 111, 0.08); }
 
+/* Tucked up under the field it explains. After a button or a group of them
+   there is no such gap to close, so the pull-up is cancelled. */
 .field-help { margin: -5px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+.primary-button + .field-help,
+.secondary-button + .field-help,
+.split-actions + .field-help,
+.gesture-list + .field-help { margin-top: 9px; }
 .option-check { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; color: var(--muted); font-size: 10.5px; cursor: pointer; }
 .option-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
 .channel-controls { display: grid; gap: 8px; }
@@ -243,12 +255,22 @@ button { color: inherit; }
 
 fieldset { min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
 fieldset legend { margin: 0 0 7px; color: var(--muted); font-size: 11px; }
+#manual-placement-section { margin: 18px 0 0; padding-top: 15px; border-top: 1px solid var(--line); }
+.gesture-list { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 5px 10px; margin: 2px 0 0; }
+.gesture-list dt { color: var(--muted); font-size: 9.5px; white-space: nowrap; }
+.gesture-list dd { margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--panel-soft); font-family: inherit; font-size: 9px; }
+.field-help.warning { color: var(--warning); }
+.field-help.warning[hidden] { display: none; }
 .dimension-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .dimension-fields label { text-align: center; text-transform: uppercase; font-size: 9px; }
 .dimension-fields input { margin-bottom: 7px !important; text-align: center; }
 
+/* Block, not the default inline-block: an inline button sits on a text
+   baseline, and the descender space below it is what let the help text that
+   follows ride up into the button. */
 .primary-button,
-.secondary-button { width: 100%; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-weight: 650; font-size: 11px; cursor: pointer; }
+.secondary-button { display: block; width: 100%; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-weight: 650; font-size: 11px; cursor: pointer; }
 .primary-button { border: 1px solid var(--accent); color: #051114; background: var(--accent); }
 .primary-button:hover:not(:disabled) { border-color: var(--accent-bright); background: var(--accent-bright); }
 .secondary-button { border: 1px solid var(--line-strong); color: var(--text); background: var(--panel-raised); }

@@ -553,6 +553,137 @@ test("the tool palette Neuroglancer opens by itself is closed again", async () =
   assert.doesNotMatch(viewer, /toolPalettes\.reset\(\)/);
 });
 
+test("tiles are dragged in the cross-sections only, and never through a slice", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // Bound on the app's own slice-view map. That map has Neuroglancer's
+  // defaults as a parent at the lowest priority, so this wins over the
+  // `annotate` it ships with - and the perspective panel, which has a
+  // separate map, never sees it. A drag across a projection does not name a
+  // position in the volume, so it must not start one.
+  assert.match(viewer, /inputEventBindings\.sliceView\.set\(/);
+  assert.doesNotMatch(viewer, /inputEventBindings\.perspectiveView/);
+  // Modifiers are matched exactly, so each gesture needs its own binding.
+  assert.match(viewer, /"at:control\+mousedown0"/);
+  assert.match(viewer, /"at:control\+alt\+mousedown0"/);
+  // Removed again when placement is off, which restores the default binding
+  // rather than leaving the gesture dead.
+  assert.match(viewer, /inputEventBindings\.sliceView\.delete\(/);
+  // Second guard, for the panel the pointer is actually over: a panel without
+  // a slice view is the perspective one.
+  assert.match(viewer, /if \(!panel\.sliceView\) continue/);
+
+  // The drag is converted through the panel's own viewport, which is already
+  // in the plane of that cross-section.
+  assert.match(viewer, /translateDataPointByViewportPixels\(/);
+});
+
+test("a rotation turns a tile about its own centre, in physical units", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // Alt is what separates the two gestures; they share the target-picking
+  // path up to that point.
+  assert.match(viewer, /event\.altKey \? "rotate" : "translate"/);
+
+  // Display coordinates are voxels, and voxels are not cubes: rotating voxel
+  // counts is a shear. The plane basis is converted before any of the
+  // trigonometry happens, and measured over a long step, since Neuroglancer
+  // projects through float32 and one pixel there is mostly rounding.
+  assert.match(viewer, /toPhysical\(\s*this\.#displayDelta\(drag, dx \* BASIS_SPAN/);
+
+  // The centre is the tile's own, captured once. A tile's bounds move with
+  // it, so a centre recomputed each frame would chase its own tail.
+  assert.match(viewer, /centre: tileCentre\(outputSpace\)/);
+
+  // A Neuroglancer matrix mixes units - physical linear coefficients, a
+  // translation in output pixels - and that mixture does not survive a matrix
+  // product. Composing without converting drags the centre of the turn off
+  // the tile, by the ratio of the two spacings: invisible in an xy view.
+  assert.match(
+    viewer,
+    /composeAffine\(\s*turn,\s*toPhysicalMatrix\(base\.matrix, rank, base\.outputScales\),/,
+  );
+  assert.match(viewer, /fromPhysicalMatrix\(/);
+});
+
+test("a drag moves loaded sources in place, from a fixed starting matrix", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  // Assigning the transform of a *loaded* source is what moves the data
+  // without rebuilding the layer, its shader or its contrast range - the same
+  // reason `setLayerTransforms` exists.
+  assert.match(viewer, /transform\.transform = translateMatrix\(/);
+  // Every source reading that URL: a multi-channel tile is several layers and
+  // has to move as one.
+  assert.match(viewer, /this\.#sourcesReading\(url\)/);
+  // Recomputed from the matrix captured at mousedown, so a long drag cannot
+  // accumulate rounding into a drift.
+  assert.match(viewer, /matrix: Float64Array\.from\(/);
+
+  // The transform key is written once, when the drag ends. Every frame of a
+  // drag reaches the app as a state change, and saving each one would retire
+  // the fused preview over and over.
+  assert.match(viewer, /get dragging\(\)/);
+  assert.match(app, /if \(viewer\.dragging\) return;/);
+  assert.match(
+    app,
+    /onDragEnd:[\s\S]{0,80}schedulePlacementSync\(viewer\.getState\(\), \{ fromDrag: true \}\)/,
+  );
+});
+
+test("manual placement writes whichever coordinate system is displayed", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(html, /id="manual-placement"/);
+  assert.match(html, /id="manual-placement-target"/);
+  assert.match(html, /<kbd>Ctrl<\/kbd> \+ <kbd>Alt<\/kbd> \+ drag/);
+
+  // Any transform key, not only one "Create transform" made: the drag names
+  // the coordinate system by being made while it is on screen. The panel says
+  // which that is, since the drag will rewrite it.
+  const sync = app.slice(
+    app.indexOf("function syncManualPlacement"),
+    app.indexOf("function renderViews"),
+  );
+  assert.doesNotMatch(sync, /editableTransformKeys/);
+  assert.match(sync, /checkbox\.disabled = !possible/);
+  assert.match(app, /Drags are saved into/);
+
+  // An edit made through Neuroglancer's own source tab has no such moment to
+  // point at, so that path is still confined to the keys created here.
+  assert.match(
+    app,
+    /!fromDrag && !state\.editableTransformKeys\.has\(transformKey\)/,
+  );
+
+  // Input views only. A fused image is derived from where the tiles are, so
+  // dragging it would describe nothing the session could save.
+  assert.match(sync, /state\.currentViewLayerUrls/);
+  assert.doesNotMatch(sync, /currentFusedLayerUrls/);
+});
+
+test("a view can be selected in the list, which is what breaks a tie", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(join(repoRoot, "docs", "browser", "app.css"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(app, /function selectView\(url\)/);
+  assert.match(app, /state\.selectedViewUrl/);
+  assert.match(app, /aria-selected/);
+  // The row is the target, minus the controls it already carries.
+  assert.match(app, /event\.target\.closest\("input, button"\)/);
+  assert.match(css, /\.view-list li\.selected/);
+
+  // The selection reaches the viewer, which is the only thing it is for.
+  assert.match(app, /selectedUrl: state\.selectedViewUrl/);
+});
+
 test("views can be shown or hidden all at once, without the fused preview", async () => {
   const { readFileSync } = await import("node:fs");
   const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");

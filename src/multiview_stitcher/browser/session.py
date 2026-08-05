@@ -384,6 +384,12 @@ class Session:
                     f"dimensions {sdims}."
                 ) from exc
 
+            # A Neuroglancer source transform is not in one set of units: its
+            # linear coefficients act on physical coordinates - Neuroglancer
+            # rescales them by the dimension scales itself - while only the
+            # translation is in output pixels. This is the exact inverse of
+            # `_affine_to_neuroglancer_source_transform`, which is what builds
+            # the transform the viewer was handed.
             affine = np.eye(len(sdims) + 1)
             affine[:-1, :-1] = rows[np.ix_(row_indices, column_indices)]
             spacing = si_utils.get_spacing_from_sim(sim)

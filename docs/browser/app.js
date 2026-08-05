@@ -41,7 +41,9 @@ const state = {
   currentFusedLayerUrls: new Set(), // fused preview viewer layer urls
   viewVisibility: new Map(), // input source url -> visible
   channelVisibility: new Map(), // channel key -> visible
+  selectedViewUrl: null, // input source url picked in the views list
   positionalColors: false,
+  manualPlacement: false,
   editableTransformKeys: new Set(),
   mounts: [],
 };
@@ -621,9 +623,18 @@ function editedTransforms(ngState) {
   return Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
 }
 
-function schedulePlacementSync(ngState) {
+function schedulePlacementSync(ngState, { fromDrag = false } = {}) {
   const transformKey = state.transformKey;
-  if (!state.editableTransformKeys.has(transformKey)) return;
+  // A manual placement is saved into whatever coordinate system is displayed -
+  // that is what the user was looking at when they moved the tile. An edit
+  // made through Neuroglancer's own source tab has no such moment to point
+  // at, so it is only followed for the keys created here, as before.
+  if (!fromDrag && !state.editableTransformKeys.has(transformKey)) return;
+  // A tile in mid-drag is not a placement yet. The layer follows the pointer
+  // through the viewer state, so without this every frame of a drag would be a
+  // coordinate system to save - and each save retires the fused preview. The
+  // drag ends by calling here again, with `dragging` already false.
+  if (viewer.dragging) return;
 
   const updates = editedTransforms(ngState);
   if (!updates.length) return;
@@ -636,6 +647,7 @@ function schedulePlacementSync(ngState) {
       .catch(() => {})
       .then(async () => {
         if (placementSignatures.get(transformKey) === signature) return;
+        if (viewer.dragging) return;
         placementSignatures.set(transformKey, signature);
         try {
           const result = await command("update_transforms", {
@@ -992,6 +1004,7 @@ async function refreshViewer() {
     state.layerSources = null;
     state.currentViewLayerUrls.clear();
     $("#viewer-empty").hidden = false;
+    syncManualPlacement();
     return;
   }
 
@@ -1011,6 +1024,9 @@ async function refreshViewer() {
   await applyPositionalColors();
   scheduleDisplayVisibility(500);
   scheduleContrastSync();
+  // Layers may have been added, removed or rebuilt, and placement addresses
+  // them by URL - so it is re-applied against whatever is on screen now.
+  syncManualPlacement();
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,6 +1257,79 @@ function renderViewToggle(views) {
     : "Hide every input view, keeping the fused preview";
 }
 
+// ---------------------------------------------------------------------------
+// Manual placement
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick the view a ctrl+drag moves where several tiles overlap.
+ *
+ * Nothing is recomputed and no data moves: the selection only ever decides
+ * which layer a drag resolves to, so the viewer is simply told about it.
+ */
+function selectView(url) {
+  state.selectedViewUrl = url;
+  renderViews(state.session);
+  syncManualPlacement();
+}
+
+/** The viewer layers a view is drawn as - one per channel. */
+function layerUrlsOf(viewUrl) {
+  return Array.from(state.currentViewLayerUrls.get(viewUrl) || []);
+}
+
+/**
+ * Hand the viewer the current placement settings, or switch placement off.
+ *
+ * Called whenever anything it depends on moves: the checkbox, the selected
+ * view, the transform key, and every viewer refresh - a refresh can rebuild
+ * the layers, and the URLs are how the viewer addresses them.
+ */
+function syncManualPlacement() {
+  const possible = hasViews();
+  const checkbox = $("#manual-placement");
+  checkbox.disabled = !possible;
+  if (!possible) checkbox.checked = false;
+
+  const active = possible && checkbox.checked;
+  state.manualPlacement = active;
+  // Placement writes into whatever coordinate system is on screen, including
+  // the one an OME-Zarr came with, so the panel says which that is rather than
+  // leaving the user to infer it from the other side of the window.
+  const target = $("#manual-placement-target");
+  target.hidden = !active;
+  target.textContent = `Drags are saved into “${state.transformKey}”.`;
+
+  if (!viewer.mounted) return;
+  if (!active) {
+    viewer.setManualPlacement(null);
+    return;
+  }
+
+  viewer.setManualPlacement({
+    // Input views only: a fused image is derived from where the tiles are, so
+    // dragging it would describe nothing the session can save.
+    movableUrls: [...state.currentViewLayerUrls.keys()].flatMap(layerUrlsOf),
+    selectedUrl: state.selectedViewUrl
+      ? layerUrlsOf(state.selectedViewUrl)[0] || null
+      : null,
+    onDragStart: (url, mode) =>
+      setStatus(
+        `${mode === "rotate" ? "turning" : "moving"} a tile in ` +
+          `${state.transformKey}`,
+        true,
+      ),
+    onDragEnd: () =>
+      schedulePlacementSync(viewer.getState(), { fromDrag: true }),
+    onRefused: (reason) =>
+      setStatus(
+        reason === "ambiguous"
+          ? "several tiles here - select one in the views list to move it"
+          : "no tile under the pointer",
+      ),
+  });
+}
+
 function renderViews(described) {
   const list = $("#views");
   list.innerHTML = "";
@@ -1252,6 +1341,26 @@ function renderViews(described) {
       .join(" ");
 
     const item = document.createElement("li");
+
+    // Selecting a view is what tells a ctrl+drag which tile to move where
+    // several overlap. The whole row is the target, minus its own controls.
+    item.className = "selectable";
+    item.tabIndex = 0;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(state.selectedViewUrl === view.url));
+    if (state.selectedViewUrl === view.url) item.classList.add("selected");
+    item.title = `Select ${view.name} for manual placement`;
+
+    const select = (event) => {
+      if (event.target.closest("input, button")) return;
+      selectView(state.selectedViewUrl === view.url ? null : view.url);
+    };
+    item.addEventListener("click", select);
+    item.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      select(event);
+    });
 
     if (!state.viewVisibility.has(view.url)) {
       state.viewVisibility.set(view.url, true);
@@ -1354,6 +1463,11 @@ async function applyDescribed(described) {
   poolServeFailures = 0;
   reportedFailures.clear();
   state.session = described;
+  // A view that is no longer loaded cannot stay selected: the selection names
+  // a source URL, and a removed one would silently match nothing.
+  if (!described.views.some((view) => view.url === state.selectedViewUrl)) {
+    state.selectedViewUrl = null;
+  }
   state.previewRoute = null;
   state.previewMetadata = null;
   state.previewTransformKey = null;
@@ -1479,6 +1593,7 @@ async function clearSession() {
   state.currentViewLayerUrls.clear();
   state.currentFusedLayerUrls.clear();
   state.channelVisibility.clear();
+  state.selectedViewUrl = null;
   state.positionalColors = false;
   $("#positional-colors").checked = false;
   for (const timer of positionalColorTimers) clearTimeout(timer);
@@ -1926,7 +2041,19 @@ function wireUi() {
   $("#transform-key").addEventListener("change", async (event) => {
     state.transformKey = event.target.value;
     log(`showing transform key '${state.transformKey}'`);
+    // Before the refresh as well as after it: whether tiles may be placed by
+    // hand is a property of the key, and the answer changes right now.
+    syncManualPlacement();
     await refreshViewer();
+  });
+
+  $("#manual-placement").addEventListener("change", (event) => {
+    syncManualPlacement();
+    setStatus(
+      event.target.checked
+        ? `ctrl+drag a tile to place it in ${state.transformKey}`
+        : "manual placement off",
+    );
   });
 
   $("#positional-colors").addEventListener("change", async (event) => {
