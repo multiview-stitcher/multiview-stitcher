@@ -41,7 +41,7 @@ const state = {
   currentFusedLayerUrls: new Set(), // fused preview viewer layer urls
   viewVisibility: new Map(), // input source url -> visible
   channelVisibility: new Map(), // channel key -> visible
-  selectedViewUrl: null, // input source url picked in the views list
+  selectedViewUrls: new Set(), // input source urls picked in the views list
   positionalColors: false,
   manualPlacement: false,
   placementChannels: new Map(), // channel key -> placement applies to it
@@ -732,6 +732,7 @@ function noteTimeIndex() {
   if (index === state.timeIndex) return;
 
   state.timeIndex = index;
+  renderTimeSlider();
   if (!state.timeVaryingTransforms) return;
 
   clearTimeout(timeRefreshTimer);
@@ -1341,6 +1342,16 @@ function renderViewToggle(views) {
   toggle.title = showAll
     ? "Show every input view"
     : "Hide every input view, keeping the fused preview";
+
+  const selection = $("#toggle-selection");
+  const allSelected =
+    views.length > 0 &&
+    views.every((view) => state.selectedViewUrls.has(view.url));
+  selection.hidden = !views.length;
+  selection.textContent = allSelected ? "Select none" : "Select all";
+  selection.title = allSelected
+    ? "Clear the selection"
+    : "Select every view, so a drag moves them together";
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,13 +1359,45 @@ function renderViewToggle(views) {
 // ---------------------------------------------------------------------------
 
 /**
- * Pick the view a ctrl+drag moves where several tiles overlap.
+ * Pick the views a ctrl+drag acts on.
  *
- * Nothing is recomputed and no data moves: the selection only ever decides
- * which layer a drag resolves to, so the viewer is simply told about it.
+ * One selected view breaks the tie where tiles overlap; several make a drag
+ * move all of them together. Nothing is recomputed and no data moves: the
+ * selection only ever decides which layers a drag resolves to, so the viewer
+ * is simply told about it.
+ *
+ * A plain click selects one view, replacing whatever was selected, and
+ * clicking the only selected view clears it. Ctrl+click adds and removes,
+ * which is how a set is built up.
  */
-function selectView(url) {
-  state.selectedViewUrl = url;
+function selectView(url, { extend = false } = {}) {
+  const selected = state.selectedViewUrls;
+
+  if (extend) {
+    if (selected.has(url)) selected.delete(url);
+    else selected.add(url);
+  } else if (selected.size === 1 && selected.has(url)) {
+    selected.clear();
+  } else {
+    selected.clear();
+    selected.add(url);
+  }
+
+  renderViews(state.session);
+  syncManualPlacement();
+}
+
+/** Select every view, or none if they are already all selected. */
+function toggleAllSelected() {
+  const views = state.session?.views || [];
+  if (!views.length) return;
+
+  const all = views.every((view) => state.selectedViewUrls.has(view.url));
+  state.selectedViewUrls.clear();
+  if (!all) {
+    for (const view of views) state.selectedViewUrls.add(view.url);
+  }
+
   renderViews(state.session);
   syncManualPlacement();
 }
@@ -1471,6 +1514,29 @@ function renderPlacementScope(described) {
   $("#placement-scope").hidden = !described.n_views;
 }
 
+/**
+ * Show the time slider when the data has a time axis, and put it where the
+ * viewer is looking.
+ *
+ * Neuroglancer has no notion of a current frame - time is one axis of the
+ * position - so this is a control over the position, not a mode.
+ */
+function renderTimeSlider() {
+  const times = timeCoords();
+  const section = $("#time-section");
+  const slider = $("#time-slider");
+
+  section.hidden = times.length < 2;
+  if (section.hidden) return;
+
+  slider.max = String(times.length - 1);
+  state.timeIndex = Math.min(state.timeIndex, times.length - 1);
+  slider.value = String(state.timeIndex);
+  $("#time-value").textContent = `${times[state.timeIndex]} of ${
+    times[times.length - 1]
+  }`;
+}
+
 /** Reflect the timepoint range in the slider fill and the heading. */
 function updatePlacementTimeUi() {
   const times = timeCoords();
@@ -1501,6 +1567,16 @@ function syncManualPlacement() {
 
   const active = possible && checkbox.checked;
   state.manualPlacement = active;
+
+  // The tiles a drag acts on are chosen in the views list rather than here, so
+  // the section says what that selection currently amounts to.
+  const selected = state.selectedViewUrls.size;
+  $("#placement-tiles-label").textContent =
+    selected > 1
+      ? `${selected} selected`
+      : selected === 1
+        ? "1 selected"
+        : "whichever is under the pointer";
   // Placement writes into whatever coordinate system is on screen, including
   // the one an OME-Zarr came with, so the panel says which that is rather than
   // leaving the user to infer it from the other side of the window.
@@ -1518,17 +1594,18 @@ function syncManualPlacement() {
     // Input views only: a fused image is derived from where the tiles are, so
     // dragging it would describe nothing the session can save.
     movableUrls: [...state.currentViewLayerUrls.keys()].flatMap(layerUrlsOf),
-    selectedUrl: state.selectedViewUrl
-      ? layerUrlsOf(state.selectedViewUrl)[0] || null
-      : null,
+    // Several selected views make a drag move them all; one breaks a tie
+    // where tiles overlap.
+    selectedUrls: [...state.selectedViewUrls].flatMap(layerUrlsOf),
     // Only the chosen channels follow the pointer. A timepoint range cannot
     // be shown this way - one source transform covers the whole time axis -
     // so the drag shows the timepoint on screen and the session stores the
     // range, which is why the viewer is refreshed afterwards.
     channels: placementChannels(),
-    onDragStart: (url, mode) =>
+    onDragStart: (urls, mode) =>
       setStatus(
-        `${mode === "rotate" ? "turning" : "moving"} a tile in ` +
+        `${mode === "rotate" ? "turning" : "moving"} ` +
+          `${urls.length === 1 ? "a tile" : `${urls.length} tiles`} in ` +
           `${state.transformKey}`,
         true,
       ),
@@ -1536,9 +1613,13 @@ function syncManualPlacement() {
       schedulePlacementSync(viewer.getState(), { fromDrag: true }),
     onRefused: (reason) =>
       setStatus(
-        reason === "ambiguous"
-          ? "several tiles here - select one in the views list to move it"
-          : "no tile under the pointer",
+        {
+          ambiguous:
+            "several tiles here - select one in the views list to move it",
+          "outside-selection":
+            "start the drag on one of the selected tiles to move them",
+          "no-channels": "no channel here is set to be placed",
+        }[reason] ?? "no tile under the pointer",
       ),
   });
 }
@@ -1555,18 +1636,20 @@ function renderViews(described) {
 
     const item = document.createElement("li");
 
-    // Selecting a view is what tells a ctrl+drag which tile to move where
-    // several overlap. The whole row is the target, minus its own controls.
+    // Selecting views is what tells a ctrl+drag which tiles to move: one
+    // breaks a tie where they overlap, several move together. The whole row
+    // is the target, minus its own controls.
+    const selected = state.selectedViewUrls.has(view.url);
     item.className = "selectable";
     item.tabIndex = 0;
     item.setAttribute("role", "option");
-    item.setAttribute("aria-selected", String(state.selectedViewUrl === view.url));
-    if (state.selectedViewUrl === view.url) item.classList.add("selected");
-    item.title = `Select ${view.name} for manual placement`;
+    item.setAttribute("aria-selected", String(selected));
+    if (selected) item.classList.add("selected");
+    item.title = `Select ${view.name} for manual placement (ctrl+click to add)`;
 
     const select = (event) => {
       if (event.target.closest("input, button")) return;
-      selectView(state.selectedViewUrl === view.url ? null : view.url);
+      selectView(view.url, { extend: event.ctrlKey || event.metaKey });
     };
     item.addEventListener("click", select);
     item.addEventListener("keydown", (event) => {
@@ -1677,9 +1760,10 @@ async function applyDescribed(described) {
   reportedFailures.clear();
   state.session = described;
   // A view that is no longer loaded cannot stay selected: the selection names
-  // a source URL, and a removed one would silently match nothing.
-  if (!described.views.some((view) => view.url === state.selectedViewUrl)) {
-    state.selectedViewUrl = null;
+  // source URLs, and a removed one would silently match nothing.
+  const loaded = new Set(described.views.map((view) => view.url));
+  for (const url of state.selectedViewUrls) {
+    if (!loaded.has(url)) state.selectedViewUrls.delete(url);
   }
   state.previewRoute = null;
   state.previewMetadata = null;
@@ -1689,6 +1773,7 @@ async function applyDescribed(described) {
   renderTransformKeys(described.transform_keys);
   renderChannelControls(described);
   renderPlacementScope(described);
+  renderTimeSlider();
   renderDimensionFields(described);
   await refreshSessionSpec();
   await refreshViewer();
@@ -1811,7 +1896,7 @@ async function clearSession() {
   state.placementTimeRange = null;
   state.timeIndex = 0;
   state.timeVaryingTransforms = false;
-  state.selectedViewUrl = null;
+  state.selectedViewUrls.clear();
   state.positionalColors = false;
   $("#positional-colors").checked = false;
   for (const timer of positionalColorTimers) clearTimeout(timer);
@@ -2246,6 +2331,20 @@ function wireUi() {
       );
     }
   });
+
+  $("#time-slider").addEventListener("input", (event) => {
+    const index = Number(event.target.value);
+    state.timeIndex = index;
+    $("#time-value").textContent = `${timeCoords()[index]} of ${
+      timeCoords()[timeCoords().length - 1]
+    }`;
+    // The viewer's own position is the single source of truth for the
+    // timepoint, so the slider moves that rather than keeping a copy: a scrub
+    // in Neuroglancer and a drag here end up in the same place.
+    viewer.setTimepoint(index);
+  });
+
+  $("#toggle-selection").addEventListener("click", toggleAllSelected);
 
   $("#toggle-views").addEventListener("click", () => {
     const views = state.session?.views || [];

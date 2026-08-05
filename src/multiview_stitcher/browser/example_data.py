@@ -28,7 +28,7 @@ EXAMPLE_MENU = (
     "tiles-3d-2c",
     "tiles-2d-1c",
     "tiles-2d-2c",
-    "tiles-2d-3t-2c",
+    "tiles-2d-20t-2c",
 )
 
 
@@ -74,11 +74,11 @@ EXAMPLES = {
     # The only example with a time axis: manual placement can be restricted to
     # a range of timepoints, and a transform that varies over t has to survive
     # registration, fusion and the round trip through the viewer.
-    "tiles-2d-3t-2c": {
-        "label": "2D · 3 timepoints · two channels · 2×2",
+    "tiles-2d-20t-2c": {
+        "label": "2D · 20 timepoints · two channels · 2×2",
         "ndim": 2,
         "n_channels": 2,
-        "n_timepoints": 3,
+        "n_timepoints": 20,
         "tile_size": 128,
         "overlap": 32,
         "shift_scale": 8.0,

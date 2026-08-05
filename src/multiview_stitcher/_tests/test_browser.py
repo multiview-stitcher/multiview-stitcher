@@ -340,7 +340,7 @@ def test_session_reads_a_neuroglancer_rotation_in_physical_units():
 def _timelapse_session():
     """A session on the one example with both a time and a channel axis."""
     session = Session()
-    session.load(example_data.example_sources("tiles-2d-3t-2c")[:2])
+    session.load(example_data.example_sources("tiles-2d-20t-2c")[:2])
     session.copy_transform(si_utils.DEFAULT_TRANSFORM_KEY, "manual")
     return session
 
@@ -371,13 +371,13 @@ def _x_translation(session, transform_key, index=0):
 
 def test_the_time_and_channel_example_has_both_axes():
     session = Session()
-    session.load(example_data.example_sources("tiles-2d-3t-2c")[:1])
+    session.load(example_data.example_sources("tiles-2d-20t-2c")[:1])
 
     sim = msi_utils.get_sim_from_msim(session.msims[0])
 
-    assert sim.sizes["t"] == 3
+    assert sim.sizes["t"] == 20
     assert sim.sizes["c"] == 2
-    assert session.describe()["views"][0]["t_coords"] == ["0", "1", "2"]
+    assert session.describe()["views"][0]["t_coords"][:3] == ["0", "1", "2"]
     assert len(session.describe()["views"][0]["c_coords"]) == 2
 
 
@@ -422,7 +422,7 @@ def test_a_placement_on_a_time_range_gives_the_parameters_a_time_axis():
 
     before = float(_x_translation(session, "manual"))
     session.update_neuroglancer_transforms(
-        "manual", _nudged(session, 10), time_range=[1, 2]
+        "manual", _nudged(session, 10), time_range=[1, 19]
     )
     after = _x_translation(session, "manual")
 
@@ -431,7 +431,7 @@ def test_a_placement_on_a_time_range_gives_the_parameters_a_time_axis():
     assert "t" in after.dims
     assert float(after.isel(t=0)) == before
     assert float(after.isel(t=1)) != before
-    assert float(after.isel(t=2)) == float(after.isel(t=1))
+    assert float(after.isel(t=19)) == float(after.isel(t=1))
 
 
 def test_a_placement_can_be_restricted_to_channels_and_timepoints_at_once():
@@ -442,15 +442,15 @@ def test_a_placement_can_be_restricted_to_channels_and_timepoints_at_once():
         "manual",
         _nudged(session, 10),
         channels=[channels[0]],
-        time_range=[2, 2],
+        time_range=[7, 7],
     )
     after = _x_translation(session, "manual")
 
     assert set(after.dims) == {"c", "t"}
-    moved = after.sel(c=channels[0]).isel(t=2)
+    moved = after.sel(c=channels[0]).isel(t=7)
     for channel in channels:
-        for time in range(3):
-            if channel == channels[0] and time == 2:
+        for time in range(after.sizes["t"]):
+            if channel == channels[0] and time == 7:
                 continue
             assert float(after.sel(c=channel).isel(t=time)) != float(moved)
 
@@ -506,7 +506,7 @@ def test_registration_and_fusion_run_on_restricted_parameters(
             transform_key=transform_key,
         )
         data = np.asarray(fused.data)
-        assert data.shape[fused.dims.index("t")] == 3
+        assert data.shape[fused.dims.index("t")] == 20
         assert data.shape[fused.dims.index("c")] == 2
         assert np.isfinite(data).all()
         assert data.max() > 0
@@ -550,7 +550,7 @@ def test_the_viewer_shows_the_transform_of_the_timepoint_being_viewed():
     """A source transform is one matrix, so it has to be one timepoint's."""
     session = _timelapse_session()
     session.update_neuroglancer_transforms(
-        "manual", _nudged(session, 10), time_range=[2, 2]
+        "manual", _nudged(session, 10), time_range=[5, 5]
     )
 
     def x_translation(time_index):
@@ -562,10 +562,10 @@ def test_the_viewer_shows_the_transform_of_the_timepoint_being_viewed():
         return transform["matrix"][row][-1]
 
     assert x_translation(0) == x_translation(1)
-    assert x_translation(2) != x_translation(0)
+    assert x_translation(5) != x_translation(0)
     # Out of range is clamped rather than raising: the viewer's position can
     # briefly outrun the data while a state is being applied.
-    assert x_translation(99) == x_translation(2)
+    assert x_translation(999) == x_translation(19)
 
 
 def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
@@ -1262,7 +1262,7 @@ def test_example_generation_is_deterministic():
         ("tiles-3d-2c", 3, 2, 64),
         ("tiles-2d-1c", 2, 1, 128),
         ("tiles-2d-2c", 2, 2, 128),
-        ("tiles-2d-3t-2c", 2, 2, 128),
+        ("tiles-2d-20t-2c", 2, 2, 128),
     ],
 )
 def test_browser_example_variants_are_2_by_2(
@@ -1483,7 +1483,7 @@ def test_worker_load_replace_and_append(tiles_on_disk):
         "tiles-3d-2c",
         "tiles-2d-1c",
         "tiles-2d-2c",
-        "tiles-2d-3t-2c",
+        "tiles-2d-20t-2c",
     ]
 
     response = json.loads(worker_module.handle_json("clear", "{}"))

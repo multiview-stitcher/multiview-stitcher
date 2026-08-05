@@ -720,20 +720,59 @@ test("a transform that varies over time or channel is shown as one sample", asyn
   assert.match(viewer, /setChannelTransforms\(transforms\)/);
 });
 
-test("a view can be selected in the list, which is what breaks a tie", async () => {
+test("views can be selected in the list, which is what a drag acts on", async () => {
   const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
   const css = readFileSync(join(repoRoot, "docs", "browser", "app.css"), "utf8");
   const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
 
-  assert.match(app, /function selectView\(url\)/);
-  assert.match(app, /state\.selectedViewUrl/);
+  assert.match(app, /function selectView\(url, \{ extend = false \} = \{\}\)/);
+  assert.match(app, /state\.selectedViewUrls/);
   assert.match(app, /aria-selected/);
   // The row is the target, minus the controls it already carries.
   assert.match(app, /event\.target\.closest\("input, button"\)/);
   assert.match(css, /\.view-list li\.selected/);
 
-  // The selection reaches the viewer, which is the only thing it is for.
-  assert.match(app, /selectedUrl: state\.selectedViewUrl/);
+  // Ctrl-click builds a set; a button takes all of them or none.
+  assert.match(app, /extend: event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(html, /id="toggle-selection"/);
+  assert.match(app, /function toggleAllSelected\(\)/);
+
+  // The tiles a drag acts on are chosen in the views list, on the other side
+  // of the window from the placement panel - so the panel says so, and says
+  // what the selection currently amounts to.
+  assert.match(html, /id="placement-tiles-label"/);
+  assert.match(html, /Ctrl\+click \(&#8984; on macOS\) views in the list/);
+  assert.match(app, /\$\("#placement-tiles-label"\)\.textContent/);
+
+  // The whole selection reaches the viewer, which is the only thing it is
+  // for, and several of them move together.
+  assert.match(app, /selectedUrls: \[\.\.\.state\.selectedViewUrls\]/);
+  assert.match(viewer, /pickDragTarget\(under, placement\.selectedUrls\)/);
+  // Each tile turns about its own centre; only the angle is shared, and it is
+  // measured around the tile the pointer actually grabbed.
+  assert.match(viewer, /const anchor = urls\.find\(\(url\) => under\.includes\(url\)\)/);
+  assert.match(viewer, /centre: base\.centre/);
+});
+
+test("a time axis gets a slider over the viewer's own position", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  assert.match(html, /id="time-slider"/);
+  assert.match(app, /function renderTimeSlider\(\)/);
+  // Hidden rather than disabled when there is nothing to scrub.
+  assert.match(app, /section\.hidden = times\.length < 2/);
+
+  // Neuroglancer has no current frame: time is one axis of the position, so
+  // the slider drives that rather than keeping a copy of it. A scrub in the
+  // viewer and a drag of the slider then agree by construction.
+  assert.match(app, /viewer\.setTimepoint\(index\)/);
+  assert.match(viewer, /setTimepoint\(index\)/);
+  assert.match(viewer, /dimensions\.indexOf\("t"\)/);
 });
 
 test("views can be shown or hidden all at once, without the fused preview", async () => {

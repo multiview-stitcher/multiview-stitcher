@@ -599,16 +599,17 @@ export class NeuroglancerViewer {
    * `placement` carries:
    *   - `movableUrls`: the layers a drag may move, by source URL. Derived
    *     images are simply left out rather than guarded against here.
-   *   - `selectedUrl`: the layer the app has selected, used where tiles
-   *     overlap. Re-supply it by calling this again when the selection moves.
+   *   - `selectedUrls`: the layers the app has selected. Several of them make
+   *     a drag act on all of them at once; one breaks a tie where tiles
+   *     overlap. Re-supply by calling this again when the selection moves.
    *   - `channels`: channel indices a drag applies to, or null for all. Only
    *     those channels' layers follow the pointer, which is what the app then
    *     asks the session to save. A restriction over *time* has no equivalent
    *     here - a source transform is one matrix for the whole time axis - so
    *     the drag shows the timepoint on screen and the session stores the
    *     range.
-   *   - `onDragStart(url, mode)`, `onDragEnd(url, mode)`: the boundaries of one
-   *     drag, where `mode` is "translate" or "rotate".
+   *   - `onDragStart(urls, mode)`, `onDragEnd(urls, mode)`: the boundaries of
+   *     one drag, where `mode` is "translate" or "rotate".
    *   - `onRefused(reason)`: a drag that could not be resolved to one layer,
    *     so the app can say why instead of appearing to ignore the user.
    */
@@ -627,7 +628,7 @@ export class NeuroglancerViewer {
     const wasOff = this.#placement === null;
     this.#placement = {
       movableUrls: new Set(placement.movableUrls ?? []),
-      selectedUrl: placement.selectedUrl ?? null,
+      selectedUrls: Array.from(placement.selectedUrls ?? []),
       channels: placement.channels ? new Set(placement.channels) : null,
       onDragStart: placement.onDragStart ?? (() => {}),
       onDragEnd: placement.onDragEnd ?? (() => {}),
@@ -705,11 +706,9 @@ export class NeuroglancerViewer {
     const globalNames = Array.from(space.names);
     const globalScales = Array.from(space.scales);
 
-    const { url, reason } = pickDragTarget(
-      this.#urlsAtPosition(position, globalNames, globalScales),
-      placement.selectedUrl,
-    );
-    if (!url) {
+    const under = this.#urlsAtPosition(position, globalNames, globalScales);
+    const { urls, reason } = pickDragTarget(under, placement.selectedUrls);
+    if (!urls.length) {
       placement.onRefused(reason);
       return;
     }
@@ -717,8 +716,10 @@ export class NeuroglancerViewer {
     // Only the channels the placement applies to follow the pointer. The rest
     // stay where they are, which is exactly what the session will be asked to
     // store, so the drag shows the result rather than a promise of it.
-    const sources = this.#sourcesReading(url, placement.channels).filter(
-      (dataSource) => dataSource.loadState && !dataSource.loadState.error,
+    const sources = urls.flatMap((url) =>
+      this.#sourcesReading(url, placement.channels)
+        .filter((dataSource) => dataSource.loadState && !dataSource.loadState.error)
+        .map((dataSource) => ({ url, dataSource })),
     );
     if (!sources.length) {
       placement.onRefused("no-channels");
@@ -732,9 +733,13 @@ export class NeuroglancerViewer {
     // from a second action, so the two gestures share one code path up to here
     // - the target is picked the same way either way.
     const mode = event.altKey ? "rotate" : "translate";
+    // The tile the pointer grabbed, which is the one a rotation is measured
+    // around. Every tile then turns by that angle about its own centre.
+    const anchor = urls.find((url) => under.includes(url)) ?? urls[0];
 
     this.#drag = {
-      url,
+      urls,
+      anchor,
       panel,
       mode,
       originX: event.clientX,
@@ -745,11 +750,12 @@ export class NeuroglancerViewer {
       origin,
       // Captured, not read as the drag goes: a tile's bounds move with it, and
       // a rotation centre recomputed from them would chase its own tail.
-      bases: sources.map((dataSource) => {
+      bases: sources.map(({ url, dataSource }) => {
         const { transform } = dataSource.loadState;
         const { outputSpace } = transform.value;
         const outputNames = Array.from(outputSpace.names);
         return {
+          url,
           dataSource,
           matrix: Float64Array.from(transform.value.transform),
           outputNames,
@@ -766,7 +772,12 @@ export class NeuroglancerViewer {
 
     if (mode === "rotate") {
       const plane = this.#planeBasis(panel, origin);
-      const centre = this.#tileCentreOffset(this.#drag.bases[0], plane, origin);
+      // Measured around the grabbed tile: that one follows the pointer, and
+      // the rest turn by the same angle about their own centres.
+      const grabbed =
+        this.#drag.bases.find((base) => base.url === anchor) ??
+        this.#drag.bases[0];
+      const centre = this.#tileCentreOffset(grabbed, plane, origin);
       if (!centre) {
         this.#drag = null;
         placement.onRefused("uncentred");
@@ -781,7 +792,7 @@ export class NeuroglancerViewer {
     window.addEventListener("pointerup", this.#drag.onUp);
     window.addEventListener("pointercancel", this.#drag.onUp);
 
-    placement.onDragStart(url, mode);
+    placement.onDragStart(urls, mode);
   }
 
   #moveDrag(event) {
@@ -863,7 +874,7 @@ export class NeuroglancerViewer {
     window.removeEventListener("pointercancel", drag.onUp);
     this.#drag = null;
 
-    this.#placement?.onDragEnd(drag.url, drag.mode);
+    this.#placement?.onDragEnd(drag.urls, drag.mode);
   }
 
   /** How far a drag of `dx, dy` viewport pixels reaches, in display units. */
@@ -1233,6 +1244,28 @@ export class NeuroglancerViewer {
   setPosition(position) {
     const navigation = this.#require().navigationState.position;
     navigation.value = Float32Array.from(position);
+  }
+
+  /**
+   * Move to a timepoint, leaving every other axis where it is.
+   *
+   * Neuroglancer has no notion of a current frame - time is just another axis
+   * of the position - so a timepoint is a coordinate like any other. Returns
+   * false when the data has no time axis, which is the app's cue that its
+   * slider has nothing to drive.
+   */
+  setTimepoint(index) {
+    const dimensions = this.getPositionDimensions();
+    const axis = dimensions.indexOf("t");
+    if (axis < 0) return false;
+
+    const position = this.getPosition();
+    if (position.length !== dimensions.length) return false;
+    // The middle of the voxel: Neuroglancer samples at the position, and the
+    // integer edge between two frames is ambiguous.
+    position[axis] = Number(index) + 0.5;
+    this.setPosition(position);
+    return true;
   }
 
   /** The dimension names the position is expressed in. */

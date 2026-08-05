@@ -24,26 +24,40 @@
  */
 
 /**
- * Which layer a drag should move.
+ * Which layers a drag should move.
  *
- * The pointer decides when it can: one tile under it is unambiguous. Where
- * tiles overlap - which, for a tiled acquisition, is most of the interesting
- * places - the pointer cannot, so the choice falls to the tile the user
- * selected in the views list. With nothing under the pointer there is nothing
- * to move, and an overlap with no selection is left alone rather than guessed
- * at: moving the wrong tile is worse than moving none.
+ * Selecting several tiles makes the drag act on all of them - the way to move
+ * a whole row of a grid, or to correct a stage offset shared by a batch. That
+ * takes precedence over what the pointer is on, because with a multi-selection
+ * the user has already said what they mean; the pointer only has to land on
+ * one of the chosen tiles, so that a stray drag over the rest of the image
+ * does not shift the selection by accident.
  *
- * Returns `{url, reason}`, where `url` is null when no drag should start.
+ * With one tile selected or none, the pointer decides where it can: a single
+ * tile under it is unambiguous. Where tiles overlap - which, for a tiled
+ * acquisition, is most of the interesting places - it cannot, and the choice
+ * falls to the selection. An overlap with nothing selected is left alone
+ * rather than guessed at: moving the wrong tile is worse than moving none.
+ *
+ * Returns `{urls, reason}`, with `urls` empty when no drag should start.
  */
 export function pickDragTarget(candidates, selected) {
   const urls = Array.from(new Set(candidates));
+  const chosen = Array.from(new Set(selected ?? []));
 
-  if (urls.length === 0) return { url: null, reason: "empty" };
-  if (urls.length === 1) return { url: urls[0], reason: "only" };
-  if (selected && urls.includes(selected)) {
-    return { url: selected, reason: "selected" };
+  if (urls.length === 0) return { urls: [], reason: "empty" };
+
+  if (chosen.length > 1) {
+    return urls.some((url) => chosen.includes(url))
+      ? { urls: chosen, reason: "selection" }
+      : { urls: [], reason: "outside-selection" };
   }
-  return { url: null, reason: "ambiguous" };
+
+  if (urls.length === 1) return { urls: [urls[0]], reason: "only" };
+  if (chosen.length === 1 && urls.includes(chosen[0])) {
+    return { urls: [chosen[0]], reason: "selected" };
+  }
+  return { urls: [], reason: "ambiguous" };
 }
 
 /**

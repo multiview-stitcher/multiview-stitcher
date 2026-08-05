@@ -53,23 +53,26 @@ const closeAll = (actual, expected, message) => {
 };
 
 test("the pointer decides when only one tile is under it", () => {
-  assert.deepEqual(pickDragTarget(["a"], null), { url: "a", reason: "only" });
+  assert.deepEqual(pickDragTarget(["a"], []), { urls: ["a"], reason: "only" });
   // Even when something else is selected: the pointer is unambiguous.
-  assert.deepEqual(pickDragTarget(["a"], "b"), { url: "a", reason: "only" });
+  assert.deepEqual(pickDragTarget(["a"], ["b"]), {
+    urls: ["a"],
+    reason: "only",
+  });
   // One tile reported once per channel is still one tile.
-  assert.deepEqual(pickDragTarget(["a", "a"], null), {
-    url: "a",
+  assert.deepEqual(pickDragTarget(["a", "a"], []), {
+    urls: ["a"],
     reason: "only",
   });
 });
 
 test("where tiles overlap, the selection decides", () => {
-  assert.deepEqual(pickDragTarget(["a", "b"], "b"), {
-    url: "b",
+  assert.deepEqual(pickDragTarget(["a", "b"], ["b"]), {
+    urls: ["b"],
     reason: "selected",
   });
-  assert.deepEqual(pickDragTarget(["a", "b"], "a"), {
-    url: "a",
+  assert.deepEqual(pickDragTarget(["a", "b"], ["a"]), {
+    urls: ["a"],
     reason: "selected",
   });
 });
@@ -77,15 +80,43 @@ test("where tiles overlap, the selection decides", () => {
 test("an ambiguous drag is refused rather than guessed at", () => {
   // Moving the wrong tile is worse than moving none, and the user has a way
   // to say which they mean.
-  assert.deepEqual(pickDragTarget(["a", "b"], null), {
-    url: null,
+  assert.deepEqual(pickDragTarget(["a", "b"], []), {
+    urls: [],
     reason: "ambiguous",
   });
-  assert.deepEqual(pickDragTarget(["a", "b"], "c"), {
-    url: null,
+  assert.deepEqual(pickDragTarget(["a", "b"], ["c"]), {
+    urls: [],
     reason: "ambiguous",
   });
-  assert.deepEqual(pickDragTarget([], "a"), { url: null, reason: "empty" });
+  assert.deepEqual(pickDragTarget([], ["a"]), { urls: [], reason: "empty" });
+});
+
+test("several selected tiles are dragged together", () => {
+  // Moving a whole row of a grid at once, or correcting a stage offset shared
+  // by a batch: with a multi-selection the user has already said what they
+  // mean, so the pointer no longer narrows it down.
+  assert.deepEqual(pickDragTarget(["a"], ["a", "b"]), {
+    urls: ["a", "b"],
+    reason: "selection",
+  });
+  // Including tiles the pointer is nowhere near.
+  assert.deepEqual(pickDragTarget(["a", "c"], ["a", "b"]), {
+    urls: ["a", "b"],
+    reason: "selection",
+  });
+});
+
+test("a multi-tile drag has to start on one of the selected tiles", () => {
+  // Otherwise a stray drag over the rest of the image would shift the whole
+  // selection, with nothing under the pointer to suggest it would.
+  assert.deepEqual(pickDragTarget(["c"], ["a", "b"]), {
+    urls: [],
+    reason: "outside-selection",
+  });
+  assert.deepEqual(pickDragTarget([], ["a", "b"]), {
+    urls: [],
+    reason: "empty",
+  });
 });
 
 const space = {

@@ -131,6 +131,14 @@ def _apply_to_samples(current, affine, sim, channels, time_range):
         return updated
 
     combined = xr.where(mask, updated, current)
+
+    # A view the user did not move is reported alongside the ones they did,
+    # since the viewer hands over every layer's transform at once. Restricting
+    # a placement must not give those views an axis to say that nothing
+    # differs across it.
+    if np.allclose(*xr.broadcast(combined, current)):
+        return current
+
     # `xr.where` returns the broadcast of its arguments, so the transposition
     # keeps the matrix axes last, where every consumer expects them.
     other = [dim for dim in combined.dims if dim not in ("x_in", "x_out")]

@@ -84,6 +84,7 @@
           <div class="section-title-row">
             <h3>Loaded views</h3>
             <div class="section-title-actions">
+              <button id="toggle-selection" class="text-button" type="button" hidden>Select all</button>
               <button id="toggle-views" class="text-button" type="button" hidden>Hide all</button>
               <span id="dataset-summary" class="count-label">None</span>
             </div>
@@ -97,6 +98,15 @@
           <label for="transform-key">Displayed transform</label>
           <select id="transform-key" disabled></select>
           <p class="field-help">Operations use the coordinate system selected here.</p>
+        </section>
+
+        <section id="time-section" hidden>
+          <div class="section-title-row">
+            <h3>Time</h3>
+            <span id="time-value" class="count-label"></span>
+          </div>
+          <input id="time-slider" type="range" min="0" max="0" step="1" value="0" aria-label="Displayed timepoint" />
+          <p class="field-help">The timepoint shown in the viewer.</p>
         </section>
 
         <section>
@@ -172,6 +182,18 @@
                 <div id="placement-channels" class="scope-channels"></div>
                 <p id="placement-channels-empty" class="field-help">
                   This data has no channel axis.
+                </p>
+              </div>
+
+              <div class="scope-block">
+                <span class="scope-label">
+                  Apply to tiles
+                  <span id="placement-tiles-label" class="scope-value"></span>
+                </span>
+                <p class="field-help">
+                  Ctrl+click (&#8984; on macOS) views in the list to select several:
+                  a drag then moves them all together, and a rotation turns each
+                  about its own center.
                 </p>
               </div>
 
