@@ -389,6 +389,35 @@ def test_concat_result_can_be_selected_with_multiscale_sel_coords():
     )
 
 
+def test_multiscale_sel_coords_reflects_scalar_selection_in_zarr():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(2 * 3 * 8 * 8, dtype=np.uint16).reshape(2, 3, 8, 8)
+        zarray = zarr.open_array(
+            os.path.join(tmpdir, "input.zarr"),
+            mode="w",
+            shape=data.shape,
+            chunks=(1, 1, 4, 4),
+            dtype=data.dtype,
+        )
+        zarray[:] = data
+        sim = si_utils.get_sim_from_array(
+            zarray,
+            dims=["t", "c", "y", "x"],
+            t_coords=[10.0, 20.0],
+            c_coords=["a", "b", "c"],
+        )
+        msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+        selected = msi_utils.multiscale_sel_coords(msim, {"t": 20.0, "c": "b"})
+        selected_sim = msi_utils.get_sim_from_msim(selected)
+        backing = si_utils._get_xarray_zarr_array(selected_sim)
+
+        assert selected_sim.dims == ("y", "x")
+        assert backing.shape == selected_sim.shape
+        assert backing.chunks == (4, 4)
+        np.testing.assert_array_equal(np.asarray(selected_sim), data[1, 1])
+
+
 def test_concat_single_msim_short_circuits_without_materializing():
     """
     A single-item concat is a no-op; it must not fall through to the eager

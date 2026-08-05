@@ -168,16 +168,28 @@ def test_serialize_deserialize_zarr_backed_sim_with_dropped_dim():
             c_coords=[0, 1, 2],
         )
 
+        # Canonicalizing c/t order is itself represented by a virtual zarr.
+        backing = si_utils._get_xarray_zarr_array(sim)
+        assert backing.shape == sim.shape
+        assert tuple(sim.encoding["preferred_chunks"]) == sim.dims
+
         # Simulate the sim_sel_coords({'t': 10.0}) pattern (no drop=True)
         sim_sel = sim.sel({"t": 10.0})
 
         assert "t" not in sim_sel.dims
+        selected_backing = si_utils._get_xarray_zarr_array(sim_sel)
+        assert selected_backing.shape == sim_sel.shape
+        assert selected_backing.chunks == (1, 4, 4)
 
         info = si_utils.serialize_zarr_backed_sim(sim_sel)
         sim2 = si_utils.deserialize_zarr_backed_sim(info)
 
-        assert info["zarr_dims"] == ["c", "t", "y", "x"]
-        assert info["isel_dropped"] == {"t": 0}
+        # The scalar t selection is reflected in a virtual zarr array, so the
+        # serialized backing no longer needs metadata to describe a rank
+        # mismatch between the sim and its payload.
+        assert info["zarr_dims"] == ["c", "y", "x"]
+        assert info["isel_dropped"] == {}
+        assert info["zarr_array"].shape == sim_sel.shape
         assert list(sim2.dims) == list(sim_sel.dims)
         assert si_utils.is_xarray_zarr_backed(sim2)
         # Spatial coords are preserved
@@ -216,11 +228,10 @@ def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
         info = si_utils.serialize_zarr_backed_sim(sim_sel)
         sim2 = si_utils.deserialize_zarr_backed_sim(info)
 
-        # Singleton t expansion now yields a *real* 4D zarr array (t, c, y, x)
-        # whose axes match the sim dims 1:1, so the backing dims include t and
-        # the dropped t/c selections are captured as scalar isel entries.
-        assert info["zarr_dims"] == ["t", "c", "y", "x"]
-        assert info["isel_dropped"] == {"t": 0, "c": 0}
+        # Both scalar selections are now represented by the virtual payload.
+        assert info["zarr_dims"] == ["y", "x"]
+        assert info["isel_dropped"] == {}
+        assert info["zarr_array"].shape == sim_sel.shape
         assert list(sim2.dims) == list(sim_sel.dims)
         assert si_utils.is_xarray_zarr_backed(sim2)
 
@@ -331,6 +342,52 @@ def test_singleton_expansion_wraps_one_real_zarr_array():
         assert "_zarr_chunks" not in sim.attrs
         # Chunk hints live only in encoding, in backing-zarr axis order.
         assert tuple(sim.encoding["preferred_chunks"]) == ("t", "c", "y", "x")
+
+
+def test_singleton_expansion_inserts_missing_c_after_t():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sim = _zarr_backed_sim(
+            tmpdir,
+            "input.zarr",
+            np.arange(2 * 8 * 8, dtype=np.uint16).reshape(2, 8, 8),
+            dims=["t", "y", "x"],
+            chunks=(1, 4, 4),
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[0.0, 1.0],
+        )
+
+        backing = si_utils._get_xarray_zarr_array(sim)
+        assert sim.dims == ("t", "c", "y", "x")
+        assert backing.shape == sim.shape
+        assert backing.chunks == (1, 1, 4, 4)
+        np.testing.assert_array_equal(np.asarray(sim.isel(c=0)), backing[:, 0])
+
+
+def test_sim_sel_coords_reflects_dropped_dim_in_virtual_zarr():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(2 * 3 * 8 * 8, dtype=np.uint16).reshape(2, 3, 8, 8)
+        sim = _zarr_backed_sim(
+            tmpdir,
+            "input.zarr",
+            data,
+            dims=["t", "c", "y", "x"],
+            chunks=(1, 1, 4, 4),
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": 0.0},
+            t_coords=[10.0, 20.0],
+            c_coords=["a", "b", "c"],
+        )
+
+        selected = si_utils.sim_sel_coords(sim, {"t": 20.0, "c": "b"})
+        backing = si_utils._get_xarray_zarr_array(selected)
+
+        assert selected.dims == ("y", "x")
+        assert backing.shape == selected.shape
+        assert backing.chunks == (4, 4)
+        assert selected.coords["t"].item() == 20.0
+        assert selected.coords["c"].item() == "b"
+        np.testing.assert_array_equal(np.asarray(selected), data[1, 1])
 
 
 def test_concat_zarr_backed_sims_stays_zarr_backed():

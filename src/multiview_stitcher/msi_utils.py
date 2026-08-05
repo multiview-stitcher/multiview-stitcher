@@ -104,7 +104,7 @@ def get_transform_from_msim(msim, transform_key):
 
 
 def multiscale_sel_coords(msim, sel_dict):
-    """ """
+    """Select coordinates across all levels while preserving lazy backends."""
 
     # Somehow .sel on a datatree does not work when
     # attributes are present. So we remove them and
@@ -114,6 +114,15 @@ def multiscale_sel_coords(msim, sel_dict):
     msim.attrs = {}
     msim = msim.sel(sel_dict)
     msim.attrs = attrs
+
+    def _normalize_image(ds):
+        if "image" not in ds.data_vars:
+            return ds
+        return ds.assign(image=si_utils.normalize_zarr_backing(ds["image"]))
+
+    # DataTree.sel applies xarray indexes independently at every scale; fold
+    # those indexes into each level's virtual zarr before returning the tree.
+    msim = msim.map_over_datasets(_normalize_image)
 
     if "point_sets" in list(msim.keys()):
         for points_key in list(msim["point_sets"].keys()):
@@ -286,6 +295,7 @@ def get_sim_from_msim(msim, scale="scale0"):
     highest scale sim from msim with affine transforms
     """
     sim = msim["%s/image" % scale].copy()
+    sim = si_utils.normalize_zarr_backing(sim)
     inherited_coords = _get_inherited_coords_for_sim(msim, scale, sim)
     if inherited_coords:
         sim = sim.assign_coords(inherited_coords)

@@ -46,6 +46,96 @@ def test_expand_dims_returns_real_zarr_array(zarr_format):
 
 
 @pytest.mark.parametrize("zarr_format", [2, 3])
+def test_expand_dims_at_inserts_axes_at_requested_positions(zarr_format):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(12, dtype=np.uint16).reshape(3, 4)
+        source = _write_zarr(tmpdir, "a.zarr", data, (1, 2), zarr_format)
+
+        expanded = zarr_utils.expand_dims_at(source, (0, 2))
+
+        assert isinstance(expanded, zarr.Array)
+        assert expanded.shape == (1, 3, 1, 4)
+        assert expanded.chunks == (1, 1, 1, 2)
+        assert np.array_equal(expanded[0, :, 0], data)
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_getitem_drops_chunk_size_one_axes(zarr_format):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)
+        source = _write_zarr(tmpdir, "a.zarr", data, (1, 1, 2), zarr_format)
+
+        selected = zarr_utils.getitem(source, (1, -1, slice(None)))
+
+        assert isinstance(selected, zarr.Array)
+        assert selected.shape == (4,)
+        assert selected.chunks == (2,)
+        assert np.array_equal(selected[:], data[1, -1])
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_getitem_supports_scalar_output(zarr_format):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = _write_zarr(
+            tmpdir,
+            "a.zarr",
+            np.arange(4, dtype=np.uint16).reshape(2, 2),
+            (1, 1),
+            zarr_format,
+        )
+
+        selected = zarr_utils.getitem(source, (1, 0))
+
+        assert selected.shape == ()
+        assert selected[()] == source[1, 0]
+
+
+def test_getitem_rejects_scalar_index_on_larger_chunks():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = _write_zarr(
+            tmpdir,
+            "a.zarr",
+            np.ones((4, 4), dtype=np.uint16),
+            (2, 2),
+            3,
+        )
+
+        with pytest.raises(
+            zarr_utils.NotChunkAlignedError, match="chunk size 1"
+        ):
+            zarr_utils.getitem(source, (1, slice(None)))
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
+def test_transpose_moves_chunk_size_one_axes(zarr_format):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        data = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)
+        source = _write_zarr(tmpdir, "a.zarr", data, (1, 1, 2), zarr_format)
+
+        transposed = zarr_utils.transpose(source, (1, 0, 2))
+
+        assert isinstance(transposed, zarr.Array)
+        assert transposed.shape == (3, 2, 4)
+        assert transposed.chunks == (1, 1, 2)
+        assert np.array_equal(transposed[:], data.transpose(1, 0, 2))
+
+
+def test_transpose_rejects_reordering_larger_chunk_axes():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = _write_zarr(
+            tmpdir,
+            "a.zarr",
+            np.ones((2, 3, 4), dtype=np.uint16),
+            (1, 2, 2),
+            3,
+        )
+
+        assert not zarr_utils.is_transposable(source, (0, 2, 1))
+        with pytest.raises(zarr_utils.NotChunkAlignedError):
+            zarr_utils.transpose(source, (0, 2, 1))
+
+
+@pytest.mark.parametrize("zarr_format", [2, 3])
 def test_stack_returns_real_zarr_array(zarr_format):
     with tempfile.TemporaryDirectory() as tmpdir:
         a = _write_zarr(
