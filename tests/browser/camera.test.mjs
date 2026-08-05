@@ -125,3 +125,45 @@ test("a dropped axis does not shift the ones that remain", () => {
 
   assert.deepEqual(next, [44, 55, 6]);
 });
+
+const { centreOnData } = await import(
+  join(repoRoot, "docs", "browser", "camera.js")
+);
+
+test("an unplaced camera is centred on the whole of the data", () => {
+  // Neuroglancer places the camera on the first valid coordinate space, which
+  // can be before every layer has reported its bounds - leaving the view in a
+  // corner of the data. Re-centring as the bounds grow ends up on the whole.
+  const next = centreOnData({
+    names: ["x", "y", "z", "t"],
+    position: [3.4, 1.9, 1.9, 0],
+    lowerBounds: [500, 480, 0, 0],
+    upperBounds: [620, 564, 64, 1],
+  });
+
+  assert.deepEqual(next, [560, 522, 32, 0.5]);
+});
+
+test("centring reports no change when it is already centred", () => {
+  assert.equal(
+    centreOnData({
+      names: ["x", "y"],
+      position: [56, 34.5],
+      lowerBounds: [0, 0],
+      upperBounds: [112, 69],
+    }),
+    null,
+  );
+});
+
+test("centring leaves an axis with no finite extent alone", () => {
+  const next = centreOnData({
+    names: ["x", "y"],
+    position: [10, 20],
+    lowerBounds: [0, Number.NEGATIVE_INFINITY],
+    upperBounds: [112, Number.POSITIVE_INFINITY],
+  });
+
+  // Only x moves; y has no meaningful middle.
+  assert.deepEqual(next, [56, 20]);
+});

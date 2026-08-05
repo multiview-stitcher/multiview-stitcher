@@ -113,29 +113,38 @@ test("metadata keys are told apart from chunk data", () => {
   }
 });
 
-test("the wheel URL changes when the wheel does", async () => {
-  // A rebuild of the same commit produces an identically named wheel, and
-  // micropip fetches it from inside a worker - where a page reload does not
-  // bypass the HTTP cache. Only a changing URL keeps the Python runtime in
-  // step with the JavaScript.
-  const { readFileSync } = await import("node:fs");
-  const manifest = JSON.parse(
-    readFileSync(join(repoRoot, "docs", "browser", "packages", "manifest.json"), "utf8"),
-  );
+test("the build id covers the app, not just the wheel", async (t) => {
+  // `docs/browser/packages/` holds build output and is not checked in, so a
+  // fresh clone - and CI, which builds its wheel elsewhere - has no manifest
+  // to read. The assertions that need one are worth keeping, but not at the
+  // cost of a failure that says nothing about the code.
+  const { existsSync, readFileSync } = await import("node:fs");
+  const path = join(repoRoot, "docs", "browser", "packages", "manifest.json");
+  if (!existsSync(path)) {
+    t.skip("no manifest; run scripts/build_browser_app.py to check this");
+    return;
+  }
 
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
   assert.ok(manifest.sha256, "the manifest must carry a wheel checksum");
 
-  // The build id covers the page's own sources as well as the wheel. A id
-  // derived from the wheel alone would not move when only JavaScript changed,
-  // leaving every such fix hidden behind the cached copy of the very file it
-  // was meant to replace.
+  // An id derived from the wheel alone would not move when only JavaScript
+  // changed, leaving every such fix hidden behind the cached copy of the very
+  // file it was meant to replace.
   assert.match(manifest.build, /^[0-9a-f]{12}$/);
   assert.notEqual(
     manifest.build,
     manifest.sha256.slice(0, 12),
     "the build id should not be the wheel checksum on its own",
   );
+});
 
+test("the wheel URL changes when the wheel does", async () => {
+  // A rebuild of the same commit produces an identically named wheel, and
+  // micropip fetches it from inside a worker - where a page reload does not
+  // bypass the HTTP cache. Only a changing URL keeps the Python runtime in
+  // step with the JavaScript.
+  const { readFileSync } = await import("node:fs");
   const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
   assert.match(app, /packages\/\$\{manifest\.wheel\}\?v=\$\{build\}/);
   // Worker scripts are loaded the same way and need the same treatment.
@@ -372,4 +381,53 @@ test("a custom pyodide lockfile is loaded with an explicit package base", async 
       "lockFileURL must be accompanied by packageBaseUrl",
     );
   }
+});
+
+test("layers are addressed by the URL they read, not by their name", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  // Neuroglancer renames layers it opens: an OME-Zarr carrying omero metadata
+  // turns "0: tile.ome.zarr" into "0: tile.ome.zarr channel 0". A lookup by
+  // name then misses, the in-place update throws, and the app falls back to
+  // applying the whole state - resetting the layout and refetching the data.
+  // The source URL is the app's own handle and survives the rename.
+  assert.match(viewer, /dataSource\.spec\?\.url === url/);
+  assert.match(app, /transforms\[url\]/);
+  assert.match(app, /visibility\[url\]/);
+
+  // The name must not be what either side matches on.
+  const patchPath = viewer.slice(
+    viewer.indexOf("setLayerTransforms(transforms)"),
+    viewer.indexOf("updateLayers(patches)"),
+  );
+  assert.ok(
+    !/wanted\.has\(managed\.name\)|\.get\(managed\.name\)/.test(patchPath),
+    "setLayerTransforms must not look layers up by name",
+  );
+});
+
+test("clearing gives a genuinely fresh viewer", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  const reset = viewer.slice(viewer.indexOf("  reset() {"));
+
+  // Emptying the layer list is not enough: Neuroglancer keeps the combined
+  // coordinate space, so the next dataset is measured in the previous one's
+  // dimensions and bounds. The viewer is rebuilt instead.
+  assert.match(reset, /this\.dispose\(\);/);
+  assert.match(reset, /this\.mount\(target\);/);
+
+  // A new instance restores from the URL fragment on the way up, which would
+  // bring the discarded dataset straight back.
+  assert.match(reset, /location\??\.hash/);
+  assert.match(reset, /replaceState/);
+
+  // The page resets on clear, and when a load has nothing in common with what
+  // is on screen.
+  assert.match(app, /if \(viewer\.mounted\) viewer\.reset\(\);/);
+  assert.match(app, /if \(!shared\) viewer\.reset\(\);/);
 });

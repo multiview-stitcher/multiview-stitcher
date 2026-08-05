@@ -69,3 +69,31 @@ export function carryCameraOver({
 
   return changed ? next : null;
 }
+
+/**
+ * The middle of the data, for every axis with a finite extent.
+ *
+ * Used until the user takes the camera over. Neuroglancer places it itself on
+ * the first valid coordinate space, but that can be before every layer has
+ * reported its bounds - so the camera settles into a corner of the data and
+ * the view looks empty. Re-centring as the bounds grow ends up on the whole.
+ *
+ * Returns the corrected position, or `null` when it is already centred.
+ */
+export function centreOnData({ names, position, lowerBounds, upperBounds }) {
+  const next = Array.from(position);
+  let changed = false;
+
+  for (let i = 0; i < names.length; i += 1) {
+    const lower = lowerBounds[i];
+    const upper = upperBounds[i];
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) continue;
+    const centre = (lower + upper) / 2;
+    if (centre !== next[i]) {
+      next[i] = centre;
+      changed = true;
+    }
+  }
+
+  return changed ? next : null;
+}

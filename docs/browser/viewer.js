@@ -29,9 +29,13 @@ import {
 // means a rebuilt camera.js cannot be served from cache behind a fresh
 // viewer.js - two halves of different builds fail in ways that look like
 // neither.
-const { carryCameraOver } = await import(
+const { carryCameraOver, centreOnData } = await import(
   `./camera.js${new URL(import.meta.url).search}`
 );
+
+//: Events that mean the user is driving the camera. Until one arrives, the
+//: viewer keeps the camera on the data as the layers report their bounds.
+const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown"];
 
 /** Wraps one mounted Neuroglancer instance. */
 export class NeuroglancerViewer {
@@ -43,6 +47,9 @@ export class NeuroglancerViewer {
   #onPositionChanged = null;
   #onCoordinateSpaceChanged = null;
   #applying = false;
+  #placing = false;
+  #cameraPlaced = false;
+  #onTakeover = null;
   #lastNames = null;
   #lastPosition = null;
 
@@ -56,6 +63,18 @@ export class NeuroglancerViewer {
 
     this.#target = target;
     this.#viewer = setupDefaultViewer({ target });
+
+    // Fresh viewer, so the camera is ours to place until the user moves it.
+    this.#cameraPlaced = false;
+    this.#onTakeover = () => {
+      if (!this.#placing) this.#cameraPlaced = true;
+    };
+    for (const type of TAKEOVER_EVENTS) {
+      target.addEventListener(type, this.#onTakeover, {
+        capture: true,
+        passive: true,
+      });
+    }
 
     // Neuroglancer coalesces its own updates, so these fire once per settled
     // change rather than once per mutation.
@@ -112,16 +131,32 @@ export class NeuroglancerViewer {
     if (!position || position.length !== space.rank) return;
 
     const names = Array.from(space.names);
-    const next = carryCameraOver({
+    const geometry = {
       names,
       position: Array.from(position),
       lowerBounds: Array.from(space.bounds.lowerBounds),
       upperBounds: Array.from(space.bounds.upperBounds),
-      previousNames: this.#lastNames,
-      previousPosition: this.#lastPosition,
-    });
+    };
 
-    if (next) navigation.position.value = Float32Array.from(next);
+    // Until the user takes over, keep the camera on the middle of whatever
+    // has loaded; Neuroglancer's own placement happens on the first valid
+    // coordinate space, which can be before every layer has reported.
+    const next = this.#cameraPlaced
+      ? carryCameraOver({
+          ...geometry,
+          previousNames: this.#lastNames,
+          previousPosition: this.#lastPosition,
+        })
+      : centreOnData(geometry);
+
+    if (next) {
+      this.#placing = true;
+      try {
+        navigation.position.value = Float32Array.from(next);
+      } finally {
+        this.#placing = false;
+      }
+    }
     this.#rememberCamera(names, next ?? position);
   }
 
@@ -160,6 +195,39 @@ export class NeuroglancerViewer {
     return this.#viewer !== null;
   }
 
+  /**
+   * Put the viewer back to how it was when it was mounted.
+   *
+   * Emptying the layer list is not enough: the dimensions, their scales and
+   * units, the camera and the layout all outlive it, and the next dataset is
+   * then shown through the previous one's coordinate space. The remembered
+   * camera goes too - carrying it into an unrelated dataset is how a fresh
+   * load ends up pointing at nothing.
+   */
+  reset() {
+    const target = this.#require() && this.#target;
+
+    // `setupDefaultViewer` binds the viewer state to the URL fragment, and a
+    // new instance restores from it on the way up - so without this the
+    // discarded dataset comes straight back. Replaced rather than assigned,
+    // to avoid a history entry and a hashchange.
+    if (globalThis.location?.hash) {
+      globalThis.history?.replaceState(
+        null,
+        "",
+        globalThis.location.pathname + globalThis.location.search,
+      );
+    }
+
+    // Rebuilt rather than emptied. `state.reset()` leaves the combined
+    // coordinate space behind, so the next dataset is measured in the
+    // previous one's dimensions and bounds - which is how a load after a
+    // clear ended up showing nothing. Listeners registered through
+    // `onStateChanged`/`onPositionChanged` are kept and re-wired.
+    this.dispose();
+    this.mount(target);
+  }
+
   /** Tear the viewer down and release its WebGL context and workers. */
   dispose() {
     if (!this.#viewer) return;
@@ -171,9 +239,17 @@ export class NeuroglancerViewer {
     this.#viewer.navigationState.coordinateSpace.changed.remove(
       this.#onCoordinateSpaceChanged,
     );
+    if (this.#onTakeover) {
+      for (const type of TAKEOVER_EVENTS) {
+        this.#target?.removeEventListener(type, this.#onTakeover, {
+          capture: true,
+        });
+      }
+    }
     this.#viewer.dispose();
 
     this.#viewer = null;
+    this.#onTakeover = null;
     this.#onStateChanged = null;
     this.#onPositionChanged = null;
     this.#onCoordinateSpaceChanged = null;
@@ -268,23 +344,43 @@ export class NeuroglancerViewer {
    */
   setLayerTransforms(transforms) {
     const viewer = this.#require();
-    const wanted = new Map(Object.entries(transforms));
+    const missing = [];
 
-    for (const managed of viewer.layerManager.managedLayers) {
-      if (!wanted.has(managed.name)) continue;
-      const transform = wanted.get(managed.name);
-      wanted.delete(managed.name);
+    for (const [url, transform] of Object.entries(transforms)) {
+      const sources = this.#sourcesReading(url);
+      if (!sources.length) {
+        missing.push(url);
+        continue;
+      }
+      for (const dataSource of sources) applyTransform(dataSource, transform);
+    }
 
-      const userLayer = managed.layer;
-      if (!userLayer) continue;
-      for (const dataSource of userLayer.dataSources) {
-        applyTransform(dataSource, transform);
+    if (missing.length) {
+      throw new Error(`no layer reads from: ${missing.join(", ")}`);
+    }
+  }
+
+  /**
+   * The loaded data sources reading from `url`.
+   *
+   * Layers are addressed by the URL they read rather than by name: the name
+   * is Neuroglancer's to change. Opening an OME-Zarr that carries omero
+   * metadata renames the layer after its channel - `"0: tile.ome.zarr"`
+   * becomes `"0: tile.ome.zarr channel 0"` - and a name can also be made
+   * unique, or edited by the user. The URL is the app's own handle on a
+   * layer and survives all of that.
+   *
+   * One URL can back several layers, since a multi-channel image is opened
+   * as one layer per channel, so every match is returned.
+   */
+  #sourcesReading(url) {
+    const sources = [];
+    for (const managed of this.#viewer.layerManager.managedLayers) {
+      for (const dataSource of managed.layer?.dataSources ?? []) {
+        if (dataSource.spec?.url === url) sources.push(dataSource);
       }
     }
-
-    if (wanted.size) {
-      throw new Error(`no such layer(s): ${[...wanted.keys()].join(", ")}`);
-    }
+    return sources;
   }
 
   /**
@@ -315,24 +411,31 @@ export class NeuroglancerViewer {
   }
 
   /**
-   * Show or hide layers by name.
+   * Show or hide layers, addressed by the URL they read.
    *
    * Goes through `ManagedUserLayer.setVisible`, so it takes effect without
-   * touching the rest of the state.
+   * touching the rest of the state. See `#sourcesReading` for why the URL is
+   * the handle rather than the layer name.
    */
   setLayerVisibility(visibility) {
     const viewer = this.#require();
-    const wanted = new Map(Object.entries(visibility));
+    const missing = [];
 
-    for (const layer of viewer.layerManager.managedLayers) {
-      if (wanted.has(layer.name)) {
-        layer.setVisible(Boolean(wanted.get(layer.name)));
-        wanted.delete(layer.name);
+    for (const [url, visible] of Object.entries(visibility)) {
+      let found = false;
+      for (const managed of viewer.layerManager.managedLayers) {
+        const reads = (managed.layer?.dataSources ?? []).some(
+          (dataSource) => dataSource.spec?.url === url,
+        );
+        if (!reads) continue;
+        managed.setVisible(Boolean(visible));
+        found = true;
       }
+      if (!found) missing.push(url);
     }
 
-    if (wanted.size) {
-      throw new Error(`no such layer(s): ${[...wanted.keys()].join(", ")}`);
+    if (missing.length) {
+      throw new Error(`no layer reads from: ${missing.join(", ")}`);
     }
   }
 

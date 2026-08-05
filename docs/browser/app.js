@@ -619,13 +619,18 @@ function showViewerState(ngState) {
   // layers themselves are unchanged, only their transforms and visibility
   // are applied.
   if (state.layerSources && sameLayers(sources, state.layerSources)) {
+    // Keyed by source URL, not by layer name: Neuroglancer renames layers it
+    // opens - an OME-Zarr with omero metadata becomes "<name> channel 0" -
+    // and a lookup by name would miss, fall back to applying the whole state
+    // and take the layout and the shader settings with it.
     const transforms = {};
     const visibility = {};
     for (const layer of ngState.layers || []) {
       const source = layer.source;
-      transforms[layer.name] =
+      const url = typeof source === "string" ? source : source.url;
+      transforms[url] =
         typeof source === "string" ? null : source.transform || null;
-      visibility[layer.name] = layer.visible !== false;
+      visibility[url] = layer.visible !== false;
     }
     try {
       viewer.setLayerTransforms(transforms);
@@ -639,6 +644,16 @@ function showViewerState(ngState) {
     }
   }
 
+  // Nothing in common with what is on screen means a different dataset, not
+  // an edit of this one. Its coordinate space, camera and layout say nothing
+  // about the new data, so the viewer starts clean and Neuroglancer places
+  // the camera on what actually loaded. Adding the fused preview, or
+  // removing one view, still shares sources and keeps the view.
+  const shared = Object.values(sources).some((url) =>
+    state.layerSources ? Object.values(state.layerSources).includes(url) : false,
+  );
+  if (!shared) viewer.reset();
+
   state.layerSources = sources;
   // Applied to the running viewer: the camera, the WebGL context and anything
   // already fetched all survive, so switching transform_key is immediate.
@@ -647,7 +662,9 @@ function showViewerState(ngState) {
 
 async function refreshViewer() {
   if (!hasViews()) {
-    if (viewer.mounted) viewer.setLayers([]);
+    // No views: back to a blank viewer, not an empty layer list on top of the
+    // previous dataset's coordinate space.
+    if (viewer.mounted) viewer.reset();
     state.layerSources = null;
     return;
   }
@@ -866,7 +883,12 @@ async function removeView(index, name) {
 
 async function clearSession() {
   const described = await command("clear", {});
+  // Everything derived from the old dataset goes, so that what is loaded next
+  // starts from the same state a fresh page would.
   state.previewRoute = null;
+  state.transformKey = null;
+  state.layerSources = null;
+  state.position = null;
   await applyDescribed(described);
   log("cleared all views");
   setStatus("drop a folder to begin");
