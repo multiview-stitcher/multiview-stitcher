@@ -165,6 +165,32 @@
               moves; where tiles overlap, the one selected in the views list does.
               The new placement is saved when you release.
             </p>
+
+            <div id="placement-scope" class="placement-scope">
+              <div class="scope-block">
+                <span class="scope-label">Apply to channels</span>
+                <div id="placement-channels" class="scope-channels"></div>
+                <p id="placement-channels-empty" class="field-help">
+                  This data has no channel axis.
+                </p>
+              </div>
+
+              <div class="scope-block">
+                <span class="scope-label">
+                  Apply to timepoints
+                  <span id="placement-time-label" class="scope-value"></span>
+                </span>
+                <div id="placement-time" class="dual-range" aria-label="Timepoints manual placement applies to">
+                  <div class="dual-range-track"></div>
+                  <input id="placement-time-first" class="contrast-min-slider" type="range" min="0" max="0" step="1" value="0" aria-label="First timepoint" />
+                  <input id="placement-time-last" class="contrast-max-slider" type="range" min="0" max="0" step="1" value="0" aria-label="Last timepoint" />
+                </div>
+                <p id="placement-time-empty" class="field-help">
+                  This data has no time axis.
+                </p>
+              </div>
+            </div>
+
             <p id="manual-placement-target" class="field-help warning" hidden></p>
           </fieldset>
         </section>

@@ -123,7 +123,19 @@ class WorkerRuntime:
 
     def _cmd_update_transforms(self, payload):
         return self._require_session().update_neuroglancer_transforms(
-            payload.get("transform_key"), payload.get("updates", [])
+            payload.get("transform_key"),
+            payload.get("updates", []),
+            channels=payload.get("channels"),
+            time_range=payload.get("time_range"),
+        )
+
+    def _cmd_channel_transforms(self, payload):
+        return self._require_session().channel_transforms(
+            transform_key=payload.get("transform_key"),
+            base_url=payload.get("base_url", ""),
+            api_base=payload.get("api_base", ""),
+            serve_views=payload.get("serve_views", "auto"),
+            time_index=payload.get("time_index", 0),
         )
 
     def _cmd_register(self, payload):
@@ -208,6 +220,7 @@ class WorkerRuntime:
             contrast_limits=payload.get("contrast_limits"),
             layout=payload.get("layout"),
             show_all_channels=payload.get("show_all_channels", False),
+            time_index=payload.get("time_index", 0),
         )
 
     # ------------------------------------------------------------------

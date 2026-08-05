@@ -38,9 +38,10 @@ Data visualization and control panel
     - Remove
     - Short info (shape per dim, number of res levels)
     - Visibility toggle
-    - layers can be selected by clicking on them, and the selected layer is subtly highlighted
+    - layers can be selected by clicking on them, and the selected layer is subtly highlighted. Several layers can be selected at the same time by holding down ctrl while clicking on them. there's a small button to select / unselect all layers
 - Coordinate system selection
   - dropdown menu to select transform_key to show in neuroglancer viewer
+- If a time dimension is present, add a time slider to select the timepoint to show in neuroglancer viewer
 - Display options
   - list of channels
     - "Positional colors": checkbox to color channels based on their position (see vis_utils.py for details), fused image is unaffected by this option
@@ -65,6 +66,12 @@ Different tabs for different types of operations:
       - only the orthogonal views can be used for manual placement, the oblique view is disabled. in each orthogonal view, the user can drag tiles in the plane of the view, and the tile will be moved in 3D space accordingly. for rotation, a given tile is rotated around its center in 2D (that panel's projection plane)
       - After a drag is completed, the transform_key is updated, and the user can see the updated transform_key in the neuroglancer viewer. The layer moves in real time, but the transform_key is only updated after the drag is completed
       - Which layer is being dragged? If it's unique because of the mouse position, then that layer is being dragged. If multiple layers are under the mouse position, the currently selected layer is being dragged. If no layer is under the mouse position, then no layer is being dragged. Layers are selected by clicking on them in the layers list in the left panel
+
+      - additional options for manual placement:
+        - a small list of checkboxes for each channel: only for the checked channels the manual transformation is applied. this works together with the idea that transform_keys can be defined per channel (e.g. `xr.concat(params_c, dim='c').assign_coords({'c': channels})`). By default all channels are ticked. If all channels are treated in the same way, the parameters don't need to have a channel dimension
+        - similar for timepoints: if there's a time dimension, add a double range time slider for the timepoints for which the manual transform should apply (parameters can also have a t dimension). if there's no time dimension, this should be greyed out
+        - similar for tiles: if several tiles are selected, the transform should be applied to all the selected tiles (add a quick explanation about this). For rotations, rotation is applied around the center of each tile.
+
 - Registration
   - sub tabs:
     - Common options

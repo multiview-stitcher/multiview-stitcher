@@ -668,6 +668,58 @@ test("manual placement writes whichever coordinate system is displayed", async (
   assert.doesNotMatch(sync, /currentFusedLayerUrls/);
 });
 
+test("a placement can be restricted to some channels and timepoints", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  assert.match(html, /id="placement-channels"/);
+  assert.match(html, /id="placement-time-first"/);
+  assert.match(html, /id="placement-time-last"/);
+
+  // Null, not "all of them": it is what lets the session store one affine for
+  // the whole image instead of one per channel, so the parameters stay free
+  // of an axis they would not vary over.
+  const scope = app.slice(
+    app.indexOf("function placementChannels"),
+    app.indexOf("function renderPlacementScope"),
+  );
+  assert.match(scope, /chosen\.length === channels\.length\s*\?\s*null/);
+  assert.match(scope, /first === 0 && last === count - 1 \? null/);
+
+  // The drag itself shows the channel restriction - the viewer opens one
+  // layer per channel, each with its own transform.
+  assert.match(app, /channels: placementChannels\(\)/);
+  assert.match(viewer, /#sourcesReading\(url, placement\.channels\)/);
+  assert.match(viewer, /if \(channel !== null && !channels\.has\(channel\)\)/);
+
+  // Both restrictions reach the session with the placement they were made
+  // under, rather than whatever the checkboxes say when the save runs.
+  assert.match(app, /const channels = fromDrag \? placementChannels\(\) : null/);
+  assert.match(app, /time_range: timeRange/);
+});
+
+test("a transform that varies over time or channel is shown as one sample", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // A source transform is one matrix. Over time that means showing the
+  // timepoint being viewed, and rebuilding when it moves.
+  assert.match(app, /time_index: state\.timeIndex/);
+  assert.match(app, /function noteTimeIndex\(\)/);
+  assert.match(app, /if \(!state\.timeVaryingTransforms\) return;/);
+  // A drag can only show one timepoint of a placement stored for a range of
+  // them, so what the session holds is what ends up on screen.
+  assert.match(app, /if \(hadPreview \|\| timeRange\)/);
+
+  // Over channel it means one layer each, aimed separately - which cannot
+  // travel inside the state, since the state has one layer per view.
+  assert.match(app, /command\("channel_transforms"/);
+  assert.match(viewer, /setChannelTransforms\(transforms\)/);
+});
+
 test("a view can be selected in the list, which is what breaks a tie", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(join(repoRoot, "docs", "browser", "app.css"), "utf8");

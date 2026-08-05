@@ -15,6 +15,7 @@ import pytest
 import xarray as xr
 
 from multiview_stitcher import (
+    fusion,
     msi_utils,
     ngff_utils,
     registration,
@@ -329,6 +330,242 @@ def test_session_reads_a_neuroglancer_rotation_in_physical_units():
     expected[z, z] = expected[y, y] = 0.0
     expected[z, y], expected[y, z] = -1.0, 1.0
     np.testing.assert_allclose(linear, expected, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Manual placement restricted to some channels or timepoints
+# ---------------------------------------------------------------------------
+
+
+def _timelapse_session():
+    """A session on the one example with both a time and a channel axis."""
+    session = Session()
+    session.load(example_data.example_sources("tiles-2d-3t-2c")[:2])
+    session.copy_transform(si_utils.DEFAULT_TRANSFORM_KEY, "manual")
+    return session
+
+
+def _nudged(session, shift, index=0):
+    """The viewer's own edit of one view: a shift of `shift` output pixels."""
+    state = session.neuroglancer_state(transform_key="manual")
+    transform = json.loads(
+        json.dumps(state["layers"][index]["source"]["transform"])
+    )
+    x_row = list(transform["outputDimensions"]).index("x")
+    transform["matrix"][x_row][-1] += shift
+    return [{"index": index, "transform": transform}]
+
+
+def _channels(session, index=0):
+    sim = msi_utils.get_sim_from_msim(session.msims[index])
+    return [str(value) for value in sim.coords["c"].values]
+
+
+def _x_translation(session, transform_key, index=0):
+    """The x translation of a view's transform, keeping any c / t axes."""
+    affine = msi_utils.get_transform_from_msim(
+        session.msims[index], transform_key
+    )
+    return affine.sel(x_in="x", x_out="1")
+
+
+def test_the_time_and_channel_example_has_both_axes():
+    session = Session()
+    session.load(example_data.example_sources("tiles-2d-3t-2c")[:1])
+
+    sim = msi_utils.get_sim_from_msim(session.msims[0])
+
+    assert sim.sizes["t"] == 3
+    assert sim.sizes["c"] == 2
+    assert session.describe()["views"][0]["t_coords"] == ["0", "1", "2"]
+    assert len(session.describe()["views"][0]["c_coords"]) == 2
+
+
+def test_an_unrestricted_placement_leaves_the_parameters_flat():
+    """A transform that is the same everywhere carries no channel axis.
+
+    The axes are what let a placement differ between samples; adding them when
+    nothing differs would make every downstream consumer broadcast over an
+    axis of identical matrices.
+    """
+    session = _timelapse_session()
+
+    session.update_neuroglancer_transforms("manual", _nudged(session, 10))
+
+    assert "c" not in _x_translation(session, "manual").dims
+
+
+def test_a_placement_on_one_channel_gives_the_parameters_a_channel_axis():
+    session = _timelapse_session()
+    channels = _channels(session)
+
+    before = float(_x_translation(session, "manual"))
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 10), channels=[channels[1]]
+    )
+    after = _x_translation(session, "manual")
+
+    assert "c" in after.dims
+    # Only the chosen channel moved; the other kept what it had.
+    np.testing.assert_allclose(float(after.sel(c=channels[0])), before)
+    assert float(after.sel(c=channels[1])) != before
+
+    # Selecting every channel again flattens them back out.
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 0), channels=channels
+    )
+    assert "c" not in _x_translation(session, "manual").dims
+
+
+def test_a_placement_on_a_time_range_gives_the_parameters_a_time_axis():
+    session = _timelapse_session()
+
+    before = float(_x_translation(session, "manual"))
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 10), time_range=[1, 2]
+    )
+    after = _x_translation(session, "manual")
+
+    # The axis appears because the timepoints now differ, not because the data
+    # has one: the transform started out flat.
+    assert "t" in after.dims
+    assert float(after.isel(t=0)) == before
+    assert float(after.isel(t=1)) != before
+    assert float(after.isel(t=2)) == float(after.isel(t=1))
+
+
+def test_a_placement_can_be_restricted_to_channels_and_timepoints_at_once():
+    session = _timelapse_session()
+    channels = _channels(session)
+
+    session.update_neuroglancer_transforms(
+        "manual",
+        _nudged(session, 10),
+        channels=[channels[0]],
+        time_range=[2, 2],
+    )
+    after = _x_translation(session, "manual")
+
+    assert set(after.dims) == {"c", "t"}
+    moved = after.sel(c=channels[0]).isel(t=2)
+    for channel in channels:
+        for time in range(3):
+            if channel == channels[0] and time == 2:
+                continue
+            assert float(after.sel(c=channel).isel(t=time)) != float(moved)
+
+
+def test_a_placement_out_of_range_is_reported_rather_than_ignored():
+    session = _timelapse_session()
+
+    with pytest.raises(ValueError, match="None of the channels"):
+        session.update_neuroglancer_transforms(
+            "manual", _nudged(session, 10), channels=["not a channel"]
+        )
+
+
+@pytest.mark.parametrize(
+    "channels,time_range",
+    [
+        (["channel 0"], None),
+        (None, [1, 2]),
+        (["channel 1"], [0, 1]),
+    ],
+    ids=["per-channel", "per-timepoint", "both"],
+)
+def test_registration_and_fusion_run_on_restricted_parameters(
+    channels, time_range
+):
+    """Manual placement is upstream of everything else.
+
+    Restricting it is the only thing in the app that gives the parameters a
+    ``c`` or ``t`` axis, and registration and fusion both have to broadcast
+    over whichever appeared - otherwise placing one channel by hand quietly
+    breaks the rest of the session.
+    """
+    session = _timelapse_session()
+    session.update_neuroglancer_transforms(
+        "manual",
+        _nudged(session, 12),
+        channels=channels,
+        time_range=time_range,
+    )
+    placed = _x_translation(session, "manual")
+    assert set(placed.dims) & {"c", "t"}, "the fixture must exercise an axis"
+
+    result = session.register(
+        RegistrationOptions(
+            transform_key="manual", new_transform_key="registered"
+        )
+    )
+    assert result["transform_key"] == "registered"
+
+    for transform_key in ("manual", "registered"):
+        fused = fusion.fuse(
+            [msi_utils.get_sim_from_msim(msim) for msim in session.msims],
+            transform_key=transform_key,
+        )
+        data = np.asarray(fused.data)
+        assert data.shape[fused.dims.index("t")] == 3
+        assert data.shape[fused.dims.index("c")] == 2
+        assert np.isfinite(data).all()
+        assert data.max() > 0
+
+
+def test_a_channel_dependent_transform_reaches_the_viewer_per_channel():
+    """One Neuroglancer layer carries one transform, and layers are channels.
+
+    A transform that varies over channel therefore cannot be described by the
+    layer specification, and is sent alongside for the app to apply once the
+    per-channel layers are up.
+    """
+    session = _timelapse_session()
+    channels = _channels(session)
+
+    # Nothing to say while every channel shares a transform.
+    assert session.channel_transforms(transform_key="manual") == {}
+
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 10), channels=[channels[1]]
+    )
+
+    # The state itself still builds, showing the first channel's transform.
+    state = session.neuroglancer_state(transform_key="manual", api_base="/api")
+    assert len(state["layers"]) == len(session.msims)
+
+    per_view = session.channel_transforms(
+        transform_key="manual", api_base="/api"
+    )
+    assert len(per_view) == 1, "only the view that was moved needs one"
+
+    per_channel = next(iter(per_view.values()))
+    assert sorted(per_channel) == ["0", "1"]
+    x_of = lambda spec: spec["matrix"][  # noqa: E731
+        list(spec["outputDimensions"]).index("x")
+    ][-1]
+    assert x_of(per_channel["0"]) != x_of(per_channel["1"])
+
+
+def test_the_viewer_shows_the_transform_of_the_timepoint_being_viewed():
+    """A source transform is one matrix, so it has to be one timepoint's."""
+    session = _timelapse_session()
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 10), time_range=[2, 2]
+    )
+
+    def x_translation(time_index):
+        state = session.neuroglancer_state(
+            transform_key="manual", time_index=time_index
+        )
+        transform = state["layers"][0]["source"]["transform"]
+        row = list(transform["outputDimensions"]).index("x")
+        return transform["matrix"][row][-1]
+
+    assert x_translation(0) == x_translation(1)
+    assert x_translation(2) != x_translation(0)
+    # Out of range is clamped rather than raising: the viewer's position can
+    # briefly outrun the data while a state is being applied.
+    assert x_translation(99) == x_translation(2)
 
 
 def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
@@ -1025,6 +1262,7 @@ def test_example_generation_is_deterministic():
         ("tiles-3d-2c", 3, 2, 64),
         ("tiles-2d-1c", 2, 1, 128),
         ("tiles-2d-2c", 2, 2, 128),
+        ("tiles-2d-3t-2c", 2, 2, 128),
     ],
 )
 def test_browser_example_variants_are_2_by_2(
@@ -1245,6 +1483,7 @@ def test_worker_load_replace_and_append(tiles_on_disk):
         "tiles-3d-2c",
         "tiles-2d-1c",
         "tiles-2d-2c",
+        "tiles-2d-3t-2c",
     ]
 
     response = json.loads(worker_module.handle_json("clear", "{}"))

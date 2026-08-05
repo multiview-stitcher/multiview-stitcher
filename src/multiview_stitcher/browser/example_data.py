@@ -28,6 +28,7 @@ EXAMPLE_MENU = (
     "tiles-3d-2c",
     "tiles-2d-1c",
     "tiles-2d-2c",
+    "tiles-2d-3t-2c",
 )
 
 
@@ -69,6 +70,19 @@ EXAMPLES = {
         "overlap": 32,
         "shift_scale": 8.0,
         "seed": 3,
+    },
+    # The only example with a time axis: manual placement can be restricted to
+    # a range of timepoints, and a transform that varies over t has to survive
+    # registration, fusion and the round trip through the viewer.
+    "tiles-2d-3t-2c": {
+        "label": "2D · 3 timepoints · two channels · 2×2",
+        "ndim": 2,
+        "n_channels": 2,
+        "n_timepoints": 3,
+        "tile_size": 128,
+        "overlap": 32,
+        "shift_scale": 8.0,
+        "seed": 4,
     },
 }
 
@@ -127,7 +141,7 @@ def _dataset(name):
         sample_data.generate_tiled_dataset(
             ndim=spec["ndim"],
             N_c=spec["n_channels"],
-            N_t=1,
+            N_t=spec.get("n_timepoints", 1),
             tile_size=spec["tile_size"],
             tiles_x=2,
             tiles_y=2,

@@ -464,16 +464,47 @@ export class NeuroglancerViewer {
    * layer and survives all of that.
    *
    * One URL can back several layers, since a multi-channel image is opened
-   * as one layer per channel, so every match is returned.
+   * as one layer per channel, so every match is returned. Pass `channels` -
+   * a set of channel indices - to keep only some of them, which is how a
+   * placement restricted to one channel moves only that channel's layer.
    */
-  #sourcesReading(url) {
+  #sourcesReading(url, channels = null) {
     const sources = [];
     for (const managed of this.#viewer.layerManager.managedLayers) {
+      if (channels) {
+        const channel = this.#channelIndex(managed);
+        // A layer with no channel axis is the whole image, so it belongs to
+        // every selection rather than to none.
+        if (channel !== null && !channels.has(channel)) continue;
+      }
       for (const dataSource of managed.layer?.dataSources ?? []) {
         if (dataSource.spec?.url === url) sources.push(dataSource);
       }
     }
     return sources;
+  }
+
+  /**
+   * Aim each channel of a layer separately.
+   *
+   * A Neuroglancer source transform is one matrix and a layer is one channel,
+   * so a transform that varies over channel arrives beside the viewer state
+   * rather than inside it - see `Session.channel_transforms`. `transforms`
+   * maps a URL to `{channelIndex: spec}`; channels left out keep whatever the
+   * layer specification gave them.
+   *
+   * Silent about a URL nothing reads: this is applied after a state has been
+   * handed over, and a layer may still be loading.
+   */
+  setChannelTransforms(transforms) {
+    this.#require();
+
+    for (const [url, byChannel] of Object.entries(transforms || {})) {
+      for (const [channel, transform] of Object.entries(byChannel || {})) {
+        const sources = this.#sourcesReading(url, new Set([Number(channel)]));
+        for (const dataSource of sources) applyTransform(dataSource, transform);
+      }
+    }
   }
 
   /**
@@ -570,6 +601,12 @@ export class NeuroglancerViewer {
    *     images are simply left out rather than guarded against here.
    *   - `selectedUrl`: the layer the app has selected, used where tiles
    *     overlap. Re-supply it by calling this again when the selection moves.
+   *   - `channels`: channel indices a drag applies to, or null for all. Only
+   *     those channels' layers follow the pointer, which is what the app then
+   *     asks the session to save. A restriction over *time* has no equivalent
+   *     here - a source transform is one matrix for the whole time axis - so
+   *     the drag shows the timepoint on screen and the session stores the
+   *     range.
    *   - `onDragStart(url, mode)`, `onDragEnd(url, mode)`: the boundaries of one
    *     drag, where `mode` is "translate" or "rotate".
    *   - `onRefused(reason)`: a drag that could not be resolved to one layer,
@@ -591,6 +628,7 @@ export class NeuroglancerViewer {
     this.#placement = {
       movableUrls: new Set(placement.movableUrls ?? []),
       selectedUrl: placement.selectedUrl ?? null,
+      channels: placement.channels ? new Set(placement.channels) : null,
       onDragStart: placement.onDragStart ?? (() => {}),
       onDragEnd: placement.onDragEnd ?? (() => {}),
       onRefused: placement.onRefused ?? (() => {}),
@@ -676,10 +714,16 @@ export class NeuroglancerViewer {
       return;
     }
 
-    const sources = this.#sourcesReading(url).filter(
+    // Only the channels the placement applies to follow the pointer. The rest
+    // stay where they are, which is exactly what the session will be asked to
+    // store, so the drag shows the result rather than a promise of it.
+    const sources = this.#sourcesReading(url, placement.channels).filter(
       (dataSource) => dataSource.loadState && !dataSource.loadState.error,
     );
-    if (!sources.length) return;
+    if (!sources.length) {
+      placement.onRefused("no-channels");
+      return;
+    }
 
     const { displayDimensionIndices } =
       viewer.navigationState.pose.displayDimensions.value;

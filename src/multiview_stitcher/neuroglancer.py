@@ -40,6 +40,29 @@ def _affine_to_neuroglancer_source_transform(
     return affine
 
 
+def _select_affine_sample(affine, channel_coord=None, time_index=0):
+    """Reduce a transform to the single affine a Neuroglancer layer can carry.
+
+    A transform may vary over channel or time - a channel alignment, or a
+    manual placement applied to some timepoints only. A Neuroglancer source
+    transform is one matrix, so the layer shows one sample of it: the channel
+    the layer is drawn from, and the timepoint being viewed. The rest is
+    reachable by asking again for a different sample.
+    """
+    if "c" in affine.dims:
+        coords = [str(value) for value in affine.coords["c"].values]
+        wanted = str(channel_coord) if channel_coord is not None else None
+        index = coords.index(wanted) if wanted in coords else 0
+        affine = affine.isel(c=index, drop=True)
+
+    if "t" in affine.dims:
+        index = int(time_index or 0)
+        index = min(max(index, 0), affine.sizes["t"] - 1)
+        affine = affine.isel(t=index, drop=True)
+
+    return affine
+
+
 def _project_source_transform(affine, dims, source_dims):
     """Remove synthetic dimensions from a Neuroglancer source transform."""
     indices = [dims.index(dim) for dim in source_dims]
@@ -60,6 +83,7 @@ def generate_neuroglancer_json(
     global_dict: dict = None,
     layout: str = None,
     source_dims: list = None,
+    time_index: int = 0,
 ):
     virtual_ome_zarrs = ome_zarr_paths is None
 
@@ -161,8 +185,11 @@ def generate_neuroglancer_json(
                 affine = spatial_image_utils.get_affine_from_sim(
                     registered_sim, transform_key=transform_key
                 )
-                if "t" in affine.dims:
-                    affine = affine.sel(t=0)
+                affine = _select_affine_sample(
+                    affine,
+                    channel_coord=channel_coord,
+                    time_index=time_index,
+                )
 
                 # Compose a correction that maps from OME-Zarr physical coordinates to
                 # in-memory physical coordinates before applying the registered affine.

@@ -44,11 +44,17 @@ const state = {
   selectedViewUrl: null, // input source url picked in the views list
   positionalColors: false,
   manualPlacement: false,
+  placementChannels: new Map(), // channel key -> placement applies to it
+  placementTimeRange: null, // [first, last] timepoint indices, inclusive
+  placementTimeCount: null, // timepoints the range above was chosen for
+  timeIndex: 0, // timepoint on screen, which is the one transforms are shown at
+  timeVaryingTransforms: false, // whether following the timepoint is worth it
   editableTransformKeys: new Set(),
   mounts: [],
 };
 
 let displayVisibilityTimer = null;
+let timeRefreshTimer = null;
 let contrastSyncTimers = [];
 let positionalColorRequest = 0;
 let positionalColorTimers = [];
@@ -638,7 +644,11 @@ function schedulePlacementSync(ngState, { fromDrag = false } = {}) {
 
   const updates = editedTransforms(ngState);
   if (!updates.length) return;
-  const signature = JSON.stringify(updates);
+  // A drag carries the scope it was made under, so a later change to the
+  // checkboxes cannot rewrite what was already saved.
+  const channels = fromDrag ? placementChannels() : null;
+  const timeRange = fromDrag ? placementTimeRange() : null;
+  const signature = JSON.stringify([updates, channels, timeRange]);
   if (placementSignatures.get(transformKey) === signature) return;
 
   clearTimeout(placementSyncTimer);
@@ -653,14 +663,26 @@ function schedulePlacementSync(ngState, { fromDrag = false } = {}) {
           const result = await command("update_transforms", {
             transform_key: transformKey,
             updates,
+            channels: channels
+              ? channels.map((index) => displayChannels()[index]?.name)
+              : null,
+            time_range: timeRange,
           });
           if (state.session) state.session.generation = result.generation;
+          // From here on the viewer has to follow the timepoint: what it shows
+          // is one sample of a transform that now differs between them.
+          if (timeRange) state.timeVaryingTransforms = true;
           const hadPreview = Boolean(state.previewRoute);
           state.previewRoute = null;
           state.previewMetadata = null;
           state.previewTransformKey = null;
           await refreshSessionSpec();
-          if (hadPreview) {
+          // A drag can only show one timepoint's worth of a placement that
+          // was stored for a range of them, so the viewer is rebuilt from
+          // what the session actually holds rather than left showing the
+          // drag. The channel restriction needs no such correction: those
+          // layers moved and the others did not.
+          if (hadPreview || timeRange) {
             await refreshViewer();
             renderViews(state.session);
           }
@@ -682,11 +704,42 @@ function mountViewer() {
   // only needs to know when that changes.
   viewer.onPositionChanged((position) => {
     state.position = position;
+    noteTimeIndex();
   });
   viewer.onStateChanged((ngState) => {
     schedulePlacementSync(ngState);
     scheduleDisplayVisibility();
   });
+}
+
+/**
+ * Follow the timepoint being viewed, refreshing when it moves.
+ *
+ * Only worth doing once a transform actually varies over time: a source
+ * transform is one matrix, so the state has to be rebuilt to show a different
+ * timepoint's, and doing that on every scrub of a dataset whose placement is
+ * the same throughout would be pure cost.
+ */
+function noteTimeIndex() {
+  if (timeCoords().length < 2) return;
+
+  const dimensions = viewer.getPositionDimensions();
+  const axis = dimensions.indexOf("t");
+  if (axis < 0) return;
+
+  const value = Math.round(state.position?.[axis] ?? 0);
+  const index = Math.min(Math.max(value, 0), timeCoords().length - 1);
+  if (index === state.timeIndex) return;
+
+  state.timeIndex = index;
+  if (!state.timeVaryingTransforms) return;
+
+  clearTimeout(timeRefreshTimer);
+  timeRefreshTimer = setTimeout(() => {
+    refreshViewer().catch((error) =>
+      log(`could not follow the timepoint: ${error.message}`, "warn"),
+    );
+  }, 200);
 }
 
 /** The layers a state describes, as `name -> source url`. */
@@ -1008,18 +1061,26 @@ async function refreshViewer() {
     return;
   }
 
-  const ngState = await command("neuroglancer_state", {
+  const geometry = {
     transform_key: state.transformKey,
     base_url: window.location.origin,
     // The service worker only claims URLs inside its own scope, so Python
     // must build viewer URLs below this prefix rather than at the site root.
     api_base: API_BASE,
+    // A source transform is one matrix, so it can only be one timepoint's.
+    // Showing the one being viewed is what makes a placement stored for a
+    // range of them legible.
+    time_index: state.timeIndex,
+  };
+  const ngState = await command("neuroglancer_state", {
+    ...geometry,
     preview_route: state.previewRoute,
   });
 
   applyViewVisibility(ngState);
   $("#viewer-empty").hidden = true;
   showViewerState(ngState);
+  await applyChannelTransforms(geometry);
   applyDisplayVisibility();
   await applyPositionalColors();
   scheduleDisplayVisibility(500);
@@ -1027,6 +1088,31 @@ async function refreshViewer() {
   // Layers may have been added, removed or rebuilt, and placement addresses
   // them by URL - so it is re-applied against whatever is on screen now.
   syncManualPlacement();
+}
+
+/**
+ * Aim the per-channel layers of any view whose transform varies by channel.
+ *
+ * A Neuroglancer layer carries one source transform and the viewer opens one
+ * layer per channel, so a channel-dependent placement cannot travel inside the
+ * state - it arrives beside it. Nothing is sent for the ordinary case, where
+ * every channel shares a transform.
+ */
+async function applyChannelTransforms(geometry) {
+  let transforms;
+  try {
+    transforms = await command("channel_transforms", geometry);
+  } catch (error) {
+    log(`could not read per-channel transforms: ${error.message}`, "warn");
+    return;
+  }
+  if (!transforms || !Object.keys(transforms).length) return;
+
+  try {
+    viewer.setChannelTransforms(transforms);
+  } catch (error) {
+    log(`could not apply per-channel transforms: ${error.message}`, "warn");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1278,6 +1364,128 @@ function layerUrlsOf(viewUrl) {
   return Array.from(state.currentViewLayerUrls.get(viewUrl) || []);
 }
 
+/** The timepoints the loaded data has, as their coordinate values. */
+function timeCoords() {
+  return state.session?.views?.[0]?.t_coords || [];
+}
+
+/**
+ * The channels a placement applies to, as indices, or null for all of them.
+ *
+ * Null is the case worth distinguishing: it lets the session store one affine
+ * for the whole image rather than one per channel, which is what keeps the
+ * parameters free of a channel axis they would not vary over.
+ */
+function placementChannels() {
+  const channels = displayChannels().filter(({ index }) => index !== null);
+  if (!channels.length) return null;
+  const chosen = channels.filter(
+    ({ key }) => state.placementChannels.get(key) !== false,
+  );
+  return chosen.length === channels.length
+    ? null
+    : chosen.map(({ index }) => index);
+}
+
+/** The timepoint range a placement applies to, or null for all of them. */
+function placementTimeRange() {
+  const count = timeCoords().length;
+  if (count < 2) return null;
+  const [first, last] = state.placementTimeRange ?? [0, count - 1];
+  return first === 0 && last === count - 1 ? null : [first, last];
+}
+
+/**
+ * Rebuild the channel checkboxes and the timepoint slider for the loaded data.
+ *
+ * Both start unrestricted - every channel, every timepoint - so that a user
+ * who never opens this section places tiles the way they always did.
+ */
+function renderPlacementScope(described) {
+  const channels = displayChannels().filter(({ index }) => index !== null);
+  const container = $("#placement-channels");
+  container.replaceChildren();
+  $("#placement-channels-empty").hidden = channels.length > 0;
+  container.hidden = channels.length === 0;
+
+  // A scope belongs to the dataset it was chosen for; a different one starts
+  // unrestricted rather than inheriting a selection nothing on screen shows.
+  const keys = new Set(channels.map(({ key }) => key));
+  for (const key of state.placementChannels.keys()) {
+    if (!keys.has(key)) state.placementChannels.delete(key);
+  }
+
+  for (const { name, key } of channels) {
+    if (!state.placementChannels.has(key)) {
+      state.placementChannels.set(key, true);
+    }
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = state.placementChannels.get(key) !== false;
+    box.addEventListener("change", () => {
+      // Never leave every channel unticked: a placement that applies to
+      // nothing would be a drag the viewer refuses for no visible reason.
+      const others = channels.filter((channel) => channel.key !== key);
+      const anyOther = others.some(
+        (channel) => state.placementChannels.get(channel.key) !== false,
+      );
+      if (!box.checked && !anyOther) {
+        box.checked = true;
+        setStatus("at least one channel has to be placed");
+        return;
+      }
+      state.placementChannels.set(key, box.checked);
+      syncManualPlacement();
+    });
+    const text = document.createElement("span");
+    text.textContent = name;
+    label.append(box, text);
+    container.appendChild(label);
+  }
+
+  const times = timeCoords();
+  const timeBlock = $("#placement-time").closest(".scope-block");
+  const hasTime = times.length > 1;
+  timeBlock.classList.toggle("disabled", !hasTime);
+  $("#placement-time").hidden = !hasTime;
+  $("#placement-time-empty").hidden = hasTime;
+
+  const first = $("#placement-time-first");
+  const last = $("#placement-time-last");
+  for (const slider of [first, last]) {
+    slider.max = String(Math.max(times.length - 1, 0));
+    slider.disabled = !hasTime;
+  }
+  if (state.placementTimeCount !== times.length) {
+    state.placementTimeCount = times.length;
+    state.placementTimeRange = null;
+  }
+  if (!state.placementTimeRange) {
+    state.placementTimeRange = [0, Math.max(times.length - 1, 0)];
+  }
+  first.value = String(state.placementTimeRange[0]);
+  last.value = String(state.placementTimeRange[1]);
+  updatePlacementTimeUi();
+
+  $("#placement-scope").hidden = !described.n_views;
+}
+
+/** Reflect the timepoint range in the slider fill and the heading. */
+function updatePlacementTimeUi() {
+  const times = timeCoords();
+  const row = $("#placement-time");
+  const [first, last] = state.placementTimeRange ?? [0, 0];
+  const span = Math.max(times.length - 1, 1);
+  row.style.setProperty("--low", `${(first / span) * 100}%`);
+  row.style.setProperty("--high", `${(last / span) * 100}%`);
+  $("#placement-time-label").textContent = times.length
+    ? first === last
+      ? `${times[first]}`
+      : `${times[first]} – ${times[last]}`
+    : "";
+}
+
 /**
  * Hand the viewer the current placement settings, or switch placement off.
  *
@@ -1313,6 +1521,11 @@ function syncManualPlacement() {
     selectedUrl: state.selectedViewUrl
       ? layerUrlsOf(state.selectedViewUrl)[0] || null
       : null,
+    // Only the chosen channels follow the pointer. A timepoint range cannot
+    // be shown this way - one source transform covers the whole time axis -
+    // so the drag shows the timepoint on screen and the session stores the
+    // range, which is why the viewer is refreshed afterwards.
+    channels: placementChannels(),
     onDragStart: (url, mode) =>
       setStatus(
         `${mode === "rotate" ? "turning" : "moving"} a tile in ` +
@@ -1475,6 +1688,7 @@ async function applyDescribed(described) {
   renderViews(described);
   renderTransformKeys(described.transform_keys);
   renderChannelControls(described);
+  renderPlacementScope(described);
   renderDimensionFields(described);
   await refreshSessionSpec();
   await refreshViewer();
@@ -1593,6 +1807,10 @@ async function clearSession() {
   state.currentViewLayerUrls.clear();
   state.currentFusedLayerUrls.clear();
   state.channelVisibility.clear();
+  state.placementChannels.clear();
+  state.placementTimeRange = null;
+  state.timeIndex = 0;
+  state.timeVaryingTransforms = false;
   state.selectedViewUrl = null;
   state.positionalColors = false;
   $("#positional-colors").checked = false;
@@ -2046,6 +2264,23 @@ function wireUi() {
     syncManualPlacement();
     await refreshViewer();
   });
+
+  for (const [selector, position] of [
+    ["#placement-time-first", 0],
+    ["#placement-time-last", 1],
+  ]) {
+    $(selector).addEventListener("input", (event) => {
+      const range = [...(state.placementTimeRange ?? [0, 0])];
+      range[position] = Number(event.target.value);
+      // The two handles share a track, so the one being dragged pushes the
+      // other rather than crossing it.
+      if (range[0] > range[1]) range[1 - position] = range[position];
+      state.placementTimeRange = range;
+      $("#placement-time-first").value = String(range[0]);
+      $("#placement-time-last").value = String(range[1]);
+      updatePlacementTimeUi();
+    });
+  }
 
   $("#manual-placement").addEventListener("change", (event) => {
     syncManualPlacement();

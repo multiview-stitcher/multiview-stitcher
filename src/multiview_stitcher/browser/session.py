@@ -25,6 +25,7 @@ them, their shaders and their contrast ranges.
 import uuid
 
 import numpy as np
+import xarray as xr
 
 from multiview_stitcher import (
     msi_utils,
@@ -60,6 +61,80 @@ POSITIONAL_COLOR_PALETTE = [
     "#0072B2",
     "#F0E442",
 ]
+
+
+def _sample_mask(sim, channels, time_range):
+    """Which channels and timepoints a placement applies to, or None for all.
+
+    Returned as a boolean :class:`xr.DataArray` over whichever of ``c`` and
+    ``t`` are actually restricted, so that it broadcasts against the affines.
+    None means "everywhere", which is the case worth keeping separate: it lets
+    the parameters stay free of axes they would not vary over.
+    """
+    masks = []
+
+    if channels is not None and "c" in sim.dims:
+        coords = sim.coords["c"].values
+        wanted = {str(channel) for channel in channels}
+        selected = [str(value) in wanted for value in coords]
+        if not any(selected):
+            raise ValueError(
+                "None of the channels selected for manual placement exist in "
+                f"the data: {sorted(wanted)} vs {[str(c) for c in coords]}."
+            )
+        if not all(selected):
+            masks.append(
+                xr.DataArray(selected, dims=["c"], coords={"c": coords})
+            )
+
+    if time_range is not None and "t" in sim.dims:
+        coords = sim.coords["t"].values
+        first, last = (int(value) for value in time_range)
+        first, last = max(min(first, last), 0), min(
+            max(first, last), len(coords) - 1
+        )
+        selected = [first <= index <= last for index in range(len(coords))]
+        if not any(selected):
+            raise ValueError(
+                f"The timepoint range {time_range} selects no timepoint."
+            )
+        if not all(selected):
+            masks.append(
+                xr.DataArray(selected, dims=["t"], coords={"t": coords})
+            )
+
+    if not masks:
+        return None
+    mask = masks[0]
+    for other in masks[1:]:
+        mask = mask & other
+    return mask
+
+
+def _apply_to_samples(current, affine, sim, channels, time_range):
+    """Write ``affine`` into ``current`` wherever the selection applies.
+
+    Unrestricted, the result is one affine for the whole image - flat, however
+    many axes the previous parameters happened to carry. Restricted, the
+    samples left out keep what they had, and the result gains the ``c`` or
+    ``t`` axis that difference needs. Registration and fusion both broadcast
+    over those axes, so nothing downstream has to know which happened.
+    """
+    mask = _sample_mask(sim, channels, time_range)
+
+    t_coords = current.coords["t"].values if "t" in current.dims else None
+    updated = param_utils.affine_to_xaffine(
+        affine, t_coords=t_coords if mask is None else None
+    )
+
+    if mask is None:
+        return updated
+
+    combined = xr.where(mask, updated, current)
+    # `xr.where` returns the broadcast of its arguments, so the transposition
+    # keeps the matrix axes last, where every consumer expects them.
+    other = [dim for dim in combined.dims if dim not in ("x_in", "x_out")]
+    return combined.transpose(*other, "x_in", "x_out")
 
 
 class Session:
@@ -325,12 +400,25 @@ class Session:
             "generation": self.generation,
         }
 
-    def update_neuroglancer_transforms(self, transform_key, updates):
+    def update_neuroglancer_transforms(
+        self, transform_key, updates, channels=None, time_range=None
+    ):
         """Persist source transforms edited in the embedded viewer.
 
         Neuroglancer expresses translations in output pixels. The session's
         affines express them in physical units, so each spatial row is scaled
         by that dimension's image spacing before it is attached to the msim.
+
+        ``channels`` and ``time_range`` restrict which samples of the image the
+        new placement applies to - a channel that is misaligned with the rest,
+        or a stretch of timepoints where the sample drifted. Whatever is left
+        out keeps the transform it had, which is what gives the parameters a
+        ``c`` or ``t`` dimension. Leave both out and the placement applies
+        throughout, and the parameters stay as flat as they were: a transform
+        that is the same everywhere has no reason to carry those axes.
+
+        ``channels`` is a list of channel coordinate values; ``time_range`` a
+        ``(first, last)`` pair of timepoint *indices*, both ends included.
         """
         if transform_key not in self.transform_keys():
             raise ValueError(
@@ -398,12 +486,8 @@ class Session:
                 for row, dim in zip(row_indices, sdims)
             ]
 
-            current = params[index]
-            t_coords = (
-                current.coords["t"].values if "t" in current.dims else None
-            )
-            params[index] = param_utils.affine_to_xaffine(
-                affine, t_coords=t_coords
+            params[index] = _apply_to_samples(
+                params[index], affine, sim, channels, time_range
             )
 
         self.set_params(transform_key, params)
@@ -786,6 +870,7 @@ class Session:
         contrast_limits=None,
         layout=None,
         show_all_channels=False,
+        time_index=0,
     ):
         """Build the Neuroglancer viewer state for the current session.
 
@@ -829,6 +914,7 @@ class Session:
             channel_coord=channel_coord,
             contrast_limits=contrast_limits,
             layout=layout,
+            time_index=time_index,
             # Name the layers as the app lists the views, so the two can be
             # read side by side and a removed view is unambiguous.
             layer_dicts=[
@@ -869,6 +955,7 @@ class Session:
                         channel_coord=channel,
                         contrast_limits=contrast_limits,
                         layout=layout,
+                        time_index=time_index,
                         layer_dicts=[
                             {
                                 "name": (
@@ -939,6 +1026,67 @@ class Session:
             state["layers"] = list(state.get("layers", [])) + [layer]
 
         return state
+
+    def channel_transforms(
+        self,
+        transform_key=None,
+        base_url="",
+        api_base="",
+        serve_views="auto",
+        time_index=0,
+    ):
+        """Per-channel source transforms, for the views that need them.
+
+        A Neuroglancer layer carries one source transform, and the viewer opens
+        one layer per channel - so a transform that varies over channel cannot
+        be described by the layer specification the state carries. It is sent
+        alongside instead, keyed by the URL the layers read and the channel
+        each one sits at, for the app to apply once they are up.
+
+        Views whose transform is the same for every channel are left out
+        entirely: there is nothing for the app to do, and that is the ordinary
+        case.
+        """
+        if self.is_empty():
+            return {}
+
+        transform_key = transform_key or self.default_transform_key()
+        result = {}
+
+        for index, msim in enumerate(self.msims):
+            affine = msi_utils.get_transform_from_msim(msim, transform_key)
+            if "c" not in affine.dims:
+                continue
+
+            sim = msi_utils.get_sim_from_msim(msim)
+            url = "zarr://" + self.source_url(
+                index,
+                origin=base_url,
+                api_base=api_base,
+                serve_views=serve_views,
+            )
+            channels = [str(value) for value in sim.coords["c"].values]
+
+            # Built by asking for a whole state per channel: the projection
+            # into a Neuroglancer source transform depends on the source
+            # dimensions and spacings, and that lives in one place.
+            per_channel = {}
+            for channel_index, channel in enumerate(channels):
+                state = self.neuroglancer_state(
+                    transform_key=transform_key,
+                    base_url=base_url,
+                    api_base=api_base,
+                    serve_views=serve_views,
+                    channel_coord=channel,
+                    time_index=time_index,
+                )
+                per_channel[str(channel_index)] = state["layers"][index][
+                    "source"
+                ].get("transform")
+
+            result[url] = per_channel
+
+        return result
 
     def preview_matches(self, transform_key):
         """Whether the fused preview belongs to ``transform_key``."""
