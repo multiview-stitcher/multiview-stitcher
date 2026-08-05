@@ -775,6 +775,12 @@ def test_multichannel_preview_exposes_every_channel_and_inherits_display():
     assert len(fused_layers) == 1
     assert fused_layers[0]["localDimensions"] == {"c'": [1, ""]}
     assert fused_layers[0]["localPosition"] == [0]
+    # Splitting one layer per channel, and colouring each from the omero
+    # metadata above, is something Neuroglancer only does for a layer whose
+    # type it works out itself. Naming the type here - "image" - is what made
+    # the fused preview render as a single grey channel.
+    assert "type" not in fused_layers[0]
+    assert all("type" not in layer for layer in state["layers"])
 
 
 def test_positional_colors_match_loaded_views():

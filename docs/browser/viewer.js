@@ -12,7 +12,9 @@
  *     that appears in a Neuroglancer link - with `toJSON`, `restoreState` and
  *     a `changed` signal;
  *   - `viewer.navigationState.position` holds the selected position;
- *   - `viewer.layerManager` owns the layers, each with a `setVisible`.
+ *   - `viewer.layerManager` owns the layers, each with a `setVisible`;
+ *   - `viewer.toolPalettes` and the side panel states are the same objects the
+ *     `toolPalettes`, `layerListPanel` and `selectedLayer` state keys address.
  *
  * Layers are described as viewer state rather than built object by object.
  * That is what the Python side already produces, it is the part of the API
@@ -59,6 +61,7 @@ export class NeuroglancerViewer {
   #onStateChanged = null;
   #onPositionChanged = null;
   #onCoordinateSpaceChanged = null;
+  #onToolPalettesChanged = null;
   #applying = false;
   #placing = false;
   #cameraPlaced = false;
@@ -83,7 +86,12 @@ export class NeuroglancerViewer {
       target,
       showToolPaletteButton: false,
     });
-    this.#hideLayerPanels();
+
+    // Neuroglancer opens a tool palette on its own, so hiding the button that
+    // opens one is not enough - see `#hideSidePanels`.
+    this.#onToolPalettesChanged = () => this.#hideSidePanels();
+    this.#viewer.toolPalettes.changedShallow.add(this.#onToolPalettesChanged);
+    this.#hideSidePanels();
 
     // Fresh viewer, so the camera is ours to place until the user moves it.
     this.#cameraPlaced = false;
@@ -260,6 +268,9 @@ export class NeuroglancerViewer {
     this.#viewer.navigationState.coordinateSpace.changed.remove(
       this.#onCoordinateSpaceChanged,
     );
+    this.#viewer.toolPalettes.changedShallow.remove(
+      this.#onToolPalettesChanged,
+    );
     if (this.#onTakeover) {
       for (const type of TAKEOVER_EVENTS) {
         this.#target?.removeEventListener(type, this.#onTakeover, {
@@ -274,6 +285,7 @@ export class NeuroglancerViewer {
     this.#onStateChanged = null;
     this.#onPositionChanged = null;
     this.#onCoordinateSpaceChanged = null;
+    this.#onToolPalettesChanged = null;
     this.#lastNames = null;
     this.#lastPosition = null;
     this.#positionalBackups.clear();
@@ -286,10 +298,27 @@ export class NeuroglancerViewer {
     return this.#viewer;
   }
 
-  #hideLayerPanels() {
+  /**
+   * Keep Neuroglancer's own side panels closed.
+   *
+   * The layer and shader panels start closed but stay reachable from the
+   * viewer toolbar. The tool palette is different: `showToolPaletteButton`
+   * only removes the button that opens one, and Neuroglancer adds a "Shader
+   * controls" palette *by itself* every time a multi-channel image finishes
+   * loading - docked to the left, over the data. This app has its own channel
+   * controls, so that panel is closed again as it appears.
+   *
+   * Closed rather than deleted: Neuroglancer only adds the palette when no
+   * palette with that query exists yet, so the closed one is what stops it
+   * from returning with the next multi-channel layer.
+   */
+  #hideSidePanels() {
     if (!this.#viewer) return;
     this.#viewer.selectedLayer.visible = false;
     this.#viewer.layerListPanelState.location.visible = false;
+    for (const palette of this.#viewer.toolPalettes.palettes) {
+      palette.location.visible = false;
+    }
   }
 
   // -------------------------------------------------------------------
@@ -325,7 +354,7 @@ export class NeuroglancerViewer {
     try {
       if (!preserveView) viewer.state.reset();
       viewer.state.restoreState(state);
-      this.#hideLayerPanels();
+      this.#hideSidePanels();
     } finally {
       this.#applying = false;
     }

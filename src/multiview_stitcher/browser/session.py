@@ -903,7 +903,11 @@ class Session:
         if preview_zarr is not None:
             preview_sim = preview_zarr.sims[0]
             layer = {
-                "type": "image",
+                # No "type": an untyped layer is opened as Neuroglancer's
+                # "auto" layer, and that is the one it expands into a layer per
+                # channel, colouring each from the OME-Zarr's omero metadata.
+                # Naming the type here skips that step, which left the fused
+                # preview a single grey channel next to coloured input views.
                 "source": {
                     "url": (
                         f"zarr://{base_url}{api_base}/zarr/"

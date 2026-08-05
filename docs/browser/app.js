@@ -1220,6 +1220,27 @@ function renderChannelControls(described) {
   registration.disabled = !described.n_views || channels.length < 2;
 }
 
+/**
+ * Whether every input view is shown.
+ *
+ * The fused preview is deliberately not counted: it is derived data with its
+ * own toggle, and switching the inputs off to look at the fusion is the whole
+ * point of the "hide all" button.
+ */
+function allViewsVisible(views) {
+  return views.every((view) => state.viewVisibility.get(view.url) !== false);
+}
+
+function renderViewToggle(views) {
+  const toggle = $("#toggle-views");
+  const showAll = !allViewsVisible(views);
+  toggle.hidden = !views.length;
+  toggle.textContent = showAll ? "Show all" : "Hide all";
+  toggle.title = showAll
+    ? "Show every input view"
+    : "Hide every input view, keeping the fused preview";
+}
+
 function renderViews(described) {
   const list = $("#views");
   list.innerHTML = "";
@@ -1319,6 +1340,9 @@ function renderViews(described) {
     item.append(visibility, text, remove);
     list.appendChild(item);
   }
+
+  // After the loop above, so every view has a recorded visibility to read.
+  renderViewToggle(described.views);
 
   $("#dataset-summary").textContent = described.n_views
     ? `${described.n_views} · ${described.views[0].ndim}D`
@@ -1888,6 +1912,15 @@ function wireUi() {
           : "failed to open the folder",
       );
     }
+  });
+
+  $("#toggle-views").addEventListener("click", () => {
+    const views = state.session?.views || [];
+    if (!views.length) return;
+    const visible = !allViewsVisible(views);
+    for (const view of views) state.viewVisibility.set(view.url, visible);
+    renderViews(state.session);
+    applyDisplayVisibility();
   });
 
   $("#transform-key").addEventListener("change", async (event) => {

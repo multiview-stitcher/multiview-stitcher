@@ -182,6 +182,7 @@ button { color: inherit; }
 .example-menu button:hover,
 .example-menu button:focus-visible { outline: none; background: var(--accent-soft); color: var(--accent-bright); }
 .section-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-title-actions { display: flex; align-items: baseline; gap: 10px; }
 .count-label { color: var(--muted); font-size: 10px; }
 .empty-state { margin: 1px 0 0; color: var(--faint); font-size: 10.5px; }
 

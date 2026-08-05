@@ -533,3 +533,43 @@ test("channel and contrast controls update loaded layers in place", async () => 
   assert.match(app, /command\("positional_colors"/);
   assert.match(app, /className = "derived-view"/);
 });
+
+test("the tool palette Neuroglancer opens by itself is closed again", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // `showToolPaletteButton: false` removes the button that opens a palette,
+  // but Neuroglancer adds a "Shader controls" palette on its own whenever a
+  // multi-channel image finishes loading - which is every dataset this app
+  // opens. Only closing it as it is registered keeps it off the screen.
+  assert.match(viewer, /toolPalettes\.changedShallow\.add/);
+  assert.match(viewer, /toolPalettes\.changedShallow\.remove/);
+  assert.match(viewer, /palette\.location\.visible = false/);
+
+  // Closed, not deleted: Neuroglancer only adds the palette when none with
+  // that query exists, so a deleted one comes straight back with the next
+  // multi-channel layer.
+  assert.doesNotMatch(viewer, /palette\.dispose\(\)/);
+  assert.doesNotMatch(viewer, /toolPalettes\.reset\(\)/);
+});
+
+test("views can be shown or hidden all at once, without the fused preview", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(html, /id="toggle-views"/);
+
+  // The button walks `state.session.views` - the input views. The fused
+  // preview is derived data with a toggle of its own, and hiding the inputs
+  // to look at the fusion is what the button is for, so it must not be swept
+  // along.
+  const handler = app.slice(
+    app.indexOf('$("#toggle-views").addEventListener'),
+    app.indexOf('$("#transform-key").addEventListener'),
+  );
+  assert.match(handler, /state\.session\?\.views \|\| \[\]/);
+  assert.match(handler, /state\.viewVisibility\.set\(view\.url, visible\)/);
+  assert.doesNotMatch(handler, /previewVisibility|currentFusedLayerUrls/);
+  assert.match(handler, /applyDisplayVisibility\(\)/);
+});

@@ -108,12 +108,19 @@ def multiscale_sel_coords(msim, sel_dict):
 
     # Somehow .sel on a datatree does not work when
     # attributes are present. So we remove them and
-    # add them back after sel.
+    # add them back after sel - on the input as well as on the
+    # result, since the input belongs to the caller. Leaving it
+    # stripped is what silently dropped the omero display metadata
+    # of every view that a registration selected a channel from.
 
     attrs = msim.attrs.copy()
     msim.attrs = {}
-    msim = msim.sel(sel_dict)
-    msim.attrs = attrs
+    try:
+        selected = msim.sel(sel_dict)
+    finally:
+        msim.attrs = attrs
+    selected.attrs = attrs
+    msim = selected
 
     if "point_sets" in list(msim.keys()):
         for points_key in list(msim["point_sets"].keys()):
