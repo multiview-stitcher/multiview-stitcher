@@ -50,7 +50,6 @@ dependencies = [
     "matplotlib",
     "scikit-image >=0.21.0",
     "ngff-zarr >=0.12.2",
-    "ome-zarr >=0.10.2",
     "aiohttp"
 ]
 dynamic = [
@@ -114,11 +113,12 @@ playground = [
 ]
 browser = [
     # Versions installable in Pyodide, matching docs/browser/config.json.
-    # ngff-zarr / ome-zarr-py have no WebAssembly build; multiview-stitcher
-    # falls back to its own NGFF reader/writer when they are absent.
+    # ngff-zarr installs there and is used in both environments, so the NGFF
+    # reader and writer are the same code in the browser as on CPython.
     "zarr ==2.18.3",
     "dask[array] ==2025.2.0",
     "dask-image ==2024.5.3",
+    "ngff-zarr",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",

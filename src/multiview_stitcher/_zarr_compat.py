@@ -19,6 +19,7 @@ keeps its own API identical across both zarr versions.
 """
 
 import json
+import os
 from collections.abc import MutableMapping
 
 import numcodecs
@@ -39,6 +40,35 @@ ZARR_V3 = _zarr_major_version() >= 3
 
 # Metadata document name of a zarr array, per format version.
 METADATA_KEY = "zarr.json" if ZARR_V3 else ".zarray"
+
+
+# ---------------------------------------------------------------------------
+# Opening zarr objects from a path or a store
+# ---------------------------------------------------------------------------
+#
+# A source may be a path/URL or an already-constructed store. The latter is
+# what the browser runtime uses, to route reads through its service worker, and
+# zarr spells the two cases differently.
+
+
+def is_pathlike(source):
+    return isinstance(source, (str, os.PathLike))
+
+
+def open_zarr_group(source, mode="r", **kwargs):
+    """Open a zarr group from a path/URL or from a store-like object."""
+    if is_pathlike(source):
+        return zarr.open_group(str(source), mode=mode, **kwargs)
+    return zarr.open_group(store=source, mode=mode, **kwargs)
+
+
+def open_zarr_array(source, path, mode="r", **kwargs):
+    """Open a zarr array below ``source`` at the relative ``path``."""
+    if is_pathlike(source):
+        return zarr.open_array(
+            os.path.join(str(source), str(path)), mode=mode, **kwargs
+        )
+    return zarr.open_array(store=source, path=str(path), mode=mode, **kwargs)
 
 
 # ---------------------------------------------------------------------------

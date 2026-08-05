@@ -18,27 +18,15 @@ from dask import array as da
 import dask.diagnostics
 from xarray import DataTree
 
-from multiview_stitcher import _ngff_meta, msi_utils, param_utils, misc_utils
-from multiview_stitcher import spatial_image_utils as si_utils
+import ngff_zarr
 
-# ngff-zarr and ome-zarr-py are the reference NGFF implementations and are used
-# whenever they are importable. Neither has a WebAssembly build, so in Pyodide
-# multiview-stitcher falls back to the equivalent readers/writers in
-# `_ngff_meta`. Both paths are covered by the test suite.
-try:
-    import ngff_zarr
-except ImportError:  # pragma: no cover - exercised in the Pyodide environment
-    ngff_zarr = None
+from multiview_stitcher import _zarr_compat, msi_utils, param_utils, misc_utils
+from multiview_stitcher import spatial_image_utils as si_utils
 
 # Original axes of an image read from NGFF.  Spatial images deliberately add
 # missing singleton ``t``/``c`` dimensions, but a viewer transform attached to
 # the original OME-Zarr must still have the rank of the array on disk.
 NGFF_SOURCE_DIMS_ATTR = "_multiview_stitcher_ngff_source_dims"
-
-try:
-    from ome_zarr import writer
-except ImportError:  # pragma: no cover - exercised in the Pyodide environment
-    writer = None
 
 
 def _drop_none_values(value):
@@ -945,17 +933,9 @@ def sim_to_ngff_image(sim, transform_key):
         for isdim, sdim in enumerate(sdims):
             origin[sdim] = origin[sdim] + transform_translation[isdim]
 
-    if ngff_zarr is not None:
-        return ngff_zarr.to_ngff_image(
-            sim.data,
-            dims=sim.dims,
-            scale=si_utils.get_spacing_from_sim(sim),
-            translation=origin,
-        )
-
-    return _ngff_meta.NgffImage(
-        data=sim.data,
-        dims=tuple(sim.dims),
+    return ngff_zarr.to_ngff_image(
+        sim.data,
+        dims=sim.dims,
         scale=si_utils.get_spacing_from_sim(sim),
         translation=origin,
     )
@@ -970,11 +950,6 @@ def msim_to_ngff_multiscales(msim, transform_key):
     the given transform_key will be added to the
     `translate` coordinateTransformation of the NGFF image(s).
     """
-
-    if ngff_zarr is None:  # pragma: no cover - Pyodide environment
-        raise ImportError(
-            "msim_to_ngff_multiscales() requires the ngff-zarr package."
-        )
 
     ngff_ims = []
     for scale_key in msi_utils.get_sorted_scale_keys(msim):
@@ -1100,29 +1075,77 @@ def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
     # ngff_zarr currently reads image data as dask arrays. For the zarr-backed
     # default path, reuse its parsed metadata but reopen the on-disk arrays.
     return [
-        _ngff_meta.open_zarr_array(zarr_path, dataset.path, mode="r")
+        _zarr_compat.open_zarr_array(zarr_path, dataset.path, mode="r")
         for dataset in ngff_multiscales.metadata.datasets
     ]
-
-
-def _open_ngff_dataset_array_as_dask(source, path):
-    return da.from_zarr(_ngff_meta.open_zarr_array(source, path, mode="r"))
 
 
 def read_ngff_multiscales(zarr_path):
     """Parse the NGFF multiscales metadata of an OME-Zarr v0.4/v0.5 store.
 
-    Uses ``ngff-zarr`` when it is installed and the source is a path/URL, and
-    the built-in reader otherwise (Pyodide, or when a zarr store object is
-    passed instead of a path - which is how the browser runtime routes reads
-    through its service worker).
+    ``zarr_path`` may be a path/URL or an already-constructed zarr store, which
+    is how the browser runtime routes reads through its service worker. Parsing
+    reads metadata only - no chunk is fetched until the arrays are used.
     """
-    if ngff_zarr is not None and _ngff_meta._is_pathlike(zarr_path):
-        return ngff_zarr.from_ngff_zarr(zarr_path)
+    return ngff_zarr.from_ngff_zarr(zarr_path)
 
-    return _ngff_meta.read_ngff_multiscales(
-        zarr_path, array_opener=_open_ngff_dataset_array_as_dask
+
+def write_multiscales_metadata(group, axes, datasets, ngff_version="0.4"):
+    """Write NGFF ``multiscales`` metadata into an open zarr ``group``.
+
+    The arrays are written separately - block by block, and in the browser by
+    several workers at once - so only the metadata is written here, which is
+    why ``ngff_zarr.to_ngff_zarr`` is not used: it would write the arrays too.
+    The document itself is ngff-zarr's own :class:`ngff_zarr.Metadata`, so the
+    schema has one definition rather than one per writer.
+
+    v0.4 keeps ``multiscales`` (including its ``version``) at the top level of
+    the group attributes; v0.5 nests ``multiscales`` and ``version`` inside an
+    ``ome`` attribute.
+    """
+    metadata = ngff_zarr.Metadata(
+        axes=[ngff_zarr.Axis(**dict(axis)) for axis in axes],
+        datasets=[
+            ngff_zarr.Dataset(
+                path=dataset["path"],
+                coordinateTransformations=[
+                    _ngff_transform(transform)
+                    for transform in dataset["coordinateTransformations"]
+                ],
+            )
+            for dataset in datasets
+        ],
+        coordinateTransformations=None,
+        name=group.name,
     )
+
+    multiscale = _drop_none_values(asdict(metadata))
+    # Only `axes`, `datasets` and `name` are written. The optional keys are
+    # dropped rather than emitted empty, which keeps the document identical to
+    # what the previous two writers produced.
+    for optional in ("coordinateTransformations", "omero", "metadata",
+                     "extra", "type", "version"):
+        multiscale.pop(optional, None)
+
+    if str(ngff_version).startswith("0.4"):
+        multiscale["version"] = str(ngff_version)
+        group.attrs["multiscales"] = [multiscale]
+        return
+
+    ome = dict(group.attrs.get("ome", {}))
+    ome["version"] = str(ngff_version)
+    ome["multiscales"] = [multiscale]
+    group.attrs["ome"] = ome
+
+
+def _ngff_transform(transform):
+    """One coordinate transformation as an ngff-zarr dataclass."""
+    transform = dict(transform)
+    if transform.get("type") == "scale":
+        return ngff_zarr.Scale(scale=list(transform["scale"]))
+    if transform.get("type") == "translation":
+        return ngff_zarr.Translation(translation=list(transform["translation"]))
+    return ngff_zarr.Identity()
 
 
 def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
@@ -1568,19 +1591,12 @@ def write_sim_to_ome_zarr(
         for res_level in range(n_resolutions)
     ]
 
-    if writer is not None:
-        writer.write_multiscales_metadata(
-            group=output_group,
-            axes=axes,
-            datasets=multiscales_datasets,
-        )
-    else:  # pragma: no cover - exercised in the Pyodide environment
-        _ngff_meta.write_multiscales_metadata(
-            output_group,
-            axes=axes,
-            datasets=multiscales_datasets,
-            ngff_version=ngff_version,
-        )
+    write_multiscales_metadata(
+        output_group,
+        axes=axes,
+        datasets=multiscales_datasets,
+        ngff_version=ngff_version,
+    )
 
     if "c" in sim.dims:
         contrast_min = np.array(
@@ -1670,7 +1686,7 @@ def read_sim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = _ngff_meta.open_zarr_group(zarr_path, mode="r")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
 
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
@@ -1707,7 +1723,7 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
         If the on-disk OME-Zarr is not v0.4 or v0.5, or if the number of
         resolution levels in msim does not match the on-disk zarr.
     """
-    root = _ngff_meta.open_zarr_group(zarr_path, mode="a")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="a")
     attrs = dict(root.attrs)
 
     # Detect OME-Zarr version and retrieve the multiscales list
@@ -1820,7 +1836,7 @@ def read_msim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = _ngff_meta.open_zarr_group(zarr_path, mode="r")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
         ch_coords = [ch["label"] for ch in omero["channels"]]

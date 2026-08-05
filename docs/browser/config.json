@@ -23,7 +23,8 @@
   "browser_dependencies": [
     "zarr==2.18.3",
     "dask[array]!=2025.11.0",
-    "dask-image"
+    "dask-image",
+    "ngff-zarr"
   ],
   "default_n_workers": 3,
   "max_n_workers": 12

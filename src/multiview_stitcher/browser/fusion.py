@@ -23,7 +23,7 @@ from dataclasses import asdict
 
 import numpy as np
 
-from multiview_stitcher import _ngff_meta, msi_utils, ngff_utils
+from multiview_stitcher import _zarr_compat, msi_utils, ngff_utils
 from multiview_stitcher import fusion as core_fusion
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import store as browser_store
@@ -255,7 +255,7 @@ def write_multiscales_metadata(msims, options, fetch=None, write=None):
     else:
         target = root
 
-    group = _ngff_meta.open_zarr_group(
+    group = _zarr_compat.open_zarr_group(
         target,
         mode="a",
         **ngff_utils.zarr_group_creation_kwargs_for_ngff_version(
@@ -263,7 +263,7 @@ def write_multiscales_metadata(msims, options, fetch=None, write=None):
         ),
     )
 
-    _ngff_meta.write_multiscales_metadata(
+    ngff_utils.write_multiscales_metadata(
         group,
         axes=axes,
         datasets=[
