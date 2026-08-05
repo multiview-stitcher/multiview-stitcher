@@ -4,8 +4,13 @@ End-to-end smoke test of the browser runtime, executed inside Pyodide.
 It walks the whole path the browser app takes - write a miniature multiscale
 OME-Zarr, open it through the browser session, register two views, fuse them
 lazily and read one fused chunk - and checks the results, so that platform
-differences between CPython and Pyodide (zarr v2, older xarray, no ngff-zarr
-or ome-zarr-py) surface in CI rather than in the UI.
+differences between CPython and Pyodide (zarr v2, an older xarray) surface in
+CI rather than in the UI.
+
+The NGFF layer is no longer one of those differences: ngff-zarr installs in
+Pyodide and is used in both environments. zarr still is - the browser reads
+OME-Zarr 0.4 through zarr-python v2, because v3 needs WebAssembly stack
+switching that only the Pyodide-patched build provides.
 
 Run by ``tests/browser/smoke.mjs``; ``main()`` returns a JSON string.
 """
@@ -82,17 +87,13 @@ def main():
         zarr.__version__.startswith("2."),
         f"zarr {zarr.__version__}",
     )
-    # The reference NGFF packages have no WebAssembly build; the built-in
-    # readers/writers must carry the OME-Zarr handling here.
+    # The same NGFF library as on CPython. A second implementation for the
+    # browser was exactly the kind of platform boundary this test exists to
+    # catch, so its absence is worth asserting.
     check(
-        "ngff_zarr_absent",
-        ngff_utils.ngff_zarr is None,
-        "ngff-zarr unexpectedly importable",
-    )
-    check(
-        "ome_zarr_absent",
-        ngff_utils.writer is None,
-        "ome-zarr unexpectedly importable",
+        "ngff_zarr_present",
+        ngff_utils.ngff_zarr is not None,
+        "ngff-zarr is not importable",
     )
 
     # --- write and read a miniature multiscale OME-Zarr ------------------
