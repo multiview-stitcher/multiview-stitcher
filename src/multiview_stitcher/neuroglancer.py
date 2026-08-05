@@ -40,6 +40,14 @@ def _affine_to_neuroglancer_source_transform(
     return affine
 
 
+def _project_source_transform(affine, dims, source_dims):
+    """Remove synthetic dimensions from a Neuroglancer source transform."""
+    indices = [dims.index(dim) for dim in source_dims]
+    homogeneous = len(dims)
+    keep = indices + [homogeneous]
+    return affine[np.ix_(keep, keep)]
+
+
 def generate_neuroglancer_json(
     ome_zarr_paths: list[str],
     ome_zarr_urls: list[str],
@@ -51,6 +59,7 @@ def generate_neuroglancer_json(
     layer_dicts: list[dict] = None,
     global_dict: dict = None,
     layout: str = None,
+    source_dims: list = None,
 ):
     virtual_ome_zarrs = ome_zarr_paths is None
 
@@ -82,6 +91,36 @@ def generate_neuroglancer_json(
     ndim = len(sdims)
     dims = sim.dims
     spacing = spatial_image_utils.get_spacing_from_sim(sim)
+
+    if source_dims is None:
+        if virtual_ome_zarrs:
+            # These URLs conventionally expose the supplied sims themselves,
+            # including any singleton dimensions they contain.
+            source_dims = [tuple(source_sim.dims) for source_sim in sims]
+        else:
+            # Paths point at the original arrays, whose axes may omit the
+            # singleton t/c dimensions added to our in-memory spatial images.
+            source_dims = [tuple(image.dims) for image in ngff_images]
+    else:
+        source_dims = [tuple(source) for source in source_dims]
+
+    if len(source_dims) != len(ome_zarr_urls):
+        raise ValueError(
+            "source_dims must contain one dimension sequence per OME-Zarr "
+            f"URL, got {len(source_dims)} for {len(ome_zarr_urls)} URLs."
+        )
+    for index, source in enumerate(source_dims):
+        if len(set(source)) != len(source):
+            raise ValueError(
+                f"source_dims[{index}] contains duplicate dimensions: "
+                f"{source}."
+            )
+        unknown = [dim for dim in source if dim not in dims]
+        if unknown:
+            raise ValueError(
+                f"source_dims[{index}] contains dimensions not present in "
+                f"the spatial image: {unknown}."
+            )
 
     if sims is not None:
         if transform_key is None and not virtual_ome_zarrs:
@@ -220,10 +259,34 @@ def generate_neuroglancer_json(
                 for dim in dims
             })
 
-    output_dimensions = {
-        dim: dimension_specs_per_source[0][dim]
-        for dim in dims
-    }
+    output_dimensions = {}
+    for dim in dims:
+        for source_index, source in enumerate(source_dims):
+            if dim in source:
+                output_dimensions[dim] = dimension_specs_per_source[
+                    source_index
+                ][dim]
+                break
+
+    def source_transform(index):
+        affine = full_affines[index]
+        if affine is None:
+            return {}
+        affine = _project_source_transform(
+            affine, list(dims), source_dims[index]
+        )
+        return {
+            # Neuroglancer drops the final homogeneous matrix row.
+            "matrix": [
+                [float(value) for value in row] for row in affine[:-1]
+            ],
+            "outputDimensions": {
+                (dim if dim != "c" else "c'"): dimension_specs_per_source[
+                    index
+                ][dim]
+                for dim in source_dims[index]
+            },
+        }
 
     if layout is None:
         layout = "xy" if ndim == 2 else "4panel"
@@ -243,24 +306,14 @@ def generate_neuroglancer_json(
                 # "type": "image",
                 "source": {
                     "url": f"{url}",
-                    "transform": {
-                        # neuroglancer drops last row of homogeneous matrix
-                        "matrix": [
-                            [float(value) for value in row]
-                            for row in full_affines[iview][:-1]
-                        ],
-                        "outputDimensions": {
-                            (dim if dim != "c" else "c'"): dimension_specs_per_source[
-                                iview
-                            ][dim]
-                            for dim in dims
-                        },
-                    }
-                    if full_affines[iview] is not None
-                    else {},
+                    "transform": source_transform(iview),
                 },
-                "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
-                "localPosition": [channel_index] if "c" in dims else [],
+                "localDimensions": (
+                    {"c'": [1, ""]} if "c" in source_dims[iview] else {}
+                ),
+                "localPosition": (
+                    [channel_index] if "c" in source_dims[iview] else []
+                ),
                 # 'localPosition': [0 for nsdim in nsdims] + [centers[iview][idim] for idim, dim in enumerate(sdims)],
                 "tab": "rendering",
                 "opacity": 0.6,
@@ -292,27 +345,23 @@ def generate_neuroglancer_json(
                     }
                     | (
                         {
-                            "transform": {
-                                # neuroglancer drops last row of homogeneous matrix
-                                "matrix": [
-                                    [float(value) for value in row]
-                                    for row in full_affines[iview][:-1]
-                                ],
-                                "outputDimensions": {
-                                    (dim if dim != "c" else "c'"): dimension_specs_per_source[
-                                        iview
-                                    ][dim]
-                                    for dim in dims
-                                },
-                            },
+                            "transform": source_transform(iview),
                         }
                         if full_affines[iview] is not None
                         else {}
                     )
                     for iview, url in enumerate(ome_zarr_urls)
                 ],
-                "localDimensions": {"c'": [1, ""]} if "c" in dims else {},
-                "localPosition": [channel_index] if "c" in dims else [],
+                "localDimensions": (
+                    {"c'": [1, ""]}
+                    if any("c" in source for source in source_dims)
+                    else {}
+                ),
+                "localPosition": (
+                    [channel_index]
+                    if any("c" in source for source in source_dims)
+                    else []
+                ),
                 "tab": "rendering",
                 "opacity": 0.6,
                 # 'volumeRendering': 'on',

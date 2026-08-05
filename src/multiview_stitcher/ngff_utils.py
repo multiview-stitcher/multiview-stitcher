@@ -29,6 +29,11 @@ try:
 except ImportError:  # pragma: no cover - exercised in the Pyodide environment
     ngff_zarr = None
 
+# Original axes of an image read from NGFF.  Spatial images deliberately add
+# missing singleton ``t``/``c`` dimensions, but a viewer transform attached to
+# the original OME-Zarr must still have the rank of the array on disk.
+NGFF_SOURCE_DIMS_ATTR = "_multiview_stitcher_ngff_source_dims"
+
 try:
     from ome_zarr import writer
 except ImportError:  # pragma: no cover - exercised in the Pyodide environment
@@ -1038,6 +1043,11 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
         transform_key=transform_key,
     )
 
+    # Keep the distinction between axes stored in NGFF and singleton axes
+    # added by get_sim_from_array().  Consumers that address the original
+    # OME-Zarr (not a newly generated virtual one) need the former.
+    sim.attrs[NGFF_SOURCE_DIMS_ATTR] = list(ngff_im.dims)
+
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
     si_utils.set_sim_affine(
@@ -1073,6 +1083,14 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
 
     msim = DataTree.from_dict(msim_dict)
+
+    # ``get_msim_from_sim`` intentionally strips image attrs. Reattach the
+    # original NGFF axes to every scale so converting the msim back to a sim
+    # retains the rank of the arrays that are actually served.
+    for iscale, ngff_im in enumerate(ngff_multiscales.images):
+        msim[f"scale{iscale}/image"].attrs[NGFF_SOURCE_DIMS_ATTR] = list(
+            ngff_im.dims
+        )
 
     return msim
 

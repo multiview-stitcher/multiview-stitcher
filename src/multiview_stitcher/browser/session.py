@@ -677,6 +677,21 @@ class Session:
             ]
             if include_views
             else None,
+            source_dims=[
+                (
+                    tuple(sim.dims)
+                    if serve_views == "virtual"
+                    or not browser_dataset.is_directly_servable(source)
+                    else tuple(
+                        sim.attrs.get(
+                            ngff_utils.NGFF_SOURCE_DIMS_ATTR, sim.dims
+                        )
+                    )
+                )
+                for source, sim in zip(self.sources, sims)
+            ]
+            if include_views
+            else [],
         )
 
         if preview_route and self.ensure_route(preview_route) is not None:

@@ -689,10 +689,25 @@ def test_ome_zarr_ng(ndim, N_t, N_c, option):
                     "outputDimensions"
                 ]
             )
+            expected_source_dims = list(sims[0].dims)
+            expected_output_dims = [
+                dim if dim != "c" else "c'"
+                for dim in expected_source_dims
+            ]
+            assert list(output_dims) == expected_output_dims
+            assert np.asarray(matrix).shape == (
+                len(expected_source_dims),
+                len(expected_source_dims) + 1,
+            )
+            assert list(ng_json["dimensions"]) == expected_source_dims
             assert output_dims["y"] == [0.1e-6, "m"]
             assert output_dims["x"] == [0.1e-6, "m"]
             if "z" in sims[0].dims:
                 assert output_dims["z"] == [2e-6, "m"]
+            if "c" not in sims[0].dims:
+                assert "c'" not in output_dims
+            if "t" not in sims[0].dims:
+                assert "t" not in output_dims
             assert type(matrix[0][0]) is float
 
         # test with channel coord

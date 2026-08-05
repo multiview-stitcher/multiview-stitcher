@@ -633,6 +633,46 @@ def test_neuroglancer_state_uses_selected_transform_key(tiles_on_disk):
     assert json.loads(json.dumps(state))
 
 
+def test_neuroglancer_state_strips_axes_absent_from_native_source(
+    tiles_on_disk,
+):
+    session = Session()
+    session.load(tiles_on_disk[:1])
+    sim = msi_utils.get_sim_from_msim(session.msims[0])
+    assert tuple(sim.dims) == ("t", "c", "y", "x")
+
+    # Model an OME-Zarr whose array omits the singleton time axis. The
+    # in-memory spatial image still has t, while a native viewer URL does not.
+    session.msims[0]["scale0/image"].attrs[
+        ngff_utils.NGFF_SOURCE_DIMS_ATTR
+    ] = ["c", "y", "x"]
+    session.sources[0].url = "/app/__mvs__/fs/m1/tile_0.ome.zarr"
+
+    native = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        api_base="/app/__mvs__",
+    )["layers"][0]
+    native_transform = native["source"]["transform"]
+    assert list(native_transform["outputDimensions"]) == ["c'", "y", "x"]
+    assert np.asarray(native_transform["matrix"]).shape == (3, 4)
+
+    # A virtual view is generated from the expanded sim and therefore keeps
+    # all four in-memory dimensions in both its metadata and transform.
+    virtual = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        api_base="/app/__mvs__",
+        serve_views="virtual",
+    )["layers"][0]
+    virtual_transform = virtual["source"]["transform"]
+    assert list(virtual_transform["outputDimensions"]) == [
+        "t",
+        "c'",
+        "y",
+        "x",
+    ]
+    assert np.asarray(virtual_transform["matrix"]).shape == (4, 5)
+
+
 def test_neuroglancer_state_includes_preview_layer(tiles_on_disk):
     session = Session()
     session.load(tiles_on_disk)

@@ -199,6 +199,10 @@ def test_read_msim_from_ome_zarr(array_backend):
         )
         sim_read = msi_utils.get_sim_from_msim(msim_read, scale="scale0")
 
+        assert sim_read.attrs[ngff_utils.NGFF_SOURCE_DIMS_ATTR] == list(
+            sim.dims
+        )
+
         assert si_utils.is_dask_backed_dataarray(sim_read) == (
             array_backend == "dask"
         )
