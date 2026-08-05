@@ -321,7 +321,6 @@ test("a transform_key switch patches transforms instead of rebuilding layers", a
   // and the chosen layout. When only the transforms changed, they are applied
   // to the loaded sources instead.
   assert.match(app, /setLayerTransforms\(/);
-  assert.match(app, /sameLayers\(/);
   assert.match(viewer, /setLayerTransforms\(transforms\)/);
   // The transform of a loaded source is separately watchable.
   assert.match(viewer, /loadState\.transform\.restoreState/);
@@ -426,8 +425,31 @@ test("clearing gives a genuinely fresh viewer", async () => {
   assert.match(reset, /location\??\.hash/);
   assert.match(reset, /replaceState/);
 
-  // The page resets on clear, and when a load has nothing in common with what
-  // is on screen.
+  // The page resets on clear, and when a load has nothing in common with
+  // what is on screen.
   assert.match(app, /if \(viewer\.mounted\) viewer\.reset\(\);/);
-  assert.match(app, /if \(!shared\) viewer\.reset\(\);/);
+  assert.match(app, /!wanted\.some\(\(url\) => known\.includes\(url\)\)/);
+  assert.match(app, /viewer\.reset\(\);\n\s*state\.layerSources = sources;/);
+});
+
+test("adding the fused preview leaves the rest of the viewer alone", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  // Restoring a `layers` array clears the layer list and rebuilds every
+  // layer, replacing the chosen layout, the selected layer and each layer's
+  // shader and contrast range. A layer that appears or disappears is applied
+  // on its own instead.
+  assert.match(viewer, /addLayers\(specs\)/);
+  assert.match(viewer, /removeLayers\(urls\)/);
+  assert.match(viewer, /makeLayer\(viewer\.layerSpecification, spec\.name, spec\)/);
+  assert.match(viewer, /layerManager\.removeManagedLayer\(managed\)/);
+
+  assert.match(app, /viewer\.removeLayers\(removed\)/);
+  assert.match(app, /viewer\.addLayers\(added\)/);
+
+  // A layer added a moment ago has no loaded source to re-aim yet, so only
+  // the ones that were already there are patched.
+  assert.match(app, /known\.includes\(url\)/);
 });

@@ -61,6 +61,12 @@ import "neuroglancer";
 export { setupDefaultViewer } from "neuroglancer/unstable/ui/default_viewer_setup.js";
 export { Viewer } from "neuroglancer/unstable/viewer.js";
 export { StatusMessage } from "neuroglancer/unstable/status.js";
+
+// Builds one layer from a layer specification, so a layer can be added to a
+// running viewer instead of restoring a whole `layers` array - which clears
+// the list and rebuilds every layer, taking the layout and each layer's
+// shader settings with it.
+export { makeLayer } from "neuroglancer/unstable/layer/index.js";
 """
 
 #: esbuild has no built-in loader for the assets neuroglancer imports.

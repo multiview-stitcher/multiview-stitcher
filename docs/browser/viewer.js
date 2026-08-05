@@ -21,6 +21,7 @@
  */
 
 import {
+  makeLayer,
   setupDefaultViewer,
   StatusMessage,
 } from "./neuroglancer/neuroglancer.js";
@@ -381,6 +382,50 @@ export class NeuroglancerViewer {
       }
     }
     return sources;
+  }
+
+  /**
+   * Add layers to the running viewer, leaving everything else as it is.
+   *
+   * Going through the viewer state instead would mean restoring a `layers`
+   * array, and that clears the layer list and builds every layer again: the
+   * chosen layout, the selected layer and each existing layer's shader and
+   * contrast range are all replaced. Adding the fused preview is not a reason
+   * to lose any of that.
+   *
+   * Each spec is a Neuroglancer layer specification, exactly as it appears in
+   * the `layers` array of a viewer state.
+   */
+  addLayers(specs) {
+    const viewer = this.#require();
+
+    for (const spec of specs) {
+      const layer = makeLayer(viewer.layerSpecification, spec.name, spec);
+      viewer.layerSpecification.add(layer);
+    }
+  }
+
+  /**
+   * Remove every layer reading from one of `urls`.
+   *
+   * Silent about a URL that no layer reads: the caller is describing what the
+   * viewer should end up showing, and a layer already gone is not a problem.
+   */
+  removeLayers(urls) {
+    const viewer = this.#require();
+    const wanted = new Set(urls);
+
+    // Collected first: removing mutates the list being walked.
+    const doomed = viewer.layerManager.managedLayers.filter((managed) =>
+      (managed.layer?.dataSources ?? []).some((dataSource) =>
+        wanted.has(dataSource.spec?.url),
+      ),
+    );
+
+    for (const managed of doomed) {
+      viewer.layerManager.removeManagedLayer(managed);
+    }
+    return doomed.length;
   }
 
   /**

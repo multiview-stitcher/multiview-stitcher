@@ -600,14 +600,6 @@ function layerSources(ngState) {
   return sources;
 }
 
-function sameLayers(a, b) {
-  const names = Object.keys(a);
-  return (
-    names.length === Object.keys(b).length &&
-    names.every((name) => a[name] === b[name])
-  );
-}
-
 function showViewerState(ngState) {
   mountViewer();
 
@@ -618,23 +610,65 @@ function showViewerState(ngState) {
   // settings, the selected layer and the chosen layout with it - so when the
   // layers themselves are unchanged, only their transforms and visibility
   // are applied.
-  if (state.layerSources && sameLayers(sources, state.layerSources)) {
-    // Keyed by source URL, not by layer name: Neuroglancer renames layers it
-    // opens - an OME-Zarr with omero metadata becomes "<name> channel 0" -
-    // and a lookup by name would miss, fall back to applying the whole state
-    // and take the layout and the shader settings with it.
-    const transforms = {};
-    const visibility = {};
-    for (const layer of ngState.layers || []) {
+  const known = state.layerSources ? Object.values(state.layerSources) : [];
+  const wanted = Object.values(sources);
+
+  // Keyed by source URL, not by layer name: Neuroglancer renames layers it
+  // opens - an OME-Zarr with omero metadata becomes "<name> channel 0" - and
+  // a lookup by name would miss, fall back to applying the whole state and
+  // take the layout and the shader settings with it.
+  const transforms = {};
+  const visibility = {};
+  for (const layer of ngState.layers || []) {
+    const source = layer.source;
+    const url = typeof source === "string" ? source : source.url;
+    transforms[url] =
+      typeof source === "string" ? null : source.transform || null;
+    visibility[url] = layer.visible !== false;
+  }
+
+  // Nothing in common with what is on screen means a different dataset, not
+  // an edit of this one. Its coordinate space, camera and layout say nothing
+  // about the new data, so the viewer starts clean and Neuroglancer places
+  // the camera on what actually loaded.
+  if (state.layerSources && !wanted.some((url) => known.includes(url))) {
+    viewer.reset();
+    state.layerSources = sources;
+    viewer.setState(ngState);
+    return;
+  }
+
+  if (state.layerSources) {
+    // Same dataset. Whether layers only moved, or one was added or removed -
+    // the fused preview appearing is the usual case - the difference is
+    // applied on its own. Restoring a `layers` array instead would clear the
+    // list and rebuild every layer, replacing the chosen layout, the selected
+    // layer and each layer's shader and contrast range.
+    const added = (ngState.layers || []).filter((layer) => {
       const source = layer.source;
       const url = typeof source === "string" ? source : source.url;
-      transforms[url] =
-        typeof source === "string" ? null : source.transform || null;
-      visibility[url] = layer.visible !== false;
-    }
+      return !known.includes(url);
+    });
+    const removed = known.filter((url) => !wanted.includes(url));
+
     try {
-      viewer.setLayerTransforms(transforms);
-      viewer.setLayerVisibility(visibility);
+      if (removed.length) viewer.removeLayers(removed);
+      if (added.length) viewer.addLayers(added);
+
+      // Only the layers that were already there: a layer added a moment ago
+      // has no loaded source to re-aim yet, and carries its transform in the
+      // specification it was built from.
+      const survivors = Object.fromEntries(
+        Object.entries(transforms).filter(([url]) => known.includes(url)),
+      );
+      viewer.setLayerTransforms(survivors);
+      viewer.setLayerVisibility(
+        Object.fromEntries(
+          Object.entries(visibility).filter(([url]) => known.includes(url)),
+        ),
+      );
+
+      state.layerSources = sources;
       return;
     } catch (error) {
       // The viewer's layers are not the ones we last applied - the user can
@@ -643,16 +677,6 @@ function showViewerState(ngState) {
       log(`re-applying the full viewer state: ${error.message}`, "warn");
     }
   }
-
-  // Nothing in common with what is on screen means a different dataset, not
-  // an edit of this one. Its coordinate space, camera and layout say nothing
-  // about the new data, so the viewer starts clean and Neuroglancer places
-  // the camera on what actually loaded. Adding the fused preview, or
-  // removing one view, still shares sources and keeps the view.
-  const shared = Object.values(sources).some((url) =>
-    state.layerSources ? Object.values(state.layerSources).includes(url) : false,
-  );
-  if (!shared) viewer.reset();
 
   state.layerSources = sources;
   // Applied to the running viewer: the camera, the WebGL context and anything
