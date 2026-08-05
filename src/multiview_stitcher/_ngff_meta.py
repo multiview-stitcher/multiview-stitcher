@@ -27,6 +27,11 @@ from typing import Any, Optional
 import numpy as np
 import zarr
 
+# Imported for its side effect as much as anything: reading an OME-Zarr
+# written by another tool can need codec metadata this numcodecs would
+# otherwise refuse. See `_zarr_compat.register_compatible_codecs`.
+from multiview_stitcher import _zarr_compat  # noqa: F401
+
 # NGFF axis "type" values that are not spatial.
 _NON_SPATIAL_AXIS_TYPES = {"time", "channel"}
 

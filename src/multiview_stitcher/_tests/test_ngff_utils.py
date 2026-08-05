@@ -10,6 +10,7 @@ import zarr
 from xarray import DataTree
 
 from multiview_stitcher import (
+    _zarr_compat,
     io,
     msi_utils,
     ngff_utils,
@@ -794,3 +795,189 @@ def test_update_ome_zarr_multiscales_metadata(ngff_version):
             assert "multiscales" in all_attrs.get("ome", {})
         else:
             assert "multiscales" in all_attrs
+
+
+# ---------------------------------------------------------------------------
+# Codec metadata written by other implementations
+# ---------------------------------------------------------------------------
+
+
+def _write_bioformats2raw_style_zarr(path, typesize=2):
+    """A minimal OME-Zarr shaped and encoded the way bioformats2raw writes one.
+
+    Written by hand rather than with zarr, because the point is the compressor
+    metadata: bioformats2raw records `typesize` in every `.zarray`, which is a
+    parameter numcodecs only grew later.
+    """
+    import json
+
+    import numcodecs
+
+    image = os.path.join(path, "0")
+    codec = numcodecs.Blosc(cname="lz4", clevel=5, shuffle=1)
+    shape = (1, 2, 1, 32, 32)
+    expected = (np.arange(int(np.prod(shape))) % 500).astype("uint16")
+
+    level = os.path.join(image, "0")
+    os.makedirs(os.path.join(level, "0", "0", "0", "0"))
+    with open(os.path.join(level, ".zarray"), "w") as handle:
+        json.dump(
+            {
+                "chunks": list(shape),
+                "dtype": "<u2",
+                "fill_value": 0,
+                "filters": None,
+                "order": "C",
+                "shape": list(shape),
+                "zarr_format": 2,
+                "dimension_separator": "/",
+                "compressor": {
+                    "id": "blosc",
+                    "cname": "lz4",
+                    "clevel": 5,
+                    "shuffle": 1,
+                    "blocksize": 0,
+                    "typesize": typesize,
+                },
+            },
+            handle,
+        )
+    with open(os.path.join(level, "0", "0", "0", "0", "0"), "wb") as handle:
+        handle.write(codec.encode(expected.reshape(shape).tobytes()))
+
+    with open(os.path.join(image, ".zgroup"), "w") as handle:
+        json.dump({"zarr_format": 2}, handle)
+    with open(os.path.join(image, ".zattrs"), "w") as handle:
+        json.dump(
+            {
+                "multiscales": [
+                    {
+                        "version": "0.4",
+                        "name": "series_0",
+                        "axes": [
+                            {"name": "t", "type": "time"},
+                            {"name": "c", "type": "channel"},
+                            {
+                                "name": "z",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                        ],
+                        "datasets": [
+                            {
+                                "path": "0",
+                                "coordinateTransformations": [
+                                    {
+                                        "type": "scale",
+                                        "scale": [1.0, 1.0, 1.0, 0.5, 0.5],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            handle,
+        )
+
+    return image, expected.sum()
+
+
+@pytest.fixture
+def numcodecs_without_blosc_typesize(monkeypatch):
+    """Stand in for a numcodecs whose Blosc predates the `typesize` parameter.
+
+    Which is what Pyodide ships, and therefore what the browser app runs. On
+    CPython the parameter exists, so without this the test would pass whatever
+    the library did - and a test that cannot fail is worse than none.
+    """
+    import numcodecs
+    import numcodecs.registry
+
+    real = numcodecs.Blosc
+
+    class OldBlosc(real):
+        def __init__(self, cname="lz4", clevel=5, shuffle=1, blocksize=0):
+            super().__init__(
+                cname=cname,
+                clevel=clevel,
+                shuffle=shuffle,
+                blocksize=blocksize,
+            )
+
+    registry = dict(numcodecs.registry.codec_registry)
+    monkeypatch.setattr(numcodecs, "Blosc", OldBlosc)
+    monkeypatch.setattr(_zarr_compat, "numcodecs", numcodecs)
+    numcodecs.registry.register_codec(OldBlosc, "blosc")
+    try:
+        yield OldBlosc
+    finally:
+        numcodecs.registry.codec_registry.clear()
+        numcodecs.registry.codec_registry.update(registry)
+
+
+def test_an_old_numcodecs_cannot_read_bioformats2raw_unaided(
+    tmp_path, numcodecs_without_blosc_typesize
+):
+    """The failure this compatibility shim exists for.
+
+    Blosc keeps the type size in each compressed block's own header, so the
+    copy in the metadata is not needed to decode anything - but an older
+    numcodecs refuses the keyword outright, and the file will not open.
+    """
+    image, _ = _write_bioformats2raw_style_zarr(str(tmp_path))
+
+    with pytest.raises(TypeError, match="typesize"):
+        ngff_utils.read_msim_from_ome_zarr(image)
+
+
+def test_bioformats2raw_zarr_reads_with_an_old_numcodecs(
+    tmp_path, numcodecs_without_blosc_typesize
+):
+    image, expected_sum = _write_bioformats2raw_style_zarr(str(tmp_path))
+
+    _zarr_compat.register_compatible_codecs()
+    msim = ngff_utils.read_msim_from_ome_zarr(image)
+    sim = msi_utils.get_sim_from_msim(msim)
+
+    assert dict(sim.sizes) == {"t": 1, "c": 2, "z": 1, "y": 32, "x": 32}
+    # Decoded, not merely opened: the pixels have to come back intact.
+    assert int(np.asarray(sim.data).sum()) == int(expected_sum)
+
+
+def test_a_codec_key_the_library_does_not_know_still_fails(
+    numcodecs_without_blosc_typesize,
+):
+    """Dropping an unknown key would decode the bytes wrongly, not not at all.
+
+    Only settings that Blosc records in its own block header may be dropped;
+    anything else has to reach the user as an error.
+    """
+    with pytest.raises(TypeError, match="not_a_blosc_setting"):
+        _zarr_compat.codec_from_config(
+            numcodecs_without_blosc_typesize,
+            {"cname": "lz4", "not_a_blosc_setting": 1},
+            _zarr_compat._BLOSC_ENCODE_ONLY_KEYS,
+        )
+
+
+def test_a_configuration_the_codec_accepts_is_passed_through_untouched():
+    import numcodecs
+
+    config = {"cname": "zstd", "clevel": 3, "shuffle": 2, "blocksize": 0}
+
+    codec = _zarr_compat.codec_from_config(
+        numcodecs.Blosc, dict(config), _zarr_compat._BLOSC_ENCODE_ONLY_KEYS
+    )
+
+    assert codec == numcodecs.Blosc(**config)

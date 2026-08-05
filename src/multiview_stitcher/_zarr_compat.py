@@ -21,6 +21,8 @@ keeps its own API identical across both zarr versions.
 import json
 from collections.abc import MutableMapping
 
+import numcodecs
+import numcodecs.registry
 import numpy as np
 import zarr
 
@@ -37,6 +39,64 @@ ZARR_V3 = _zarr_major_version() >= 3
 
 # Metadata document name of a zarr array, per format version.
 METADATA_KEY = "zarr.json" if ZARR_V3 else ".zarray"
+
+
+# ---------------------------------------------------------------------------
+# Codec metadata written by other tools
+# ---------------------------------------------------------------------------
+
+#: Blosc settings that only describe how data was *compressed*. Blosc records
+#: them in each compressed block's own header, so decompression re-reads them
+#: from the bytes and never needs the value in the metadata. numcodecs grew a
+#: parameter for `typesize` well after writers started emitting it - notably
+#: bioformats2raw, whose OME-Zarrs carry it in every `.zarray` - so an older
+#: build refuses a file it is perfectly able to read.
+_BLOSC_ENCODE_ONLY_KEYS = frozenset({"typesize"})
+
+
+def codec_from_config(base, config, droppable):
+    """Build a codec from ``config``, dropping keys ``base`` cannot take.
+
+    Only the keys in ``droppable`` may be dropped, and only once the codec has
+    actually refused them: a key this library does not know about is left to
+    fail, because silently ignoring one would decode the bytes wrongly rather
+    than not at all.
+    """
+    try:
+        return base.from_config(config)
+    except TypeError:
+        trimmed = {
+            key: value
+            for key, value in config.items()
+            if key not in droppable
+        }
+        if trimmed == config:
+            raise
+        return base.from_config(trimmed)
+
+
+class _CompatibleBlosc(numcodecs.Blosc):
+    """Blosc that reads configurations written for a newer numcodecs."""
+
+    @classmethod
+    def from_config(cls, config):
+        return codec_from_config(
+            numcodecs.Blosc, config, _BLOSC_ENCODE_ONLY_KEYS
+        )
+
+
+def register_compatible_codecs():
+    """Teach numcodecs to read codec metadata from other implementations.
+
+    Registered process-wide, the way a codec plugin registers itself, because
+    the decode happens deep inside zarr where no argument of ours reaches. The
+    replacement differs from the original only in what it accepts, never in
+    what it produces, and compression is untouched.
+    """
+    numcodecs.registry.register_codec(_CompatibleBlosc, "blosc")
+
+
+register_compatible_codecs()
 
 
 def json_default(obj):
