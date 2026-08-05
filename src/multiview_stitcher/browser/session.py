@@ -24,7 +24,9 @@ them, their shaders and their contrast ranges.
 
 import uuid
 
-from multiview_stitcher import msi_utils, neuroglancer, ngff_utils
+import numpy as np
+
+from multiview_stitcher import msi_utils, neuroglancer, ngff_utils, param_utils
 from multiview_stitcher import registration as core_registration
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import dataset as browser_dataset
@@ -275,6 +277,119 @@ class Session:
             self.bump_generation()
 
         return transform_key
+
+    def copy_transform(self, source_transform_key, new_transform_key):
+        """Copy a common coordinate system under a new editable name."""
+        source_transform_key = (
+            source_transform_key or self.default_transform_key()
+        )
+        new_transform_key = str(new_transform_key or "").strip()
+        if not new_transform_key:
+            raise ValueError("The new transform key must have a name.")
+        if source_transform_key not in self.transform_keys():
+            raise ValueError(
+                f"Transform key '{source_transform_key}' is not available."
+            )
+        if new_transform_key in self.transform_keys():
+            raise ValueError(
+                f"Transform key '{new_transform_key}' already exists."
+            )
+
+        params = [
+            msi_utils.get_transform_from_msim(msim, source_transform_key).copy(
+                deep=True
+            )
+            for msim in self.msims
+        ]
+        self.set_params(new_transform_key, params)
+        return {
+            "source_transform_key": source_transform_key,
+            "transform_key": new_transform_key,
+            "transform_keys": self.transform_keys(),
+            "generation": self.generation,
+        }
+
+    def update_neuroglancer_transforms(self, transform_key, updates):
+        """Persist source transforms edited in the embedded viewer.
+
+        Neuroglancer expresses translations in output pixels. The session's
+        affines express them in physical units, so each spatial row is scaled
+        by that dimension's image spacing before it is attached to the msim.
+        """
+        if transform_key not in self.transform_keys():
+            raise ValueError(
+                f"Transform key '{transform_key}' is not available."
+            )
+
+        params = [
+            msi_utils.get_transform_from_msim(msim, transform_key).copy(
+                deep=True
+            )
+            for msim in self.msims
+        ]
+
+        for update in updates or []:
+            index = int(update["index"])
+            if not 0 <= index < len(self.msims):
+                raise IndexError(f"View {index} does not exist.")
+
+            spec = update.get("transform") or {}
+            rows = np.asarray(spec.get("matrix"), dtype=float)
+            if rows.ndim != 2 or rows.shape[1] != rows.shape[0] + 1:
+                raise ValueError(
+                    f"View {index} has an invalid Neuroglancer transform."
+                )
+
+            sim = msi_utils.get_sim_from_msim(self.msims[index])
+            sdims = list(si_utils.get_spatial_dims_from_sim(sim))
+            source = self.sources[index]
+            source_dims = (
+                list(sim.dims)
+                if not browser_dataset.is_directly_servable(source)
+                else list(
+                    sim.attrs.get(ngff_utils.NGFF_SOURCE_DIMS_ATTR, sim.dims)
+                )
+            )
+            output_dims = [
+                str(dim).rstrip("'^")
+                for dim in (spec.get("outputDimensions") or {})
+            ]
+            if not output_dims:
+                output_dims = [
+                    "c" if dim == "c'" else dim for dim in source_dims
+                ]
+
+            try:
+                row_indices = [output_dims.index(dim) for dim in sdims]
+                column_indices = [source_dims.index(dim) for dim in sdims]
+            except ValueError as exc:
+                raise ValueError(
+                    f"View {index} transform no longer has the spatial "
+                    f"dimensions {sdims}."
+                ) from exc
+
+            affine = np.eye(len(sdims) + 1)
+            affine[:-1, :-1] = rows[np.ix_(row_indices, column_indices)]
+            spacing = si_utils.get_spacing_from_sim(sim)
+            affine[:-1, -1] = [
+                rows[row, -1] * spacing[dim]
+                for row, dim in zip(row_indices, sdims)
+            ]
+
+            current = params[index]
+            t_coords = (
+                current.coords["t"].values if "t" in current.dims else None
+            )
+            params[index] = param_utils.affine_to_xaffine(
+                affine, t_coords=t_coords
+            )
+
+        self.set_params(transform_key, params)
+        return {
+            "transform_key": transform_key,
+            "transform_keys": self.transform_keys(),
+            "generation": self.generation,
+        }
 
     # ------------------------------------------------------------------
     # Cache invalidation
@@ -626,6 +741,7 @@ class Session:
         channel_coord=None,
         contrast_limits=None,
         layout=None,
+        show_all_channels=False,
     ):
         """Build the Neuroglancer viewer state for the current session.
 
@@ -693,6 +809,55 @@ class Session:
             if include_views
             else [],
         )
+
+        if show_all_channels and "c" in sims[0].dims:
+            channel_coords = [
+                str(value) for value in sims[0].coords["c"].values
+            ]
+            if len(channel_coords) > 1:
+                layers = []
+                for channel in channel_coords:
+                    channel_state = neuroglancer.generate_neuroglancer_json(
+                        ome_zarr_paths=None,
+                        ome_zarr_urls=urls,
+                        sims=sims,
+                        transform_key=transform_key,
+                        channel_coord=channel,
+                        contrast_limits=contrast_limits,
+                        layout=layout,
+                        layer_dicts=[
+                            {
+                                "name": (
+                                    f"{index}: {source.resolved_name(index)}"
+                                    f" · {channel}"
+                                )
+                            }
+                            for index, source in enumerate(self.sources)
+                        ],
+                        source_dims=[
+                            (
+                                tuple(sim.dims)
+                                if serve_views == "virtual"
+                                or not browser_dataset.is_directly_servable(
+                                    source
+                                )
+                                else tuple(
+                                    sim.attrs.get(
+                                        ngff_utils.NGFF_SOURCE_DIMS_ATTR,
+                                        sim.dims,
+                                    )
+                                )
+                            )
+                            for source, sim in zip(self.sources, sims)
+                        ],
+                    )
+                    layers.extend(channel_state.get("layers", []))
+                state["layers"] = layers
+
+        # Keep Neuroglancer's own layer and shader panels out of the way until
+        # the user explicitly opens them from the viewer controls.
+        state["layerListPanel"] = {"visible": False}
+        state["selectedLayer"] = {"visible": False}
 
         if preview_route and self.ensure_route(preview_route) is not None:
             state["layers"] = list(state.get("layers", [])) + [

@@ -115,6 +115,17 @@ class WorkerRuntime:
     def _cmd_spec(self, payload):
         return self._require_session().spec().to_dict()
 
+    def _cmd_copy_transform(self, payload):
+        return self._require_session().copy_transform(
+            payload.get("source_transform_key"),
+            payload.get("new_transform_key"),
+        )
+
+    def _cmd_update_transforms(self, payload):
+        return self._require_session().update_neuroglancer_transforms(
+            payload.get("transform_key"), payload.get("updates", [])
+        )
+
     def _cmd_register(self, payload):
         session = self._require_session()
         options = RegistrationOptions.from_dict(payload.get("options"))
@@ -190,6 +201,7 @@ class WorkerRuntime:
             channel_coord=payload.get("channel_coord"),
             contrast_limits=payload.get("contrast_limits"),
             layout=payload.get("layout"),
+            show_all_channels=payload.get("show_all_channels", False),
         )
 
     # ------------------------------------------------------------------

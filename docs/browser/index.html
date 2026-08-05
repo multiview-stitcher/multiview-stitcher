@@ -3,9 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>multiview-stitcher · browser</title>
-    <!-- Neuroglancer's own stylesheet, emitted next to its bundle. The
-         iframe used to carry this; an embedded viewer needs it linked. -->
+    <title>multiview-stitcher</title>
     <link
       rel="stylesheet"
       href="neuroglancer/neuroglancer.css"
@@ -14,97 +12,244 @@
     <link rel="stylesheet" href="app.css" id="app-stylesheet" />
   </head>
   <body>
-    <header>
-      <h1>multiview-stitcher</h1>
-      <p class="subtitle">
-        Registration and fusion in the browser &mdash; your data never leaves
-        your machine.
-      </p>
-      <span id="inactive" hidden>
-        inactive &mdash; another tab took over
-      </span>
-      <span id="status">starting&hellip;</span>
-      <div id="progress" hidden>
-        <div class="track"><div id="progress-bar"></div></div>
-        <span id="progress-label"></span>
+    <header class="app-header">
+      <div class="brand">
+        <img src="../images/logo.svg" alt="" />
+        <div>
+          <h1>multiview-stitcher</h1>
+          <p>Registration &amp; fusion in your browser</p>
+        </div>
       </div>
+
+      <div class="status-area" aria-live="polite">
+        <div id="progress" hidden>
+          <div class="progress-copy">
+            <span id="progress-label"></span>
+            <span id="progress-percent"></span>
+          </div>
+          <div class="track"><div id="progress-bar"></div></div>
+        </div>
+        <span id="status">starting&hellip;</span>
+        <span id="inactive" hidden>inactive &mdash; another tab took over</span>
+      </div>
+
+      <nav class="header-actions" aria-label="Application information">
+        <button id="log-button" class="quiet-button" type="button">
+          Log <span id="log-count" class="badge" hidden>0</span>
+        </button>
+        <label class="worker-control" for="worker-count">
+          <span>Workers</span>
+          <input id="worker-count" type="number" min="0" max="3" value="3" disabled />
+        </label>
+        <button id="viewer-help-button" class="quiet-button" type="button" aria-label="Viewer controls help"><span class="viewer-help-label">Viewer help</span><span class="viewer-help-short" aria-hidden="true">?</span></button>
+        <button id="about-button" class="quiet-button" type="button" aria-label="About multiview-stitcher"><span class="about-label">About</span><span class="about-short" aria-hidden="true">i</span></button>
+      </nav>
     </header>
 
-    <main>
-      <aside id="panel">
+    <main class="workspace">
+      <aside id="data-panel" class="side-panel" aria-label="Data and display controls">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Workspace</span>
+            <h2>Data &amp; display</h2>
+          </div>
+        </div>
+
         <section>
-          <h2>Data</h2>
-          <div id="dropzone" class="disabled">
-            <p>Drop a folder here</p>
-            <p class="hint">
-              one OME-Zarr, or a folder holding several of them. Drop
-              several folders at once and each must be a single OME-Zarr.
-              Dropping more adds to the loaded views.
-            </p>
-            <button id="browse" type="button" data-load>Browse&hellip;</button>
+          <div id="dropzone" class="dropzone disabled" tabindex="0" role="button">
+            <div class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg>
+            </div>
+            <strong>Drop OME-Zarr folders</strong>
+            <span>or click to choose from this device</span>
+            <button id="browse" type="button" data-load>Choose folders</button>
           </div>
 
-          <div class="actions actions-row">
-            <button id="example" type="button" data-load disabled>
+          <div class="data-actions">
+            <button id="example" class="text-button" type="button" data-load disabled>
               Load example
             </button>
-            <button id="clear" type="button" data-load>Clear</button>
+            <button id="clear" class="text-button danger" type="button" data-load disabled>
+              Clear all
+            </button>
           </div>
 
-          <p id="dataset-summary" class="summary">no data loaded</p>
-          <ul id="views"></ul>
+          <div class="section-title-row">
+            <h3>Loaded views</h3>
+            <span id="dataset-summary" class="count-label">None</span>
+          </div>
+          <ul id="views" class="view-list"></ul>
+          <p id="empty-views" class="empty-state">Your loaded image views will appear here.</p>
         </section>
 
         <section>
-          <h2>Coordinate system</h2>
-          <label for="transform-key">transform_key</label>
+          <h3>Coordinate system</h3>
+          <label for="transform-key">Displayed transform</label>
           <select id="transform-key" disabled></select>
-          <p class="hint">
-            Applied to every loaded source. Switching does not touch the image
-            data.
-          </p>
+          <p class="field-help">Operations use the coordinate system selected here.</p>
         </section>
 
         <section>
-          <h2>Compute</h2>
-          <label for="worker-count">Python web workers</label>
-          <select id="worker-count" disabled></select>
-          <p class="hint">
-            Pairwise registrations and fused preview chunks are spread over
-            these.
-          </p>
+          <h3>Display options</h3>
+          <label for="display-channel">Channels</label>
+          <select id="display-channel" disabled>
+            <option value="all">Show all channels</option>
+          </select>
 
-          <div class="actions">
-            <button type="button" data-action="register" disabled>
-              Register
-            </button>
-            <button type="button" data-action="fuse-preview" disabled>
-              Fuse (preview)
-            </button>
-            <button type="button" data-action="fuse-disk" disabled>
-              Fuse to OME-Zarr&hellip;
-            </button>
+          <label>Contrast limits</label>
+          <div class="contrast-fields">
+            <label for="contrast-min"><span>Min</span><input id="contrast-min" type="number" step="any" placeholder="Auto" disabled /></label>
+            <label for="contrast-max"><span>Max</span><input id="contrast-max" type="number" step="any" placeholder="Auto" disabled /></label>
           </div>
-          <p class="hint">
-            The preview is computed lazily: only the chunks the viewer asks for
-            are fused.
-          </p>
-        </section>
-
-        <section class="grow">
-          <h2>Log</h2>
-          <div id="log"></div>
+          <p class="field-help">Applied to every displayed channel. Leave blank for automatic contrast.</p>
         </section>
       </aside>
 
-      <div id="viewer" aria-label="Neuroglancer viewer"></div>
+      <section id="viewer-shell" aria-label="Image viewer">
+        <div id="viewer" aria-label="Neuroglancer viewer"></div>
+        <div id="viewer-empty" class="viewer-empty">
+          <div class="viewer-empty-icon" aria-hidden="true"></div>
+          <h2>No image data loaded</h2>
+          <p>Drop an OME-Zarr folder in the data panel to begin.</p>
+        </div>
+      </section>
+
+      <aside id="operations-panel" class="side-panel" aria-label="Data operations">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Processing</span>
+            <h2>Operations</h2>
+          </div>
+        </div>
+
+        <div class="tabs main-tabs" role="tablist" aria-label="Operations">
+          <button id="placement-tab" role="tab" aria-selected="true" aria-controls="placement-panel" data-tab="placement">Placement</button>
+          <button id="registration-tab" role="tab" aria-selected="false" aria-controls="registration-panel" data-tab="registration">Register</button>
+          <button id="fusion-tab" role="tab" aria-selected="false" aria-controls="fusion-panel" data-tab="fusion">Fuse</button>
+        </div>
+
+        <section id="placement-panel" class="operation-panel" role="tabpanel" aria-labelledby="placement-tab">
+          <div class="operation-intro">
+            <span class="step-icon">01</span>
+            <div>
+              <h3>Interactive tile placement</h3>
+              <p>Create an editable copy of the displayed coordinate system.</p>
+            </div>
+          </div>
+          <label for="placement-transform-name">New transform name</label>
+          <input id="placement-transform-name" type="text" value="manual" placeholder="manual" />
+          <button class="primary-button" type="button" data-action="new-transform" disabled>
+            Create transform
+          </button>
+          <p class="field-help">After creating it, use each layer&rsquo;s source transform controls in the viewer to place tiles.</p>
+        </section>
+
+        <section id="registration-panel" class="operation-panel" role="tabpanel" aria-labelledby="registration-tab" hidden>
+          <div class="operation-intro">
+            <span class="step-icon">02</span>
+            <div>
+              <h3>Registration</h3>
+              <p>Align all loaded views from the displayed coordinate system.</p>
+            </div>
+          </div>
+
+          <div class="tabs sub-tabs" role="tablist" aria-label="Registration options">
+            <button role="tab" aria-selected="true" data-subtab="registration-common">Common</button>
+            <button role="tab" aria-selected="false" data-subtab="registration-advanced">Advanced</button>
+          </div>
+          <div id="registration-common" class="subtab-panel">
+            <label for="registration-channel">Registration channel</label>
+            <select id="registration-channel" disabled></select>
+            <label for="registration-transform-name">New transform name</label>
+            <input id="registration-transform-name" type="text" value="registered" />
+          </div>
+          <div id="registration-advanced" class="subtab-panel" hidden>
+            <fieldset>
+              <legend>Registration binning</legend>
+              <div id="registration-binning" class="dimension-fields"></div>
+              <p class="field-help">Leave blank to choose binning automatically.</p>
+            </fieldset>
+          </div>
+          <button class="primary-button" type="button" data-action="register" disabled>Register views</button>
+        </section>
+
+        <section id="fusion-panel" class="operation-panel" role="tabpanel" aria-labelledby="fusion-tab" hidden>
+          <div class="operation-intro">
+            <span class="step-icon">03</span>
+            <div>
+              <h3>Fusion</h3>
+              <p>Combine the views in the displayed coordinate system.</p>
+            </div>
+          </div>
+
+          <div class="tabs sub-tabs" role="tablist" aria-label="Fusion options">
+            <button role="tab" aria-selected="true" data-subtab="fusion-common">Common</button>
+            <button role="tab" aria-selected="false" data-subtab="fusion-advanced">Advanced</button>
+          </div>
+          <div id="fusion-common" class="subtab-panel">
+            <label for="fusion-method">Fusion method</label>
+            <select id="fusion-method">
+              <option value="weighted_average">Weighted average</option>
+              <option value="simple_average">Simple average</option>
+              <option value="max">Maximum intensity</option>
+            </select>
+          </div>
+          <div id="fusion-advanced" class="subtab-panel" hidden>
+            <fieldset>
+              <legend>Blending widths</legend>
+              <div id="blending-widths" class="dimension-fields"></div>
+              <p class="field-help">Physical width of edge blending per axis.</p>
+            </fieldset>
+            <fieldset>
+              <legend>Output spacing</legend>
+              <div id="output-spacing" class="dimension-fields"></div>
+              <p class="field-help">Leave blank to infer spacing from the inputs.</p>
+            </fieldset>
+          </div>
+          <div class="split-actions">
+            <button class="secondary-button" type="button" data-action="fuse-preview" disabled>Fuse preview</button>
+            <button class="primary-button" type="button" data-action="fuse-disk" disabled>Fuse to OME-Zarr</button>
+          </div>
+          <p class="field-help">Preview chunks are computed lazily as you navigate.</p>
+        </section>
+      </aside>
     </main>
 
+    <dialog id="log-dialog" class="app-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">Diagnostics</span><h2>Activity log</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close log">&times;</button>
+      </div>
+      <div id="log" class="log"></div>
+      <div class="dialog-footer"><button id="clear-log" class="secondary-button" type="button">Clear log</button></div>
+    </dialog>
+
+    <dialog id="about-dialog" class="app-dialog about-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">About</span><h2>multiview-stitcher</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close about dialog">&times;</button>
+      </div>
+      <div class="about-content">
+        <img src="../images/logo.svg" alt="multiview-stitcher logo" />
+        <p>Registration and fusion for tiled, multiview microscopy data&mdash;running locally in your browser.</p>
+        <div class="privacy-note"><strong>Your data stays local.</strong><span>Images are processed on this device and are never uploaded.</span></div>
+        <p class="built-with">Built with <a href="https://neuroglancer-docs.web.app/" target="_blank" rel="noopener">Neuroglancer</a>, <a href="https://ngff.openmicroscopy.org/" target="_blank" rel="noopener">OME-Zarr</a>, and <a href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a>.</p>
+        <p id="runtime-info" class="runtime-info">Runtime information will appear after startup.</p>
+      </div>
+    </dialog>
+
+    <dialog id="viewer-help-dialog" class="app-dialog help-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">Viewer controls</span><h2>Navigate the image</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close viewer help">&times;</button>
+      </div>
+      <div class="help-content">
+        <div><span class="help-icon">+</span><div><strong>Zoom in or out</strong><p>Scroll the mouse wheel or pinch on a trackpad over the viewer.</p></div></div>
+        <div><span class="help-icon">&#8596;</span><div><strong>Pan across the image</strong><p>Click and drag inside a view to move through the data.</p></div></div>
+      </div>
+    </dialog>
+
     <script>
-      // The page's own scripts are versioned from the build manifest, exactly
-      // as the wheel and the workers are. Without this a reload can pick up a
-      // fresh Python wheel behind a cached app.js - two halves of different
-      // builds, which fails in ways that look like neither.
       (async () => {
         let build = "dev";
         try {
@@ -121,8 +266,6 @@
           `neuroglancer/neuroglancer.css?v=${build}`;
         document.getElementById("app-stylesheet").href = `app.css?v=${build}`;
 
-        // routes.js is a plain script that publishes a global; app.js is a
-        // module because it imports the viewer integration.
         for (const [src, type] of [["routes.js", ""], ["app.js", "module"]]) {
           await new Promise((resolve, reject) => {
             const element = document.createElement("script");

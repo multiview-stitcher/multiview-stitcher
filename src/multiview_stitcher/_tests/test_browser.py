@@ -33,6 +33,7 @@ from multiview_stitcher.browser import (
     open_http_store,
     serialization,
 )
+from multiview_stitcher.browser import example_data
 from multiview_stitcher.browser import store as browser_store
 
 
@@ -220,6 +221,59 @@ def test_session_register_adds_transform_key(tiles_on_disk):
 
     restored = serialization.params_from_json(result["params"])
     assert restored[0].shape[-2:] == (3, 3)
+
+
+def test_session_copies_selected_transform_key():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d"))
+    source_key = si_utils.DEFAULT_TRANSFORM_KEY
+    source_params = [
+        msi_utils.get_transform_from_msim(msim, source_key).copy()
+        for msim in session.msims
+    ]
+
+    result = session.copy_transform(source_key, "manual")
+
+    assert result["source_transform_key"] == source_key
+    assert result["transform_key"] == "manual"
+    assert "manual" in session.transform_keys()
+    for msim, expected in zip(session.msims, source_params):
+        xr.testing.assert_equal(
+            msi_utils.get_transform_from_msim(msim, "manual"), expected
+        )
+
+    with pytest.raises(ValueError, match="already exists"):
+        session.copy_transform(source_key, "manual")
+
+
+def test_session_persists_neuroglancer_placement_edits():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d")[:1])
+    source_key = si_utils.DEFAULT_TRANSFORM_KEY
+    session.copy_transform(source_key, "manual")
+    state = session.neuroglancer_state(transform_key="manual")
+    transform = json.loads(
+        json.dumps(state["layers"][0]["source"]["transform"])
+    )
+    output_dims = list(transform["outputDimensions"])
+    x_row = output_dims.index("x")
+    transform["matrix"][x_row][-1] += 4
+
+    before = msi_utils.get_transform_from_msim(
+        session.msims[0], "manual"
+    ).copy()
+    session.update_neuroglancer_transforms(
+        "manual", [{"index": 0, "transform": transform}]
+    )
+    after = msi_utils.get_transform_from_msim(session.msims[0], "manual")
+
+    spacing = si_utils.get_spacing_from_sim(
+        msi_utils.get_sim_from_msim(session.msims[0])
+    )
+    np.testing.assert_allclose(
+        after.sel(x_in="x", x_out="1"),
+        before.sel(x_in="x", x_out="1") + 4 * spacing["x"],
+    )
 
 
 def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
@@ -688,6 +742,38 @@ def test_neuroglancer_state_includes_preview_layer(tiles_on_disk):
     assert preview["route"] in state["layers"][-1]["source"]["url"]
 
 
+def test_neuroglancer_state_hides_side_panels_and_uses_dimension_layout():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d"))
+
+    state = session.neuroglancer_state()
+
+    assert state["layout"] == "4panel"
+    assert state["layerListPanel"] == {"visible": False}
+    assert state["selectedLayer"] == {"visible": False}
+
+
+def test_neuroglancer_state_can_show_every_channel():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d")[:1])
+    sim = msi_utils.get_sim_from_msim(session.msims[0])
+    channel = sim.isel(c=0, drop=True)
+    multichannel = xr.concat(
+        [channel, channel],
+        dim=xr.IndexVariable("c", ["green", "magenta"]),
+    )
+    session.msims[0] = msi_utils.get_msim_from_sim(
+        multichannel, scale_factors=[]
+    )
+
+    state = session.neuroglancer_state(show_all_channels=True)
+
+    assert len(state["layers"]) == 2
+    assert {layer["localPosition"][0] for layer in state["layers"]} == {0, 1}
+    assert any("green" in layer["name"] for layer in state["layers"])
+    assert any("magenta" in layer["name"] for layer in state["layers"])
+
+
 def test_preview_layer_is_hidden_under_another_transform_key(tiles_on_disk):
     """A fused image only means anything in the space it was fused in.
 
@@ -734,6 +820,18 @@ def test_registration_options_reject_unknown_methods():
         RegistrationOptions(groupwise_resolution_method="nope")
     with pytest.raises(ValueError, match="pruning method"):
         RegistrationOptions(pre_registration_pruning_method="nope")
+
+
+def test_fusion_options_forward_interface_controls():
+    options = FusionOptions(
+        fusion_func="max",
+        output_spacing={"y": 2.0, "x": 2.0},
+        blending_widths={"y": 8.0, "x": 8.0},
+    )
+
+    kwargs = options.fuse_kwargs()
+    assert kwargs["output_spacing"] == {"y": 2.0, "x": 2.0}
+    assert kwargs["blending_widths"] == {"y": 8.0, "x": 8.0}
 
 
 def test_source_spec_name_falls_back_to_url():

@@ -161,6 +161,7 @@ class FusionOptions:
     fusion_func: str = "weighted_average"
     output_chunksize: Any = None
     output_spacing: Optional[dict] = None
+    blending_widths: Optional[dict] = None
     output_stack_mode: str = "union"
     output_zarr_url: Optional[str] = None
     ngff_version: str = "0.4"
@@ -185,6 +186,8 @@ class FusionOptions:
             kwargs["output_chunksize"] = self.output_chunksize
         if self.output_spacing is not None:
             kwargs["output_spacing"] = self.output_spacing
+        if self.blending_widths is not None:
+            kwargs["blending_widths"] = self.blending_widths
         return kwargs
 
     def to_dict(self):

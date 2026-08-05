@@ -453,3 +453,37 @@ test("adding the fused preview leaves the rest of the viewer alone", async () =>
   // the ones that were already there are patched.
   assert.match(app, /known\.includes\(url\)/);
 });
+
+test("the browser chrome exposes the complete responsive workflow", () => {
+  const html = readFileSync(
+    join(repoRoot, "docs", "browser", "index.html"),
+    "utf8",
+  );
+  const css = readFileSync(
+    join(repoRoot, "docs", "browser", "app.css"),
+    "utf8",
+  );
+
+  for (const id of [
+    "data-panel",
+    "viewer",
+    "operations-panel",
+    "display-channel",
+    "contrast-min",
+    "contrast-max",
+    "placement-panel",
+    "registration-panel",
+    "fusion-panel",
+    "log-dialog",
+    "viewer-help-dialog",
+    "about-dialog",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(
+    html,
+    /id="worker-count"[^>]*type="number"[^>]*value="3"/,
+  );
+  assert.match(css, /@media \(max-width: 820px\)/);
+  assert.match(css, /grid-template-areas:\s*"viewer"\s*"data"\s*"operations"/);
+});

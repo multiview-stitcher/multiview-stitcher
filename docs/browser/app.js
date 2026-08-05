@@ -34,6 +34,12 @@ const state = {
   previewRoute: null,
   transformKey: null,
   layerSources: null, // name -> url of what the viewer currently shows
+  currentViewLayerUrls: new Map(), // input source url -> viewer layer urls
+  viewVisibility: new Map(), // input source url -> visible
+  displayChannel: "all",
+  contrastMin: null,
+  contrastMax: null,
+  editableTransformKeys: new Set(),
   mounts: [],
 };
 
@@ -50,6 +56,9 @@ function log(message, level = "info") {
   const box = $("#log");
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
+  const count = box.childElementCount;
+  $("#log-count").textContent = String(count);
+  $("#log-count").hidden = count === 0;
 
   // Mirrored so that everything is in one place: the viewer reports its own
   // failures to the console, and correlating the two matters more than
@@ -95,6 +104,8 @@ function setProgress(progress) {
   if (!progress || !progress.total) {
     container.hidden = true;
     $("#progress-bar").style.width = "0";
+    $("#progress-percent").textContent = "";
+    $("#status").hidden = false;
     return;
   }
 
@@ -102,7 +113,9 @@ function setProgress(progress) {
   const fraction = Math.max(0, Math.min(1, completed / total));
 
   container.hidden = false;
+  $("#status").hidden = true;
   $("#progress-bar").style.width = `${(fraction * 100).toFixed(1)}%`;
+  $("#progress-percent").textContent = `${Math.round(fraction * 100)}%`;
   $("#progress-label").textContent =
     `${label} ${completed}/${total} ${unit}${total === 1 ? "" : "s"}`;
 }
@@ -154,7 +167,7 @@ function setBusy(busy) {
     button.disabled = busy || (needsData && !hasViews());
   }
   for (const button of document.querySelectorAll("button[data-load]")) {
-    button.disabled = busy;
+    button.disabled = busy || (button.id === "clear" && !hasViews());
   }
   $("#worker-count").disabled = busy;
 }
@@ -577,6 +590,63 @@ function fsRequest(message, transfer = []) {
 // ---------------------------------------------------------------------------
 
 const viewer = new NeuroglancerViewer();
+let placementSyncTimer = null;
+let placementSync = Promise.resolve();
+const placementSignatures = new Map();
+
+function editedTransforms(ngState) {
+  const byIndex = new Map();
+  for (const layer of ngState.layers || []) {
+    const match = String(layer.name || "").match(/^(\d+):/);
+    if (!match || byIndex.has(Number(match[1]))) continue;
+    const sourceSpecs = Array.isArray(layer.source) ? layer.source : [layer.source];
+    const source = sourceSpecs.find(
+      (candidate) => candidate && typeof candidate === "object" && candidate.transform,
+    );
+    if (source) {
+      byIndex.set(Number(match[1]), {
+        index: Number(match[1]),
+        transform: source.transform,
+      });
+    }
+  }
+  return Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
+}
+
+function schedulePlacementSync(ngState) {
+  const transformKey = state.transformKey;
+  if (!state.editableTransformKeys.has(transformKey)) return;
+
+  const updates = editedTransforms(ngState);
+  if (!updates.length) return;
+  const signature = JSON.stringify(updates);
+  if (placementSignatures.get(transformKey) === signature) return;
+
+  clearTimeout(placementSyncTimer);
+  placementSyncTimer = setTimeout(() => {
+    placementSync = placementSync
+      .catch(() => {})
+      .then(async () => {
+        if (placementSignatures.get(transformKey) === signature) return;
+        placementSignatures.set(transformKey, signature);
+        try {
+          const result = await command("update_transforms", {
+            transform_key: transformKey,
+            updates,
+          });
+          if (state.session) state.session.generation = result.generation;
+          const hadPreview = Boolean(state.previewRoute);
+          state.previewRoute = null;
+          await refreshSessionSpec();
+          if (hadPreview) await refreshViewer();
+          setStatus(`saved placement in ${transformKey}`);
+        } catch (error) {
+          placementSignatures.delete(transformKey);
+          log(`could not save tile placement: ${error.message}`, "error");
+        }
+      });
+  }, 350);
+}
 
 function mountViewer() {
   if (viewer.mounted) return;
@@ -588,6 +658,7 @@ function mountViewer() {
   viewer.onPositionChanged((position) => {
     state.position = position;
   });
+  viewer.onStateChanged(schedulePlacementSync);
 }
 
 /** The layers a state describes, as `name -> source url`. */
@@ -600,10 +671,16 @@ function layerSources(ngState) {
   return sources;
 }
 
-function showViewerState(ngState) {
+function showViewerState(ngState, { replaceLayers = false } = {}) {
   mountViewer();
 
   const sources = layerSources(ngState);
+
+  if (replaceLayers && state.layerSources) {
+    viewer.setLayers(ngState.layers || []);
+    state.layerSources = sources;
+    return;
+  }
 
   // A transform_key switch changes only where each layer sits. Handing the
   // whole state over would rebuild every layer, taking the user's shader
@@ -684,12 +761,46 @@ function showViewerState(ngState) {
   viewer.setState(ngState);
 }
 
-async function refreshViewer() {
+function contrastLimits() {
+  if (state.contrastMin === null && state.contrastMax === null) return null;
+  if (state.contrastMin === null || state.contrastMax === null) {
+    throw new Error("Enter both contrast limits, or leave both blank.");
+  }
+  if (!Number.isFinite(state.contrastMin) || !Number.isFinite(state.contrastMax)) {
+    throw new Error("Contrast limits must be numbers.");
+  }
+  if (state.contrastMin >= state.contrastMax) {
+    throw new Error("The maximum contrast limit must be greater than the minimum.");
+  }
+  return [state.contrastMin, state.contrastMax];
+}
+
+function applyViewVisibility(ngState) {
+  state.currentViewLayerUrls = new Map();
+  for (const layer of ngState.layers || []) {
+    const match = String(layer.name || "").match(/^(\d+):/);
+    if (!match) continue;
+    const index = Number(match[1]);
+    const view = state.session?.views?.[index];
+    if (!view) continue;
+    const source = layer.source;
+    const url = typeof source === "string" ? source : source.url;
+    if (!state.currentViewLayerUrls.has(view.url)) {
+      state.currentViewLayerUrls.set(view.url, new Set());
+    }
+    state.currentViewLayerUrls.get(view.url).add(url);
+    layer.visible = state.viewVisibility.get(view.url) !== false;
+  }
+}
+
+async function refreshViewer({ replaceLayers = false } = {}) {
   if (!hasViews()) {
     // No views: back to a blank viewer, not an empty layer list on top of the
     // previous dataset's coordinate space.
     if (viewer.mounted) viewer.reset();
     state.layerSources = null;
+    state.currentViewLayerUrls.clear();
+    $("#viewer-empty").hidden = false;
     return;
   }
 
@@ -700,9 +811,15 @@ async function refreshViewer() {
     // must build viewer URLs below this prefix rather than at the site root.
     api_base: API_BASE,
     preview_route: state.previewRoute,
+    channel_coord:
+      state.displayChannel === "all" ? null : state.displayChannel,
+    show_all_channels: state.displayChannel === "all",
+    contrast_limits: contrastLimits(),
   });
 
-  showViewerState(ngState);
+  applyViewVisibility(ngState);
+  $("#viewer-empty").hidden = true;
+  showViewerState(ngState, { replaceLayers });
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +872,63 @@ function renderTransformKeys(keys) {
   select.disabled = keys.length < 2;
 }
 
+function renderDimensionFields(described) {
+  const view = described.views[0];
+  const dims = view?.spatial_dims || [];
+  const defaults = { z: 3, y: 10, x: 10 };
+
+  for (const [containerSelector, prefix, values] of [
+    ["#registration-binning", "registration-binning", {}],
+    ["#blending-widths", "blending-width", defaults],
+    ["#output-spacing", "output-spacing", {}],
+  ]) {
+    const container = $(containerSelector);
+    container.replaceChildren();
+    for (const dim of dims) {
+      const wrapper = document.createElement("div");
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      const id = `${prefix}-${dim}`;
+      label.htmlFor = id;
+      label.textContent = dim;
+      input.id = id;
+      input.type = "number";
+      input.min = prefix === "registration-binning" ? "1" : "0";
+      input.step = prefix === "registration-binning" ? "1" : "any";
+      input.dataset.dimension = dim;
+      input.value = values[dim] ?? "";
+      input.placeholder = "auto";
+      wrapper.append(label, input);
+      container.appendChild(wrapper);
+    }
+  }
+}
+
+function renderChannelControls(described) {
+  const channels = described.views[0]?.c_coords || [];
+  const display = $("#display-channel");
+  display.replaceChildren(new Option("Show all channels", "all"));
+  channels.forEach((channel) => display.add(new Option(channel, channel)));
+  if (state.displayChannel !== "all" && !channels.includes(state.displayChannel)) {
+    state.displayChannel = "all";
+  }
+  display.value = state.displayChannel;
+  display.disabled = !described.n_views || channels.length < 2;
+
+  const registration = $("#registration-channel");
+  registration.replaceChildren();
+  if (channels.length) {
+    channels.forEach((channel, index) =>
+      registration.add(new Option(channel, String(index))),
+    );
+  } else {
+    registration.add(new Option("No channel axis", ""));
+  }
+  registration.disabled = !described.n_views || channels.length < 2;
+  $("#contrast-min").disabled = !described.n_views;
+  $("#contrast-max").disabled = !described.n_views;
+}
+
 function renderViews(described) {
   const list = $("#views");
   list.innerHTML = "";
@@ -767,12 +941,32 @@ function renderViews(described) {
 
     const item = document.createElement("li");
 
+    if (!state.viewVisibility.has(view.url)) {
+      state.viewVisibility.set(view.url, true);
+    }
+
+    const visibility = document.createElement("input");
+    visibility.type = "checkbox";
+    visibility.className = "visibility-toggle";
+    visibility.checked = state.viewVisibility.get(view.url) !== false;
+    visibility.title = `Show or hide ${view.name}`;
+    visibility.setAttribute("aria-label", `Show ${view.name}`);
+    visibility.addEventListener("change", () => {
+      state.viewVisibility.set(view.url, visibility.checked);
+      const urls = state.currentViewLayerUrls.get(view.url) || [];
+      const patch = Object.fromEntries(
+        Array.from(urls, (url) => [url, visibility.checked]),
+      );
+      if (Object.keys(patch).length) viewer.setLayerVisibility(patch);
+    });
+
     const text = document.createElement("div");
     const name = document.createElement("strong");
     // The viewer names its layers the same way, so the two lists line up.
     name.textContent = `${index}: ${view.name}`;
     const detail = document.createElement("span");
-    detail.textContent = `${shape} · ${view.dtype} · ${view.levels.length} level(s)`;
+    detail.className = "view-detail";
+    detail.textContent = `${shape} · ${view.levels.length} level${view.levels.length === 1 ? "" : "s"}`;
     text.append(name, detail);
 
     const remove = document.createElement("button");
@@ -789,13 +983,14 @@ function renderViews(described) {
       }
     });
 
-    item.append(text, remove);
+    item.append(visibility, text, remove);
     list.appendChild(item);
   });
 
   $("#dataset-summary").textContent = described.n_views
-    ? `${described.n_views} view(s), ${described.views[0].ndim}D`
-    : "no data loaded";
+    ? `${described.n_views} · ${described.views[0].ndim}D`
+    : "None";
+  $("#empty-views").hidden = Boolean(described.n_views);
 }
 
 async function applyDescribed(described) {
@@ -805,6 +1000,8 @@ async function applyDescribed(described) {
   state.previewRoute = null;
   renderViews(described);
   renderTransformKeys(described.transform_keys);
+  renderChannelControls(described);
+  renderDimensionFields(described);
   await refreshSessionSpec();
   await refreshViewer();
   setBusy(false);
@@ -913,9 +1110,61 @@ async function clearSession() {
   state.transformKey = null;
   state.layerSources = null;
   state.position = null;
+  state.viewVisibility.clear();
+  state.currentViewLayerUrls.clear();
+  state.displayChannel = "all";
+  state.contrastMin = null;
+  state.contrastMax = null;
+  $("#contrast-min").value = "";
+  $("#contrast-max").value = "";
+  state.editableTransformKeys.clear();
+  placementSignatures.clear();
+  clearTimeout(placementSyncTimer);
   await applyDescribed(described);
   log("cleared all views");
   setStatus("drop a folder to begin");
+}
+
+function namedTransform(selector, fallback) {
+  const value = $(selector).value.trim();
+  if (!value) throw new Error("Enter a name for the new transform.");
+  return value || fallback;
+}
+
+function dimensionValues(selector, { integers = false } = {}) {
+  const values = {};
+  for (const input of document.querySelectorAll(`${selector} input`)) {
+    if (input.value.trim() === "") continue;
+    const value = integers ? Number.parseInt(input.value, 10) : Number(input.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`${input.dataset.dimension} must be a positive number.`);
+    }
+    values[input.dataset.dimension] = value;
+  }
+  return Object.keys(values).length ? values : null;
+}
+
+async function doCreateTransform() {
+  setBusy(true);
+  setStatus("creating transform", true);
+  try {
+    const newTransformKey = namedTransform("#placement-transform-name", "manual");
+    const result = await command("copy_transform", {
+      source_transform_key: state.transformKey,
+      new_transform_key: newTransformKey,
+    });
+    state.session.transform_keys = result.transform_keys;
+    state.transformKey = result.transform_key;
+    state.editableTransformKeys.add(result.transform_key);
+    state.previewRoute = null;
+    renderTransformKeys(result.transform_keys);
+    await refreshSessionSpec();
+    await refreshViewer();
+    log(`created '${newTransformKey}' from '${result.source_transform_key}'`);
+    setStatus(`editing ${newTransformKey}`);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function doRegister() {
@@ -925,7 +1174,20 @@ async function doRegister() {
 
   try {
     const result = await command("register", {
-      options: { new_transform_key: "registered" },
+      options: {
+        transform_key: state.transformKey,
+        new_transform_key: namedTransform(
+          "#registration-transform-name",
+          "registered",
+        ),
+        reg_channel_index:
+          $("#registration-channel").value === ""
+            ? null
+            : Number($("#registration-channel").value),
+        registration_binning: dimensionValues("#registration-binning", {
+          integers: true,
+        }),
+      },
       distribute: pool.size > 0,
     });
 
@@ -954,7 +1216,7 @@ async function doFusePreview() {
 
   try {
     const result = await command("fuse_preview", {
-      options: { transform_key: state.transformKey },
+      options: fusionOptions(),
     });
     state.previewRoute = result.route;
     await refreshSessionSpec();
@@ -1001,7 +1263,7 @@ async function doFuseToDisk() {
 
     const result = await command("fuse_to_zarr", {
       options: {
-        transform_key: state.transformKey,
+        ...fusionOptions(),
         output_zarr_url: `${API_BASE}/fs/${mount}/${OUTPUT_NAME}`,
       },
       distribute: pool.size > 0,
@@ -1019,6 +1281,15 @@ async function doFuseToDisk() {
     clearProgress();
     setBusy(false);
   }
+}
+
+function fusionOptions() {
+  return {
+    transform_key: state.transformKey,
+    fusion_func: $("#fusion-method").value,
+    blending_widths: dimensionValues("#blending-widths"),
+    output_spacing: dimensionValues("#output-spacing"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,19 +1365,15 @@ async function boot() {
   const sessionBoot = sessionWorker.send({ type: "boot", config });
 
   const select = $("#worker-count");
-  select.innerHTML = "";
-  for (let count = 0; count <= state.config.max_n_workers; count += 1) {
-    const option = document.createElement("option");
-    option.value = String(count);
-    option.textContent = count === 0 ? "none (session worker only)" : String(count);
-    select.appendChild(option);
-  }
-  const suggested = Math.min(
-    state.config.max_n_workers,
-    Math.max(1, (navigator.hardwareConcurrency || 4) - 1),
-  );
-  select.value = String(Math.min(suggested, state.config.default_n_workers));
+  select.max = String(state.config.max_n_workers);
+  select.value = String(Math.min(3, state.config.max_n_workers));
+  select.disabled = false;
   select.addEventListener("change", () => {
+    const requested = Math.max(
+      0,
+      Math.min(state.config.max_n_workers, Number(select.value) || 0),
+    );
+    select.value = String(requested);
     log(`compute workers: ${select.value}`);
     startWorkers();
   });
@@ -1121,6 +1388,9 @@ async function boot() {
       `dask ${info.dask} · multiview-stitcher ${info.multiview_stitcher} · ` +
       `build ${build}`,
   );
+  $("#runtime-info").textContent =
+    `Python ${info.python} · NumPy ${info.numpy} · Zarr ${info.zarr} · ` +
+    `multiview-stitcher ${info.multiview_stitcher} · build ${build}`;
 
   claimTab();
 
@@ -1138,11 +1408,63 @@ async function boot() {
 function wireUi() {
   const dropzone = $("#dropzone");
 
+  for (const [buttonSelector, dialogSelector] of [
+    ["#log-button", "#log-dialog"],
+    ["#viewer-help-button", "#viewer-help-dialog"],
+    ["#about-button", "#about-dialog"],
+  ]) {
+    $(buttonSelector).addEventListener("click", () =>
+      $(dialogSelector).showModal(),
+    );
+  }
+  for (const button of document.querySelectorAll("[data-close-dialog]")) {
+    button.addEventListener("click", () => button.closest("dialog").close());
+  }
+  for (const dialog of document.querySelectorAll("dialog")) {
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  }
+  $("#clear-log").addEventListener("click", () => {
+    $("#log").replaceChildren();
+    $("#log-count").hidden = true;
+  });
+
+  for (const button of document.querySelectorAll(".main-tabs [data-tab]")) {
+    button.addEventListener("click", () => {
+      for (const peer of document.querySelectorAll(".main-tabs [data-tab]")) {
+        const selected = peer === button;
+        peer.setAttribute("aria-selected", String(selected));
+        $(`#${peer.dataset.tab}-panel`).hidden = !selected;
+      }
+    });
+  }
+  for (const button of document.querySelectorAll(".sub-tabs [data-subtab]")) {
+    button.addEventListener("click", () => {
+      const tabs = button.closest(".sub-tabs");
+      for (const peer of tabs.querySelectorAll("[data-subtab]")) {
+        const selected = peer === button;
+        peer.setAttribute("aria-selected", String(selected));
+        $(`#${peer.dataset.subtab}`).hidden = !selected;
+      }
+    });
+  }
+
   dropzone.addEventListener("dragover", (event) => {
     event.preventDefault();
     dropzone.classList.add("dragging");
   });
   dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragging"));
+
+  dropzone.addEventListener("click", (event) => {
+    if (event.target !== $("#browse")) $("#browse").click();
+  });
+  dropzone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      $("#browse").click();
+    }
+  });
 
   dropzone.addEventListener("drop", async (event) => {
     event.preventDefault();
@@ -1207,6 +1529,34 @@ function wireUi() {
     await refreshViewer();
   });
 
+  $("#display-channel").addEventListener("change", async (event) => {
+    state.displayChannel = event.target.value;
+    log(
+      state.displayChannel === "all"
+        ? "showing all channels"
+        : `showing channel '${state.displayChannel}'`,
+    );
+    await refreshViewer({ replaceLayers: true });
+  });
+
+  let contrastTimer = null;
+  for (const [selector, key] of [
+    ["#contrast-min", "contrastMin"],
+    ["#contrast-max", "contrastMax"],
+  ]) {
+    $(selector).addEventListener("input", (event) => {
+      state[key] = event.target.value.trim() === ""
+        ? null
+        : Number(event.target.value);
+      clearTimeout(contrastTimer);
+      contrastTimer = setTimeout(() => {
+        refreshViewer({ replaceLayers: true }).catch((error) => {
+          setStatus(error.message);
+        });
+      }, 220);
+    });
+  }
+
   $("#example").addEventListener("click", async () => {
     try {
       await withPool(() => loadExample($("#example").dataset.example));
@@ -1226,6 +1576,7 @@ function wireUi() {
   });
 
   for (const [action, handler] of Object.entries({
+    "new-transform": doCreateTransform,
     register: doRegister,
     "fuse-preview": doFusePreview,
     "fuse-disk": doFuseToDisk,
