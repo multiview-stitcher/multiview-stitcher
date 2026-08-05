@@ -30,10 +30,10 @@ from multiview_stitcher.browser import (
     SourceSpec,
     WorkerRuntime,
     directory_fetch,
+    example_data,
     open_http_store,
     serialization,
 )
-from multiview_stitcher.browser import example_data
 from multiview_stitcher.browser import store as browser_store
 
 
@@ -825,11 +825,13 @@ def test_registration_options_reject_unknown_methods():
 def test_fusion_options_forward_interface_controls():
     options = FusionOptions(
         fusion_func="max",
+        output_chunksize={"y": 64, "x": 64},
         output_spacing={"y": 2.0, "x": 2.0},
         blending_widths={"y": 8.0, "x": 8.0},
     )
 
     kwargs = options.fuse_kwargs()
+    assert kwargs["output_chunksize"] == {"y": 64, "x": 64}
     assert kwargs["output_spacing"] == {"y": 2.0, "x": 2.0}
     assert kwargs["blending_widths"] == {"y": 8.0, "x": 8.0}
 
@@ -896,16 +898,40 @@ def test_example_generation_is_deterministic():
     first = msi_utils.get_sim_from_msim(
         example_data.build_msim("tiles-3d", 2)
     )
+    first_data = np.asarray(first.data)
+    example_data._dataset.cache_clear()
     second = msi_utils.get_sim_from_msim(
         example_data.build_msim("tiles-3d", 2)
     )
 
     np.testing.assert_array_equal(
-        np.asarray(first.data), np.asarray(second.data)
+        first_data, np.asarray(second.data)
     )
     assert si_utils.get_origin_from_sim(first) == si_utils.get_origin_from_sim(
         second
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "ndim", "n_channels", "tile_size"),
+    [
+        ("tiles-3d-1c", 3, 1, 64),
+        ("tiles-3d-2c", 3, 2, 64),
+        ("tiles-2d-1c", 2, 1, 128),
+        ("tiles-2d-2c", 2, 2, 128),
+    ],
+)
+def test_browser_example_variants_are_2_by_2(
+    name, ndim, n_channels, tile_size
+):
+    sources = example_data.example_sources(name)
+    sim = example_data.build_sim(name, 0)
+
+    assert len(sources) == 4
+    assert len(si_utils.get_spatial_dims_from_sim(sim)) == ndim
+    assert sim.sizes["c"] == n_channels
+    assert sim.sizes["x"] == tile_size
+    assert sim.sizes["y"] == tile_size
 
 
 def test_example_dataset_is_3d_and_registrable():
@@ -1108,7 +1134,12 @@ def test_worker_load_replace_and_append(tiles_on_disk):
     assert response["result"]["n_views"] == 1
 
     response = json.loads(worker_module.handle_json("examples", "{}"))
-    assert response["result"]["examples"][0]["name"] == "tiles-3d"
+    assert [example["name"] for example in response["result"]["examples"]] == [
+        "tiles-3d-1c",
+        "tiles-3d-2c",
+        "tiles-2d-1c",
+        "tiles-2d-2c",
+    ]
 
     response = json.loads(worker_module.handle_json("clear", "{}"))
     assert response["result"]["n_views"] == 0

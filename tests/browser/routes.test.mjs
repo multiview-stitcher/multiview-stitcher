@@ -463,17 +463,22 @@ test("the browser chrome exposes the complete responsive workflow", () => {
     join(repoRoot, "docs", "browser", "app.css"),
     "utf8",
   );
+  const app = readFileSync(
+    join(repoRoot, "docs", "browser", "app.js"),
+    "utf8",
+  );
 
   for (const id of [
     "data-panel",
     "viewer",
     "operations-panel",
-    "display-channel",
-    "contrast-min",
-    "contrast-max",
+    "channel-controls",
+    "empty-channels",
+    "example-menu",
     "placement-panel",
     "registration-panel",
     "fusion-panel",
+    "output-chunksizes",
     "log-dialog",
     "viewer-help-dialog",
     "about-dialog",
@@ -484,6 +489,41 @@ test("the browser chrome exposes the complete responsive workflow", () => {
     html,
     /id="worker-count"[^>]*type="number"[^>]*value="3"/,
   );
+  assert.match(html, /href="https:\/\/github\.com\/multiview-stitcher\/multiview-stitcher"/);
+  assert.match(html, /Registration &amp; Fusion in the browser \(OME-Zarr\)/);
+  assert.match(html, /Hold <kbd>Ctrl<\/kbd> and scroll/);
+  assert.match(css, /\.channel-contrast-line/);
+  assert.match(app, /range\.className = "dual-range"/);
   assert.match(css, /@media \(max-width: 820px\)/);
   assert.match(css, /grid-template-areas:\s*"viewer"\s*"data"\s*"operations"/);
+});
+
+test("channel and contrast controls update loaded layers in place", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(viewer, /setDisplayVisibility\(visibility, channelVisibility/);
+  assert.match(viewer, /channelVisibility\[layerChannel\] !== false/);
+  assert.match(viewer, /managed\.setVisible\(Boolean\(visibility\[url\]\) && channelVisible\)/);
+  assert.match(viewer, /setContrastLimits\(visibility, channelIndex, limits\)/);
+  assert.match(viewer, /range,/);
+
+  const channelHandler = app.slice(
+    app.indexOf("function renderChannelControls"),
+    app.indexOf("function renderViews"),
+  );
+  assert.doesNotMatch(channelHandler, /refreshViewer/);
+  assert.match(channelHandler, /applyDisplayVisibility/);
+  assert.match(channelHandler, /applyContrastLimits/);
+  assert.match(channelHandler, /visibility\.addEventListener\("change"/);
+  assert.match(channelHandler, /slider\.addEventListener\("input"/);
+  assert.match(app, /output_chunksize: dimensionValues\("#output-chunksizes"/);
+
+  assert.match(viewer, /setupDefaultViewer\(\{ target \}\)/);
+  assert.doesNotMatch(viewer, /showLayerListPanelButton: false/);
+  assert.doesNotMatch(viewer, /showLayerSidePanelButton: false/);
+  assert.doesNotMatch(viewer, /showLayerPanel: false/);
+  assert.match(viewer, /this\.#viewer\.selectedLayer\.visible = false/);
+  assert.match(viewer, /this\.#viewer\.layerListPanelState\.location\.visible = false/);
 });

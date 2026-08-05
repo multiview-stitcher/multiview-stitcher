@@ -98,8 +98,8 @@ class WorkerRuntime:
     def _cmd_examples(self, payload):
         return {
             "examples": [
-                {"name": name, "label": spec["label"]}
-                for name, spec in example_data.EXAMPLES.items()
+                {"name": name, "label": example_data.EXAMPLES[name]["label"]}
+                for name in example_data.EXAMPLE_MENU
             ]
         }
 

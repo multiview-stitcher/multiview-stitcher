@@ -63,7 +63,11 @@ export class NeuroglancerViewer {
     if (this.#viewer) throw new Error("the viewer is already mounted");
 
     this.#target = target;
+    // Keep Neuroglancer's standard layer and shader controls available. The
+    // panels themselves start closed, but users can open either one from the
+    // viewer toolbar whenever they need the full controls.
     this.#viewer = setupDefaultViewer({ target });
+    this.#hideLayerPanels();
 
     // Fresh viewer, so the camera is ours to place until the user moves it.
     this.#cameraPlaced = false;
@@ -265,6 +269,12 @@ export class NeuroglancerViewer {
     return this.#viewer;
   }
 
+  #hideLayerPanels() {
+    if (!this.#viewer) return;
+    this.#viewer.selectedLayer.visible = false;
+    this.#viewer.layerListPanelState.location.visible = false;
+  }
+
   // -------------------------------------------------------------------
   // Viewer state
   // -------------------------------------------------------------------
@@ -298,6 +308,7 @@ export class NeuroglancerViewer {
     try {
       if (!preserveView) viewer.state.reset();
       viewer.state.restoreState(state);
+      this.#hideLayerPanels();
     } finally {
       this.#applying = false;
     }
@@ -482,6 +493,121 @@ export class NeuroglancerViewer {
     if (missing.length) {
       throw new Error(`no layer reads from: ${missing.join(", ")}`);
     }
+  }
+
+  /**
+   * Apply the app's view and per-channel checkboxes to existing layers.
+   *
+   * Neuroglancer opens one managed layer per channel. Channel changes are
+   * therefore visibility operations, not a reason to replace the layers (or
+   * their coordinate space, camera, shader and computed contrast range).
+   */
+  setDisplayVisibility(visibility, channelVisibility = {}) {
+    const viewer = this.#require();
+    let matched = 0;
+
+    for (const managed of viewer.layerManager.managedLayers) {
+      const url = (managed.layer?.dataSources ?? [])
+        .map((dataSource) => dataSource.spec?.url)
+        .find((candidate) => Object.hasOwn(visibility, candidate));
+      if (url === undefined) continue;
+
+      const layerChannel = this.#channelIndex(managed);
+      const channelVisible =
+        layerChannel === null
+          ? channelVisibility.default !== false
+          : channelVisibility[layerChannel] !== false;
+      managed.setVisible(Boolean(visibility[url]) && channelVisible);
+      matched += 1;
+    }
+
+    return matched;
+  }
+
+  /** Set only the image shader's displayed min/max on matching channels. */
+  setContrastLimits(visibility, channelIndex, limits) {
+    let changed = 0;
+    for (const managed of this.#require().layerManager.managedLayers) {
+      const readsInput = (managed.layer?.dataSources ?? []).some(
+        (dataSource) => Object.hasOwn(visibility, dataSource.spec?.url),
+      );
+      if (!readsInput) continue;
+      const layerChannel = this.#channelIndex(managed);
+      if (channelIndex !== null && layerChannel !== channelIndex) {
+        continue;
+      }
+
+      const apply = () => {
+        const control = this.#contrastControl(managed);
+        if (!control) return false;
+        const currentRange = control.trackable.value?.range;
+        const range =
+          typeof currentRange?.[0] === "bigint"
+            ? Array.from(limits, (value) => BigInt(Math.round(value)))
+            : Array.from(limits);
+        control.trackable.value = {
+          ...control.trackable.value,
+          range,
+          autoCompute: false,
+        };
+        return true;
+      };
+      if (!apply()) {
+        // A newly opened image parses its shader asynchronously. Queue the
+        // requested values on that layer instead of silently skipping it.
+        managed.layer?.shaderControlState?.controls?.changed?.addOnce(apply);
+      }
+      changed += 1;
+    }
+    return changed;
+  }
+
+  /** Current range and slider window for the selected channel layer(s). */
+  getContrastLimits(visibility, channelIndex) {
+    const ranges = [];
+    const windows = [];
+
+    for (const managed of this.#require().layerManager.managedLayers) {
+      const readsInput = (managed.layer?.dataSources ?? []).some(
+        (dataSource) => Object.hasOwn(visibility, dataSource.spec?.url),
+      );
+      if (!readsInput) continue;
+      const layerChannel = this.#channelIndex(managed);
+      if (channelIndex !== null && layerChannel !== channelIndex) {
+        continue;
+      }
+      const value = this.#contrastControl(managed)?.trackable?.value;
+      const range = Array.from(value?.range ?? [], Number);
+      const window = Array.from(value?.window ?? [], Number);
+      if (range.length === 2 && range.every(Number.isFinite)) ranges.push(range);
+      if (window.length === 2 && window.every(Number.isFinite)) windows.push(window);
+    }
+
+    if (!ranges.length) return null;
+    const bounds = windows.length ? windows : ranges;
+    return {
+      min: Math.min(...ranges.map((range) => range[0])),
+      max: Math.max(...ranges.map((range) => range[1])),
+      lower: Math.min(...bounds.map((range) => range[0])),
+      upper: Math.max(...bounds.map((range) => range[1])),
+    };
+  }
+
+  #channelIndex(managed) {
+    const space = managed.localCoordinateSpace?.value;
+    const names = Array.from(space?.names ?? []);
+    const dimension = names.findIndex(
+      (name) => String(name).replace(/'+$/, "") === "c",
+    );
+    if (dimension < 0) return null;
+    const position = Number(managed.localPosition?.value?.[dimension]);
+    return Number.isFinite(position) ? Math.floor(position) : null;
+  }
+
+  #contrastControl(managed) {
+    const controls = managed.layer?.shaderControlState?.value;
+    if (!controls?.get) return null;
+    return controls.get("contrast") ?? controls.get("normalized") ?? null;
   }
 
   // -------------------------------------------------------------------

@@ -36,12 +36,13 @@ const state = {
   layerSources: null, // name -> url of what the viewer currently shows
   currentViewLayerUrls: new Map(), // input source url -> viewer layer urls
   viewVisibility: new Map(), // input source url -> visible
-  displayChannel: "all",
-  contrastMin: null,
-  contrastMax: null,
+  channelVisibility: new Map(), // channel key -> visible
   editableTransformKeys: new Set(),
   mounts: [],
 };
+
+let displayVisibilityTimer = null;
+let contrastSyncTimers = [];
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -658,7 +659,10 @@ function mountViewer() {
   viewer.onPositionChanged((position) => {
     state.position = position;
   });
-  viewer.onStateChanged(schedulePlacementSync);
+  viewer.onStateChanged((ngState) => {
+    schedulePlacementSync(ngState);
+    scheduleDisplayVisibility();
+  });
 }
 
 /** The layers a state describes, as `name -> source url`. */
@@ -671,16 +675,10 @@ function layerSources(ngState) {
   return sources;
 }
 
-function showViewerState(ngState, { replaceLayers = false } = {}) {
+function showViewerState(ngState) {
   mountViewer();
 
   const sources = layerSources(ngState);
-
-  if (replaceLayers && state.layerSources) {
-    viewer.setLayers(ngState.layers || []);
-    state.layerSources = sources;
-    return;
-  }
 
   // A transform_key switch changes only where each layer sits. Handing the
   // whole state over would rebuild every layer, taking the user's shader
@@ -761,20 +759,6 @@ function showViewerState(ngState, { replaceLayers = false } = {}) {
   viewer.setState(ngState);
 }
 
-function contrastLimits() {
-  if (state.contrastMin === null && state.contrastMax === null) return null;
-  if (state.contrastMin === null || state.contrastMax === null) {
-    throw new Error("Enter both contrast limits, or leave both blank.");
-  }
-  if (!Number.isFinite(state.contrastMin) || !Number.isFinite(state.contrastMax)) {
-    throw new Error("Contrast limits must be numbers.");
-  }
-  if (state.contrastMin >= state.contrastMax) {
-    throw new Error("The maximum contrast limit must be greater than the minimum.");
-  }
-  return [state.contrastMin, state.contrastMax];
-}
-
 function applyViewVisibility(ngState) {
   state.currentViewLayerUrls = new Map();
   for (const layer of ngState.layers || []) {
@@ -793,7 +777,140 @@ function applyViewVisibility(ngState) {
   }
 }
 
-async function refreshViewer({ replaceLayers = false } = {}) {
+function inputLayerVisibility() {
+  const visibility = {};
+  for (const [viewUrl, layerUrls] of state.currentViewLayerUrls) {
+    for (const layerUrl of layerUrls) {
+      visibility[layerUrl] = state.viewVisibility.get(viewUrl) !== false;
+    }
+  }
+  return visibility;
+}
+
+function displayChannels() {
+  const channels = state.session?.views?.[0]?.c_coords || [];
+  return channels.length
+    ? channels.map((name, index) => ({ name: String(name), index, key: String(index) }))
+    : [{ name: "Image", index: null, key: "default" }];
+}
+
+function channelVisibility() {
+  return Object.fromEntries(
+    displayChannels().map(({ key, index }) => [
+      index === null ? "default" : index,
+      state.channelVisibility.get(key) !== false,
+    ]),
+  );
+}
+
+function applyDisplayVisibility() {
+  if (!viewer.mounted) return 0;
+  return viewer.setDisplayVisibility(
+    inputLayerVisibility(),
+    channelVisibility(),
+  );
+}
+
+function scheduleDisplayVisibility(delay = 0) {
+  clearTimeout(displayVisibilityTimer);
+  displayVisibilityTimer = setTimeout(() => {
+    try {
+      applyDisplayVisibility();
+    } catch (error) {
+      log(`could not update layer visibility: ${error.message}`, "warn");
+    }
+  }, delay);
+}
+
+function formatContrast(value) {
+  if (!Number.isFinite(value)) return "–";
+  return Number(value.toPrecision(6)).toString();
+}
+
+function updateContrastFill(row) {
+  const low = row.querySelector(".contrast-min-slider");
+  const high = row.querySelector(".contrast-max-slider");
+  const span = Number(high.max) - Number(high.min);
+  if (!(span > 0)) return;
+  const lowPercent = ((Number(low.value) - Number(low.min)) / span) * 100;
+  const highPercent = ((Number(high.value) - Number(high.min)) / span) * 100;
+  const range = row.querySelector(".dual-range");
+  range.style.setProperty("--low", `${lowPercent}%`);
+  range.style.setProperty("--high", `${highPercent}%`);
+}
+
+function setContrastUi(row, { min, max, lower = min, upper = max }) {
+  lower = Math.min(lower, min);
+  upper = Math.max(upper, max);
+  if (!(upper > lower)) {
+    const padding = Math.max(Math.abs(lower) * 0.01, 1);
+    lower -= padding;
+    upper += padding;
+  }
+  const step = Math.max((upper - lower) / 1000, Number.EPSILON);
+  const minSlider = row.querySelector(".contrast-min-slider");
+  const maxSlider = row.querySelector(".contrast-max-slider");
+  for (const slider of [minSlider, maxSlider]) {
+    slider.min = String(lower);
+    slider.max = String(upper);
+    slider.step = String(step);
+  }
+  minSlider.value = String(min);
+  maxSlider.value = String(max);
+  row.querySelector(".contrast-min-value").value = formatContrast(min);
+  row.querySelector(".contrast-max-value").value = formatContrast(max);
+  updateContrastFill(row);
+}
+
+function syncContrastUi() {
+  if (!viewer.mounted || !hasViews()) return false;
+  let synced = 0;
+  for (const row of document.querySelectorAll(".channel-control")) {
+    const channelIndex = row.dataset.channelIndex === ""
+      ? null
+      : Number(row.dataset.channelIndex);
+    const limits = viewer.getContrastLimits(
+      inputLayerVisibility(),
+      channelIndex,
+    );
+    if (!limits) continue;
+    setContrastUi(row, limits);
+    synced += 1;
+  }
+  return synced > 0;
+}
+
+function scheduleContrastSync() {
+  for (const timer of contrastSyncTimers) clearTimeout(timer);
+  contrastSyncTimers = [0, 1400, 2800].map((delay) =>
+    setTimeout(() => syncContrastUi(), delay),
+  );
+}
+
+function applyContrastLimits(row, channelIndex, min, max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !(min < max)) {
+    throw new Error("Enter two numbers with the minimum below the maximum.");
+  }
+  const minSlider = row.querySelector(".contrast-min-slider");
+  const maxSlider = row.querySelector(".contrast-max-slider");
+  setContrastUi(row, {
+    min,
+    max,
+    lower: Math.min(min, Number(minSlider.min)),
+    upper: Math.max(max, Number(maxSlider.max)),
+  });
+  const changed = viewer.setContrastLimits(
+    inputLayerVisibility(),
+    channelIndex,
+    [min, max],
+  );
+  if (!changed) {
+    setStatus("contrast controls are still loading");
+    scheduleContrastSync();
+  }
+}
+
+async function refreshViewer() {
   if (!hasViews()) {
     // No views: back to a blank viewer, not an empty layer list on top of the
     // previous dataset's coordinate space.
@@ -811,15 +928,14 @@ async function refreshViewer({ replaceLayers = false } = {}) {
     // must build viewer URLs below this prefix rather than at the site root.
     api_base: API_BASE,
     preview_route: state.previewRoute,
-    channel_coord:
-      state.displayChannel === "all" ? null : state.displayChannel,
-    show_all_channels: state.displayChannel === "all",
-    contrast_limits: contrastLimits(),
   });
 
   applyViewVisibility(ngState);
   $("#viewer-empty").hidden = true;
-  showViewerState(ngState, { replaceLayers });
+  showViewerState(ngState);
+  applyDisplayVisibility();
+  scheduleDisplayVisibility(500);
+  scheduleContrastSync();
 }
 
 // ---------------------------------------------------------------------------
@@ -881,6 +997,7 @@ function renderDimensionFields(described) {
     ["#registration-binning", "registration-binning", {}],
     ["#blending-widths", "blending-width", defaults],
     ["#output-spacing", "output-spacing", {}],
+    ["#output-chunksizes", "output-chunksize", {}],
   ]) {
     const container = $(containerSelector);
     container.replaceChildren();
@@ -893,8 +1010,9 @@ function renderDimensionFields(described) {
       label.textContent = dim;
       input.id = id;
       input.type = "number";
-      input.min = prefix === "registration-binning" ? "1" : "0";
-      input.step = prefix === "registration-binning" ? "1" : "any";
+      const integer = ["registration-binning", "output-chunksize"].includes(prefix);
+      input.min = integer ? "1" : "0";
+      input.step = integer ? "1" : "any";
       input.dataset.dimension = dim;
       input.value = values[dim] ?? "";
       input.placeholder = "auto";
@@ -906,14 +1024,112 @@ function renderDimensionFields(described) {
 
 function renderChannelControls(described) {
   const channels = described.views[0]?.c_coords || [];
-  const display = $("#display-channel");
-  display.replaceChildren(new Option("Show all channels", "all"));
-  channels.forEach((channel) => display.add(new Option(channel, channel)));
-  if (state.displayChannel !== "all" && !channels.includes(state.displayChannel)) {
-    state.displayChannel = "all";
+  const controls = $("#channel-controls");
+  controls.replaceChildren();
+  $("#empty-channels").hidden = Boolean(described.n_views);
+
+  if (described.n_views) {
+    const activeKeys = new Set(displayChannels().map(({ key }) => key));
+    for (const key of state.channelVisibility.keys()) {
+      if (!activeKeys.has(key)) state.channelVisibility.delete(key);
+    }
+
+    for (const { name, index, key } of displayChannels()) {
+      if (!state.channelVisibility.has(key)) state.channelVisibility.set(key, true);
+
+      const row = document.createElement("div");
+      row.className = "channel-control";
+      row.dataset.channelIndex = index === null ? "" : String(index);
+
+      const heading = document.createElement("label");
+      heading.className = "channel-heading";
+      const visibility = document.createElement("input");
+      visibility.type = "checkbox";
+      visibility.className = "visibility-toggle channel-visibility";
+      visibility.checked = state.channelVisibility.get(key) !== false;
+      visibility.setAttribute("aria-label", `Show channel ${name}`);
+      const channelName = document.createElement("span");
+      channelName.textContent = name;
+      heading.append(visibility, channelName);
+
+      const line = document.createElement("div");
+      line.className = "channel-contrast-line";
+      const minValue = document.createElement("input");
+      minValue.type = "text";
+      minValue.inputMode = "decimal";
+      minValue.className = "contrast-min-value";
+      minValue.value = "0";
+      minValue.placeholder = "min";
+      minValue.setAttribute("aria-label", `Minimum contrast for ${name}`);
+
+      const range = document.createElement("div");
+      range.className = "dual-range";
+      range.setAttribute("aria-label", `Contrast limits for ${name}`);
+      const track = document.createElement("div");
+      track.className = "dual-range-track";
+      const minSlider = document.createElement("input");
+      minSlider.type = "range";
+      minSlider.className = "contrast-min-slider";
+      minSlider.min = "0";
+      minSlider.max = "1";
+      minSlider.step = "0.001";
+      minSlider.value = "0";
+      minSlider.setAttribute("aria-label", `Minimum contrast slider for ${name}`);
+      const maxSlider = document.createElement("input");
+      maxSlider.type = "range";
+      maxSlider.className = "contrast-max-slider";
+      maxSlider.min = "0";
+      maxSlider.max = "1";
+      maxSlider.step = "0.001";
+      maxSlider.value = "1";
+      maxSlider.setAttribute("aria-label", `Maximum contrast slider for ${name}`);
+      range.append(track, minSlider, maxSlider);
+
+      const maxValue = document.createElement("input");
+      maxValue.type = "text";
+      maxValue.inputMode = "decimal";
+      maxValue.className = "contrast-max-value";
+      maxValue.value = "1";
+      maxValue.placeholder = "max";
+      maxValue.setAttribute("aria-label", `Maximum contrast for ${name}`);
+      line.append(minValue, range, maxValue);
+      row.append(heading, line);
+      controls.appendChild(row);
+
+      visibility.addEventListener("change", () => {
+        state.channelVisibility.set(key, visibility.checked);
+        log(`${visibility.checked ? "showing" : "hiding"} channel '${name}'`);
+        applyDisplayVisibility();
+        scheduleDisplayVisibility(300);
+      });
+
+      for (const slider of [minSlider, maxSlider]) {
+        slider.addEventListener("input", (event) => {
+          let min = Number(minSlider.value);
+          let max = Number(maxSlider.value);
+          const step = Number(event.target.step) || Number.EPSILON;
+          if (event.target === minSlider && min >= max) min = max - step;
+          if (event.target === maxSlider && max <= min) max = min + step;
+          try {
+            applyContrastLimits(row, index, min, max);
+          } catch (error) {
+            setStatus(error.message);
+          }
+        });
+      }
+
+      const commitValues = (event) => {
+        try {
+          applyContrastLimits(row, index, Number(minValue.value), Number(maxValue.value));
+        } catch (error) {
+          setStatus(error.message);
+          event.target.select();
+        }
+      };
+      minValue.addEventListener("change", commitValues);
+      maxValue.addEventListener("change", commitValues);
+    }
   }
-  display.value = state.displayChannel;
-  display.disabled = !described.n_views || channels.length < 2;
 
   const registration = $("#registration-channel");
   registration.replaceChildren();
@@ -925,8 +1141,6 @@ function renderChannelControls(described) {
     registration.add(new Option("No channel axis", ""));
   }
   registration.disabled = !described.n_views || channels.length < 2;
-  $("#contrast-min").disabled = !described.n_views;
-  $("#contrast-max").disabled = !described.n_views;
 }
 
 function renderViews(described) {
@@ -953,11 +1167,7 @@ function renderViews(described) {
     visibility.setAttribute("aria-label", `Show ${view.name}`);
     visibility.addEventListener("change", () => {
       state.viewVisibility.set(view.url, visibility.checked);
-      const urls = state.currentViewLayerUrls.get(view.url) || [];
-      const patch = Object.fromEntries(
-        Array.from(urls, (url) => [url, visibility.checked]),
-      );
-      if (Object.keys(patch).length) viewer.setLayerVisibility(patch);
+      applyDisplayVisibility();
     });
 
     const text = document.createElement("div");
@@ -1080,10 +1290,12 @@ async function loadDirectories(handles) {
 }
 
 async function loadExample(name) {
-  const append = Boolean(state.session && state.session.n_views);
   setStatus("generating the example dataset", true);
 
-  const described = await command("load_example", { name, replace: !append });
+  // Presets are complete datasets. Replacing makes it possible to move
+  // directly between 2D/3D and single/multichannel examples without first
+  // clearing incompatible dimensions by hand.
+  const described = await command("load_example", { name, replace: true });
   await applyDescribed(described);
 
   log(`loaded the '${name}' example: ${described.n_views} view(s)`);
@@ -1112,11 +1324,9 @@ async function clearSession() {
   state.position = null;
   state.viewVisibility.clear();
   state.currentViewLayerUrls.clear();
-  state.displayChannel = "all";
-  state.contrastMin = null;
-  state.contrastMax = null;
-  $("#contrast-min").value = "";
-  $("#contrast-max").value = "";
+  state.channelVisibility.clear();
+  for (const timer of contrastSyncTimers) clearTimeout(timer);
+  contrastSyncTimers = [];
   state.editableTransformKeys.clear();
   placementSignatures.clear();
   clearTimeout(placementSyncTimer);
@@ -1289,6 +1499,9 @@ function fusionOptions() {
     fusion_func: $("#fusion-method").value,
     blending_widths: dimensionValues("#blending-widths"),
     output_spacing: dimensionValues("#output-spacing"),
+    output_chunksize: dimensionValues("#output-chunksizes", {
+      integers: true,
+    }),
   };
 }
 
@@ -1396,8 +1609,17 @@ async function boot() {
 
   const { examples } = await command("examples", {});
   if (examples.length) {
-    $("#example").textContent = `Load example: ${examples[0].label}`;
-    $("#example").dataset.example = examples[0].name;
+    const menu = $("#example-menu");
+    menu.replaceChildren();
+    for (const example of examples) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.role = "menuitem";
+      button.dataset.load = "";
+      button.dataset.example = example.name;
+      button.textContent = example.label;
+      menu.appendChild(button);
+    }
     $("#example").disabled = false;
   }
 
@@ -1529,42 +1751,30 @@ function wireUi() {
     await refreshViewer();
   });
 
-  $("#display-channel").addEventListener("change", async (event) => {
-    state.displayChannel = event.target.value;
-    log(
-      state.displayChannel === "all"
-        ? "showing all channels"
-        : `showing channel '${state.displayChannel}'`,
-    );
-    await refreshViewer({ replaceLayers: true });
+  $("#example").addEventListener("click", () => {
+    const menu = $("#example-menu");
+    menu.hidden = !menu.hidden;
+    $("#example").setAttribute("aria-expanded", String(!menu.hidden));
   });
 
-  let contrastTimer = null;
-  for (const [selector, key] of [
-    ["#contrast-min", "contrastMin"],
-    ["#contrast-max", "contrastMax"],
-  ]) {
-    $(selector).addEventListener("input", (event) => {
-      state[key] = event.target.value.trim() === ""
-        ? null
-        : Number(event.target.value);
-      clearTimeout(contrastTimer);
-      contrastTimer = setTimeout(() => {
-        refreshViewer({ replaceLayers: true }).catch((error) => {
-          setStatus(error.message);
-        });
-      }, 220);
-    });
-  }
-
-  $("#example").addEventListener("click", async () => {
+  $("#example-menu").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-example]");
+    if (!button) return;
+    $("#example-menu").hidden = true;
+    $("#example").setAttribute("aria-expanded", "false");
     try {
-      await withPool(() => loadExample($("#example").dataset.example));
+      await withPool(() => loadExample(button.dataset.example));
     } catch (error) {
       log(error.message, "error");
       setStatus("failed to load the example");
       setBusy(false);
     }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".example-picker")) return;
+    $("#example-menu").hidden = true;
+    $("#example").setAttribute("aria-expanded", "false");
   });
 
   $("#clear").addEventListener("click", async () => {

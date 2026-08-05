@@ -12,7 +12,7 @@ The interface should
   - "Log" button to show log
   - spin box for number of workers, by default 3
   - Viewer controls help button
-    - zoom in/out
+    - zoom in/out (requires ctrl)
     - pan
   - github link to multiview-stitcher repo
   - "About" button
@@ -23,7 +23,8 @@ The interface should
 - neuroglancer viewer
 - for yx data, the layout should be 'xy'
 - for zyx data, the layout should be 4 panels
-- don't show layer or shader control panels
+- don't show an open layer panel, but don't make it inaccessible
+- don't show the tool palette
 
 ## Left panel
 
@@ -32,7 +33,7 @@ Data visualization and control panel
 - Data drop zone
   - drag and drop OME-Zarrs (top level ome-zarr or folder containing multiple ome-zarrs)
   - click to open file dialog
-- List of loaded msims
+- List of loaded msims + fused preview (if available)
   - elements on each msim:
     - Remove
     - Short info (shape per dim, number of res levels)
@@ -40,12 +41,13 @@ Data visualization and control panel
 - Coordinate system selection
   - dropdown menu to select transform_key to show in neuroglancer viewer
 - Display options
-  - drop down for which channel(s) to show in neuroglancer viewer: 
-    - "Show all channels"
-    - <name of channel 1>
-    - <name of channel 2>
-    ...
-  - contrast limits (min, max), set for all channels together
+  - list of channels
+    - "Positional colors": checkbox to color channels based on their position (see vis_utils.py for details), fused image is unaffected by this option
+    - for each channel:
+      - visibility toggle
+      - contrast limits (min, max)
+        - double range slider
+        - in the same line / height: min / max text fields
 
 ## Right panel
 
@@ -72,6 +74,7 @@ Different tabs for different types of operations:
     - Advanced options:
       - blending widths
       - output spacing
+      - output chunksizes
   - "Fuse (preview)"
   - "Fuse to OME-Zarr"
 

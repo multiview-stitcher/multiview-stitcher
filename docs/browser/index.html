@@ -17,7 +17,7 @@
         <img src="../images/logo.svg" alt="" />
         <div>
           <h1>multiview-stitcher</h1>
-          <p>Registration &amp; fusion in your browser</p>
+          <p>Registration &amp; Fusion in the browser (OME-Zarr)</p>
         </div>
       </div>
 
@@ -42,6 +42,10 @@
           <input id="worker-count" type="number" min="0" max="3" value="3" disabled />
         </label>
         <button id="viewer-help-button" class="quiet-button" type="button" aria-label="Viewer controls help"><span class="viewer-help-label">Viewer help</span><span class="viewer-help-short" aria-hidden="true">?</span></button>
+        <a class="quiet-button github-link" href="https://github.com/multiview-stitcher/multiview-stitcher" target="_blank" rel="noopener" aria-label="multiview-stitcher on GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a9.5 9.5 0 0 0-3 18.5c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1 1.6 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.7-1.4-2.3-.3-4.7-1.1-4.7-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.7 5 .4.3.7 1 .7 1.9v2.8c0 .4.2.6.7.5A9.5 9.5 0 0 0 12 2.5Z" /></svg>
+          <span>GitHub</span>
+        </a>
         <button id="about-button" class="quiet-button" type="button" aria-label="About multiview-stitcher"><span class="about-label">About</span><span class="about-short" aria-hidden="true">i</span></button>
       </nav>
     </header>
@@ -66,9 +70,12 @@
           </div>
 
           <div class="data-actions">
-            <button id="example" class="text-button" type="button" data-load disabled>
-              Load example
-            </button>
+            <div class="example-picker">
+              <button id="example" class="text-button" type="button" data-load aria-haspopup="menu" aria-expanded="false" disabled>
+                Load example <span aria-hidden="true">▾</span>
+              </button>
+              <div id="example-menu" class="example-menu" role="menu" hidden></div>
+            </div>
             <button id="clear" class="text-button danger" type="button" data-load disabled>
               Clear all
             </button>
@@ -91,17 +98,8 @@
 
         <section>
           <h3>Display options</h3>
-          <label for="display-channel">Channels</label>
-          <select id="display-channel" disabled>
-            <option value="all">Show all channels</option>
-          </select>
-
-          <label>Contrast limits</label>
-          <div class="contrast-fields">
-            <label for="contrast-min"><span>Min</span><input id="contrast-min" type="number" step="any" placeholder="Auto" disabled /></label>
-            <label for="contrast-max"><span>Max</span><input id="contrast-max" type="number" step="any" placeholder="Auto" disabled /></label>
-          </div>
-          <p class="field-help">Applied to every displayed channel. Leave blank for automatic contrast.</p>
+          <div id="channel-controls" class="channel-controls" aria-label="Channel display controls"></div>
+          <p id="empty-channels" class="empty-state">Channels will appear after loading image data.</p>
         </section>
       </aside>
 
@@ -141,7 +139,7 @@
           <button class="primary-button" type="button" data-action="new-transform" disabled>
             Create transform
           </button>
-          <p class="field-help">After creating it, use each layer&rsquo;s source transform controls in the viewer to place tiles.</p>
+          <p class="field-help">The new coordinate system becomes active immediately for interactive placement.</p>
         </section>
 
         <section id="registration-panel" class="operation-panel" role="tabpanel" aria-labelledby="registration-tab" hidden>
@@ -205,6 +203,11 @@
               <div id="output-spacing" class="dimension-fields"></div>
               <p class="field-help">Leave blank to infer spacing from the inputs.</p>
             </fieldset>
+            <fieldset>
+              <legend>Output chunk sizes</legend>
+              <div id="output-chunksizes" class="dimension-fields"></div>
+              <p class="field-help">Pixels per output chunk; leave blank to choose automatically.</p>
+            </fieldset>
           </div>
           <div class="split-actions">
             <button class="secondary-button" type="button" data-action="fuse-preview" disabled>Fuse preview</button>
@@ -244,7 +247,7 @@
         <button class="icon-button" type="button" data-close-dialog aria-label="Close viewer help">&times;</button>
       </div>
       <div class="help-content">
-        <div><span class="help-icon">+</span><div><strong>Zoom in or out</strong><p>Scroll the mouse wheel or pinch on a trackpad over the viewer.</p></div></div>
+        <div><span class="help-icon">+</span><div><strong>Zoom in or out</strong><p>Hold <kbd>Ctrl</kbd> and scroll the mouse wheel, or pinch on a trackpad over the viewer.</p></div></div>
         <div><span class="help-icon">&#8596;</span><div><strong>Pan across the image</strong><p>Click and drag inside a view to move through the data.</p></div></div>
       </div>
     </dialog>
