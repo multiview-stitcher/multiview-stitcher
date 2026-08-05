@@ -213,6 +213,9 @@ def test_read_msim_from_ome_zarr(array_backend):
             [str(v) for v in sim.coords["c"].values],
             [str(v) for v in sim_read.coords["c"].values],
         )
+        assert msim_read.attrs["omero"] == zarr.open_group(
+            zarr_path, mode="r"
+        ).attrs["omero"]
 
         selected_channel = sim.coords["c"].values[1]
         selected_msim = msi_utils.multiscale_sel_coords(

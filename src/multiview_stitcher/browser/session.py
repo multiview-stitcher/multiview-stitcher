@@ -26,7 +26,13 @@ import uuid
 
 import numpy as np
 
-from multiview_stitcher import msi_utils, neuroglancer, ngff_utils, param_utils
+from multiview_stitcher import (
+    msi_utils,
+    mv_graph,
+    neuroglancer,
+    ngff_utils,
+    param_utils,
+)
 from multiview_stitcher import registration as core_registration
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import dataset as browser_dataset
@@ -44,6 +50,16 @@ PREVIEW_NAME = "fused"
 
 #: Route name prefix of the virtual OME-Zarrs exposing input views.
 VIEW_PREFIX = "view_"
+
+POSITIONAL_COLOR_PALETTE = [
+    "#E69F00",
+    "#56B4E9",
+    "#D55E00",
+    "#009E73",
+    "#CC79A7",
+    "#0072B2",
+    "#F0E442",
+]
 
 
 class Session:
@@ -549,7 +565,9 @@ class Session:
         fused_msim = browser_fusion.preview(self.msims, options)
         route = self._route(PREVIEW_NAME)
         self._virtual_zarrs[route] = ngff_utils.VirtualOMEZarr(
-            fused_msim, name=f"{PREVIEW_NAME}.ome.zarr"
+            fused_msim,
+            name=f"{PREVIEW_NAME}.ome.zarr",
+            omero=browser_fusion.inherited_omero(self.msims),
         )
         self._preview_options = options
 
@@ -559,6 +577,26 @@ class Session:
             "metadata": serialization.msim_metadata(
                 fused_msim, name=PREVIEW_NAME
             ),
+        }
+
+    def positional_colors(self, transform_key=None, n_colors=2):
+        """Return one adjacency-based display color for each input view."""
+        if self.is_empty():
+            return {"colors": []}
+        transform_key = transform_key or self.default_transform_key()
+        sims = [msi_utils.get_sim_from_msim(msim) for msim in self.msims]
+        color_indices = mv_graph.get_greedy_colors(
+            sims,
+            n_colors=int(n_colors),
+            transform_key=transform_key,
+        )
+        return {
+            "colors": [
+                POSITIONAL_COLOR_PALETTE[
+                    color_indices[index] % len(POSITIONAL_COLOR_PALETTE)
+                ]
+                for index in range(len(sims))
+            ]
         }
 
     def _fusion_options(self, options):
@@ -859,26 +897,36 @@ class Session:
         state["layerListPanel"] = {"visible": False}
         state["selectedLayer"] = {"visible": False}
 
-        if preview_route and self.ensure_route(preview_route) is not None:
-            state["layers"] = list(state.get("layers", [])) + [
-                {
-                    "type": "image",
-                    "source": {
-                        "url": (
-                            f"zarr://{base_url}{api_base}/zarr/"
-                            f"{preview_route}"
-                        )
-                    },
-                    "tab": "rendering",
-                    "opacity": 1.0,
-                    "name": PREVIEW_NAME,
-                    # A fused image exists only in the coordinate system it
-                    # was fused in. Shown under a different transform key it
-                    # would sit somewhere the views are not, so it stays
-                    # loaded but hidden until that key is selected again.
-                    "visible": self.preview_matches(transform_key),
-                }
-            ]
+        preview_zarr = (
+            self.ensure_route(preview_route) if preview_route else None
+        )
+        if preview_zarr is not None:
+            preview_sim = preview_zarr.sims[0]
+            layer = {
+                "type": "image",
+                "source": {
+                    "url": (
+                        f"zarr://{base_url}{api_base}/zarr/"
+                        f"{preview_route}"
+                    )
+                },
+                "tab": "rendering",
+                "opacity": 1.0,
+                "name": PREVIEW_NAME,
+                # A fused image exists only in the coordinate system it was
+                # fused in. Shown under a different transform key it would
+                # sit somewhere the views are not, so it stays loaded but
+                # hidden until that key is selected again.
+                "visible": self.preview_matches(transform_key),
+            }
+            if "c" in preview_sim.dims:
+                # This is the same channel-local coordinate setup used for
+                # input views. Neuroglancer expands the ready image layer into
+                # one managed layer per channel and applies its OMERO color and
+                # window metadata to each one.
+                layer["localDimensions"] = {"c'": [1, ""]}
+                layer["localPosition"] = [0]
+            state["layers"] = list(state.get("layers", [])) + [layer]
 
         return state
 

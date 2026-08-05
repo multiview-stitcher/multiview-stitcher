@@ -8,6 +8,7 @@ import os, shutil
 import signal
 import threading
 import uuid
+from copy import deepcopy
 
 import dask
 import numpy as np
@@ -1831,5 +1832,11 @@ def read_msim_from_ome_zarr(
                 return ds.assign_coords(c=ch_coords)
 
             msim = msim.map_over_datasets(_assign_channel_coords)
+
+        # Display metadata is part of the image, not just a source-side aid
+        # for recovering channel labels. Keeping it on the DataTree lets
+        # virtual OME-Zarr views and derived outputs (notably browser fusion)
+        # inherit the input colors and contrast windows.
+        msim.attrs["omero"] = deepcopy(omero)
 
     return msim

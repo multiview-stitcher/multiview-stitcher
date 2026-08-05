@@ -474,6 +474,7 @@ test("the browser chrome exposes the complete responsive workflow", () => {
     "operations-panel",
     "channel-controls",
     "empty-channels",
+    "positional-colors",
     "example-menu",
     "placement-panel",
     "registration-panel",
@@ -520,10 +521,15 @@ test("channel and contrast controls update loaded layers in place", async () => 
   assert.match(channelHandler, /slider\.addEventListener\("input"/);
   assert.match(app, /output_chunksize: dimensionValues\("#output-chunksizes"/);
 
-  assert.match(viewer, /setupDefaultViewer\(\{ target \}\)/);
+  assert.match(viewer, /setupDefaultViewer\(\{\s*target,/);
+  assert.match(viewer, /showToolPaletteButton: false/);
   assert.doesNotMatch(viewer, /showLayerListPanelButton: false/);
   assert.doesNotMatch(viewer, /showLayerSidePanelButton: false/);
   assert.doesNotMatch(viewer, /showLayerPanel: false/);
   assert.match(viewer, /this\.#viewer\.selectedLayer\.visible = false/);
   assert.match(viewer, /this\.#viewer\.layerListPanelState\.location\.visible = false/);
+  assert.match(viewer, /setPositionalColors\(colors = null\)/);
+  assert.match(viewer, /POSITIONAL_COLOR_SHADER/);
+  assert.match(app, /command\("positional_colors"/);
+  assert.match(app, /className = "derived-view"/);
 });

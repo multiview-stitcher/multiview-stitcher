@@ -32,17 +32,24 @@ const state = {
   sessionSpec: null, // snapshot compute workers rebuild from
   position: null, // where the user is looking, reported by the viewer
   previewRoute: null,
+  previewMetadata: null,
+  previewTransformKey: null,
+  previewVisibility: true,
   transformKey: null,
   layerSources: null, // name -> url of what the viewer currently shows
   currentViewLayerUrls: new Map(), // input source url -> viewer layer urls
+  currentFusedLayerUrls: new Set(), // fused preview viewer layer urls
   viewVisibility: new Map(), // input source url -> visible
   channelVisibility: new Map(), // channel key -> visible
+  positionalColors: false,
   editableTransformKeys: new Set(),
   mounts: [],
 };
 
 let displayVisibilityTimer = null;
 let contrastSyncTimers = [];
+let positionalColorRequest = 0;
+let positionalColorTimers = [];
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -638,8 +645,13 @@ function schedulePlacementSync(ngState) {
           if (state.session) state.session.generation = result.generation;
           const hadPreview = Boolean(state.previewRoute);
           state.previewRoute = null;
+          state.previewMetadata = null;
+          state.previewTransformKey = null;
           await refreshSessionSpec();
-          if (hadPreview) await refreshViewer();
+          if (hadPreview) {
+            await refreshViewer();
+            renderViews(state.session);
+          }
           setStatus(`saved placement in ${transformKey}`);
         } catch (error) {
           placementSignatures.delete(transformKey);
@@ -761,20 +773,34 @@ function showViewerState(ngState) {
 
 function applyViewVisibility(ngState) {
   state.currentViewLayerUrls = new Map();
+  state.currentFusedLayerUrls = new Set();
   for (const layer of ngState.layers || []) {
+    const source = layer.source;
+    const url = typeof source === "string" ? source : source.url;
+    if (String(layer.name || "").startsWith("fused")) {
+      state.currentFusedLayerUrls.add(url);
+      continue;
+    }
     const match = String(layer.name || "").match(/^(\d+):/);
     if (!match) continue;
     const index = Number(match[1]);
     const view = state.session?.views?.[index];
     if (!view) continue;
-    const source = layer.source;
-    const url = typeof source === "string" ? source : source.url;
     if (!state.currentViewLayerUrls.has(view.url)) {
       state.currentViewLayerUrls.set(view.url, new Set());
     }
     state.currentViewLayerUrls.get(view.url).add(url);
     layer.visible = state.viewVisibility.get(view.url) !== false;
   }
+}
+
+function fusedLayerVisibility() {
+  const visible =
+    state.previewVisibility &&
+    (!state.previewTransformKey || state.previewTransformKey === state.transformKey);
+  return Object.fromEntries(
+    [...state.currentFusedLayerUrls].map((url) => [url, visible]),
+  );
 }
 
 function inputLayerVisibility() {
@@ -806,8 +832,42 @@ function channelVisibility() {
 function applyDisplayVisibility() {
   if (!viewer.mounted) return 0;
   return viewer.setDisplayVisibility(
-    inputLayerVisibility(),
+    {
+      ...inputLayerVisibility(),
+      ...fusedLayerVisibility(),
+    },
     channelVisibility(),
+  );
+}
+
+async function applyPositionalColors() {
+  const request = ++positionalColorRequest;
+  for (const timer of positionalColorTimers) clearTimeout(timer);
+  positionalColorTimers = [];
+  if (!viewer.mounted || !state.positionalColors || !hasViews()) {
+    if (viewer.mounted) viewer.setPositionalColors(null);
+    return;
+  }
+
+  const result = await command("positional_colors", {
+    transform_key: state.transformKey,
+    n_colors: 2,
+  });
+  if (request !== positionalColorRequest || !state.positionalColors) return;
+
+  const colors = {};
+  state.session.views.forEach((view, index) => {
+    for (const url of state.currentViewLayerUrls.get(view.url) || []) {
+      colors[url] = result.colors[index];
+    }
+  });
+  viewer.setPositionalColors(colors);
+  positionalColorTimers = [700, 1600, 3000].map((delay) =>
+    setTimeout(() => {
+      if (request === positionalColorRequest && state.positionalColors) {
+        viewer.setPositionalColors(colors);
+      }
+    }, delay),
   );
 }
 
@@ -875,6 +935,15 @@ function syncContrastUi() {
     );
     if (!limits) continue;
     setContrastUi(row, limits);
+    if (state.currentFusedLayerUrls.size) {
+      viewer.setContrastLimits(
+        Object.fromEntries(
+          [...state.currentFusedLayerUrls].map((url) => [url, true]),
+        ),
+        channelIndex,
+        [limits.min, limits.max],
+      );
+    }
     synced += 1;
   }
   return synced > 0;
@@ -900,7 +969,12 @@ function applyContrastLimits(row, channelIndex, min, max) {
     upper: Math.max(max, Number(maxSlider.max)),
   });
   const changed = viewer.setContrastLimits(
-    inputLayerVisibility(),
+    {
+      ...inputLayerVisibility(),
+      ...Object.fromEntries(
+        [...state.currentFusedLayerUrls].map((url) => [url, true]),
+      ),
+    },
     channelIndex,
     [min, max],
   );
@@ -934,6 +1008,7 @@ async function refreshViewer() {
   $("#viewer-empty").hidden = true;
   showViewerState(ngState);
   applyDisplayVisibility();
+  await applyPositionalColors();
   scheduleDisplayVisibility(500);
   scheduleContrastSync();
 }
@@ -1027,6 +1102,8 @@ function renderChannelControls(described) {
   const controls = $("#channel-controls");
   controls.replaceChildren();
   $("#empty-channels").hidden = Boolean(described.n_views);
+  $("#positional-colors").disabled = !described.n_views;
+  $("#positional-colors").checked = state.positionalColors;
 
   if (described.n_views) {
     const activeKeys = new Set(displayChannels().map(({ key }) => key));
@@ -1197,6 +1274,52 @@ function renderViews(described) {
     list.appendChild(item);
   });
 
+  if (state.previewRoute && state.previewMetadata) {
+    const level = state.previewMetadata.levels[0];
+    const shape = Object.entries(level.shape)
+      .map(([dim, size]) => `${dim}:${size}`)
+      .join(" ");
+    const item = document.createElement("li");
+    item.className = "derived-view";
+
+    const visibility = document.createElement("input");
+    visibility.type = "checkbox";
+    visibility.className = "visibility-toggle";
+    visibility.checked = state.previewVisibility;
+    visibility.title = "Show or hide fused preview";
+    visibility.setAttribute("aria-label", "Show fused preview");
+    visibility.addEventListener("change", () => {
+      state.previewVisibility = visibility.checked;
+      applyDisplayVisibility();
+    });
+
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = "Fused preview";
+    const detail = document.createElement("span");
+    detail.className = "view-detail";
+    detail.textContent = `${shape} · ${state.previewMetadata.levels.length} level${state.previewMetadata.levels.length === 1 ? "" : "s"}`;
+    text.append(name, detail);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove";
+    remove.title = "Remove fused preview";
+    remove.textContent = "×";
+    remove.addEventListener("click", async () => {
+      state.previewRoute = null;
+      state.previewMetadata = null;
+      state.previewTransformKey = null;
+      state.currentFusedLayerUrls.clear();
+      await refreshViewer();
+      renderViews(state.session);
+      setStatus("fused preview removed");
+    });
+
+    item.append(visibility, text, remove);
+    list.appendChild(item);
+  }
+
   $("#dataset-summary").textContent = described.n_views
     ? `${described.n_views} · ${described.views[0].ndim}D`
     : "None";
@@ -1208,6 +1331,9 @@ async function applyDescribed(described) {
   reportedFailures.clear();
   state.session = described;
   state.previewRoute = null;
+  state.previewMetadata = null;
+  state.previewTransformKey = null;
+  state.currentFusedLayerUrls.clear();
   renderViews(described);
   renderTransformKeys(described.transform_keys);
   renderChannelControls(described);
@@ -1319,12 +1445,20 @@ async function clearSession() {
   // Everything derived from the old dataset goes, so that what is loaded next
   // starts from the same state a fresh page would.
   state.previewRoute = null;
+  state.previewMetadata = null;
+  state.previewTransformKey = null;
+  state.previewVisibility = true;
   state.transformKey = null;
   state.layerSources = null;
   state.position = null;
   state.viewVisibility.clear();
   state.currentViewLayerUrls.clear();
+  state.currentFusedLayerUrls.clear();
   state.channelVisibility.clear();
+  state.positionalColors = false;
+  $("#positional-colors").checked = false;
+  for (const timer of positionalColorTimers) clearTimeout(timer);
+  positionalColorTimers = [];
   for (const timer of contrastSyncTimers) clearTimeout(timer);
   contrastSyncTimers = [];
   state.editableTransformKeys.clear();
@@ -1367,6 +1501,9 @@ async function doCreateTransform() {
     state.transformKey = result.transform_key;
     state.editableTransformKeys.add(result.transform_key);
     state.previewRoute = null;
+    state.previewMetadata = null;
+    state.previewTransformKey = null;
+    renderViews(state.session);
     renderTransformKeys(result.transform_keys);
     await refreshSessionSpec();
     await refreshViewer();
@@ -1410,6 +1547,9 @@ async function doRegister() {
     state.session.transform_keys = result.transform_keys;
     state.transformKey = result.transform_key;
     state.previewRoute = null;
+    state.previewMetadata = null;
+    state.previewTransformKey = null;
+    renderViews(state.session);
     renderTransformKeys(result.transform_keys);
     await refreshSessionSpec();
     await refreshViewer();
@@ -1425,10 +1565,15 @@ async function doFusePreview() {
   setStatus("preparing the fused preview", true);
 
   try {
+    const options = fusionOptions();
     const result = await command("fuse_preview", {
-      options: fusionOptions(),
+      options,
     });
     state.previewRoute = result.route;
+    state.previewMetadata = result.metadata;
+    state.previewTransformKey = options.transform_key;
+    state.previewVisibility = true;
+    renderViews(state.session);
     await refreshSessionSpec();
     await refreshViewer();
 
@@ -1749,6 +1894,30 @@ function wireUi() {
     state.transformKey = event.target.value;
     log(`showing transform key '${state.transformKey}'`);
     await refreshViewer();
+  });
+
+  $("#positional-colors").addEventListener("change", async (event) => {
+    state.positionalColors = event.target.checked;
+    try {
+      setStatus(
+        state.positionalColors
+          ? "computing positional colors"
+          : "restoring channel colors",
+        state.positionalColors,
+      );
+      await applyPositionalColors();
+      setStatus(
+        state.positionalColors
+          ? "showing positional colors"
+          : "showing channel colors",
+      );
+    } catch (error) {
+      state.positionalColors = false;
+      event.target.checked = false;
+      viewer.setPositionalColors(null);
+      log(`could not apply positional colors: ${error.message}`, "error");
+      setStatus("could not apply positional colors");
+    }
   });
 
   $("#example").addEventListener("click", () => {

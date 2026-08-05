@@ -38,6 +38,18 @@ const { carryCameraOver, centreOnData } = await import(
 //: viewer keeps the camera on the data as the layers report their bounds.
 const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown"];
 
+const POSITIONAL_COLOR_SHADER = `#uicontrol invlerp contrast
+#uicontrol vec3 color color
+void main() {
+  float contrast_value = contrast();
+  if (VOLUME_RENDERING) {
+    emitRGBA(vec4(color * contrast_value, contrast_value));
+  } else {
+    emitRGB(color * contrast_value);
+  }
+}
+`;
+
 /** Wraps one mounted Neuroglancer instance. */
 export class NeuroglancerViewer {
   #viewer = null;
@@ -53,6 +65,7 @@ export class NeuroglancerViewer {
   #onTakeover = null;
   #lastNames = null;
   #lastPosition = null;
+  #positionalBackups = new Map();
 
   /**
    * Mount a viewer into `target`.
@@ -66,7 +79,10 @@ export class NeuroglancerViewer {
     // Keep Neuroglancer's standard layer and shader controls available. The
     // panels themselves start closed, but users can open either one from the
     // viewer toolbar whenever they need the full controls.
-    this.#viewer = setupDefaultViewer({ target });
+    this.#viewer = setupDefaultViewer({
+      target,
+      showToolPaletteButton: false,
+    });
     this.#hideLayerPanels();
 
     // Fresh viewer, so the camera is ours to place until the user moves it.
@@ -260,6 +276,7 @@ export class NeuroglancerViewer {
     this.#onCoordinateSpaceChanged = null;
     this.#lastNames = null;
     this.#lastPosition = null;
+    this.#positionalBackups.clear();
     if (this.#target) this.#target.replaceChildren();
     this.#target = null;
   }
@@ -524,6 +541,46 @@ export class NeuroglancerViewer {
     return matched;
   }
 
+  /** Apply adjacency colors to input layers without rebuilding any layer. */
+  setPositionalColors(colors = null) {
+    const managedLayers = this.#require().layerManager.managedLayers;
+    const live = new Set(managedLayers);
+
+    for (const managed of managedLayers) {
+      const url = (managed.layer?.dataSources ?? [])
+        .map((dataSource) => dataSource.spec?.url)
+        .find((candidate) => colors && Object.hasOwn(colors, candidate));
+      const backup = this.#positionalBackups.get(managed);
+
+      if (url !== undefined) {
+        const layer = managed.layer;
+        if (!layer?.fragmentMain) continue;
+        if (!backup) {
+          const colorControl = layer.shaderControlState?.value?.get?.("color");
+          const originalColor = colorControl?.trackable?.value;
+          this.#positionalBackups.set(managed, {
+            shader: layer.fragmentMain.value,
+            color: originalColor
+              ? Float32Array.from(originalColor)
+              : null,
+          });
+        }
+        const limits = this.#contrastControl(managed)?.trackable?.value;
+        layer.fragmentMain.value = POSITIONAL_COLOR_SHADER;
+        this.#applyShaderDisplay(managed, colors[url], limits);
+      } else if (backup) {
+        const limits = this.#contrastControl(managed)?.trackable?.value;
+        managed.layer.fragmentMain.value = backup.shader;
+        this.#applyShaderDisplay(managed, backup.color, limits);
+        this.#positionalBackups.delete(managed);
+      }
+    }
+
+    for (const managed of this.#positionalBackups.keys()) {
+      if (!live.has(managed)) this.#positionalBackups.delete(managed);
+    }
+  }
+
   /** Set only the image shader's displayed min/max on matching channels. */
   setContrastLimits(visibility, channelIndex, limits) {
     let changed = 0;
@@ -608,6 +665,49 @@ export class NeuroglancerViewer {
     const controls = managed.layer?.shaderControlState?.value;
     if (!controls?.get) return null;
     return controls.get("contrast") ?? controls.get("normalized") ?? null;
+  }
+
+  #applyShaderDisplay(managed, color, limits) {
+    const apply = () => {
+      const controls = managed.layer?.shaderControlState?.value;
+      if (!controls?.get) return false;
+      if (typeof color === "string") {
+        const match = color.match(/^#?([0-9a-f]{6})$/i);
+        const control = controls.get("color");
+        if (!match || !control) return false;
+        const value = Number.parseInt(match[1], 16);
+        control.trackable.value = Float32Array.from([
+          ((value >> 16) & 255) / 255,
+          ((value >> 8) & 255) / 255,
+          (value & 255) / 255,
+        ]);
+      } else if (color && controls.get("color")) {
+        controls.get("color").trackable.value = Float32Array.from(color);
+      }
+
+      const contrast = this.#contrastControl(managed);
+      if (contrast && limits?.range) {
+        const current = contrast.trackable.value;
+        const range = Array.from(limits.range, Number);
+        const window = Array.from(limits.window ?? limits.range, Number);
+        const integral = typeof current?.range?.[0] === "bigint";
+        contrast.trackable.value = {
+          ...current,
+          range: integral
+            ? range.map((value) => BigInt(Math.round(value)))
+            : range,
+          window: integral
+            ? window.map((value) => BigInt(Math.round(value)))
+            : window,
+          autoCompute: false,
+        };
+      }
+      return true;
+    };
+
+    if (!apply()) {
+      managed.layer?.shaderControlState?.controls?.changed?.addOnce(apply);
+    }
   }
 
   // -------------------------------------------------------------------

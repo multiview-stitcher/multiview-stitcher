@@ -188,6 +188,7 @@ button { color: inherit; }
 .view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
 .view-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
 .view-list li:hover { border-color: var(--line-strong); }
+.view-list li.derived-view { border-color: #26515a; background: rgba(45, 179, 196, 0.06); }
 .view-list li > div { min-width: 0; }
 .view-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 620; }
 .view-list .view-detail { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -196,6 +197,8 @@ button { color: inherit; }
 .view-list .remove:hover { color: var(--error); background: rgba(255, 121, 111, 0.08); }
 
 .field-help { margin: -5px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+.option-check { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; color: var(--muted); font-size: 10.5px; cursor: pointer; }
+.option-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
 .channel-controls { display: grid; gap: 8px; }
 .channel-control { padding: 8px 9px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
 .channel-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--text); font-size: 10.5px; font-weight: 620; }

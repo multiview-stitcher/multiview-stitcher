@@ -34,6 +34,7 @@ from multiview_stitcher.browser import (
     open_http_store,
     serialization,
 )
+from multiview_stitcher.browser import session as session_module
 from multiview_stitcher.browser import store as browser_store
 
 
@@ -740,6 +741,51 @@ def test_neuroglancer_state_includes_preview_layer(tiles_on_disk):
     names = [layer["name"] for layer in state["layers"]]
     assert "fused" in names
     assert preview["route"] in state["layers"][-1]["source"]["url"]
+
+
+def test_multichannel_preview_exposes_every_channel_and_inherits_display():
+    session = Session()
+    session.load(example_data.example_sources("tiles-2d-2c")[:1])
+    omero = {
+        "channels": [
+            {
+                "label": "channel0",
+                "color": "00FF00",
+                "window": {"min": 0, "max": 100, "start": 4, "end": 80},
+            },
+            {
+                "label": "channel1",
+                "color": "FF00FF",
+                "window": {"min": 0, "max": 200, "start": 8, "end": 160},
+            },
+        ]
+    }
+    session.msims[0].attrs["omero"] = omero
+
+    preview = session.fuse_preview(FusionOptions())
+    kind, zattrs = session.serve(preview["route"], ".zattrs")
+    state = session.neuroglancer_state(preview_route=preview["route"])
+    fused_layers = [
+        layer for layer in state["layers"] if layer["name"].startswith("fused")
+    ]
+
+    assert kind == "json"
+    assert zattrs["omero"] == omero
+    assert preview["metadata"]["levels"][0]["shape"]["c"] == 2
+    assert len(fused_layers) == 1
+    assert fused_layers[0]["localDimensions"] == {"c'": [1, ""]}
+    assert fused_layers[0]["localPosition"] == [0]
+
+
+def test_positional_colors_match_loaded_views():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d"))
+
+    result = session.positional_colors()
+
+    assert len(result["colors"]) == len(session.msims)
+    assert len(set(result["colors"])) > 1
+    assert set(result["colors"]) <= set(session_module.POSITIONAL_COLOR_PALETTE)
 
 
 def test_neuroglancer_state_hides_side_panels_and_uses_dimension_layout():

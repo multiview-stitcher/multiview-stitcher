@@ -18,12 +18,28 @@ Every participant derives the output geometry from the *same* inputs and
 options, so the block grids agree by construction.
 """
 
+from copy import deepcopy
+from dataclasses import asdict
+
 import numpy as np
 
 from multiview_stitcher import _ngff_meta, msi_utils, ngff_utils
 from multiview_stitcher import fusion as core_fusion
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import store as browser_store
+
+
+def inherited_omero(msims):
+    """Copy the first input's channel display metadata for fused output."""
+    if not msims:
+        return None
+    sim = msi_utils.get_sim_from_msim(msims[0], scale="scale0")
+    omero = msims[0].attrs.get("omero", sim.attrs.get("omero"))
+    if omero is None:
+        return None
+    if hasattr(omero, "__dataclass_fields__"):
+        omero = asdict(omero)
+    return deepcopy(omero)
 
 
 def _level_path(index):
@@ -259,6 +275,10 @@ def write_multiscales_metadata(msims, options, fetch=None, write=None):
         ],
         ngff_version=options.ngff_version,
     )
+
+    omero = inherited_omero(msims)
+    if omero is not None:
+        group.attrs["omero"] = omero
 
     return {
         "levels": [level["path"] for level in levels],

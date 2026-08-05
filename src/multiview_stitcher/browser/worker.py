@@ -189,6 +189,12 @@ class WorkerRuntime:
     def _cmd_transform_keys(self, payload):
         return {"transform_keys": self._require_session().transform_keys()}
 
+    def _cmd_positional_colors(self, payload):
+        return self._require_session().positional_colors(
+            transform_key=payload.get("transform_key"),
+            n_colors=payload.get("n_colors", 2),
+        )
+
     def _cmd_neuroglancer_state(self, payload):
         session = self._require_session()
         return session.neuroglancer_state(
