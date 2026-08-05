@@ -191,7 +191,8 @@ function setBusy(busy) {
 /** Promise-based request/response over a Worker's postMessage. */
 class WorkerChannel {
   constructor(url, name) {
-    this.worker = new Worker(url);
+    // Module workers throughout: Pyodide will not start in a classic one.
+    this.worker = new Worker(url, { type: "module" });
     this.name = name;
     this.pending = new Map();
     this.nextId = 1;

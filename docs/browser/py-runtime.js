@@ -5,11 +5,14 @@
  * pinned dependencies and the same multiview-stitcher wheel - so that any
  * worker can rebuild the same Python state from a session spec. What differs
  * is only which entry point in `multiview_stitcher.browser.worker` they call.
+ *
+ * An ES module, and so are the workers that load it: Pyodide refuses to start
+ * in a classic worker ("Classic web workers are not supported"), so the whole
+ * chain - `new Worker(..., {type: "module"})`, `import` rather than
+ * `importScripts` - has to be modules too.
  */
 
-/* global loadPyodide */
-
-let pyodide = null;
+export let pyodide = null;
 let api = null;
 
 //: Boot is slow enough - tens of seconds, most of it downloading - that the
@@ -18,13 +21,17 @@ let api = null;
 const BOOT_PHASES = 4;
 
 /** Load Pyodide, the pinned dependencies and the multiview-stitcher wheel. */
-async function bootRuntime(config, { log = () => {} } = {}) {
+export async function bootRuntime(config, { log = () => {} } = {}) {
   if (api) return api;
 
   const phase = (message, step) =>
     log(message, { phase: step, phases: BOOT_PHASES });
 
-  importScripts(`${config.pyodide_index_url}pyodide.js`);
+  // Imported rather than `importScripts`-ed: this is a module worker, and
+  // Pyodide's own module build is what it offers for one.
+  const { loadPyodide } = await import(
+    /* webpackIgnore: true */ `${config.pyodide_index_url}pyodide.mjs`
+  );
 
   phase("booting Python runtime", 1);
   pyodide = await loadPyodide({
@@ -72,14 +79,46 @@ set_bridge(XHRBridge(base_url=${JSON.stringify(config.api_base)}))
   return api;
 }
 
+// Every call into Python is made with `callPromising`, which lets the
+// WebAssembly stack suspend. zarr v3 needs it: its API is asynchronous
+// underneath, and with no thread in the browser to run an event loop on it
+// blocks by stack switching instead. A plain synchronous call fails with
+// "Cannot stack switch because the Python entrypoint was a synchronous
+// function", so the requirement announces itself rather than hiding.
+//
+// Suspending returns control to the JavaScript event loop mid-call, so a
+// second message could otherwise start while the first is still inside
+// Python. The session is stateful and its Python is not written to be
+// re-entered, so calls are serialised: one at a time, in arrival order.
+let pythonTurn = Promise.resolve();
+
+function inTurn(work) {
+  const turn = pythonTurn.then(work, work);
+  // The queue must neither stall on a failure nor report one twice.
+  pythonTurn = turn.then(
+    () => {},
+    () => {},
+  );
+  return turn;
+}
+
 /** Run a session-worker command; returns the parsed response. */
-function callCommand(command, payload) {
-  return JSON.parse(api.worker.handle_json(command, JSON.stringify(payload || {})));
+export function callCommand(command, payload) {
+  return inTurn(async () =>
+    JSON.parse(
+      await api.worker.handle_json.callPromising(
+        command,
+        JSON.stringify(payload || {}),
+      ),
+    ),
+  );
 }
 
 /** Run a compute-worker task; returns the parsed response. */
-function callTask(task) {
-  return JSON.parse(api.worker.run_task_json(JSON.stringify(task)));
+export function callTask(task) {
+  return inTurn(async () =>
+    JSON.parse(await api.worker.run_task_json.callPromising(JSON.stringify(task))),
+  );
 }
 
 /**
@@ -88,7 +127,11 @@ function callTask(task) {
  * `sessionSpec` is null in the session worker (which owns the live session)
  * and set in compute workers, which rebuild a read-only copy on demand.
  */
-function callServe(route, key, sessionSpec) {
+export function callServe(route, key, sessionSpec) {
+  return inTurn(() => serveOnce(route, key, sessionSpec));
+}
+
+async function serveOnce(route, key, sessionSpec) {
   // JSON, like every other call into Python. Handing over a live JS object
   // instead would convert its nulls to `JsNull` proxies rather than to None,
   // and those pass an `is not None` check and then fail deep inside numeric
@@ -97,7 +140,7 @@ function callServe(route, key, sessionSpec) {
   let result = null;
 
   try {
-    result = api.worker.serve_route(route, key, spec);
+    result = await api.worker.serve_route.callPromising(route, key, spec);
     // (status, content type, body) with the body as bytes, which `toJs`
     // converts to a Uint8Array view on the WebAssembly heap.
     const [status, contentType, body] = result.toJs();

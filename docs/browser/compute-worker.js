@@ -9,11 +9,14 @@
  * never travels through JavaScript.
  */
 
-/* global bootRuntime, callTask, callServe */
-
-// Carry the build id on, so the shared runtime is not loaded from cache
-// while the worker itself is fresh.
-importScripts(`py-runtime.js${self.location.search}`);
+// Started, not awaited. `self.onmessage` below has to be installed
+// before this module's first suspension point: a message that arrives
+// while a top-level `await` is pending has no handler to reach, and the
+// worker then sits there having missed the one message it was sent.
+//
+// The build id is carried on so the shared runtime is not loaded from
+// cache while the worker itself is fresh.
+const runtime = import(`./py-runtime.js${self.location.search}`);
 
 let ready = false;
 
@@ -22,6 +25,7 @@ function post(id, payload, transfer = []) {
 }
 
 self.onmessage = async (event) => {
+  const { bootRuntime, callTask, callServe } = await runtime;
   const { id, type } = event.data;
 
   try {
@@ -40,7 +44,7 @@ self.onmessage = async (event) => {
     if (!ready) throw new Error("the Python runtime is still starting");
 
     if (type === "task") {
-      const response = callTask(event.data.task);
+      const response = await callTask(event.data.task);
       if (!response.ok) {
         post(id, { ok: true, result: { error: response.error } });
       } else {
@@ -50,7 +54,7 @@ self.onmessage = async (event) => {
     }
 
     if (type === "serve") {
-      const response = callServe(
+      const response = await callServe(
         event.data.route,
         event.data.key,
         event.data.session,

@@ -25,11 +25,9 @@ parallel without a shared flush step.
 
 import urllib.error
 import urllib.request
-from collections.abc import MutableMapping
 
 import zarr
 
-from multiview_stitcher._zarr_compat import ZARR_V3
 from multiview_stitcher.browser.env import is_pyodide
 
 #: Keys whose contents are small, immutable per generation, and requested
@@ -228,33 +226,6 @@ class HttpStoreBase:
             self._metadata_cache.pop(key, None)
 
 
-class HttpZarrStoreV2(HttpStoreBase, MutableMapping):
-    """zarr v2 (``MutableMapping``) store over an HTTP prefix."""
-
-    def __getitem__(self, key):
-        data = self.fetch_key(key)
-        if data is None:
-            raise KeyError(key)
-        return data
-
-    def __setitem__(self, key, value):
-        self.write_key(key, value)
-
-    def __delitem__(self, key):
-        self.write_key(key, None)
-
-    def __iter__(self):
-        # Listing is not available over plain HTTP; zarr only needs it for
-        # discovery, which OME-Zarr metadata makes unnecessary.
-        return iter(())
-
-    def __len__(self):
-        return 0
-
-    def __contains__(self, key):
-        return self.fetch_key(key) is not None
-
-
 def _make_v3_store_class():
     """Build the zarr v3 store class lazily (v3-only imports live inside)."""
     from zarr.abc.store import Store
@@ -342,14 +313,10 @@ def open_http_store(base_url, fetch=None, write=None, writable=False):
     """
     global _v3_store_class
 
-    if ZARR_V3:
-        if _v3_store_class is None:
-            _v3_store_class = _make_v3_store_class()
-        return _v3_store_class(
-            base_url, fetch=fetch, write=write, writable=writable
-        )
+    if _v3_store_class is None:
+        _v3_store_class = _make_v3_store_class()
 
-    return HttpZarrStoreV2(
+    return _v3_store_class(
         base_url, fetch=fetch, write=write, writable=writable
     )
 

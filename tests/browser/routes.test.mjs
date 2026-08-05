@@ -328,6 +328,105 @@ test("a transform_key switch patches transforms instead of rebuilding layers", a
   assert.match(viewer, /dataSource\.changed\.add/);
 });
 
+test("every call into Python can suspend, and they are taken one at a time", async () => {
+  const { readFileSync } = await import("node:fs");
+  const runtime = readFileSync(
+    join(repoRoot, "docs", "browser", "py-runtime.js"), "utf8",
+  );
+  const session = readFileSync(
+    join(repoRoot, "docs", "browser", "session-worker.js"), "utf8",
+  );
+  const compute = readFileSync(
+    join(repoRoot, "docs", "browser", "compute-worker.js"), "utf8",
+  );
+
+  // zarr v3 has no thread to run an event loop on, so it blocks by stack
+  // switching - which only works if the call into Python was made in a way
+  // that permits it. A plain call raises "Cannot stack switch because the
+  // Python entrypoint was a synchronous function".
+  for (const entry of ["handle_json", "run_task_json", "serve_route"]) {
+    assert.match(
+      runtime,
+      new RegExp(`${entry}\\.callPromising\\(`),
+      `${entry} must be called so it can suspend`,
+    );
+  }
+
+  // Suspending returns control to the event loop mid-call, so without this a
+  // second message would enter Python while the first is still inside it -
+  // against a session that is not written to be re-entered.
+  assert.match(runtime, /let pythonTurn = Promise\.resolve\(\)/);
+  for (const call of ["callCommand", "callTask", "callServe"]) {
+    const start = runtime.indexOf(`function ${call}(`);
+    const body = runtime.slice(start, runtime.indexOf("\n}", start));
+    assert.match(body, /inTurn\(/, `${call} must take its turn`);
+  }
+
+  // And the callers have to await what is now a promise.
+  assert.match(session, /await callCommand\(/);
+  assert.match(session, /await callServe\(/);
+  assert.match(compute, /await callTask\(/);
+  assert.match(compute, /await callServe\(/);
+});
+
+test("the workers are ES modules, because Pyodide refuses classic ones", async () => {
+  const { readFileSync } = await import("node:fs");
+  const dir = join(repoRoot, "docs", "browser");
+  const app = readFileSync(join(dir, "app.js"), "utf8");
+  const runtime = readFileSync(join(dir, "py-runtime.js"), "utf8");
+
+  // Pyodide 314 throws "Classic web workers are not supported" on start-up,
+  // so the whole chain has to be modules: the Worker, the script it loads,
+  // and the way that script pulls in Pyodide.
+  assert.match(app, /new Worker\(url, \{ type: "module" \}\)/);
+  assert.match(runtime, /await import\(\s*\/\* webpackIgnore: true \*\/ `\$\{config\.pyodide_index_url\}pyodide\.mjs`/);
+
+  for (const worker of ["session-worker.js", "compute-worker.js", "fs-worker.js"]) {
+    const source = readFileSync(join(dir, worker), "utf8");
+    assert.doesNotMatch(
+      source,
+      /importScripts\(/,
+      `${worker} must not use importScripts`,
+    );
+  }
+
+  // The two Python workers take their runtime by import, and the names have
+  // to be ones py-runtime actually exports.
+  for (const [worker, names] of [
+    ["session-worker.js", ["bootRuntime", "callCommand", "callServe"]],
+    ["compute-worker.js", ["bootRuntime", "callTask", "callServe"]],
+  ]) {
+    const source = readFileSync(join(dir, worker), "utf8");
+    assert.match(source, /await import\(\s*`\.\/py-runtime\.js\$\{self\.location\.search\}`/);
+    for (const name of names) {
+      assert.match(
+        runtime,
+        new RegExp(`export (async )?(function|let) ${name}\\b`),
+        `py-runtime must export ${name} for ${worker}`,
+      );
+    }
+  }
+});
+
+test("zarr comes from Pyodide's index, not PyPI", async () => {
+  const { readFileSync } = await import("node:fs");
+  const config = JSON.parse(
+    readFileSync(join(repoRoot, "docs", "browser", "config.json"), "utf8"),
+  );
+
+  // Two wheels call themselves the same zarr version. Pyodide's own build
+  // suspends the WebAssembly stack; PyPI's starts a thread, which the browser
+  // cannot give it - every read then fails with "can't start new thread".
+  assert.ok(
+    config.pyodide_packages.includes("zarr"),
+    "zarr must be loaded from Pyodide's package index",
+  );
+  assert.ok(
+    !config.browser_dependencies.some((dep) => dep.startsWith("zarr")),
+    "zarr must not be installed from PyPI by micropip",
+  );
+});
+
 test("the Python runtime is fetched once, not once per worker", async () => {
   const { readFileSync } = await import("node:fs");
   const sw = readFileSync(join(repoRoot, "docs", "browser", "sw.js"), "utf8");

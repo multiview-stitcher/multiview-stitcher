@@ -31,7 +31,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # zarr v3 blocks by suspending the WebAssembly stack, which Node
+          # only has unflagged from v25.
+          node-version: "25"
           cache: npm
           cache-dependency-path: tests/browser/package.json
 

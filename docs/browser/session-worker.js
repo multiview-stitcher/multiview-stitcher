@@ -8,11 +8,14 @@
  * they need from a spec this worker hands them.
  */
 
-/* global bootRuntime, callCommand, callServe, pyodide */
-
-// Carry the build id on, so the shared runtime is not loaded from cache
-// while the worker itself is fresh.
-importScripts(`py-runtime.js${self.location.search}`);
+// Started, not awaited. `self.onmessage` below has to be installed
+// before this module's first suspension point: a message that arrives
+// while a top-level `await` is pending has no handler to reach, and the
+// worker then sits there having missed the one message it was sent.
+//
+// The build id is carried on so the shared runtime is not loaded from
+// cache while the worker itself is fresh.
+const runtime = import(`./py-runtime.js${self.location.search}`);
 
 let ready = false;
 let outputMount = null;
@@ -24,6 +27,7 @@ function post(id, payload) {
 }
 
 self.onmessage = async (event) => {
+  const { bootRuntime, callCommand, callServe } = await runtime;
   const { id, type } = event.data;
 
   try {
@@ -33,21 +37,21 @@ self.onmessage = async (event) => {
           self.postMessage({ type: "log", message, ...progress }),
       });
       ready = true;
-      post(id, { ok: true, result: callCommand("info", {}).result });
+      post(id, { ok: true, result: (await callCommand("info", {})).result });
       return;
     }
 
     if (!ready) throw new Error("the Python runtime is still starting");
 
     if (type === "command") {
-      const response = callCommand(event.data.command, event.data.payload);
+      const response = await callCommand(event.data.command, event.data.payload);
       if (!response.ok) throw new Error(response.error + "\n" + (response.traceback || ""));
       post(id, { ok: true, result: response.result });
       return;
     }
 
     if (type === "serve") {
-      const response = callServe(event.data.route, event.data.key, null);
+      const response = await callServe(event.data.route, event.data.key, null);
       post(id, response, response.found ? [response.data] : []);
       return;
     }

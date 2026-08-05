@@ -1,12 +1,10 @@
 """
-Compatibility layer between zarr-python v2 and v3.
+Byte-level zarr helpers shared by both of multiview-stitcher's environments.
 
-multiview-stitcher runs in two quite different Python environments:
-
-* CPython, where zarr v3 is the default and the store API is asynchronous
-  (:class:`zarr.abc.store.Store`), and
-* Pyodide / the browser, where only zarr v2 is installable and stores are
-  plain ``MutableMapping``\\s.
+CPython and Pyodide now run the same zarr-python v3, so nothing here branches
+on the library version. What it does branch on is the *format* of the data: an
+OME-Zarr 0.4 store is a zarr v2 hierarchy and a 0.5 one is v3, and both are
+read through the same v3 library.
 
 Everything in this module is *numeric and byte-level*: array metadata dicts,
 codec signatures, chunk-key encoding and read-only "virtual" arrays whose
@@ -14,8 +12,7 @@ chunks are served by remapping output chunk coordinates onto source chunks.
 No dimension names, coordinates or xarray concepts appear here; those live in
 ``spatial_image_utils``/``msi_utils``.
 
-The public helpers are used by :mod:`multiview_stitcher.zarr_utils`, which
-keeps its own API identical across both zarr versions.
+The public helpers are used by :mod:`multiview_stitcher.zarr_utils`.
 """
 
 import json
@@ -26,20 +23,6 @@ import numcodecs
 import numcodecs.registry
 import numpy as np
 import zarr
-
-
-def _zarr_major_version():
-    version = getattr(zarr, "__version__", "0")
-    try:
-        return int(str(version).split(".")[0])
-    except ValueError:  # pragma: no cover - unparsable dev versions
-        return 0
-
-
-ZARR_V3 = _zarr_major_version() >= 3
-
-# Metadata document name of a zarr array, per format version.
-METADATA_KEY = "zarr.json" if ZARR_V3 else ".zarray"
 
 
 # ---------------------------------------------------------------------------
@@ -147,16 +130,11 @@ def json_default(obj):
 def array_metadata_dict(zarray):
     """Return ``zarray``'s own array metadata as a plain dict.
 
-    For zarr v3 this is ``metadata.to_dict()``; for zarr v2 the stored
-    ``.zarray`` document is parsed, which preserves the exact on-disk encoding
-    of ``fill_value``, ``filters`` and ``compressor`` without having to
-    re-derive it from Python objects.
+    Note that this is the metadata of the *data*, not of the library: an
+    OME-Zarr 0.4 array read by zarr-python v3 reports ``zarr_format`` 2, and
+    the callers below branch on that rather than on the library version.
     """
-    if ZARR_V3:
-        return dict(zarray.metadata.to_dict())
-
-    raw = zarray.store[zarray._key_prefix + ".zarray"]
-    return json.loads(bytes(raw).decode("utf-8"))
+    return dict(zarray.metadata.to_dict())
 
 
 def codec_signature(zarray):
@@ -194,16 +172,10 @@ def codec_signature(zarray):
 def encode_source_chunk_key(zarray, coords):
     """Return the store key of a source chunk in the source's own encoding.
 
-    zarr v3 exposes chunk-key encoding via ``metadata.chunk_key_encoding``,
-    zarr v2 via ``Array._chunk_key``; support both so that v2 (OME-Zarr 0.4)
-    and v3 sources work transparently. The returned key already includes the
-    array's own path within its store (usually empty for arrays opened at the
-    store root, as is the case for our sources).
+    The returned key already includes the array's own path within its store
+    (usually empty for arrays opened at the store root, as is the case for our
+    sources).
     """
-    if not ZARR_V3:
-        # zarr v2's _chunk_key() already prefixes the array path.
-        return zarray._chunk_key(tuple(coords))
-
     encoding = getattr(zarray.metadata, "chunk_key_encoding", None)
     if encoding is not None:
         key = encoding.encode_chunk_key(coords)
@@ -266,65 +238,6 @@ def parse_virtual_chunk_key(key):
 # ---------------------------------------------------------------------------
 # Virtual stores
 # ---------------------------------------------------------------------------
-
-
-class _VirtualZarrStoreV2(MutableMapping):
-    """Read-only ``MutableMapping`` store serving one synthesized zarr v2 array.
-
-    It answers exactly two kinds of requests: the ``.zarray`` metadata
-    document, and chunk keys resolved via ``dispatch`` to a
-    ``(source_array, source_coords)`` pair whose already-encoded bytes are
-    streamed straight through.
-    """
-
-    def __init__(self, meta_bytes, meta_key, dispatch, grid):
-        self._meta_bytes = meta_bytes
-        self._meta_key = meta_key
-        self._dispatch = dispatch
-        self._grid_shape = tuple(int(g) for g in grid)
-
-    def __getitem__(self, key):
-        if key == self._meta_key:
-            return self._meta_bytes
-        # zarr v2 probes for optional array attributes; report "no attrs".
-        if key == ".zattrs":
-            return b"{}"
-
-        coords = parse_virtual_chunk_key(key)
-        if coords is None:
-            raise KeyError(key)
-
-        target = self._dispatch(coords)
-        if target is None:
-            raise KeyError(key)
-
-        source_array, source_coords = target
-        source_key = encode_source_chunk_key(source_array, source_coords)
-        # Byte passthrough: the source store already holds encoded chunk bytes.
-        # A missing source chunk means "not initialised"; zarr then fills the
-        # chunk with the array's fill value, which is the behaviour we want.
-        return source_array.chunk_store[source_key]
-
-    def __setitem__(self, key, value):  # pragma: no cover - read-only store
-        raise NotImplementedError("virtual zarr store is read-only")
-
-    def __delitem__(self, key):  # pragma: no cover - read-only store
-        raise NotImplementedError("virtual zarr store is read-only")
-
-    def __iter__(self):
-        yield self._meta_key
-        for coords in np.ndindex(*self._grid_shape):
-            yield "/".join(str(c) for c in coords)
-
-    def __len__(self):
-        return 1 + int(np.prod(self._grid_shape)) if self._grid_shape else 1
-
-    def __contains__(self, key):
-        try:
-            self[key]
-        except KeyError:
-            return False
-        return True
 
 
 def _make_v3_store_class():
@@ -434,11 +347,8 @@ def open_virtual_array(template, out_shape, out_chunks, dispatch):
     meta_bytes, meta_key = synthesize_metadata(template, out_shape, out_chunks)
     grid = grid_shape(out_shape, out_chunks)
 
-    if ZARR_V3:
-        if _v3_store_class is None:
-            _v3_store_class = _make_v3_store_class()
-        store = _v3_store_class(meta_bytes, meta_key, dispatch, grid)
-    else:
-        store = _VirtualZarrStoreV2(meta_bytes, meta_key, dispatch, grid)
+    if _v3_store_class is None:
+        _v3_store_class = _make_v3_store_class()
 
+    store = _v3_store_class(meta_bytes, meta_key, dispatch, grid)
     return zarr.open_array(store=store, mode="r")

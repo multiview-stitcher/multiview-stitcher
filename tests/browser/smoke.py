@@ -4,13 +4,17 @@ End-to-end smoke test of the browser runtime, executed inside Pyodide.
 It walks the whole path the browser app takes - write a miniature multiscale
 OME-Zarr, open it through the browser session, register two views, fuse them
 lazily and read one fused chunk - and checks the results, so that platform
-differences between CPython and Pyodide (zarr v2, an older xarray) surface in
-CI rather than in the UI.
+differences between CPython and Pyodide surface in CI rather than in the UI.
 
-The NGFF layer is no longer one of those differences: ngff-zarr installs in
-Pyodide and is used in both environments. zarr still is - the browser reads
-OME-Zarr 0.4 through zarr-python v2, because v3 needs WebAssembly stack
-switching that only the Pyodide-patched build provides.
+The library layer is no longer one of those differences: the browser runs the
+same zarr v3 and the same ngff-zarr as CPython. What is left to catch is the
+*runtime* - a numpy or xarray build that behaves differently, a codec that is
+not compiled in, and above all a zarr that cannot block here.
+
+Needs a JavaScript runtime with WebAssembly stack switching (JSPI): zarr v3
+has no thread to run an event loop on in the browser and suspends instead.
+Node.js 25 and later have it unflagged; 20 to 24 need
+``--experimental-wasm-jspi``.
 
 Run by ``tests/browser/smoke.mjs``; ``main()`` returns a JSON string.
 """
@@ -70,6 +74,7 @@ def build_dataset(root="/data"):
 
 def main():
     import zarr
+    import zarr.abc.store
 
     from multiview_stitcher import ngff_utils
     from multiview_stitcher.browser import (
@@ -83,10 +88,13 @@ def main():
     info = runtime_info()
     check("runtime_is_pyodide", info["pyodide"], info)
     check(
-        "zarr_v2",
-        zarr.__version__.startswith("2."),
+        "zarr_v3",
+        zarr.__version__.startswith("3."),
         f"zarr {zarr.__version__}",
     )
+    # The check that would have caught shipping PyPI's zarr, whose synchronous
+    # API starts a thread that Pyodide cannot give it.
+    check("zarr_sync_usable", info["zarr_sync"] == "ok", info["zarr_sync"])
     # The same NGFF library as on CPython. A second implementation for the
     # browser was exactly the kind of platform boundary this test exists to
     # catch, so its absence is worth asserting.
@@ -383,12 +391,12 @@ def main():
         http_described["views"][0]["served"],
     )
     check(
-        "http_store_is_v2_mapping",
+        "http_store_is_a_zarr_store",
         isinstance(
             browser_store.open_http_store("/x", fetch=service_worker_fetch),
-            browser_store.HttpZarrStoreV2,
+            zarr.abc.store.Store,
         ),
-        "expected the zarr v2 store in Pyodide",
+        "expected a zarr v3 store in Pyodide",
     )
 
     http_session.register(RegistrationOptions(new_transform_key="registered"))
