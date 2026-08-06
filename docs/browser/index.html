@@ -64,9 +64,12 @@
             <div class="drop-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg>
             </div>
-            <strong>Drop OME-Zarr folders</strong>
+            <strong>Drop OME-Zarr folders or CZI files</strong>
             <span>or click to choose from this device</span>
-            <button id="browse" type="button" data-load>Choose folders</button>
+            <div class="drop-buttons">
+              <button id="browse" type="button" data-load>Choose folders</button>
+              <button id="browse-czi" type="button" data-load>Choose CZI files</button>
+            </div>
           </div>
 
           <div class="data-actions">

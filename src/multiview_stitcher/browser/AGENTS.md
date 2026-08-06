@@ -32,6 +32,7 @@ Data visualization and control panel
 
 - Data drop zone
   - drag and drop OME-Zarrs (top level ome-zarr or folder containing multiple ome-zarrs)
+  - drag and drop mosaic .czi files; every tile of the file becomes a view
   - click to open file dialog
 - List of loaded msims + fused preview (if available)
   - elements on each msim:

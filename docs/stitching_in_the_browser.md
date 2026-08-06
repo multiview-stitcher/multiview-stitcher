@@ -22,15 +22,20 @@ Open the browser app
    needs the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API),
    which Firefox and Safari do not implement yet.
 2. Choose how many Python web workers to start.
-3. Press **Load example** for a generated 3D 2&times;2 tile dataset, or drop a
-   folder onto the landing area &mdash; either a single OME-Zarr, or a folder
-   containing one OME-Zarr per tile. Several folders can be dropped together,
-   in which case each one must itself be an OME-Zarr.
+3. Press **Load example** for a generated 3D 2&times;2 tile dataset, or drop your
+   data onto the landing area:
+
+    - a **folder** &mdash; either a single OME-Zarr, or a folder containing one
+      OME-Zarr per tile. Several folders can be dropped together, in which case
+      each one must itself be an OME-Zarr.
+    - a **mosaic CZI file**, whose tiles are read with their positions from the
+      file metadata. One file is a whole dataset.
+
 4. Press **Register**, then **Fuse (preview)**.
 
-Dropping further folders *adds* their images to the views already loaded, so a
-dataset can be assembled tile by tile from several places; dropping the same
-folder twice changes nothing. Registration and fusion show their progress in
+Dropping further folders or files *adds* their images to the views already
+loaded, so a dataset can be assembled tile by tile from several places;
+dropping the same folder twice changes nothing. Registration and fusion show their progress in
 the header, and the compute workers start as soon as you pick how many to use
 rather than on the first action. Each view has an individual remove button, and
 **Clear** starts over. The viewer's layers always mirror the list, in the same
@@ -81,6 +86,21 @@ flowchart TB
   difference. The fused preview is always virtual: its chunks are fused on
   demand, spread over the worker pool.
 
+### Reading a CZI
+
+A CZI is one file rather than a directory of chunks, so it takes a different
+route from an OME-Zarr: instead of being read over the service worker, it is
+**mounted** into each Python worker's own filesystem, where it becomes an
+ordinary path. `io.read_mosaic_into_sims_czifile` &mdash; the same function used
+on the desktop &mdash; then opens it unchanged.
+
+The mount is Emscripten's `WORKERFS`, which answers each read by slicing the
+`File` and reading that slice synchronously. Only the bytes actually needed are
+ever read, so a multi-gigabyte CZI is seeked through rather than loaded: opening
+a mosaic touches its header and subblock directory, and each tile is decoded on
+demand. Every worker mounts the file for itself, which is what lets a compute
+worker open a tile knowing nothing but its URL.
+
 ### Cache invalidation
 
 Every URL the viewer receives carries a session *generation*. Anything that
@@ -99,8 +119,10 @@ URLs it has never seen. Requests for a retired route are answered with
 ## Current limitations
 
 - Chromium only, because of the File System Access API.
-- OME-Zarr v0.4 input (Pyodide ships zarr v2). Reading other formats, e.g.
-  CZI or TIFF, is not available in the browser yet.
+- Input is OME-Zarr, or **uncompressed** mosaic CZI. Compressed CZI (LZW, JPEG,
+  JPEG XR, ZSTD) cannot be decoded in the browser: that needs
+  [imagecodecs](https://pypi.org/project/imagecodecs/), a C extension with no
+  WebAssembly build. Other formats, e.g. TIFF, are not available yet.
 - Registration uses phase correlation and fusion uses weighted averaging;
   methods depending on packages without a WebAssembly build (ANTsPy,
   ITK-Elastix) are not available.

@@ -188,3 +188,80 @@ def test_read_imaris_into_msim_synthetic_file():
         sim0.sel(t=0, c=1).data.compute(),
         data0 + 100,
     )
+
+
+# ---------------------------------------------------------------------------
+# Mosaic CZI
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mosaic_czi():
+    pytest.importorskip("czifile")
+    return str(sample_data.get_mosaic_sample_data_path())
+
+
+def test_open_czi_reuses_one_handle_per_thread(mosaic_czi):
+    """Every lazy plane read opens the file; re-parsing its directory each
+    time costs seconds on a mosaic with thousands of tiles."""
+    from multiview_stitcher import czi_utils
+
+    czi_utils.close_czi_files()
+    first = czi_utils.open_czi(mosaic_czi)
+
+    assert czi_utils.open_czi(mosaic_czi) is first
+
+    czi_utils.close_czi_files()
+    assert not getattr(czi_utils._open_files, "cache", {})
+
+
+def test_open_czi_evicts_beyond_its_limit(mosaic_czi, tmp_path):
+    """Handles are held open, so the cache must stay bounded."""
+    import shutil
+
+    from multiview_stitcher import czi_utils
+
+    czi_utils.close_czi_files()
+
+    copies = []
+    for index in range(czi_utils._MAX_OPEN_FILES + 1):
+        copy = tmp_path / f"copy_{index}.czi"
+        shutil.copyfile(mosaic_czi, copy)
+        copies.append(str(copy))
+        czi_utils.open_czi(str(copy))
+
+    cache = czi_utils._open_files.cache
+    assert len(cache) == czi_utils._MAX_OPEN_FILES
+    assert copies[0] not in cache  # the least recently used one went first
+
+    czi_utils.close_czi_files()
+
+
+def test_czi_reads_are_correct_under_the_threaded_scheduler(mosaic_czi):
+    """A cached CziFile seeks one shared file handle.
+
+    Sharing it between threads interleaves seek and read, and each thread gets
+    back some of the other's bytes - silently, as plausible-looking image data.
+    Dask's threaded scheduler is the default for arrays, so this is the normal
+    case on CPython.
+    """
+    import dask
+
+    from multiview_stitcher import czi_utils
+
+    czi_utils.close_czi_files()
+    with dask.config.set(scheduler="synchronous"):
+        expected = [
+            sim.data.compute()
+            for sim in io.read_mosaic_into_sims_czifile(mosaic_czi)
+        ]
+
+    czi_utils.close_czi_files()
+    with dask.config.set(scheduler="threads", num_workers=4):
+        got = [
+            sim.data.compute()
+            for sim in io.read_mosaic_into_sims_czifile(mosaic_czi)
+        ]
+
+    for expected_tile, got_tile in zip(expected, got):
+        np.testing.assert_array_equal(expected_tile, got_tile)

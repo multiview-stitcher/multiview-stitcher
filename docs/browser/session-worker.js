@@ -27,7 +27,8 @@ function post(id, payload) {
 }
 
 self.onmessage = async (event) => {
-  const { bootRuntime, callCommand, callServe } = await runtime;
+  const { bootRuntime, callCommand, callServe, mountFiles, unmountFiles } =
+    await runtime;
   const { id, type } = event.data;
 
   try {
@@ -53,6 +54,19 @@ self.onmessage = async (event) => {
     if (type === "serve") {
       const response = await callServe(event.data.route, event.data.key, null);
       post(id, response, response.found ? [response.data] : []);
+      return;
+    }
+
+    // Local files Python reads by path rather than through the service
+    // worker; see `mountFiles` in py-runtime.js.
+    if (type === "mount-files") {
+      post(id, { ok: true, path: mountFiles(event.data.mount, event.data.files) });
+      return;
+    }
+
+    if (type === "unmount-files") {
+      unmountFiles(event.data.mount);
+      post(id, { ok: true });
       return;
     }
 

@@ -121,6 +121,17 @@ browser = [
     "dask[array] ==2025.2.0",
     "dask-image ==2024.5.3",
     "ngff-zarr",
+    # Mosaic CZI reading. Both are pure-Python wheels, so micropip installs
+    # them unchanged; czifile reads through tifffile's FileHandle, and
+    # multiview_stitcher.io imports tifffile itself.
+    #
+    # imagecodecs is deliberately absent: it is a C extension with no
+    # WebAssembly build, which limits the browser to uncompressed CZI files.
+    # That is also why czifile stays at 2019.7.2.3 here - it treats
+    # imagecodecs as optional, while the 2026 releases import it
+    # unconditionally and would not load at all.
+    "czifile ==2019.7.2.3",
+    "tifffile",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",

@@ -36,6 +36,7 @@ from multiview_stitcher import (
 )
 from multiview_stitcher import registration as core_registration
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher.browser import czi as browser_czi
 from multiview_stitcher.browser import dataset as browser_dataset
 from multiview_stitcher.browser import fusion as browser_fusion
 from multiview_stitcher.browser import serialization
@@ -218,6 +219,9 @@ class Session:
         """Drop every view, returning the session to its empty state."""
         self.sources = []
         self.msims = []
+        # A CZI is read through a mount the page is free to release once its
+        # views are gone; a cached open file handle would outlive it.
+        browser_czi.forget_files()
         self.bump_generation(views=True)
         return self.describe()
 

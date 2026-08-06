@@ -668,6 +668,103 @@ def main():
         [layer["source"]["url"] for layer in example_state["layers"]],
     )
 
+    # --- a mosaic CZI, read by the same reader CPython uses --------------
+    # czifile and tifffile are pure Python, but imagecodecs - which czifile
+    # reaches for - is a C extension with no WebAssembly build. What is checked
+    # here is that its absence leaves czifile usable rather than disabling CZI
+    # support altogether, and that the whole browser path works on top of the
+    # unchanged `io.read_mosaic_into_sims_czifile`.
+    #
+    # The sample CZI ships inside the wheel, so this needs no mounted file. In
+    # the app the user's own file is mounted through WORKERFS and reaches the
+    # same reader as an ordinary path.
+    from multiview_stitcher import czi_utils, sample_data
+    from multiview_stitcher.browser import czi as browser_czi
+
+    check(
+        "czifile_importable_without_imagecodecs",
+        czi_utils.czifile is not None,
+        "czifile did not import; CZI support would be silently unavailable",
+    )
+    check(
+        "imagecodecs_absent",
+        __import__("multiview_stitcher.czifile_patch", fromlist=["x"]).imagecodecs
+        is None,
+        "imagecodecs is unexpectedly present, so its absence is untested here",
+    )
+
+    czi_path = str(sample_data.get_mosaic_sample_data_path())
+    czi_sources = browser_czi.czi_sources(czi_path)
+    check("czi_tiles_enumerated", len(czi_sources) == 2, czi_sources)
+
+    czi_session = Session()
+    czi_described = czi_session.load(czi_sources)
+    check(
+        "czi_session_loaded",
+        czi_described["n_views"] == 2
+        and {view["served"] for view in czi_described["views"]} == {"virtual"},
+        czi_described["views"][0],
+    )
+
+    czi_sim = msi_utils.get_sim_from_msim(czi_session.msims[0])
+    check(
+        "czi_input_is_lazy",
+        not isinstance(si_utils._get_backend_data(czi_sim), np.ndarray),
+        type(si_utils._get_backend_data(czi_sim)).__name__,
+    )
+
+    # Reading pixels is what actually goes through czifile's subblock decoding.
+    czi_route = czi_session.view_route(0)
+    kind, czi_zarray = czi_session.serve(czi_route, "0/.zarray")
+    check("czi_view_zarray", kind == "json", kind)
+
+    czi_key = "/".join("0" for _ in czi_zarray["chunks"])
+    kind, czi_chunk = czi_session.serve(czi_route, f"0/{czi_key}")
+    czi_expected = int(np.prod(czi_zarray["chunks"])) * np.dtype(
+        czi_zarray["dtype"]
+    ).itemsize
+    check(
+        "czi_view_chunk_served",
+        kind == "bytes" and len(czi_chunk) == czi_expected,
+        f"kind={kind} len={len(czi_chunk) if czi_chunk else None} "
+        f"expected={czi_expected}",
+    )
+    check(
+        "czi_view_chunk_has_signal",
+        float(
+            np.frombuffer(czi_chunk, dtype=np.dtype(czi_zarray["dtype"])).max()
+        )
+        > 0,
+        "decoded subblock is all zeros",
+    )
+
+    # A compute worker opens the file for itself from the source URL alone,
+    # which is what the page's per-worker mounts exist to make possible.
+    czi_worker = WorkerRuntime()
+    czi_served = czi_worker.run_task(
+        {
+            "kind": "serve",
+            "session": json.loads(json.dumps(czi_session.spec().to_dict())),
+            "route": czi_route,
+            "key": f"0/{czi_key}",
+        }
+    )
+    check(
+        "czi_chunk_served_by_compute_worker",
+        czi_served["kind"] == "bytes" and czi_served["payload"] == czi_chunk,
+        czi_served["kind"],
+    )
+
+    czi_registered = czi_session.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+    czi_shift = np.asarray(czi_registered["params"][1]["data"])
+    check(
+        "czi_registered",
+        np.all(np.isfinite(czi_shift)),
+        czi_shift.round(2).tolist(),
+    )
+
     # --- the JSON worker API JavaScript actually calls -------------------
     from multiview_stitcher.browser import worker as worker_module
 

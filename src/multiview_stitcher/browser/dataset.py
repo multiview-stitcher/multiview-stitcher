@@ -2,6 +2,7 @@
 
 from multiview_stitcher import msi_utils, ngff_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher.browser import czi as browser_czi
 from multiview_stitcher.browser import example_data
 from multiview_stitcher.browser import store as browser_store
 from multiview_stitcher.browser.specs import SourceSpec
@@ -11,9 +12,10 @@ def open_msim(source, fetch=None, transform_key=None):
     """Open one source as an msim.
 
     ``source`` may be an OME-Zarr URL served by the browser's service worker,
-    an ordinary filesystem path, or a generated example dataset. OME-Zarr image
-    data is never materialised here: the msim wraps zarr arrays whose chunks
-    are fetched on demand.
+    an ordinary filesystem path, one tile of a mosaic CZI, or a generated
+    example dataset. Image data is never materialised here: the msim wraps
+    zarr arrays whose chunks are fetched on demand, or - for a CZI - a dask
+    array whose subblocks are read on demand.
     """
     url = source.url if isinstance(source, SourceSpec) else str(source)
     transform_key = transform_key or si_utils.DEFAULT_TRANSFORM_KEY
@@ -21,6 +23,9 @@ def open_msim(source, fetch=None, transform_key=None):
     if example_data.is_example_url(url):
         name, tile_index = example_data.parse_example_url(url)
         return example_data.build_msim(name, tile_index)
+
+    if browser_czi.is_czi_url(url):
+        return browser_czi.build_msim(url)
 
     resolved = browser_store.resolve_zarr_source(url, fetch=fetch)
     return ngff_utils.read_msim_from_ome_zarr(
@@ -56,7 +61,7 @@ def check_compatible(msims):
     registration graph, where the failure mode is much harder to read.
     """
     if not msims:
-        raise ValueError("No OME-Zarr images were found.")
+        raise ValueError("No images were found.")
 
     ndims = {msi_utils.get_ndim(msim) for msim in msims}
     if len(ndims) > 1:

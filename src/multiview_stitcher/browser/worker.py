@@ -16,6 +16,7 @@ lazily fused preview render in parallel.
 import json
 import traceback
 
+from multiview_stitcher.browser import czi as browser_czi
 from multiview_stitcher.browser import example_data, executors, serialization
 from multiview_stitcher.browser.bridge import get_bridge
 from multiview_stitcher.browser.env import runtime_info
@@ -79,6 +80,25 @@ class WorkerRuntime:
             return described
 
         return self.session.add(payload["sources"])
+
+    def _cmd_load_czi(self, payload):
+        """Load every tile of one mosaic CZI as a view.
+
+        The page knows only the path it mounted the file at; how many tiles
+        that file holds is a question only the reader can answer, so the tile
+        URLs are enumerated here rather than in JavaScript.
+        """
+        sources = browser_czi.czi_sources(
+            payload["path"],
+            scene_index=payload.get("scene_index", 0),
+            name=payload.get("name"),
+        )
+        return self._cmd_load(
+            {
+                "sources": sources,
+                "replace": payload.get("replace", True),
+            }
+        )
 
     def _cmd_load_example(self, payload):
         """Load one of the generated example datasets."""

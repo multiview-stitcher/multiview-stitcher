@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import threading
 import warnings
 from collections import OrderedDict
 from pathlib import Path
@@ -25,17 +26,84 @@ except ImportError:
     czifile = None
 
 
+def _require_czifile():
+    if czifile is None:
+        raise ImportError(
+            "czifile is required to read mosaic CZI files. Please install it "
+            "using `pip install multiview-stitcher[czi]` or "
+            "`pip install czifile`."
+        )
+
+
+#: Open ``CziFile`` objects, most recently used last, one cache per thread.
+#:
+#: Opening a CZI parses its whole subblock directory, which is milliseconds per
+#: open for a file with thousands of tiles - and every lazy plane read opens the
+#: file again. Reusing the handle turns that into a one-off cost.
+#:
+#: The cache is thread-local because a ``CziFile`` seeks a single shared file
+#: handle: two threads reading through one would interleave seek and read and
+#: silently return each other's bytes. Dask's threaded scheduler does exactly
+#: that, so each of its workers gets its own handle. In Pyodide there is only
+#: ever one thread (only synchronous schedulers exist under Emscripten).
+_open_files = threading.local()
+
+#: Handles kept per thread. Registration and fusion read from a handful of
+#: files at a time, so a small number keeps every open file in reach.
+_MAX_OPEN_FILES = 4
+
+
+def open_czi(filename):
+    """
+    Return an open ``czifile.CziFile`` for ``filename``, reusing a cached one.
+
+    The returned file belongs to the cache: it is closed when evicted, so
+    callers must not close it themselves.
+    """
+
+    _require_czifile()
+
+    cache = getattr(_open_files, "cache", None)
+    if cache is None:
+        cache = _open_files.cache = OrderedDict()
+
+    key = str(filename)
+
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+
+    cache[key] = czifile.CziFile(key)
+
+    while len(cache) > _MAX_OPEN_FILES:
+        _, evicted = cache.popitem(last=False)
+        with contextlib.suppress(Exception):
+            evicted.close()
+
+    return cache[key]
+
+
+def close_czi_files():
+    """Close every CZI file this thread holds open."""
+
+    cache = getattr(_open_files, "cache", None)
+    if cache is None:
+        return
+
+    while cache:
+        _, czi = cache.popitem()
+        with contextlib.suppress(Exception):
+            czi.close()
+
+
 def get_czi_shape(filepath):
     """
     Get the shape of a CZI file.
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
-    czifile_file = czifile.CziFile(filepath)
+    czifile_file = open_czi(filepath)
 
     shape = {
         dim.dimension: ([] if dim.dimension not in ["Y", "X"] else dim.size)
@@ -62,12 +130,9 @@ def get_spacing_from_czi(filepath):
     Get the spacing of a CZI file.
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
-    imageFile = czifile.CziFile(filepath)
+    imageFile = open_czi(filepath)
     metadata = imageFile.metadata(raw=False)
 
     entries = metadata["ImageDocument"]["Metadata"]["Scaling"]["Items"][
@@ -85,12 +150,9 @@ def get_czi_mosaic_intervals(filepath, scene_index=0):
     Get the mosaic position intervals of a CZI file.
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
-    czifile_file = czifile.CziFile(filepath)
+    czifile_file = open_czi(filepath)
 
     shape = get_czi_shape(filepath)
     assert "M" in shape
@@ -141,12 +203,9 @@ def get_czi_channel_names(filepath):
     Get the channel names of a CZI file.
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
-    metadata = czifile.CziFile(filepath).metadata(raw=False)
+    metadata = open_czi(filepath).metadata(raw=False)
 
     # N_c = metadata['ImageDocument']['Metadata']['Information']['Image']['SizeC']
     meta_channels = metadata["ImageDocument"]["Metadata"]["Information"][
@@ -165,7 +224,7 @@ def read_czi_plane(filename, ide, slices=None):
     """
     Read a single plane from a CZI file.
     """
-    czifile_file = czifile.CziFile(filename)
+    czifile_file = open_czi(filename)
 
     plane = (
         czifile_file.filtered_subblock_directory[ide]
@@ -175,8 +234,6 @@ def read_czi_plane(filename, ide, slices=None):
 
     if slices is not None:
         plane = plane[slices]
-
-    czifile_file.close()
 
     return plane
 
@@ -191,10 +248,7 @@ def read_czi_into_xims(filename, scene_index=0):
     one for each tile (dimension M).
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
     shape = get_czi_shape(filename)
     spacing = get_spacing_from_czi(filename)
@@ -203,7 +257,7 @@ def read_czi_into_xims(filename, scene_index=0):
     # upper case
     spacing = {k.upper(): v for k, v in spacing.items()}
 
-    czifile_file = czifile.CziFile(filename)
+    czifile_file = open_czi(filename)
     dtype = czifile_file.filtered_subblock_directory[0].dtype
 
     # There's a strange dimension "0" appended to the axes
@@ -280,13 +334,10 @@ def read_view_from_multiview_czi(
     neighboring tiles are included (prestitching?) in a given read out tile).
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
     if isinstance(input_file, (str, Path)):
-        czifile_file = czifile.CziFile(input_file)
+        czifile_file = open_czi(input_file)
     else:
         czifile_file = input_file
 
@@ -336,10 +387,7 @@ def get_info_from_multiview_czi(filename):
      - definition of 'origins'
     """
 
-    if czifile is None:
-        raise ImportError(
-            "czifile is required to read mosaic CZI files. Please install it using `pip install multiview-stitcher[czi]` or `pip install czifile`."
-        )
+    _require_czifile()
 
     from xml.etree import ElementTree as etree
 
@@ -347,10 +395,9 @@ def get_info_from_multiview_czi(filename):
 
     infoDict = {}
 
-    imageFile = czifile.CziFile(pathToImage)
+    imageFile = open_czi(pathToImage)
     originalShape = imageFile.shape
     metadata = imageFile.metadata()
-    imageFile.close()
 
     metadata = etree.fromstring(metadata)
 

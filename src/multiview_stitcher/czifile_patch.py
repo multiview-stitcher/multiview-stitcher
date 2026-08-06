@@ -2,14 +2,36 @@
 This patch modifies the `SubBlockSegment.data` method to handle ZSTD1 compression
 and updates the `DECOMPRESS` dictionary to include a custom decompression function.
 See this issue: https://github.com/cgohlke/czifile/issues/10
+
+imagecodecs is optional here. It has no WebAssembly build, so importing it
+unconditionally would make this module - and with it all CZI support, since
+`czi_utils` treats an ImportError as "czifile is missing" - unavailable in
+Pyodide. Without it czifile decodes uncompressed CZI files only, which is what
+the browser deployment supports; see `browser/czi.py`.
 """
 
+import sys
 import typing
 
-import imagecodecs
 import numpy
 from czifile.czifile import DECOMPRESS, SubBlockSegment, repeat_nd
 from scipy.ndimage import zoom
+
+try:
+    import imagecodecs
+except ImportError:
+    imagecodecs = None
+
+
+#: CZI compression ids, for error messages. Only 0 can be read without
+#: imagecodecs; czifile registers 1, 2 and 4 with it, and 6 is added below.
+COMPRESSION_NAMES = {
+    1: "JPEG",
+    2: "LZW",
+    4: "JPEG XR",
+    5: "ZSTD0",
+    6: "ZSTD1",
+}
 
 
 class ZSTD1Header(typing.NamedTuple):
@@ -64,8 +86,19 @@ def data(self, raw=False, resize=True, order=0):
             data = fh.read(self.data_size)
         return data
     if de.compression:
-        # if de.compression not in DECOMPRESS:
-        #     raise ValueError('compression unknown or not supported')
+        if de.compression not in DECOMPRESS:
+            raise ValueError(
+                f"CZI compression type {de.compression} "
+                f"({COMPRESSION_NAMES.get(de.compression, 'unknown')}) "
+                "cannot be decoded here. It needs the imagecodecs package, "
+                "which is unavailable in this runtime"
+                + (
+                    " (imagecodecs has no WebAssembly build, so the browser "
+                    "reads uncompressed CZI files only)."
+                    if sys.platform == "emscripten"
+                    else ". Install it with `pip install imagecodecs`."
+                )
+            )
         with fh.lock:
             fh.seek(self.data_offset)
             data = fh.read(self.data_size)
@@ -133,5 +166,6 @@ def data(self, raw=False, resize=True, order=0):
 
 
 # patch DECOMPRESS dictionary and decompression function
-DECOMPRESS[6] = decode_zstd1
+if imagecodecs is not None:
+    DECOMPRESS[6] = decode_zstd1
 SubBlockSegment.data = data

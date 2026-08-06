@@ -115,6 +115,19 @@ report.checks.serve_route_across_the_js_boundary = {
   detail: JSON.stringify(jsBoundary),
 };
 
+// The app mounts the user's CZI with WORKERFS, which is what turns a file of
+// any size into an ordinary path without reading it into memory. It is a
+// link-time option of the Pyodide build rather than something the app can add,
+// so an upgrade that dropped it would take CZI support with it - silently,
+// since nothing else here uses that filesystem.
+//
+// Mounting itself cannot be exercised: WORKERFS refuses to mount outside a Web
+// Worker, and Node has none. What is checked is that the build still offers it.
+report.checks.workerfs_available = {
+  ok: Boolean(pyodide.FS.filesystems && pyodide.FS.filesystems.WORKERFS),
+  detail: Object.keys(pyodide.FS.filesystems || {}).join(", "),
+};
+
 const checks = Object.entries(report.checks);
 for (const [name, result] of checks) {
   console.log(`  ${result.ok ? "ok  " : "FAIL"} ${name}${result.detail ? ` - ${result.detail}` : ""}`);

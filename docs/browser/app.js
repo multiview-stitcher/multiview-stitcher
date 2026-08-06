@@ -51,6 +51,11 @@ const state = {
   timeVaryingTransforms: false, // whether following the timepoint is worth it
   editableTransformKeys: new Set(),
   mounts: [],
+  // Local files every Python worker mounts for itself, as `{ mount, files }`.
+  // Unlike an OME-Zarr - which Python reads over the service worker - a CZI is
+  // opened as a path, so the handles have to be in each worker's own
+  // filesystem. Kept here so that workers started later get the same mounts.
+  fileMounts: [],
 };
 
 let displayVisibilityTimer = null;
@@ -282,6 +287,17 @@ class ComputePool {
       booting.push(
         channel
           .send({ type: "boot", config, name: `worker ${index}` })
+          // A worker started after files were mounted has to be given them
+          // too, before it is handed a task that opens one by path.
+          .then(() => Promise.all(
+            state.fileMounts.map((entry) =>
+              channel.send({
+                type: "mount-files",
+                mount: entry.mount,
+                files: entry.files,
+              }),
+            ),
+          ))
           .then(() => {
             channel.busy = false;
             this.pump();
@@ -1821,6 +1837,81 @@ async function collectSources(handle, requireSingleImage) {
   }));
 }
 
+/** Is this a file the CZI reader should be given? */
+function isCziFile(handle) {
+  return handle.kind === "file" && handle.name.toLowerCase().endsWith(".czi");
+}
+
+/**
+ * Mount local files into every Python worker and return their directory.
+ *
+ * The session worker and the compute workers each mount the same `File`
+ * objects: Python opens the file wherever the work happens, and a compute
+ * worker rebuilding a session from source URLs alone would otherwise find
+ * nothing at the path those URLs name.
+ */
+async function mountFiles(files) {
+  const mount = crypto.randomUUID().slice(0, 8);
+
+  const { path } = await sessionWorker.send({ type: "mount-files", mount, files });
+  await Promise.all(
+    pool.workers.map((channel) =>
+      channel.send({ type: "mount-files", mount, files }),
+    ),
+  );
+
+  state.fileMounts.push({ mount, files });
+  return path;
+}
+
+/** Drop every mounted file from every worker. */
+async function unmountAllFiles() {
+  const mounts = state.fileMounts.splice(0);
+
+  for (const { mount } of mounts) {
+    await Promise.all(
+      [sessionWorker, ...pool.workers].map((channel) =>
+        channel.send({ type: "unmount-files", mount }).catch(() => {}),
+      ),
+    );
+  }
+}
+
+/**
+ * Open one or more dropped CZI files, each as a mosaic of tiles.
+ *
+ * Every tile of the file becomes a view, so one CZI is a whole dataset. How
+ * many tiles that is only the reader knows, so the page mounts the file and
+ * lets Python enumerate them.
+ */
+async function loadCziFiles(handles) {
+  const files = await Promise.all(handles.map((handle) => handle.getFile()));
+  const directory = await mountFiles(files);
+
+  let append = Boolean(state.session && state.session.n_views);
+
+  log(
+    `mounted ${files.length} CZI file(s); reading tile positions` +
+      (append ? " and adding to the loaded views" : ""),
+  );
+  setStatus("opening CZI", true);
+
+  let described = null;
+  for (const file of files) {
+    described = await command("load_czi", {
+      path: `${directory}/${file.name}`,
+      name: file.name,
+      replace: !append,
+    });
+    // Only the first file may replace; the rest extend what it loaded.
+    append = true;
+  }
+
+  await applyDescribed(described);
+  setStatus(`${described.n_views} view(s) loaded`);
+  setBusy(false);
+}
+
 /**
  * Open one or more dropped folders.
  *
@@ -1880,6 +1971,12 @@ async function removeView(index, name) {
 
 async function clearSession() {
   const described = await command("clear", {});
+
+  // Released only after Python has dropped its open handles, which `clear`
+  // does. Unmounting under a live handle would fail reads rather than free
+  // anything.
+  await unmountAllFiles();
+
   // Everything derived from the old dataset goes, so that what is loaded next
   // starts from the same state a fresh page would.
   state.previewRoute = null;
@@ -2267,7 +2364,10 @@ function wireUi() {
   dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragging"));
 
   dropzone.addEventListener("click", (event) => {
-    if (event.target !== $("#browse")) $("#browse").click();
+    // Clicking the zone itself opens the folder picker; clicking either button
+    // inside it means what the button says.
+    if (event.target.closest("button")) return;
+    $("#browse").click();
   });
   dropzone.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -2294,26 +2394,33 @@ function wireUi() {
     try {
       const handles = (await Promise.all(claimed)).filter(Boolean);
       const directories = handles.filter((handle) => handle.kind === "directory");
+      const cziFiles = handles.filter(isCziFile);
 
-      if (!directories.length) {
-        log("drop one or more folders, not single files", "error");
+      if (!directories.length && !cziFiles.length) {
+        log("drop one or more folders, or CZI files", "error");
         return;
       }
-      if (directories.length < handles.length) {
+
+      const ignored = handles.length - directories.length - cziFiles.length;
+      if (ignored > 0) {
         log(
-          `ignoring ${handles.length - directories.length} dropped file(s); ` +
-            "only folders are read",
+          `ignoring ${ignored} dropped file(s); only folders and .czi files ` +
+            "are read",
           "warn",
         );
       }
 
-      await withPool(() => loadDirectories(directories));
+      // A mixed drop is loaded folders-first, so that the tiles of a CZI
+      // extend that set rather than the other way round - `load_czi` replaces
+      // only when nothing is loaded yet.
+      if (directories.length) await withPool(() => loadDirectories(directories));
+      if (cziFiles.length) await withPool(() => loadCziFiles(cziFiles));
     } catch (error) {
       log(error.message, "error");
       setStatus(
         hasViews()
-          ? "could not open that folder; the loaded views are unchanged"
-          : "failed to open the dropped folder",
+          ? "could not open that; the loaded views are unchanged"
+          : "failed to open what was dropped",
       );
     }
   });
@@ -2329,6 +2436,32 @@ function wireUi() {
         hasViews()
           ? "could not open that folder; the loaded views are unchanged"
           : "failed to open the folder",
+      );
+    }
+  });
+
+  $("#browse-czi").addEventListener("click", async (event) => {
+    // The dropzone opens the folder picker when clicked anywhere; this button
+    // sits inside it and means something else.
+    event.stopPropagation();
+    try {
+      const handles = await window.showOpenFilePicker({
+        multiple: true,
+        types: [
+          {
+            description: "Carl Zeiss Image files",
+            accept: { "application/octet-stream": [".czi"] },
+          },
+        ],
+      });
+      await withPool(() => loadCziFiles(handles));
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      log(error.message, "error");
+      setStatus(
+        hasViews()
+          ? "could not open that file; the loaded views are unchanged"
+          : "failed to open the CZI file",
       );
     }
   });

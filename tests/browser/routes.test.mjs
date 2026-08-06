@@ -910,3 +910,55 @@ test("views can be shown or hidden all at once, without the fused preview", asyn
   assert.doesNotMatch(handler, /previewVisibility|currentFusedLayerUrls/);
   assert.match(handler, /applyDisplayVisibility\(\)/);
 });
+
+test("a mounted CZI is readable by every Python worker", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = (name) =>
+    readFileSync(join(repoRoot, "docs", "browser", name), "utf8");
+
+  const runtime = read("py-runtime.js");
+
+  // WORKERFS is the only mount that reads a File lazily: it slices the Blob
+  // and reads it with FileReaderSync, so a multi-gigabyte CZI is seeked
+  // through rather than copied into the WebAssembly heap. NATIVEFS_ASYNC or
+  // writing the bytes into MEMFS would both load the whole file.
+  assert.match(runtime, /filesystems\.WORKERFS/);
+  assert.match(runtime, /export function mountFiles/);
+
+  // Python opens the file wherever the work runs. A compute worker rebuilds a
+  // session from source URLs alone, so it needs the same mount as the session
+  // worker or every chunk of a CZI view fails to open.
+  for (const name of ["session-worker.js", "compute-worker.js"]) {
+    assert.match(read(name), /mount-files/, `${name} must accept mounts`);
+  }
+
+  const app = read("app.js");
+  assert.match(app, /type: "mount-files"/);
+  // Workers started after the file was mounted have to be caught up, which is
+  // what `state.fileMounts` is kept for.
+  assert.match(app, /state\.fileMounts/);
+});
+
+test("CZI reading is installable in Pyodide", async () => {
+  const { readFileSync } = await import("node:fs");
+  const config = JSON.parse(
+    readFileSync(join(repoRoot, "docs", "browser", "config.json"), "utf8"),
+  );
+
+  // Both are pure-Python wheels; czifile reads through tifffile's FileHandle.
+  const dependencies = config.browser_dependencies.join(" ");
+  assert.match(dependencies, /czifile/);
+  assert.match(dependencies, /tifffile/);
+
+  // imagecodecs is a C extension with no WebAssembly build. czifile 2019.7.2.3
+  // treats it as optional and reads uncompressed CZI without it; the 2026
+  // releases import it unconditionally and would not load at all.
+  assert.ok(
+    config.browser_dependencies.includes("czifile==2019.7.2.3"),
+    "czifile must be pinned to the release that makes imagecodecs optional",
+  );
+  assert.ok(
+    !dependencies.includes("imagecodecs"),
+    "imagecodecs cannot be installed in Pyodide",
+  );
+});

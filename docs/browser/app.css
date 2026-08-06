@@ -170,6 +170,8 @@ button { color: inherit; }
 .dropzone > span { margin-top: 3px; color: var(--muted); font-size: 10.5px; }
 .dropzone button { margin-top: 12px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text); background: var(--panel-raised); cursor: pointer; }
 .dropzone button:hover { border-color: var(--accent); }
+/* Wraps rather than squeezing both buttons onto one line on a narrow panel. */
+.drop-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 .data-actions { position: relative; display: flex; justify-content: space-between; gap: 10px; margin: 8px 0 15px; }
 .text-button { padding: 3px 0; color: var(--accent); font-size: 10.5px; }

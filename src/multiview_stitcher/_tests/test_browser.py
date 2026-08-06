@@ -35,6 +35,8 @@ from multiview_stitcher.browser import (
     open_http_store,
     serialization,
 )
+from multiview_stitcher.browser import czi as browser_czi
+from multiview_stitcher.browser import dataset as browser_dataset
 from multiview_stitcher.browser import session as session_module
 from multiview_stitcher.browser import store as browser_store
 
@@ -1227,6 +1229,252 @@ def test_route_format_matches_service_worker_fixtures():
     session.generation = 3
     assert session._route(PREVIEW_NAME) == fixtures["stale_request"]["route"]
     assert session._route(PREVIEW_NAME) != fixtures["route"]
+
+
+# ---------------------------------------------------------------------------
+# Mosaic CZI inputs
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def czi_path():
+    """The mosaic CZI that ships with the package: two uncompressed tiles."""
+    pytest.importorskip("czifile")
+    return str(sample_data.get_mosaic_sample_data_path())
+
+
+def test_czi_url_round_trip():
+    url = browser_czi.czi_url("/czi/m1/a b.czi", 3, scene_index=2)
+
+    assert browser_czi.is_czi_url(url)
+    assert browser_czi.parse_czi_url(url) == ("/czi/m1/a b.czi", 2, 3)
+
+
+def test_czi_url_defaults_to_the_first_scene_and_tile():
+    assert browser_czi.parse_czi_url("mvs-czi:/czi/m1/x.czi") == (
+        "/czi/m1/x.czi",
+        0,
+        0,
+    )
+
+
+def test_non_czi_urls_are_rejected():
+    assert not browser_czi.is_czi_url("/browser/__mvs__/fs/m1/tile.ome.zarr")
+    with pytest.raises(ValueError, match="not a CZI tile URL"):
+        browser_czi.parse_czi_url("mvs-example:tiles-3d/0")
+
+
+def test_czi_sources_describe_every_tile(czi_path):
+    sources = browser_czi.czi_sources(czi_path, name="mosaic")
+
+    assert len(sources) == 2
+    assert [source["name"] for source in sources] == [
+        "mosaic tile 0",
+        "mosaic tile 1",
+    ]
+    assert [
+        browser_czi.parse_czi_url(source["url"])[2] for source in sources
+    ] == [0, 1]
+
+
+def test_czi_tile_matches_the_reader_it_wraps(czi_path):
+    """The browser must open exactly what `io` opens - the same function."""
+    from multiview_stitcher import io as mvs_io
+
+    expected = mvs_io.read_mosaic_into_sims_czifile(czi_path)
+
+    for index, source in enumerate(browser_czi.czi_sources(czi_path)):
+        opened = msi_utils.get_sim_from_msim(
+            browser_dataset.open_msim(source["url"])
+        )
+        np.testing.assert_array_equal(
+            np.asarray(opened.data), np.asarray(expected[index].data)
+        )
+        assert si_utils.get_origin_from_sim(
+            opened
+        ) == si_utils.get_origin_from_sim(expected[index])
+        assert si_utils.get_spacing_from_sim(
+            opened
+        ) == si_utils.get_spacing_from_sim(expected[index])
+
+
+def test_czi_tiles_are_read_lazily(czi_path):
+    """Enumerating tiles must not decode any subblock."""
+    msim = browser_czi.build_msim(browser_czi.czi_sources(czi_path)[0]["url"])
+    data = msi_utils.get_sim_from_msim(msim).data
+
+    assert hasattr(data, "compute")
+    assert not isinstance(data, np.ndarray)
+
+
+def test_czi_tiles_keep_their_mosaic_positions(czi_path):
+    """The tile offsets are the whole point of reading the mosaic metadata."""
+    origins = [
+        si_utils.get_origin_from_sim(
+            msi_utils.get_sim_from_msim(
+                browser_dataset.open_msim(source["url"])
+            )
+        )
+        for source in browser_czi.czi_sources(czi_path)
+    ]
+
+    assert origins[0]["x"] != origins[1]["x"]
+
+
+def test_session_loads_a_czi_as_virtual_views(czi_path):
+    session = Session()
+    described = session.load(browser_czi.czi_sources(czi_path))
+
+    assert described["n_views"] == 2
+    # A CZI is not an OME-Zarr the viewer could read by itself, so Python has
+    # to serve it - getting this wrong shows up as a permanently blank layer.
+    assert {view["served"] for view in described["views"]} == {"virtual"}
+    assert json.loads(json.dumps(described))["n_views"] == 2
+
+
+def test_czi_session_serves_view_chunks(czi_path):
+    session = Session()
+    session.load(browser_czi.czi_sources(czi_path))
+
+    route = session.view_route(0)
+    kind, zarray = session.serve(route, "0/.zarray")
+    assert kind == "json"
+
+    chunk_key = "/".join("0" for _ in zarray["chunks"])
+    kind, chunk = session.serve(route, f"0/{chunk_key}")
+
+    assert kind == "bytes"
+    assert len(chunk) == int(np.prod(zarray["chunks"])) * np.dtype(
+        zarray["dtype"]
+    ).itemsize
+    assert np.frombuffer(chunk, dtype=np.dtype(zarray["dtype"])).max() > 0
+
+
+def test_czi_session_rebuilds_from_its_spec(czi_path):
+    """A compute worker gets URLs only, and must open the file for itself."""
+    session = Session()
+    session.load(browser_czi.czi_sources(czi_path))
+
+    spec = json.loads(json.dumps(session.spec().to_dict()))
+    browser_czi.forget_files()  # the worker shares no cache with the session
+    rebuilt = Session.from_spec(spec)
+
+    assert len(rebuilt.msims) == len(session.msims)
+    np.testing.assert_array_equal(
+        np.asarray(msi_utils.get_sim_from_msim(rebuilt.msims[1]).data),
+        np.asarray(msi_utils.get_sim_from_msim(session.msims[1]).data),
+    )
+
+
+def test_czi_session_registers(czi_path):
+    session = Session()
+    session.load(browser_czi.czi_sources(czi_path))
+
+    result = session.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+
+    assert "registered" in session.transform_keys()
+    assert np.all(np.isfinite(np.asarray(result["params"][1]["data"])))
+
+
+def test_worker_loads_a_czi_by_path(czi_path):
+    """`load_czi` exists so the page never has to know the tile count."""
+    runtime = WorkerRuntime()
+    described = runtime.handle(
+        "load_czi", {"path": czi_path, "name": "mosaic.czi"}
+    )
+
+    assert described["n_views"] == 2
+    assert [view["name"] for view in described["views"]] == [
+        "mosaic.czi tile 0",
+        "mosaic.czi tile 1",
+    ]
+
+
+def test_clearing_a_session_releases_the_czi(czi_path):
+    """The page unmounts the file afterwards; nothing may still hold it open."""
+    from multiview_stitcher import czi_utils
+
+    session = Session()
+    session.load(browser_czi.czi_sources(czi_path))
+    assert getattr(czi_utils._open_files, "cache", None)
+
+    session.clear()
+
+    assert not getattr(czi_utils._open_files, "cache", {})
+
+
+def test_czi_reading_survives_without_imagecodecs(czi_path, monkeypatch):
+    """The reason the browser can read CZI at all.
+
+    imagecodecs is a C extension with no WebAssembly build. czifile treats it
+    as optional, but `czifile_patch` used to import it outright - and since
+    `czi_utils` reads an ImportError as "czifile is missing", that turned a
+    missing optional decoder into no CZI support whatsoever.
+    """
+    import builtins
+    import importlib
+    import sys
+
+    from multiview_stitcher import io as mvs_io
+
+    expected = mvs_io.read_mosaic_into_sims_czifile(czi_path)
+
+    real_import = builtins.__import__
+
+    def without_imagecodecs(name, *args, **kwargs):
+        if name.split(".")[0] in ("imagecodecs", "imagecodecs_lite"):
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    import multiview_stitcher
+
+    for name in ("czifile_patch", "czi_utils"):
+        monkeypatch.delitem(
+            sys.modules, f"multiview_stitcher.{name}", raising=False
+        )
+        # `from . import czifile_patch` takes the attribute the package still
+        # carries and never re-executes the module without this.
+        monkeypatch.delattr(multiview_stitcher, name, raising=False)
+
+    monkeypatch.setattr(builtins, "__import__", without_imagecodecs)
+
+    reloaded = importlib.import_module("multiview_stitcher.czi_utils")
+
+    assert (
+        reloaded.czifile is not None
+    ), "czifile must stay usable without imagecodecs"
+    assert reloaded.czifile_patch.imagecodecs is None
+
+    monkeypatch.setattr(mvs_io, "czi_utils", reloaded)
+    got = mvs_io.read_mosaic_into_sims_czifile(czi_path)
+
+    np.testing.assert_array_equal(
+        np.asarray(got[0].data), np.asarray(expected[0].data)
+    )
+
+
+def test_a_compressed_czi_reports_the_missing_decoder(monkeypatch):
+    """Without a decoder the failure must name the codec, not raise KeyError.
+
+    In the browser every compressed CZI lands here, since none of the codecs
+    can be registered - so the message is the whole of what the user sees.
+    """
+    import types
+
+    from multiview_stitcher import czifile_patch
+
+    # Stand in for a runtime without imagecodecs, so this runs everywhere
+    # rather than only where the optional dependency happens to be absent.
+    monkeypatch.delitem(czifile_patch.DECOMPRESS, 4, raising=False)
+
+    segment = types.SimpleNamespace(
+        directory_entry=types.SimpleNamespace(compression=4), _fh=None
+    )
+
+    with pytest.raises(ValueError, match="JPEG XR"):
+        czifile_patch.data(segment)
 
 
 # ---------------------------------------------------------------------------

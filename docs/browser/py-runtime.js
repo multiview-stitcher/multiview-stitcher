@@ -79,6 +79,55 @@ set_bridge(XHRBridge(base_url=${JSON.stringify(config.api_base)}))
   return api;
 }
 
+/**
+ * Where mounted CZI files appear in this worker's Python filesystem: one
+ * directory per mount id, so two files of the same name dropped from different
+ * folders cannot collide.
+ */
+const CZI_ROOT = "/czi";
+
+//: Mount id -> path, for mounts this worker already holds. Every worker mounts
+//: the same files independently - Python opens the file wherever it runs - and
+//: the page replays mounts to workers started later, so an id arrives twice.
+const cziMounts = new Map();
+
+/**
+ * Mount local files so Python can open them by path.
+ *
+ * WORKERFS is what makes reading a multi-gigabyte CZI possible at all: it
+ * serves reads straight from the `File` through `Blob.slice` and
+ * `FileReaderSync`, so seeking around the file costs only the bytes actually
+ * read and the file is never copied into the WebAssembly heap. It is
+ * worker-only - `FileReaderSync` does not exist on the main thread - which is
+ * one more reason every Python role in this app lives in a worker.
+ *
+ * Returns the directory the files were mounted at.
+ */
+export function mountFiles(mountId, files) {
+  if (cziMounts.has(mountId)) return cziMounts.get(mountId);
+
+  const { FS } = pyodide;
+  const path = `${CZI_ROOT}/${mountId}`;
+
+  FS.mkdirTree(path);
+  FS.mount(FS.filesystems.WORKERFS, { files }, path);
+  cziMounts.set(mountId, path);
+
+  return path;
+}
+
+/** Release a mount so the browser can let go of the underlying file. */
+export function unmountFiles(mountId) {
+  if (!cziMounts.has(mountId)) return;
+
+  const { FS } = pyodide;
+  const path = cziMounts.get(mountId);
+
+  FS.unmount(path);
+  FS.rmdir(path);
+  cziMounts.delete(mountId);
+}
+
 // Every call into Python is made with `callPromising`, which lets the
 // WebAssembly stack suspend. zarr v3 needs it: its API is asynchronous
 // underneath, and with no thread in the browser to run an event loop on it

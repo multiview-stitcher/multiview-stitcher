@@ -25,7 +25,8 @@ function post(id, payload, transfer = []) {
 }
 
 self.onmessage = async (event) => {
-  const { bootRuntime, callTask, callServe } = await runtime;
+  const { bootRuntime, callTask, callServe, mountFiles, unmountFiles } =
+    await runtime;
   const { id, type } = event.data;
 
   try {
@@ -60,6 +61,20 @@ self.onmessage = async (event) => {
         event.data.session,
       );
       post(id, response, response.found ? [response.data] : []);
+      return;
+    }
+
+    // Local files Python reads by path. A compute worker rebuilds the session
+    // from source URLs alone, so it has to hold the same mounts as the session
+    // worker before any task naming a CZI source reaches it.
+    if (type === "mount-files") {
+      post(id, { ok: true, path: mountFiles(event.data.mount, event.data.files) });
+      return;
+    }
+
+    if (type === "unmount-files") {
+      unmountFiles(event.data.mount);
+      post(id, { ok: true });
       return;
     }
 
