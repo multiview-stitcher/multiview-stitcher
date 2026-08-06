@@ -397,7 +397,23 @@ test("the workers are ES modules, because Pyodide refuses classic ones", async (
     ["compute-worker.js", ["bootRuntime", "callTask", "callServe"]],
   ]) {
     const source = readFileSync(join(dir, worker), "utf8");
-    assert.match(source, /await import\(\s*`\.\/py-runtime\.js\$\{self\.location\.search\}`/);
+
+    // Started, not awaited. The app posts "boot" the moment it constructs the
+    // Worker; a handler installed after a *top-level* await is not there yet
+    // when that message arrives, and the worker then sits forever having
+    // missed the only message it was sent - which is exactly what happened.
+    assert.match(
+      source,
+      /const runtime = import\(`\.\/py-runtime\.js\$\{self\.location\.search\}`\);/,
+      `${worker} must start the import without awaiting it`,
+    );
+    const beforeHandler = source.slice(0, source.indexOf("self.onmessage"));
+    assert.doesNotMatch(
+      beforeHandler,
+      /\bawait\b/,
+      `${worker} must install its message handler before any top-level await`,
+    );
+
     for (const name of names) {
       assert.match(
         runtime,
