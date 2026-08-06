@@ -17,6 +17,8 @@ from multiview_stitcher import (
     sample_data,
 )
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher._tests._zarr_marks import ARRAY_BACKENDS, zarr_v3_only
+from multiview_stitcher._zarr_compat import ZARR_V3
 
 
 def _single_scale_msim_from_sim(sim):
@@ -56,7 +58,7 @@ def test_round_trip(ndim, ngff_version, n_batch):
         spacing_z=1,
     )[1]
 
-    if zarr.__version__ < "3" and ngff_version >= "0.5":
+    if not ZARR_V3 and ngff_version >= "0.5":
         pytest.skip("zarr>=3 required for ngff_version 0.5")
 
     # sim
@@ -89,7 +91,12 @@ def test_round_trip(ndim, ngff_version, n_batch):
         ngff_multiscales = ngff_utils.msim_to_ngff_multiscales(
             msim, transform_key=io.METADATA_TRANSFORM_KEY
         )
-        ngff_zarr.to_ngff_zarr(zarr_path, ngff_multiscales)
+        # ngff-zarr writes 0.5 unless told otherwise, which is a zarr v3
+        # hierarchy; pass the parametrized version so the msim half of the
+        # round trip covers the same format as the sim half above.
+        ngff_zarr.to_ngff_zarr(
+            zarr_path, ngff_multiscales, version=ngff_version
+        )
 
         msim_read = ngff_utils.ngff_multiscales_to_msim(
             ngff_zarr.from_ngff_zarr(zarr_path),
@@ -116,7 +123,7 @@ def test_round_trip(ndim, ngff_version, n_batch):
         )
 
 
-@pytest.mark.parametrize("array_backend", ["zarr", "dask"])
+@pytest.mark.parametrize("array_backend", ARRAY_BACKENDS)
 @pytest.mark.parametrize(
     "ndim, N_t, N_c",
     [(2, 1, 1), (2, 2, 1), (3, 1, 2), (2, None, None)],
@@ -173,7 +180,7 @@ def test_ome_zarr_read_write(ndim, N_t, N_c, array_backend):
         )
 
 
-@pytest.mark.parametrize("array_backend", ["zarr", "dask"])
+@pytest.mark.parametrize("array_backend", ARRAY_BACKENDS)
 def test_read_msim_from_ome_zarr(array_backend):
     """Verify that read_msim_from_ome_zarr returns a multiscale image with
     correct pixel data, channel names and more than one resolution level."""
@@ -239,6 +246,7 @@ def test_read_msim_from_ome_zarr(array_backend):
             )
 
 
+@zarr_v3_only
 def test_read_sim_from_ome_zarr_backends():
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
@@ -274,6 +282,7 @@ def test_read_sim_from_ome_zarr_rejects_unknown_backend():
         )
 
 
+@zarr_v3_only
 def test_read_msim_from_ome_zarr_backends():
     sim = sample_data.generate_tiled_dataset(
         ndim=2,
@@ -739,7 +748,7 @@ def test_update_ome_zarr_multiscales_metadata(ngff_version):
     """Write an OME-Zarr with one origin, call update_ome_zarr_multiscales_metadata
     with a new origin, then read back and assert the scale0 translation was
     updated while the multiscales key structure is intact."""
-    if zarr.__version__ < "3" and ngff_version >= "0.5":
+    if not ZARR_V3 and ngff_version >= "0.5":
         pytest.skip("zarr>=3 required for ngff_version 0.5")
 
     spacing = {"y": 0.5, "x": 0.5}

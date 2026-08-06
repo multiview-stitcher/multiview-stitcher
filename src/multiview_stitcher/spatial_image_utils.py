@@ -10,8 +10,7 @@ from numpy._typing import ArrayLike
 from xarray.backends import BackendArray
 from xarray.core import indexing
 
-from multiview_stitcher import param_utils
-from multiview_stitcher import zarr_utils
+from multiview_stitcher import _zarr_compat, param_utils, zarr_utils
 
 DEFAULT_TRANSFORM_KEY = "affine_metadata"
 
@@ -468,7 +467,19 @@ def get_sim_from_array(
             assert len(dims) == array.ndim
 
         if isinstance(array, zarr.Array):
-            xim = _zarr_array_to_dataarray(array, dims=dims)
+            if zarr_utils.supports_virtual_arrays():
+                xim = _zarr_array_to_dataarray(array, dims=dims)
+            else:
+                # Staying zarr-backed only pays off through the virtual
+                # transforms - lazy singleton expansion, concat and stack - and
+                # those need zarr v3. Without them, read through dask instead:
+                # same data, same chunking (the store's own), and the eager
+                # combine paths take over from here.
+                _zarr_compat.warn_zarr_v3_fallback(
+                    "Building a zarr-backed spatial image",
+                    "a dask-backed one",
+                )
+                xim = xr.DataArray(da.from_zarr(array), dims=dims)
         else:
             xim = xr.DataArray(
                 array,

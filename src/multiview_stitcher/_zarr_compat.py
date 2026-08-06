@@ -1,10 +1,20 @@
 """
-Byte-level zarr helpers shared by both of multiview-stitcher's environments.
+Byte-level zarr helpers, and the one place that knows which zarr-python is
+installed.
 
-CPython and Pyodide now run the same zarr-python v3, so nothing here branches
-on the library version. What it does branch on is the *format* of the data: an
-OME-Zarr 0.4 store is a zarr v2 hierarchy and a 0.5 one is v3, and both are
-read through the same v3 library.
+Two independent things are called "zarr v2"/"v3" here, and they must not be
+confused:
+
+* the **data format**: an OME-Zarr 0.4 store is a zarr v2 hierarchy and a 0.5
+  one is v3. zarr-python v3 reads and writes both, and the helpers below branch
+  on ``zarr_format`` to do so.
+* the **library version**: :data:`ZARR_V3` says whether zarr-python itself is
+  v3. multiview-stitcher's core (NGFF 0.4 reading/writing, registration,
+  fusion) works under either, so that the package can be installed alongside
+  the ecosystem that still pins ``zarr<3``. Features that are inherently built
+  on the v3 API - the virtual arrays below, the browser store, TIFF-backed
+  virtual stores - announce that with :func:`require_zarr_v3` or degrade with
+  :func:`warn_zarr_v3_fallback`.
 
 Everything in this module is *numeric and byte-level*: array metadata dicts,
 codec signatures, chunk-key encoding and read-only "virtual" arrays whose
@@ -17,12 +27,68 @@ The public helpers are used by :mod:`multiview_stitcher.zarr_utils`.
 
 import json
 import os
+import warnings
 from collections.abc import MutableMapping
 
 import numcodecs
 import numcodecs.registry
 import numpy as np
 import zarr
+
+
+# ---------------------------------------------------------------------------
+# Which zarr-python is installed
+# ---------------------------------------------------------------------------
+
+
+def _zarr_major_version():
+    """Major version of the installed zarr-python, as an int.
+
+    Parsed rather than string-compared: ``"2.18.3" < "3"`` happens to be true
+    lexicographically, but ``"10.0" < "3"`` would be too.
+    """
+    head = zarr.__version__.split(".")[0]
+    digits = "".join(ch for ch in head if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+#: True when zarr-python v3 (or newer) is installed. See the module docstring
+#: for why this is not the same question as the format of a given store.
+ZARR_V3 = _zarr_major_version() >= 3
+
+
+class ZarrV3Required(ImportError):
+    """A feature was used that only zarr-python v3 can provide."""
+
+
+def _zarr_v3_message(feature):
+    return (
+        f"{feature} requires zarr-python >= 3, but zarr "
+        f"{zarr.__version__} is installed."
+    )
+
+
+def require_zarr_v3(feature):
+    """Raise :class:`ZarrV3Required` unless zarr-python v3 is installed.
+
+    For functionality that has no meaningful v2 equivalent, so that callers see
+    the reason rather than an ``AttributeError`` from deep inside zarr.
+    """
+    if not ZARR_V3:
+        raise ZarrV3Required(_zarr_v3_message(feature))
+
+
+def warn_zarr_v3_fallback(feature, fallback):
+    """Warn that ``feature`` is unavailable and ``fallback`` is used instead.
+
+    For functionality that *does* have a v2 equivalent, only a less efficient
+    one - the result is still correct, so this warns rather than raises.
+    """
+    warnings.warn(
+        f"{_zarr_v3_message(feature)} Falling back to {fallback}.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +310,9 @@ def _make_v3_store_class():
     """Build the zarr v3 virtual store class.
 
     Defined lazily inside a function so that importing this module under
-    zarr v2 never touches the v3-only ``zarr.abc`` / ``zarr.core`` namespaces.
+    zarr v2 never touches the v3-only ``zarr.abc`` / ``zarr.core`` namespaces:
+    the rest of the module - and everything that reads NGFF through it - stays
+    importable there.
     """
     from zarr.abc.store import Store
     from zarr.core.buffer import default_buffer_prototype
@@ -343,6 +411,10 @@ def open_virtual_array(template, out_shape, out_chunks, dispatch):
     that have no source (which read back as the fill value).
     """
     global _v3_store_class
+
+    # zarr v2 has no async store API to serve chunks through; callers are
+    # expected to have checked and taken an eager path instead.
+    require_zarr_v3("Virtual zarr arrays")
 
     meta_bytes, meta_key = synthesize_metadata(template, out_shape, out_chunks)
     grid = grid_shape(out_shape, out_chunks)

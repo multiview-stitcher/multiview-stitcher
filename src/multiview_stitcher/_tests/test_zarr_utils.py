@@ -6,6 +6,11 @@ import pytest
 import zarr
 
 from multiview_stitcher import zarr_utils
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
+
+# The whole module exercises the virtual-array layer, which is built on the
+# zarr v3 async store API.
+pytestmark = zarr_v3_only
 
 
 def _write_zarr(tmpdir, name, data, chunks, zarr_format):

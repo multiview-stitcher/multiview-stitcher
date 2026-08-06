@@ -22,10 +22,14 @@ Design contract
   shape and chunk grid.
 * Because these transforms only ever combine whole chunks, they compose: a
   virtual array may itself be a source of another virtual array.
+* Serving chunks needs zarr-python v3's async store API, so the whole module is
+  a no-op under zarr v2: the ``is_*`` predicates report False and callers take
+  their eager fallback. See :func:`supports_virtual_arrays`.
 """
 
 import numpy as np
 
+from multiview_stitcher._zarr_compat import ZARR_V3, require_zarr_v3
 from multiview_stitcher._zarr_compat import (
     codec_signature as _codec_signature,
 )
@@ -36,6 +40,17 @@ from multiview_stitcher._zarr_compat import (
 
 class NotChunkAlignedError(ValueError):
     """Raised when a concat cannot be expressed as a pure chunk-key remap."""
+
+
+def supports_virtual_arrays():
+    """True when the transforms in this module are available.
+
+    They rest on a read-only async store, which only zarr-python v3 has. Under
+    v2 every caller has an eager equivalent (``xr.concat``, ``expand_dims``,
+    ``da.from_zarr``), so callers should branch on this rather than let the
+    transforms raise.
+    """
+    return ZARR_V3
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +68,8 @@ def expand_dims(zarray, n_leading_singletons):
     n = int(n_leading_singletons)
     if n <= 0:
         return zarray
+
+    require_zarr_v3("Lazily expanding a zarr array")
 
     out_shape = (1,) * n + tuple(zarray.shape)
     out_chunks = (1,) * n + tuple(zarray.chunks)
@@ -76,6 +93,8 @@ def stack(zarrays, axis=0):
     zarrays = list(zarrays)
     if not zarrays:
         raise ValueError("stack requires at least one array.")
+
+    require_zarr_v3("Lazily stacking zarr arrays")
 
     first = zarrays[0]
     for other in zarrays[1:]:
@@ -108,6 +127,8 @@ def is_stackable(zarrays):
     Lets callers fall back to an eager path (mirroring
     :func:`is_chunk_aligned_concatenate`) instead of hitting a ``ValueError``.
     """
+    if not supports_virtual_arrays():
+        return False
     zarrays = list(zarrays)
     if not zarrays:
         return False
@@ -169,6 +190,8 @@ def _concatenate_layout(zarrays, axis):
 
 def is_chunk_aligned_concatenate(zarrays, axis):
     """Return True when ``concatenate(zarrays, axis)`` would succeed."""
+    if not supports_virtual_arrays():
+        return False
     try:
         _concatenate_layout(zarrays, axis)
     except NotChunkAlignedError:
@@ -184,6 +207,8 @@ def concatenate(zarrays, axis):
     ``k`` along ``axis`` is routed to the owning source and its local chunk
     index; all other chunk indices pass through unchanged.
     """
+    require_zarr_v3("Lazily concatenating zarr arrays")
+
     zarrays = list(zarrays)
     axis = int(axis)
     out_shape, out_chunks, cum_counts = _concatenate_layout(zarrays, axis)

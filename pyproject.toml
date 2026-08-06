@@ -42,7 +42,15 @@ dependencies = [
     "numpy >=1.18",
     "dask !=2025.11.0",
     "dask_image",
-    "zarr >=3",
+    # Both zarr-python v2 and v3 are supported, so that multiview-stitcher can
+    # be installed next to packages that still pin `zarr<3`. Reading and
+    # writing OME-Zarr 0.4, registration and fusion work under either. What
+    # needs v3 is OME-Zarr 0.5, the virtual-array layer (zarr-backed sims,
+    # TIFFs read through a virtual store) and the browser runtime; those warn
+    # or raise, see multiview_stitcher._zarr_compat.
+    # 2.18.7 is the only v2 release that caps numcodecs; earlier ones resolve
+    # against numcodecs >=0.16 and then fail to import.
+    "zarr >=2.18.7",
     "xarray >=2024.10.0",
     "tifffile >=2022.7.28",
     "networkx",

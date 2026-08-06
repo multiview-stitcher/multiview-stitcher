@@ -21,6 +21,7 @@ from multiview_stitcher import (
     spatial_image_utils,
     transformation,
 )
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
@@ -170,6 +171,7 @@ def test_pairwise_reg_against_sample_gt(pairwise_reg_func):
             )
 
 
+@zarr_v3_only
 def test_register_pair_of_msims_zarr_backed_input_is_converted_to_dask_after_selection(monkeypatch):
     sims = sample_data.generate_tiled_dataset(
         ndim=2,

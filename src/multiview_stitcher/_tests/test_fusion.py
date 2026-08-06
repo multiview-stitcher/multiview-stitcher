@@ -21,6 +21,7 @@ from multiview_stitcher import (
     weights,
 )
 from multiview_stitcher.fusion import _core as fusion_core
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
 from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
@@ -83,6 +84,7 @@ def test_fuse_sims():
     )
 
 
+@zarr_v3_only
 def test_fuse_zarr_backed_input_stays_zarr_backed_until_chunk_execution(
     monkeypatch,
 ):
@@ -573,6 +575,7 @@ def test_fuse_grid_aligned_chunk_edge_tolerates_coordinate_roundoff():
     )
 
 
+@zarr_v3_only
 def test_materialize_xarray_zarr_backend_retries_server_disconnect(
     monkeypatch,
 ):
@@ -1266,6 +1269,7 @@ def _small_zarr_backed_sim(tmpdir, name, value, tx=0.0, c_coord=0, t_coord=0.0):
     )
 
 
+@zarr_v3_only
 def test_fuse_concat_c_zarr_backed_sims(monkeypatch):
     """Fusing a zarr-backed sim assembled by concat along c stays on the lazy
     (input_is_zarr) path and produces the correct per-channel result."""
@@ -1298,6 +1302,7 @@ def test_fuse_concat_c_zarr_backed_sims(monkeypatch):
     assert result[0, 1].max() == 30
 
 
+@zarr_v3_only
 def test_fuse_concat_t_zarr_backed_sims():
     """Fusing zarr-backed timepoints concatenated along t (chunk-1 axis)."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1316,6 +1321,7 @@ def test_fuse_concat_t_zarr_backed_sims():
     assert result[1, 0].max() == 7
 
 
+@zarr_v3_only
 def test_fuse_two_zarr_backed_tiles_concat_c_mosaic():
     """A 2-channel concat of two overlapping tiles fuses into one mosaic."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1349,6 +1355,7 @@ def test_fuse_two_zarr_backed_tiles_concat_c_mosaic():
     assert result[0, 1].max() == 50
 
 
+@zarr_v3_only
 def test_fuse_msim_concat_c_zarr_backed():
     """Fuse the highest scale of a zarr-backed msim concatenated along c."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1373,6 +1380,7 @@ def test_fuse_msim_concat_c_zarr_backed():
     assert result[0, 1].max() == 22
 
 
+@zarr_v3_only
 def test_fuse_msim_concat_c_zarr_backed_multiscale():
     """Concat two multiscale (pyramid) zarr-backed msims along c and fuse.
 

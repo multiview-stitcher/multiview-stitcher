@@ -14,7 +14,7 @@ except ImportError:
     AICSImage = None
 
 
-from multiview_stitcher import czi_utils
+from multiview_stitcher import _zarr_compat, czi_utils
 from multiview_stitcher.imaris_utils import read_imaris_into_msim
 from multiview_stitcher import msi_utils
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -343,6 +343,16 @@ def read_tiff_into_spatial_xarray(
 
     if array_backend not in ("numpy", "dask", "zarr"):
         raise ValueError("array_backend must be 'numpy', 'dask' or 'zarr'.")
+
+    if array_backend == "zarr" and not _zarr_compat.ZARR_V3:
+        # The zarr backend exposes the TIFF through a virtual store, which
+        # needs zarr-python v3. The dask backend chunks the same file the same
+        # way (one chunk per plane), so degrade to it rather than fail.
+        _zarr_compat.warn_zarr_v3_fallback(
+            "Reading a TIFF through a virtual zarr store",
+            "the dask backend",
+        )
+        array_backend = "dask"
 
     if array_backend == "numpy":
         data = tifffile.imread(filename)

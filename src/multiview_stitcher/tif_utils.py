@@ -12,17 +12,18 @@ import zarr
 import dask.array as da
 from dask import delayed
 
+from multiview_stitcher import _zarr_compat
+
 try:
     from zarr.abc.store import Store
-except ImportError:  # pragma: no cover - exercised in the Pyodide environment
-    # zarr v2 (the only version installable in Pyodide) has no async store API.
-    # Keep this module importable there - OME-Zarr is the browser input format -
-    # and fail only when a TIFF-backed virtual store is actually constructed.
+except ImportError:  # pragma: no cover - exercised in the zarr v2 environment
+    # zarr-python v2 has no async store API. Keep this module importable there
+    # - reading TIFFs into dask does not need one - and fail only when a
+    # TIFF-backed virtual store is actually constructed.
     class Store:
         def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "Reading TIFF files through a virtual Zarr store requires "
-                f"zarr>=3, but zarr {zarr.__version__} is installed."
+            _zarr_compat.require_zarr_v3(
+                "Reading TIFF files through a virtual zarr store"
             )
 
 

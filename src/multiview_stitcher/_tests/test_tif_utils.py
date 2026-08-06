@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
 from multiview_stitcher.tif_utils import (
     tif_to_dask_plane_chunks,
     tif_to_virtual_zarr_v3_plane_chunks,
@@ -26,7 +27,7 @@ def test_tif_to_dask_plane_chunks_single_page():
 
 @pytest.mark.parametrize(
     "backend",
-    ["dask", "zarr"],
+    ["dask", pytest.param("zarr", marks=zarr_v3_only)],
 )
 def test_tif_multi_axis_plane_chunks(backend):
     """

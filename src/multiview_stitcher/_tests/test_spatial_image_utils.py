@@ -9,6 +9,7 @@ import zarr
 
 from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
 
 
 @pytest.mark.parametrize(
@@ -26,6 +27,7 @@ def test_sim_array_input_backends(xp, ndim):
     assert isinstance(sim.data, da.Array)
 
 
+@zarr_v3_only
 def test_sim_zarr_array_input_backend_is_preserved():
     with tempfile.TemporaryDirectory() as tmpdir:
         zarray = zarr.open_array(
@@ -52,6 +54,7 @@ def test_sim_zarr_array_input_backend_is_preserved():
         assert isinstance(sim_slice.data, da.Array)
 
 
+@zarr_v3_only
 @pytest.mark.parametrize("zarr_format", [2, 3])
 def test_get_sim_from_array_supports_zarr_v2_and_v3(zarr_format):
     """A sim can be built from both zarr v2 (OME-Zarr 0.4) and v3 arrays,
@@ -90,6 +93,7 @@ def test_get_sim_from_array_supports_zarr_v2_and_v3(zarr_format):
         )
 
 
+@zarr_v3_only
 def test_sim_zarr_array_html_repr_reuses_zarr_repr():
     with tempfile.TemporaryDirectory() as tmpdir:
         zarray = zarr.open_array(
@@ -119,6 +123,7 @@ def test_sim_zarr_array_html_repr_reuses_zarr_repr():
         assert "dask" in inline_repr
 
 
+@zarr_v3_only
 def test_serialize_deserialize_zarr_backed_sim_roundtrip():
     """Roundtrip: serialize then deserialize preserves dims and zarr-backed status."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,6 +152,7 @@ def test_serialize_deserialize_zarr_backed_sim_roundtrip():
         assert si_utils.is_xarray_zarr_backed(sim2)
 
 
+@zarr_v3_only
 def test_serialize_deserialize_zarr_backed_sim_with_dropped_dim():
     """Roundtrip after sim_sel_coords({'t': t_val}) preserves zarr-backed status."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -185,6 +191,7 @@ def test_serialize_deserialize_zarr_backed_sim_with_dropped_dim():
         assert sim2.coords["x"].values == pytest.approx(sim_sel.coords["x"].values)
 
 
+@zarr_v3_only
 def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
     """Roundtrip works when zarr dims are a subset of the expanded sim dims."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -225,6 +232,7 @@ def test_serialize_deserialize_zarr_backed_sim_after_singleton_expansion():
         assert si_utils.is_xarray_zarr_backed(sim2)
 
 
+@zarr_v3_only
 def test_deserialize_zarr_backed_sim_reconstruct_slice_reads_requested_region():
     with tempfile.TemporaryDirectory() as tmpdir:
         data = np.arange(3 * 2 * 8 * 8, dtype=np.uint16).reshape(3, 2, 8, 8)
@@ -301,6 +309,7 @@ def _zarr_backed_sim(tmpdir, name, data, dims, chunks, **kwargs):
     return si_utils.get_sim_from_array(zarray, dims=dims, **kwargs)
 
 
+@zarr_v3_only
 def test_singleton_expansion_wraps_one_real_zarr_array():
     """Adding singleton t/c yields a real zarr.Array matching the dims 1:1."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -333,6 +342,7 @@ def test_singleton_expansion_wraps_one_real_zarr_array():
         assert tuple(sim.encoding["preferred_chunks"]) == ("t", "c", "y", "x")
 
 
+@zarr_v3_only
 def test_concat_zarr_backed_sims_stays_zarr_backed():
     with tempfile.TemporaryDirectory() as tmpdir:
         common = dict(
@@ -370,6 +380,7 @@ def test_concat_zarr_backed_sims_stays_zarr_backed():
         assert "affine_metadata" in concatenated.attrs["transforms"]
 
 
+@zarr_v3_only
 def test_concat_zarr_backed_sims_unions_transform_keys():
     """Concat must union transform_keys, not just take sims[0]'s.
 
@@ -435,6 +446,7 @@ def _rank_matched_zarr_sim(tmpdir, name, data, dims, chunks):
     return sim
 
 
+@zarr_v3_only
 def test_stack_zarr_backed_sims_stays_zarr_backed():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Sims with c/y/x (no t): stacking adds a new leading t axis lazily.

@@ -1,5 +1,6 @@
 import atexit
 import asyncio
+from contextlib import contextmanager
 from dataclasses import asdict
 from functools import partial
 import json
@@ -1155,10 +1156,11 @@ def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
     v2 there is nothing to choose.
     """
     if str(ngff_version).startswith("0.4"):
-        if zarr.__version__ >= "3":
+        if _zarr_compat.ZARR_V3:
             return {"zarr_format": 2}
         return {}
     if str(ngff_version).startswith("0.5"):
+        _zarr_compat.require_zarr_v3("Writing OME-Zarr 0.5")
         return {"zarr_format": 3}
     raise ValueError(f"ngff_version {ngff_version} not supported")
 
@@ -1172,20 +1174,55 @@ def update_zarr_array_creation_kwargs_for_ngff_version(
         zarr_array_creation_kwargs.update({
                 "dimension_separator": '/',
         })
-        if zarr.__version__ >= "3":
+        if _zarr_compat.ZARR_V3:
             zarr_array_creation_kwargs.update({
                 "zarr_format": 2,
             })
     elif ngff_version == "0.5":
-        if zarr.__version__ < "3":
-            raise ValueError("zarr>=3 required for ngff_version 0.5")
+        # A 0.5 store is a zarr v3 hierarchy, which zarr-python v2 cannot write.
+        _zarr_compat.require_zarr_v3("Writing OME-Zarr 0.5")
         zarr_array_creation_kwargs.update({
-                "zarr_version" if zarr.__version__ < "3"
-                else "zarr_format": 3,
+                "zarr_format": 3,
         })
     else:
         raise ValueError(f"ngff_version {ngff_version} not supported")
     return zarr_array_creation_kwargs
+
+
+def _write_empty_chunks_kwargs():
+    """``zarr.open`` arguments that keep all-fill-value chunks on disk.
+
+    Resolution levels are written block by block, so a block that happens to
+    hold only the fill value must still be materialized: a reader that walks
+    the chunk grid otherwise finds a hole where a chunk should be.
+
+    zarr-python v2 takes this per array handle, and honours it on every open of
+    an existing array. v3 has no equivalent per-open argument that survives
+    reopening - ``config=`` applies only when the array is *created*, and is
+    dropped when ``mode="a"`` finds one already there - so v3 goes through
+    :func:`_writing_empty_chunks` instead.
+    """
+    if _zarr_compat.ZARR_V3:
+        return {}
+    return {"write_empty_chunks": True}
+
+
+@contextmanager
+def _writing_empty_chunks():
+    """Write all-fill-value chunks for the duration of the block.
+
+    The counterpart of :func:`_write_empty_chunks_kwargs` for zarr v3, where
+    the setting is read from the global config both when an array is opened and
+    when it is written. It has to wrap the write itself rather than only the
+    open: blocks may be written from another thread or process (see
+    ``batch_func``), which does not inherit a context entered here.
+    """
+    if not _zarr_compat.ZARR_V3:
+        yield
+        return
+
+    with zarr.config.set({"array.write_empty_chunks": True}):
+        yield
 
 
 # thanks to https://github.com/CamachoDejay/teaching-bioimage-analysis-python/blob/6076e00e392075ba9c07e67e868a39d4889e6298/short_examples/zarr-from-tiles/zarr-minimal-example-tiles.ipynb
@@ -1230,21 +1267,31 @@ def write_and_return_downsampled_sim(
                     trim_excess=True,
                 )
 
-            # Open output array. This allows setting `write_empty_chunks=True`,
-            # which cannot be passed to dask.array.to_zarr below.
-            output_zarr_arr = zarr.open(
-                output_zarr_array_url,
-                shape=array.shape,
-                chunks=chunksizes,
-                dtype=array.dtype,
-                config={'write_empty_chunks': True},
-                fill_value=0,
-                mode="w",
-                **zarr_array_creation_kwargs,
-            )
+            # Open output array. This allows keeping all-fill-value chunks,
+            # which cannot be requested through dask.array.to_zarr below.
+            with _writing_empty_chunks():
+                output_zarr_arr = zarr.open(
+                    output_zarr_array_url,
+                    shape=array.shape,
+                    chunks=chunksizes,
+                    dtype=array.dtype,
+                    **_write_empty_chunks_kwargs(),
+                    fill_value=0,
+                    mode="w",
+                    **zarr_array_creation_kwargs,
+                )
 
-            if show_progressbar:
-                with dask.diagnostics.ProgressBar(show_progressbar): 
+                if show_progressbar:
+                    with dask.diagnostics.ProgressBar(show_progressbar):
+                        # Write the array
+                        array = array.to_zarr(
+                            output_zarr_arr,
+                            overwrite=True,
+                            return_stored=True,
+                            compute=True,
+                        )
+
+                else:
                     # Write the array
                     array = array.to_zarr(
                         output_zarr_arr,
@@ -1252,15 +1299,6 @@ def write_and_return_downsampled_sim(
                         return_stored=True,
                         compute=True,
                     )
-
-            else:
-                # Write the array
-                array = array.to_zarr(
-                    output_zarr_arr,
-                    overwrite=True,
-                    return_stored=True,
-                    compute=True,
-                )
         else:
             # use dask with batching to limit memory usage
 
@@ -1268,13 +1306,12 @@ def write_and_return_downsampled_sim(
                     if sdim in sdims else 1)
                     for s, sdim in zip(array.shape, dims)]
             
-            # make sure output array exists with correct shape and chunks, and with `write_empty_chunks=True`
+            # make sure output array exists with correct shape and chunks
             zarr.open(
                 output_zarr_array_url,
                 shape=[int(s) for s in output_shape],
                 chunks=[int(cs) for cs in chunksizes],
                 dtype=array.dtype,
-                config={'write_empty_chunks': True},
                 fill_value=0,
                 mode="w" if overwrite else "a",
                 **zarr_array_creation_kwargs,
@@ -1371,29 +1408,32 @@ def write_downsampled_chunk(
         trim_excess=True,
     )
 
-    output_zarr_arr = zarr.open(
-        output_zarr_array_url,
-        shape=[int(s) for s in output_shape],
-        chunks=[int(cs) for cs in output_chunksizes],
-        dtype=input_array.dtype,
-        config={'write_empty_chunks': True},
-        fill_value=0,
-        mode="a",
-        **zarr_array_creation_kwargs,
-    )
+    # This block may run in a worker thread or process, so the setting has to
+    # be established here rather than around the loop that dispatches it.
+    with _writing_empty_chunks():
+        output_zarr_arr = zarr.open(
+            output_zarr_array_url,
+            shape=[int(s) for s in output_shape],
+            chunks=[int(cs) for cs in output_chunksizes],
+            dtype=input_array.dtype,
+            **_write_empty_chunks_kwargs(),
+            fill_value=0,
+            mode="a",
+            **zarr_array_creation_kwargs,
+        )
 
-    output_zarr_arr[tuple(
-        slice(
-            ns_coord[dim],
-            ns_coord[dim] + 1,
-        )
-        if dim in nsdims
-        else slice(
-            chunk_offset[dim],
-            chunk_offset[dim] + chunk_shape[dim],
-        )
-        for dim in dims
-    )] = output_chunk.compute()
+        output_zarr_arr[tuple(
+            slice(
+                ns_coord[dim],
+                ns_coord[dim] + 1,
+            )
+            if dim in nsdims
+            else slice(
+                chunk_offset[dim],
+                chunk_offset[dim] + chunk_shape[dim],
+            )
+            for dim in dims
+        )] = output_chunk.compute()
 
     return
 

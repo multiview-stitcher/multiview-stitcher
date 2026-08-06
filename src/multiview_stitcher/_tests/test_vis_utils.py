@@ -1175,9 +1175,13 @@ def test_view_neuroglancer_channel_coord_serves_selected_channel(monkeypatch):
             port=8126,
         )
 
-    path_served_sim = msi_utils.get_sim_from_msim(captured_msims[1])
-    assert path_served_sim.sizes["c"] == 1
-    assert str(path_served_sim.coords["c"].item()) == str(selected_channel)
+        # Inside the temporary directory: the served msim is lazily backed by
+        # the store on disk, which must still be there when it is read.
+        path_served_sim = msi_utils.get_sim_from_msim(captured_msims[1])
+        assert path_served_sim.sizes["c"] == 1
+        assert str(path_served_sim.coords["c"].item()) == str(
+            selected_channel
+        )
 
 
 def test_view_neuroglancer_virtual_images_without_transform(monkeypatch):

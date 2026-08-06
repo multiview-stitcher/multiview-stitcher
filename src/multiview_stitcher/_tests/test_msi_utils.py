@@ -8,6 +8,7 @@ import zarr
 
 from multiview_stitcher import msi_utils, param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
 
 
 @pytest.mark.parametrize(
@@ -389,6 +390,7 @@ def test_concat_result_can_be_selected_with_multiscale_sel_coords():
     )
 
 
+@zarr_v3_only
 def test_concat_single_msim_short_circuits_without_materializing():
     """
     A single-item concat is a no-op; it must not fall through to the eager

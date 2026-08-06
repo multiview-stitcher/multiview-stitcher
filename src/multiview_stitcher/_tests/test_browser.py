@@ -37,6 +37,12 @@ from multiview_stitcher.browser import (
 )
 from multiview_stitcher.browser import session as session_module
 from multiview_stitcher.browser import store as browser_store
+from multiview_stitcher._tests._zarr_marks import zarr_v3_only
+
+# The browser runtime is a zarr v3 environment end to end: Pyodide ships zarr
+# v3 and the store below is an async v3 store. Nothing here is expected to work
+# under zarr v2, so the whole module is skipped there.
+pytestmark = zarr_v3_only
 
 
 @pytest.fixture
