@@ -267,6 +267,131 @@ def test_read_sim_from_ome_zarr_backends():
         assert si_utils.is_dask_backed_dataarray(sim_dask)
 
 
+def _write_time_scaled_ome_zarr(zarr_path, n_t=4, t_scale=5.0, t_unit="second"):
+    """Write an OME-Zarr whose time axis is calibrated in real units.
+
+    ``write_sim_to_ome_zarr`` derives the time calibration from the sim, and a
+    sim built from scratch has none, so the metadata is patched afterwards to
+    stand in for an acquisition that recorded one.
+    """
+    sim = si_utils.get_sim_from_array(
+        np.zeros((n_t, 1, 8, 8), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+    root = zarr.open_group(zarr_path, mode="a")
+    attrs = dict(root.attrs)
+    multiscales = attrs["multiscales"][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    multiscales["axes"][t_index]["unit"] = t_unit
+    for dataset in multiscales["datasets"]:
+        for transform in dataset["coordinateTransformations"]:
+            if transform["type"] == "scale":
+                transform["scale"][t_index] = t_scale
+    attrs["multiscales"] = [multiscales]
+    root.attrs.update(attrs)
+
+    return zarr_path
+
+
+def test_non_unity_time_scale_survives_a_round_trip():
+    """A time axis calibrated in seconds must not come back as frame indices.
+
+    Time coordinates are frame indices whatever the store says, so without a
+    carrier of its own the calibration would be silently rewritten to 1 the
+    next time the image is written out.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zarr_path = _write_time_scaled_ome_zarr(
+            os.path.join(tmp_dir, "in.ome.zarr")
+        )
+
+        # Dask-backed so the image can be written out again below.
+        sim_read = ngff_utils.read_sim_from_ome_zarr(
+            zarr_path, array_backend="dask"
+        )
+        assert ngff_utils.get_ngff_time_transform(sim_read) == {
+            "scale": 5.0,
+            "translation": 0.0,
+            "unit": "second",
+        }
+
+        msim_read = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        assert ngff_utils.get_ngff_time_transform(msim_read) == {
+            "scale": 5.0,
+            "translation": 0.0,
+            "unit": "second",
+        }
+        # Every level carries it: the viewer may read any of them.
+        for scale_key in msi_utils.get_sorted_scale_keys(msim_read):
+            sim_level = msi_utils.get_sim_from_msim(msim_read, scale=scale_key)
+            assert ngff_utils.get_ngff_time_transform(sim_level)["scale"] == 5.0
+
+        out_path = os.path.join(tmp_dir, "out.ome.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim_read, out_path)
+
+        written = zarr.open_group(out_path, mode="r").attrs["multiscales"][0]
+        t_index = [axis["name"] for axis in written["axes"]].index("t")
+        assert written["axes"][t_index]["unit"] == "second"
+        for dataset in written["datasets"]:
+            scale = next(
+                transform
+                for transform in dataset["coordinateTransformations"]
+                if transform["type"] == "scale"
+            )
+            # The time scale is the same at every resolution level, which is
+            # only downsampled spatially.
+            assert scale["scale"][t_index] == 5.0
+
+
+def test_virtual_ome_zarr_reports_the_time_scale_of_its_source():
+    """A virtual store stands in for its image, time calibration included.
+
+    Views served natively and images served virtually are drawn in one
+    coordinate space, so a virtual store that claimed a unity time scale would
+    sit at a different point of the time axis than the views it belongs with.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zarr_path = _write_time_scaled_ome_zarr(
+            os.path.join(tmp_dir, "in.ome.zarr")
+        )
+        msim = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+
+        multiscales = ngff_utils.VirtualOMEZarr(msim).root_zattrs()[
+            "multiscales"
+        ][0]
+
+        t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+        assert multiscales["axes"][t_index]["unit"] == "second"
+        for dataset in multiscales["datasets"]:
+            scale = next(
+                transform
+                for transform in dataset["coordinateTransformations"]
+                if transform["type"] == "scale"
+            )
+            assert scale["scale"][t_index] == 5.0
+
+
+def test_virtual_ome_zarr_omits_a_time_unit_without_a_time_scale():
+    """An uncalibrated time axis keeps declaring a bare unity scale."""
+    sim = si_utils.get_sim_from_array(
+        np.zeros((3, 1, 4, 4), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+    )
+    multiscales = ngff_utils.VirtualOMEZarr(
+        msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    ).root_zattrs()["multiscales"][0]
+
+    t_axis = next(axis for axis in multiscales["axes"] if axis["name"] == "t")
+    assert "unit" not in t_axis
+    scale = multiscales["datasets"][0]["coordinateTransformations"][0]
+    assert scale["scale"][0] == 1.0
+
+
 def test_read_sim_from_ome_zarr_rejects_unknown_backend():
     with pytest.raises(ValueError, match="array_backend"):
         ngff_utils.read_sim_from_ome_zarr(

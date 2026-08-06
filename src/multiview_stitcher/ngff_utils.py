@@ -28,6 +28,83 @@ from multiview_stitcher import spatial_image_utils as si_utils
 # the original OME-Zarr must still have the rank of the array on disk.
 NGFF_SOURCE_DIMS_ATTR = "_multiview_stitcher_ngff_source_dims"
 
+# Calibration of the NGFF time axis.  Spatial images carry their spatial
+# calibration in the coordinates themselves, but ``t`` coordinates are frame
+# indices, so a non-unity NGFF time scale has nowhere else to live.  Losing it
+# is not merely cosmetic: a viewer reading the original store sees the stored
+# time scale, so an image served or written as if the scale were 1 no longer
+# lines up with it along ``t``.
+NGFF_TIME_TRANSFORM_ATTR = "_multiview_stitcher_ngff_time_transform"
+
+DEFAULT_NGFF_TIME_TRANSFORM = {
+    "scale": 1.0,
+    "translation": 0.0,
+    "unit": None,
+}
+
+
+def _ngff_time_transform_of(ngff_im):
+    """The time calibration an ``ngff_zarr`` image declares for its ``t`` axis."""
+    return {
+        "scale": float((ngff_im.scale or {}).get("t", 1.0)),
+        "translation": float((ngff_im.translation or {}).get("t", 0.0)),
+        "unit": (ngff_im.axes_units or {}).get("t"),
+    }
+
+
+def _time_transform_holders(image):
+    """The images an NGFF time calibration is stored on.
+
+    A multiscale image keeps one copy per resolution level, mirroring how the
+    NGFF source dims are stored: ``msi_utils`` strips image attrs when it
+    assembles a DataTree, so the attribute has to be reattached per scale.
+    """
+    if msi_utils.is_msim(image):
+        return [
+            image[f"{scale_key}/image"]
+            for scale_key in msi_utils.get_sorted_scale_keys(image)
+        ]
+    return [image]
+
+
+def get_ngff_time_transform(image):
+    """The NGFF time scale, translation and unit carried by ``image``.
+
+    Returns the identity calibration for images that carry none, so callers
+    can use the result unconditionally.
+    """
+    holders = _time_transform_holders(image)
+    stored = holders[0].attrs.get(NGFF_TIME_TRANSFORM_ATTR) if holders else None
+    return {**DEFAULT_NGFF_TIME_TRANSFORM, **(stored or {})}
+
+
+def set_ngff_time_transform(image, time_transform):
+    """Attach an NGFF time calibration to a spatial or multiscale image.
+
+    An identity calibration is stored as the absence of the attribute, which
+    keeps images that never had a time scale byte-identical to before.
+    """
+    time_transform = {
+        **DEFAULT_NGFF_TIME_TRANSFORM,
+        **(time_transform or {}),
+    }
+    for holder in _time_transform_holders(image):
+        if time_transform == DEFAULT_NGFF_TIME_TRANSFORM:
+            holder.attrs.pop(NGFF_TIME_TRANSFORM_ATTR, None)
+        else:
+            holder.attrs[NGFF_TIME_TRANSFORM_ATTR] = dict(time_transform)
+    return image
+
+
+def copy_ngff_time_transform(source, target):
+    """Give ``target`` the time calibration of ``source``.
+
+    A derived image - a fused stack, say - spans the same timepoints as the
+    images it came from, but is built from a bare array, so the calibration
+    has to be carried across rather than inherited.
+    """
+    return set_ngff_time_transform(target, get_ngff_time_transform(source))
+
 
 def _drop_none_values(value):
     if isinstance(value, dict):
@@ -152,11 +229,25 @@ class VirtualOMEZarr:
         sdims = si_utils.get_spatial_dims_from_sim(self.sims[0])
         dims = self.sims[0].dims
 
+        # A virtual store stands in for the image it was built from, so it has
+        # to declare the same time calibration: a viewer places a natively
+        # served store and a virtual one in a single coordinate space, and a
+        # ``t`` scale of 1 here against a scaled one there would put them at
+        # different points of the time axis.
+        time_transform = get_ngff_time_transform(self.msim)
+        _NSDIM_UNIT = {"t": time_transform["unit"]}
+        _NSDIM_SCALE = {"t": float(time_transform["scale"])}
+        _NSDIM_TRANSLATION = {"t": float(time_transform["translation"])}
+
         axes = [
             _drop_none_values({
                 "name": dim,
                 "type": _DIM_TYPE.get(dim, "space"),
-                "unit": "micrometer" if dim not in _DIM_TYPE else None,
+                "unit": (
+                    _NSDIM_UNIT.get(dim)
+                    if dim in _DIM_TYPE
+                    else "micrometer"
+                ),
             })
             for dim in dims
         ]
@@ -166,11 +257,15 @@ class VirtualOMEZarr:
             spacing = si_utils.get_spacing_from_sim(sim)
             origin = si_utils.get_origin_from_sim(sim)
             scale_values = [
-                float(spacing[dim]) if dim in sdims else 1.0
+                float(spacing[dim])
+                if dim in sdims
+                else _NSDIM_SCALE.get(dim, 1.0)
                 for dim in dims
             ]
             translation_values = [
-                float(origin[dim]) if dim in sdims else 0.0
+                float(origin[dim])
+                if dim in sdims
+                else _NSDIM_TRANSLATION.get(dim, 0.0)
                 for dim in dims
             ]
             datasets.append({
@@ -1024,6 +1119,13 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
     # OME-Zarr (not a newly generated virtual one) need the former.
     sim.attrs[NGFF_SOURCE_DIMS_ATTR] = list(ngff_im.dims)
 
+    # get_sim_from_array() applies scale and translation to the spatial
+    # coordinates only; ``t`` coordinates stay frame indices.  Keep the time
+    # calibration alongside them so it can be written back out and reported to
+    # viewers reading the original store.
+    if "t" in ngff_im.dims:
+        set_ngff_time_transform(sim, _ngff_time_transform_of(ngff_im))
+
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
     si_utils.set_sim_affine(
@@ -1058,17 +1160,7 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
         curr_scale_msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
 
-    msim = DataTree.from_dict(msim_dict)
-
-    # ``get_msim_from_sim`` intentionally strips image attrs. Reattach the
-    # original NGFF axes to every scale so converting the msim back to a sim
-    # retains the rank of the arrays that are actually served.
-    for iscale, ngff_im in enumerate(ngff_multiscales.images):
-        msim[f"scale{iscale}/image"].attrs[NGFF_SOURCE_DIMS_ATTR] = list(
-            ngff_im.dims
-        )
-
-    return msim
+    return DataTree.from_dict(msim_dict)
 
 
 def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
@@ -1402,18 +1494,35 @@ def calc_ngff_coordinate_transformations_and_axes(
     stack_properties_res0: dict,
     res_abs_factors: list[dict],
     nsdims: list = None,
+    time_transform: dict = None,
 ):
-    
+
     spacing = stack_properties_res0['spacing']
     origin = stack_properties_res0['origin']
     sdims = list(spacing.keys())
     n_resolutions = len(res_abs_factors)
 
+    # Resolution levels differ spatially only, so the time calibration - which
+    # the caller carries over from the images it derived this stack from -
+    # applies unchanged to every level.
+    time_transform = {
+        **DEFAULT_NGFF_TIME_TRANSFORM,
+        **(time_transform or {}),
+    }
+    nsdim_scales = [
+        float(time_transform["scale"]) if dim == "t" else 1.0
+        for dim in nsdims
+    ]
+    nsdim_translations = [
+        float(time_transform["translation"]) if dim == "t" else 0
+        for dim in nsdims
+    ]
+
     coordtfs = [
             [
                 {
                     "type": "scale",
-                    "scale": [1.0] * len(nsdims)
+                    "scale": nsdim_scales
                     + [
                         float(s * res_abs_factors[res_level][dim])
                         for dim, s in spacing.items()
@@ -1421,7 +1530,7 @@ def calc_ngff_coordinate_transformations_and_axes(
                 },
                 {
                     "type": "translation",
-                    "translation": [0] * len(nsdims)
+                    "translation": nsdim_translations
                     + [
                         origin[dim]
                         + (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
@@ -1432,7 +1541,7 @@ def calc_ngff_coordinate_transformations_and_axes(
             # [0] * (ndim - len(sdims)) + [origin[dim] for dim in sdims]}]
             for res_level in range(n_resolutions)
         ]
-    
+
     axes = [
         {
             "name": dim,
@@ -1441,6 +1550,11 @@ def calc_ngff_coordinate_transformations_and_axes(
             else ("time" if dim == "t" else "space"),
         }
         | ({"unit": "micrometer"} if dim in sdims else {})
+        | (
+            {"unit": time_transform["unit"]}
+            if dim == "t" and time_transform["unit"]
+            else {}
+        )
         for dim in nsdims + sdims
     ]
 
@@ -1558,6 +1672,7 @@ def write_sim_to_ome_zarr(
         },
         res_abs_factors,
         nsdims=nsdims,
+        time_transform=get_ngff_time_transform(sim),
     )
 
     # parent_res_array = sim.data

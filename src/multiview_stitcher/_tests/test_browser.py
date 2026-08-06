@@ -2268,3 +2268,87 @@ def test_progress_reports_enough_to_reach_the_total(tiles_on_disk, tmp_path):
     assert last["completed"] + last["batch"] == last["total"], (
         "the final batch must account for the rest of the work"
     )
+
+
+def _calibrate_time_axis(zarr_path, t_scale, t_unit="second"):
+    """Give a written OME-Zarr the time calibration an acquisition would have."""
+    import zarr
+
+    root = zarr.open_group(zarr_path, mode="a")
+    attrs = dict(root.attrs)
+    multiscales = attrs["multiscales"][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    multiscales["axes"][t_index]["unit"] = t_unit
+    for dataset in multiscales["datasets"]:
+        for transform in dataset["coordinateTransformations"]:
+            if transform["type"] == "scale":
+                transform["scale"][t_index] = t_scale
+    attrs["multiscales"] = [multiscales]
+    root.attrs.update(attrs)
+
+
+def test_a_scaled_time_axis_reaches_the_viewer_and_the_preview(tiles_on_disk):
+    """Views and the fused preview must sit on the same time axis.
+
+    Neuroglancer places every layer by the ratio between the time scale its
+    store declares and the one the state names.  Views are streamed from the
+    original stores, so the state has to name their time scale; the preview is
+    served virtually, so its store has to declare the same one.  Any
+    disagreement stretches a layer along `t`, and the app's time slider - which
+    addresses timepoints by frame - stops landing on the frame it asks for.
+    """
+    for url in tiles_on_disk:
+        _calibrate_time_axis(url, 5.0)
+
+    session = Session()
+    session.load(tiles_on_disk)
+    preview = session.fuse_preview(FusionOptions())
+
+    state = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        preview_route=preview["route"],
+    )
+
+    assert state["dimensions"]["t"] == [5.0, "s"]
+    for layer in state["layers"]:
+        transform = layer["source"].get("transform")
+        if transform:
+            assert transform["outputDimensions"]["t"] == [5.0, "s"]
+
+    # The preview layer carries no transform, so it is its virtual store that
+    # has to agree with the state.
+    multiscales = session.ensure_route(preview["route"]).root_zattrs()[
+        "multiscales"
+    ][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    assert multiscales["axes"][t_index]["unit"] == "second"
+    for dataset in multiscales["datasets"]:
+        scale = next(
+            transform
+            for transform in dataset["coordinateTransformations"]
+            if transform["type"] == "scale"
+        )
+        assert scale["scale"][t_index] == 5.0
+
+
+def test_views_served_virtually_keep_the_time_scale_of_their_stores(
+    tiles_on_disk,
+):
+    """Switching a view to a virtual route must not move it along `t`."""
+    for url in tiles_on_disk:
+        _calibrate_time_axis(url, 5.0)
+
+    session = Session()
+    session.load(tiles_on_disk)
+
+    state = session.neuroglancer_state(
+        transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+        serve_views="virtual",
+    )
+    assert state["dimensions"]["t"] == [5.0, "s"]
+
+    route = session.view_route(0)
+    multiscales = session.ensure_route(route).root_zattrs()["multiscales"][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    scale = multiscales["datasets"][0]["coordinateTransformations"][0]
+    assert scale["scale"][t_index] == 5.0

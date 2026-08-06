@@ -1415,3 +1415,97 @@ def test_view_neuroglancer_different_folders(monkeypatch):
         assert any(issubclass(w.category, UserWarning) for w in caught)
         # serve_dir must NOT have been called
         assert len(served_dirs) == 0
+
+
+def _write_time_scaled_ome_zarr(zarr_path, t_scale, t_unit, n_t=4):
+    """An OME-Zarr whose time axis is calibrated in real units.
+
+    The calibration is patched in afterwards because a sim built from scratch
+    carries none, and it is the store - not the sim - that a viewer reads.
+    """
+    sim = si_utils.get_sim_from_array(
+        np.zeros((n_t, 1, 8, 8), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+    ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+    root = zarr.open_group(zarr_path, mode="a")
+    attrs = dict(root.attrs)
+    multiscales = attrs["multiscales"][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    multiscales["axes"][t_index]["unit"] = t_unit
+    for dataset in multiscales["datasets"]:
+        for transform in dataset["coordinateTransformations"]:
+            if transform["type"] == "scale":
+                transform["scale"][t_index] = t_scale
+    attrs["multiscales"] = [multiscales]
+    root.attrs.update(attrs)
+
+    return zarr_path
+
+
+@pytest.mark.parametrize(
+    "t_scale, t_unit, expected",
+    [
+        (5.0, "second", [5.0, "s"]),
+        (100.0, "millisecond", [0.1, "s"]),
+        (2.0, None, [2.0, ""]),
+        (1.0, "second", [1.0, "s"]),
+    ],
+)
+def test_neuroglancer_state_declares_the_stores_time_scale(
+    t_scale, t_unit, expected
+):
+    """The time dimension must describe the store the viewer actually reads.
+
+    Neuroglancer scales every layer by the ratio between the time scale the
+    store declares and the one named in the state.  Naming 1 for a store
+    calibrated in seconds stretches the layer along `t` by that scale, so a
+    position expressed in frames - which is what the app's time slider sets -
+    lands on a different frame than the one asked for.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zarr_path = _write_time_scaled_ome_zarr(
+            os.path.join(tmp_dir, "scaled.ome.zarr"), t_scale, t_unit
+        )
+        msim = ngff_utils.read_msim_from_ome_zarr(
+            zarr_path, transform_key=METADATA_TRANSFORM_KEY
+        )
+        sim = msi_utils.get_sim_from_msim(msim)
+
+        ng_json = vis_utils.generate_neuroglancer_json(
+            ome_zarr_paths=None,
+            ome_zarr_urls=["zarr://http://localhost:8000/scaled.ome.zarr"],
+            sims=[sim],
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+
+        assert ng_json["dimensions"]["t"] == expected
+        source_transform = ng_json["layers"][0]["source"]["transform"]
+        assert source_transform["outputDimensions"]["t"] == expected
+
+        # The spatial axes are unaffected by the time calibration.
+        assert ng_json["dimensions"]["y"] == [0.5, "um"]
+        assert ng_json["dimensions"]["x"] == [0.5, "um"]
+
+
+def test_neuroglancer_state_keeps_a_bare_time_dimension_uncalibrated():
+    """An image with no time calibration still declares a unity time scale."""
+    sim = si_utils.get_sim_from_array(
+        np.zeros((3, 1, 8, 8), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    ng_json = vis_utils.generate_neuroglancer_json(
+        ome_zarr_paths=None,
+        ome_zarr_urls=["zarr://http://localhost:8000/plain.ome.zarr"],
+        sims=[sim],
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+
+    assert ng_json["dimensions"]["t"] == [1.0, ""]
+    assert ng_json["dimensions"]["c"] == [1, ""]

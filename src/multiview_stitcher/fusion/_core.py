@@ -1152,6 +1152,9 @@ def fuse(
             t_coords=sims[0].coords["t"].values,
         )
 
+        # Before the write below, which reads it off the sim.
+        ngff_utils.copy_ngff_time_transform(sims[0], fused)
+
         # If requested, write OME-Zarr metadata
         # and multiscale pyramid
         if ome_zarr:
@@ -1492,6 +1495,8 @@ def fuse(
     # (combine_by_coords may change coordinate order)
     if "c" in res.dims:
         res = res.sel({"c": sims[0].coords["c"].values})
+
+    ngff_utils.copy_ngff_time_transform(sims[0], res)
 
     return res
 

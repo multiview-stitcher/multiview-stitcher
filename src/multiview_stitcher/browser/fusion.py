@@ -245,6 +245,8 @@ def write_multiscales_metadata(msims, options, fetch=None, write=None):
         scale0_properties,
         res_abs_factors,
         nsdims=nsdims,
+        # The fused output shares the time axis of the views it came from.
+        time_transform=ngff_utils.get_ngff_time_transform(msims[0]),
     )
 
     root = str(options.output_zarr_url).rstrip("/")

@@ -18,6 +18,38 @@ from multiview_stitcher import ngff_utils, spatial_image_utils
 # Public Neuroglancer instance used when no custom `neuroglancer_url` is given.
 _DEFAULT_NEUROGLANCER_URL = "https://neuroglancer-demo.appspot.com"
 
+# NGFF unit names in terms of the base units Neuroglancer expects, which it
+# writes with SI prefixes rather than spelled out.
+_NGFF_UNIT_SPECS = {
+    "meter": (1, "m"),
+    "millimeter": (1e-3, "m"),
+    "micrometer": (1e-6, "m"),
+    "nanometer": (1e-9, "m"),
+    "second": (1, "s"),
+    "millisecond": (1e-3, "s"),
+    "microsecond": (1e-6, "s"),
+    "nanosecond": (1e-9, "s"),
+}
+
+
+def _dimension_spec(scale, unit):
+    """A Neuroglancer `[scale, unit]` dimension spec for an NGFF axis."""
+    factor, ng_unit = _NGFF_UNIT_SPECS.get(unit, (1, unit or ""))
+    return [float(scale) * factor, ng_unit]
+
+
+def _time_dimension_spec(sim):
+    """The Neuroglancer time dimension of the store a sim is served from.
+
+    Neuroglancer scales each layer by the ratio between the time scale the
+    store declares and the one named here, so a sim read from a store with a
+    non-unity time scale has to report that scale rather than assume 1 - at a
+    ratio other than 1 the viewer's time axis stops counting frames, and any
+    position expressed in frames lands on the wrong one.
+    """
+    time_transform = ngff_utils.get_ngff_time_transform(sim)
+    return _dimension_spec(time_transform["scale"], time_transform["unit"])
+
 
 def _affine_to_neuroglancer_source_transform(
     affine, sdims, output_spacing
@@ -254,35 +286,30 @@ def generate_neuroglancer_json(
         channel_index = 0
 
     if not virtual_ome_zarrs:
-        unit_specs = {
-            "meter": (1, "m"),
-            "millimeter": (1e-3, "m"),
-            "micrometer": (1e-6, "m"),
-            "nanometer": (1e-9, "m"),
-            "second": (1, "s"),
-            "millisecond": (1e-3, "s"),
-            "microsecond": (1e-6, "s"),
-            "nanosecond": (1e-9, "s"),
-        }
         dimension_specs_per_source = []
         for ngff_image in ngff_images:
-            dimension_specs = {}
-            for dim in dims:
-                unit = (ngff_image.axes_units or {}).get(dim)
-                scale, ng_unit = unit_specs.get(unit, (1, unit or ""))
-                dimension_specs[dim] = [
-                    float(ngff_image.scale.get(dim, 1)) * scale,
-                    ng_unit,
-                ]
-            dimension_specs_per_source.append(dimension_specs)
-    else:
-        dimension_specs_per_source = []
-        for spacing_isim in spacings_per_sim:
             dimension_specs_per_source.append({
-                dim: [
-                    float(spacing_isim[dim]) if dim in sdims else 1,
-                    "um" if dim in sdims else "",
-                ]
+                dim: _dimension_spec(
+                    ngff_image.scale.get(dim, 1),
+                    (ngff_image.axes_units or {}).get(dim),
+                )
+                for dim in dims
+            })
+    else:
+        # The spatial calibration lives in the sim's coordinates, but the time
+        # calibration is carried alongside them: `t` coordinates are frame
+        # indices whichever time scale the store the sim came from declares.
+        dimension_specs_per_source = []
+        for source_sim, spacing_isim in zip(sims, spacings_per_sim):
+            time_spec = _time_dimension_spec(source_sim)
+            dimension_specs_per_source.append({
+                dim: (
+                    [float(spacing_isim[dim]), "um"]
+                    if dim in sdims
+                    else time_spec
+                    if dim == "t"
+                    else [1, ""]
+                )
                 for dim in dims
             })
 

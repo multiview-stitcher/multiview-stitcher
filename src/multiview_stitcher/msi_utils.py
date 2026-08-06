@@ -26,13 +26,23 @@ def _chunk_sim(sim, chunks):
     return sim.chunk({dim: chunks[dim] for dim in sim.dims if dim in chunks})
 
 
+# Attrs that become data_vars at the msim level, so keeping them on the image
+# as well would leave two copies to disagree.
+_ATTRS_REATTACHED_AS_DATA_VARS = ("transforms", "point_sets")
+
+
 def _sim_to_dataset(sim):
-    # Strip attrs (transforms are re-attached as data_vars at the msim level).
     # Chunk hints live in xarray encoding, which survives to_dataset / DataTree,
-    # so no dim/chunk bookkeeping needs to be carried on attrs.
+    # so no dim/chunk bookkeeping needs to be carried on attrs.  Everything
+    # else describing the image - its NGFF source axes, its time calibration -
+    # stays put: an msim describes the same image its sims do.
     dataset = sim.to_dataset(name="image")
     dataset.attrs = {}
-    dataset["image"].attrs = {}
+    dataset["image"].attrs = {
+        key: value
+        for key, value in sim.attrs.items()
+        if key not in _ATTRS_REATTACHED_AS_DATA_VARS
+    }
     return dataset
 
 
