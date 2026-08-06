@@ -567,6 +567,96 @@ def test_register(
         )
 
 
+def test_register_3d_input_with_singleton_spatial_dim():
+    """
+    3D views with an extent of a single pixel along one spatial dimension
+    should be registered in 2D, with the resulting parameters broadcast
+    back to 3D.
+    """
+
+    np.random.seed(0)
+    im = ndimage.gaussian_filter(np.random.random((100, 100)), 1)
+
+    # two tiles overlapping in x, the second one misaligned by a known shift
+    shift_x = 3.0
+    tile_offsets = [(0, 0.0), (40, shift_x)]
+
+    sims = [
+        spatial_image_utils.get_sim_from_array(
+            im[:, offset : offset + 60],
+            dims=["y", "x"],
+            translation={"y": 0.0, "x": float(offset) + shift},
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for offset, shift in tile_offsets
+    ]
+
+    # the same tiles, with a z dimension of length one
+    sims_3d = [
+        spatial_image_utils.get_sim_from_array(
+            im[None, :, offset : offset + 60],
+            dims=["z", "y", "x"],
+            translation={"z": 3.0, "y": 0.0, "x": float(offset) + shift},
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for offset, shift in tile_offsets
+    ]
+
+    params_2d, params_3d = [
+        registration.register(
+            [
+                msi_utils.get_msim_from_sim(sim, scale_factors=[])
+                for sim in curr_sims
+            ],
+            transform_key=METADATA_TRANSFORM_KEY,
+            reg_channel_index=0,
+            # dimension specific parameters can refer to the reduced dimension
+            registration_binning={
+                dim: 1
+                for dim in spatial_image_utils.get_spatial_dims_from_sim(
+                    curr_sims[0]
+                )
+            },
+        )
+        for curr_sims in [sims, sims_3d]
+    ]
+
+    for p_2d, p_3d in zip(params_2d, params_3d):
+        # the parameters obtained from the 3D input are 3D
+        assert list(p_3d.coords["x_in"].values) == ["z", "y", "x", "1"]
+
+        # and identical to the 2D ones in the registered dimensions
+        assert np.allclose(
+            p_3d.sel(x_in=["y", "x", "1"], x_out=["y", "x", "1"]).data,
+            p_2d.data,
+        )
+
+        # while leaving z untransformed
+        assert np.allclose(p_3d.sel(x_in="z").data, [1, 0, 0, 0])
+        assert np.allclose(p_3d.sel(x_out="z").data, [1, 0, 0, 0])
+
+    # confirm that the (2D) registration recovered the known misalignment
+    assert np.allclose(
+        (params_3d[1] - params_3d[0]).sel(x_in="x", x_out="1").data,
+        -shift_x,
+        atol=0.5,
+    )
+
+    # views lying at different z coordinates are not projected
+    assert registration._get_singleton_spatial_dim(sims_3d) == "z"
+    assert (
+        registration._get_singleton_spatial_dim(
+            [
+                sims_3d[0],
+                sims_3d[1].assign_coords(
+                    {"z": sims_3d[1].coords["z"].data + 1}
+                ),
+            ]
+        )
+        is None
+    )
+
+
 def test_reg_channel():
     example_data_path = sample_data.get_mosaic_sample_data_path()
     sims = io.read_mosaic_into_sims(example_data_path)

@@ -114,7 +114,15 @@ def get_transform_from_msim(msim, transform_key):
 
 
 def multiscale_sel_coords(msim, sel_dict):
-    """ """
+    """
+    Select coordinates from a msim.
+
+    Selecting a single coordinate along a spatial dimension projects the msim
+    onto the remaining spatial dimensions. In this case, the affine transforms
+    associated with the msim are reduced by the projected dimension(s).
+    """
+
+    input_sdims = si_utils.get_spatial_dims_from_sim(msim["scale0/image"])
 
     # Somehow .sel on a datatree does not work when
     # attributes are present. So we remove them and
@@ -131,6 +139,48 @@ def multiscale_sel_coords(msim, sel_dict):
         msim.attrs = attrs
     selected.attrs = attrs
     msim = selected
+
+    # spatial dimensions dropped by the selection above, i.e. those for which
+    # a single coordinate had been selected
+    projected_sdims = [
+        dim
+        for dim in input_sdims
+        if dim not in si_utils.get_spatial_dims_from_sim(msim["scale0/image"])
+    ]
+
+    if len(projected_sdims):
+        # The affine transforms of the msim are not affected by the coordinate
+        # selection above, so reduce them by the projected dimensions here.
+        transforms = get_transforms_from_dataset_as_dict(msim["scale0"])
+
+        # remove the transforms including their 'x_in' / 'x_out' coordinates,
+        # which would otherwise realign the reduced transforms back to the
+        # original dimensionality
+        for scale_key in get_sorted_scale_keys(msim):
+            msim[scale_key] = xr.DataTree(
+                msim[scale_key]
+                .to_dataset(inherit=False)
+                .drop_vars(
+                    list(transforms) + ["x_in", "x_out"], errors="ignore"
+                )
+            )
+
+        # and add them back without the projected dimensions
+        for transform_key, affine in transforms.items():
+            set_affine_transform(
+                msim,
+                affine.sel(
+                    {
+                        pdim: [
+                            sdim
+                            for sdim in affine.coords[pdim].values
+                            if sdim not in projected_sdims
+                        ]
+                        for pdim in ["x_in", "x_out"]
+                    }
+                ),
+                transform_key=transform_key,
+            )
 
     if "point_sets" in list(msim.keys()):
         for points_key in list(msim["point_sets"].keys()):
