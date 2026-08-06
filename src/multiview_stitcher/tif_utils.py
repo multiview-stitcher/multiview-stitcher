@@ -8,10 +8,22 @@ from pathlib import Path
 import numpy as np
 import tifffile
 import zarr
-from zarr.abc.store import Store
 
 import dask.array as da
 from dask import delayed
+
+try:
+    from zarr.abc.store import Store
+except ImportError:  # pragma: no cover - exercised in the Pyodide environment
+    # zarr v2 (the only version installable in Pyodide) has no async store API.
+    # Keep this module importable there - OME-Zarr is the browser input format -
+    # and fail only when a TIFF-backed virtual store is actually constructed.
+    class Store:
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "Reading TIFF files through a virtual Zarr store requires "
+                f"zarr>=3, but zarr {zarr.__version__} is installed."
+            )
 
 
 def _get_tiff_layout(tif):

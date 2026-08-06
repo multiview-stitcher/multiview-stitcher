@@ -203,7 +203,18 @@ If you find multiview-stitcher useful please cite this repository using the foll
 
 `multiview-stitcher` can run without installation in your browser. Data is processed locally in the browser and not uploaded to any server.
 
-### Try it out
+### Web app
+
+A [browser app](https://multiview-stitcher.github.io/multiview-stitcher/main/browser/) combines the library with [neuroglancer](https://neuroglancer-docs.web.app/) as the viewer:
+
+- drop a folder holding your OME-Zarr tiles onto the page (Chromium-based browsers, using the File System Access API)
+- register and fuse with a single click, spread over as many Python web workers as you choose
+- switch the displayed `transform_key` to compare coordinate systems, e.g. stage positions vs. registration result
+- fuse either lazily into the viewer, or into an OME-Zarr written back to a folder on your disk
+
+See [Stitching in the browser](https://multiview-stitcher.github.io/multiview-stitcher/main/stitching_in_the_browser/) for how it works and its current limitations.
+
+### JupyterLite
 
 - open [JupyterLite](https://jupyter.org/try-jupyter/lab/) in a private browser window
 - upload this notebook into the jupyter lab window: [notebooks/stitching_in_the_browser.ipynb](https://github.com/multiview-stitcher/multiview-stitcher/tree/main/notebooks/stitching_in_the_browser.ipynb)

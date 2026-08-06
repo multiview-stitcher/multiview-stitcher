@@ -42,7 +42,7 @@ dependencies = [
     "numpy >=1.18",
     "dask !=2025.11.0",
     "dask_image",
-    "zarr",
+    "zarr >=3",
     "xarray >=2024.10.0",
     "tifffile >=2022.7.28",
     "networkx",
@@ -50,7 +50,6 @@ dependencies = [
     "matplotlib",
     "scikit-image >=0.21.0",
     "ngff-zarr >=0.12.2",
-    "ome-zarr >=0.10.2",
     "aiohttp"
 ]
 dynamic = [
@@ -111,6 +110,17 @@ playground = [
     "h5py",
     "lxml",
     "xmltodict",
+]
+browser = [
+    # Versions installable in Pyodide, matching docs/browser/config.json.
+    # ngff-zarr and zarr v3 both work there, so the NGFF reader, the NGFF
+    # writer and the zarr library are the same code in the browser as on
+    # CPython. Note that zarr must come from Pyodide's own package index:
+    # its build blocks by suspending the WebAssembly stack, and the PyPI
+    # wheel of the same version starts a thread instead.
+    "dask[array] ==2025.2.0",
+    "dask-image ==2024.5.3",
+    "ngff-zarr",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",

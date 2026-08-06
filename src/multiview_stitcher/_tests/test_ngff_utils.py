@@ -10,6 +10,7 @@ import zarr
 from xarray import DataTree
 
 from multiview_stitcher import (
+    _zarr_compat,
     io,
     msi_utils,
     ngff_utils,
@@ -199,6 +200,10 @@ def test_read_msim_from_ome_zarr(array_backend):
         )
         sim_read = msi_utils.get_sim_from_msim(msim_read, scale="scale0")
 
+        assert sim_read.attrs[ngff_utils.NGFF_SOURCE_DIMS_ATTR] == list(
+            sim.dims
+        )
+
         assert si_utils.is_dask_backed_dataarray(sim_read) == (
             array_backend == "dask"
         )
@@ -209,6 +214,9 @@ def test_read_msim_from_ome_zarr(array_backend):
             [str(v) for v in sim.coords["c"].values],
             [str(v) for v in sim_read.coords["c"].values],
         )
+        assert msim_read.attrs["omero"] == zarr.open_group(
+            zarr_path, mode="r"
+        ).attrs["omero"]
 
         selected_channel = sim.coords["c"].values[1]
         selected_msim = msi_utils.multiscale_sel_coords(
@@ -257,6 +265,131 @@ def test_read_sim_from_ome_zarr_backends():
         assert si_utils.is_xarray_zarr_backed(sim_zarr)
         assert not si_utils.is_dask_backed_dataarray(sim_zarr)
         assert si_utils.is_dask_backed_dataarray(sim_dask)
+
+
+def _write_time_scaled_ome_zarr(zarr_path, n_t=4, t_scale=5.0, t_unit="second"):
+    """Write an OME-Zarr whose time axis is calibrated in real units.
+
+    ``write_sim_to_ome_zarr`` derives the time calibration from the sim, and a
+    sim built from scratch has none, so the metadata is patched afterwards to
+    stand in for an acquisition that recorded one.
+    """
+    sim = si_utils.get_sim_from_array(
+        np.zeros((n_t, 1, 8, 8), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+        translation={"y": 0.0, "x": 0.0},
+    )
+    ngff_utils.write_sim_to_ome_zarr(sim, zarr_path)
+
+    root = zarr.open_group(zarr_path, mode="a")
+    attrs = dict(root.attrs)
+    multiscales = attrs["multiscales"][0]
+    t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+    multiscales["axes"][t_index]["unit"] = t_unit
+    for dataset in multiscales["datasets"]:
+        for transform in dataset["coordinateTransformations"]:
+            if transform["type"] == "scale":
+                transform["scale"][t_index] = t_scale
+    attrs["multiscales"] = [multiscales]
+    root.attrs.update(attrs)
+
+    return zarr_path
+
+
+def test_non_unity_time_scale_survives_a_round_trip():
+    """A time axis calibrated in seconds must not come back as frame indices.
+
+    Time coordinates are frame indices whatever the store says, so without a
+    carrier of its own the calibration would be silently rewritten to 1 the
+    next time the image is written out.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zarr_path = _write_time_scaled_ome_zarr(
+            os.path.join(tmp_dir, "in.ome.zarr")
+        )
+
+        # Dask-backed so the image can be written out again below.
+        sim_read = ngff_utils.read_sim_from_ome_zarr(
+            zarr_path, array_backend="dask"
+        )
+        assert ngff_utils.get_ngff_time_transform(sim_read) == {
+            "scale": 5.0,
+            "translation": 0.0,
+            "unit": "second",
+        }
+
+        msim_read = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+        assert ngff_utils.get_ngff_time_transform(msim_read) == {
+            "scale": 5.0,
+            "translation": 0.0,
+            "unit": "second",
+        }
+        # Every level carries it: the viewer may read any of them.
+        for scale_key in msi_utils.get_sorted_scale_keys(msim_read):
+            sim_level = msi_utils.get_sim_from_msim(msim_read, scale=scale_key)
+            assert ngff_utils.get_ngff_time_transform(sim_level)["scale"] == 5.0
+
+        out_path = os.path.join(tmp_dir, "out.ome.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim_read, out_path)
+
+        written = zarr.open_group(out_path, mode="r").attrs["multiscales"][0]
+        t_index = [axis["name"] for axis in written["axes"]].index("t")
+        assert written["axes"][t_index]["unit"] == "second"
+        for dataset in written["datasets"]:
+            scale = next(
+                transform
+                for transform in dataset["coordinateTransformations"]
+                if transform["type"] == "scale"
+            )
+            # The time scale is the same at every resolution level, which is
+            # only downsampled spatially.
+            assert scale["scale"][t_index] == 5.0
+
+
+def test_virtual_ome_zarr_reports_the_time_scale_of_its_source():
+    """A virtual store stands in for its image, time calibration included.
+
+    Views served natively and images served virtually are drawn in one
+    coordinate space, so a virtual store that claimed a unity time scale would
+    sit at a different point of the time axis than the views it belongs with.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zarr_path = _write_time_scaled_ome_zarr(
+            os.path.join(tmp_dir, "in.ome.zarr")
+        )
+        msim = ngff_utils.read_msim_from_ome_zarr(zarr_path)
+
+        multiscales = ngff_utils.VirtualOMEZarr(msim).root_zattrs()[
+            "multiscales"
+        ][0]
+
+        t_index = [axis["name"] for axis in multiscales["axes"]].index("t")
+        assert multiscales["axes"][t_index]["unit"] == "second"
+        for dataset in multiscales["datasets"]:
+            scale = next(
+                transform
+                for transform in dataset["coordinateTransformations"]
+                if transform["type"] == "scale"
+            )
+            assert scale["scale"][t_index] == 5.0
+
+
+def test_virtual_ome_zarr_omits_a_time_unit_without_a_time_scale():
+    """An uncalibrated time axis keeps declaring a bare unity scale."""
+    sim = si_utils.get_sim_from_array(
+        np.zeros((3, 1, 4, 4), dtype=np.uint16),
+        dims=["t", "c", "y", "x"],
+        scale={"y": 0.5, "x": 0.5},
+    )
+    multiscales = ngff_utils.VirtualOMEZarr(
+        msi_utils.get_msim_from_sim(sim, scale_factors=[])
+    ).root_zattrs()["multiscales"][0]
+
+    t_axis = next(axis for axis in multiscales["axes"] if axis["name"] == "t")
+    assert "unit" not in t_axis
+    scale = multiscales["datasets"][0]["coordinateTransformations"][0]
+    assert scale["scale"][0] == 1.0
 
 
 def test_read_sim_from_ome_zarr_rejects_unknown_backend():
@@ -787,3 +920,189 @@ def test_update_ome_zarr_multiscales_metadata(ngff_version):
             assert "multiscales" in all_attrs.get("ome", {})
         else:
             assert "multiscales" in all_attrs
+
+
+# ---------------------------------------------------------------------------
+# Codec metadata written by other implementations
+# ---------------------------------------------------------------------------
+
+
+def _write_bioformats2raw_style_zarr(path, typesize=2):
+    """A minimal OME-Zarr shaped and encoded the way bioformats2raw writes one.
+
+    Written by hand rather than with zarr, because the point is the compressor
+    metadata: bioformats2raw records `typesize` in every `.zarray`, which is a
+    parameter numcodecs only grew later.
+    """
+    import json
+
+    import numcodecs
+
+    image = os.path.join(path, "0")
+    codec = numcodecs.Blosc(cname="lz4", clevel=5, shuffle=1)
+    shape = (1, 2, 1, 32, 32)
+    expected = (np.arange(int(np.prod(shape))) % 500).astype("uint16")
+
+    level = os.path.join(image, "0")
+    os.makedirs(os.path.join(level, "0", "0", "0", "0"))
+    with open(os.path.join(level, ".zarray"), "w") as handle:
+        json.dump(
+            {
+                "chunks": list(shape),
+                "dtype": "<u2",
+                "fill_value": 0,
+                "filters": None,
+                "order": "C",
+                "shape": list(shape),
+                "zarr_format": 2,
+                "dimension_separator": "/",
+                "compressor": {
+                    "id": "blosc",
+                    "cname": "lz4",
+                    "clevel": 5,
+                    "shuffle": 1,
+                    "blocksize": 0,
+                    "typesize": typesize,
+                },
+            },
+            handle,
+        )
+    with open(os.path.join(level, "0", "0", "0", "0", "0"), "wb") as handle:
+        handle.write(codec.encode(expected.reshape(shape).tobytes()))
+
+    with open(os.path.join(image, ".zgroup"), "w") as handle:
+        json.dump({"zarr_format": 2}, handle)
+    with open(os.path.join(image, ".zattrs"), "w") as handle:
+        json.dump(
+            {
+                "multiscales": [
+                    {
+                        "version": "0.4",
+                        "name": "series_0",
+                        "axes": [
+                            {"name": "t", "type": "time"},
+                            {"name": "c", "type": "channel"},
+                            {
+                                "name": "z",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "micrometer",
+                            },
+                        ],
+                        "datasets": [
+                            {
+                                "path": "0",
+                                "coordinateTransformations": [
+                                    {
+                                        "type": "scale",
+                                        "scale": [1.0, 1.0, 1.0, 0.5, 0.5],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            handle,
+        )
+
+    return image, expected.sum()
+
+
+@pytest.fixture
+def numcodecs_without_blosc_typesize(monkeypatch):
+    """Stand in for a numcodecs whose Blosc predates the `typesize` parameter.
+
+    Which is what Pyodide ships, and therefore what the browser app runs. On
+    CPython the parameter exists, so without this the test would pass whatever
+    the library did - and a test that cannot fail is worse than none.
+    """
+    import numcodecs
+    import numcodecs.registry
+
+    real = numcodecs.Blosc
+
+    class OldBlosc(real):
+        def __init__(self, cname="lz4", clevel=5, shuffle=1, blocksize=0):
+            super().__init__(
+                cname=cname,
+                clevel=clevel,
+                shuffle=shuffle,
+                blocksize=blocksize,
+            )
+
+    registry = dict(numcodecs.registry.codec_registry)
+    monkeypatch.setattr(numcodecs, "Blosc", OldBlosc)
+    monkeypatch.setattr(_zarr_compat, "numcodecs", numcodecs)
+    numcodecs.registry.register_codec(OldBlosc, "blosc")
+    try:
+        yield OldBlosc
+    finally:
+        numcodecs.registry.codec_registry.clear()
+        numcodecs.registry.codec_registry.update(registry)
+
+
+def test_an_old_numcodecs_cannot_read_bioformats2raw_unaided(
+    tmp_path, numcodecs_without_blosc_typesize
+):
+    """The failure this compatibility shim exists for.
+
+    Blosc keeps the type size in each compressed block's own header, so the
+    copy in the metadata is not needed to decode anything - but an older
+    numcodecs refuses the keyword outright, and the file will not open.
+    """
+    image, _ = _write_bioformats2raw_style_zarr(str(tmp_path))
+
+    with pytest.raises(TypeError, match="typesize"):
+        ngff_utils.read_msim_from_ome_zarr(image)
+
+
+def test_bioformats2raw_zarr_reads_with_an_old_numcodecs(
+    tmp_path, numcodecs_without_blosc_typesize
+):
+    image, expected_sum = _write_bioformats2raw_style_zarr(str(tmp_path))
+
+    _zarr_compat.register_compatible_codecs()
+    msim = ngff_utils.read_msim_from_ome_zarr(image)
+    sim = msi_utils.get_sim_from_msim(msim)
+
+    assert dict(sim.sizes) == {"t": 1, "c": 2, "z": 1, "y": 32, "x": 32}
+    # Decoded, not merely opened: the pixels have to come back intact.
+    assert int(np.asarray(sim.data).sum()) == int(expected_sum)
+
+
+def test_a_codec_key_the_library_does_not_know_still_fails(
+    numcodecs_without_blosc_typesize,
+):
+    """Dropping an unknown key would decode the bytes wrongly, not not at all.
+
+    Only settings that Blosc records in its own block header may be dropped;
+    anything else has to reach the user as an error.
+    """
+    with pytest.raises(TypeError, match="not_a_blosc_setting"):
+        _zarr_compat.codec_from_config(
+            numcodecs_without_blosc_typesize,
+            {"cname": "lz4", "not_a_blosc_setting": 1},
+            _zarr_compat._BLOSC_ENCODE_ONLY_KEYS,
+        )
+
+
+def test_a_configuration_the_codec_accepts_is_passed_through_untouched():
+    import numcodecs
+
+    config = {"cname": "zstd", "clevel": 3, "shuffle": 2, "blocksize": 0}
+
+    codec = _zarr_compat.codec_from_config(
+        numcodecs.Blosc, dict(config), _zarr_compat._BLOSC_ENCODE_ONLY_KEYS
+    )
+
+    assert codec == numcodecs.Blosc(**config)

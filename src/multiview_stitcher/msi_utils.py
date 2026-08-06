@@ -26,13 +26,23 @@ def _chunk_sim(sim, chunks):
     return sim.chunk({dim: chunks[dim] for dim in sim.dims if dim in chunks})
 
 
+# Attrs that become data_vars at the msim level, so keeping them on the image
+# as well would leave two copies to disagree.
+_ATTRS_REATTACHED_AS_DATA_VARS = ("transforms", "point_sets")
+
+
 def _sim_to_dataset(sim):
-    # Strip attrs (transforms are re-attached as data_vars at the msim level).
     # Chunk hints live in xarray encoding, which survives to_dataset / DataTree,
-    # so no dim/chunk bookkeeping needs to be carried on attrs.
+    # so no dim/chunk bookkeeping needs to be carried on attrs.  Everything
+    # else describing the image - its NGFF source axes, its time calibration -
+    # stays put: an msim describes the same image its sims do.
     dataset = sim.to_dataset(name="image")
     dataset.attrs = {}
-    dataset["image"].attrs = {}
+    dataset["image"].attrs = {
+        key: value
+        for key, value in sim.attrs.items()
+        if key not in _ATTRS_REATTACHED_AS_DATA_VARS
+    }
     return dataset
 
 
@@ -108,12 +118,19 @@ def multiscale_sel_coords(msim, sel_dict):
 
     # Somehow .sel on a datatree does not work when
     # attributes are present. So we remove them and
-    # add them back after sel.
+    # add them back after sel - on the input as well as on the
+    # result, since the input belongs to the caller. Leaving it
+    # stripped is what silently dropped the omero display metadata
+    # of every view that a registration selected a channel from.
 
     attrs = msim.attrs.copy()
     msim.attrs = {}
-    msim = msim.sel(sel_dict)
-    msim.attrs = attrs
+    try:
+        selected = msim.sel(sel_dict)
+    finally:
+        msim.attrs = attrs
+    selected.attrs = attrs
+    msim = selected
 
     if "point_sets" in list(msim.keys()):
         for points_key in list(msim["point_sets"].keys()):

@@ -37,7 +37,6 @@ from multiview_stitcher import (
     param_utils,
     spatial_image_utils,
     transformation,
-    vis_utils,
 )
 
 logger = logging.getLogger(__name__)
@@ -2103,6 +2102,11 @@ def _plot_registration_summaries(
     show_plot,
 ):
     edges = list(g_reg_computed.edges())
+    # Imported here rather than at module scope: plotting pulls in matplotlib
+    # and an HTTP stack, neither of which a headless or browser-side
+    # registration needs.
+    from multiview_stitcher import vis_utils
+
     fig_pair_reg, ax_pair_reg = vis_utils.plot_positions(
         msims,
         transform_key=transform_key,
@@ -2208,6 +2212,7 @@ def register(
     pairs: list[tuple[int, int]] = None,
     scheduler=None,  # deprecated, see docstring
     n_parallel_pairwise_regs: int = None,
+    pairwise_executor=None,
     return_dict: bool = False,
 ):
     """
@@ -2316,6 +2321,11 @@ def register(
         Number of parallel pairwise registrations to run. Setting this is specifically
         useful for limiting memory usage.
         By default None (all pairwise registrations are run in parallel)
+    pairwise_executor : Callable, optional
+        Hook for running the pairwise registrations outside the local dask
+        scheduler, e.g. distributed over a pool of web workers in the browser
+        runtime. See `compute_pairwise_registrations` for the calling
+        convention. By default None (pairwise registrations are run with dask).
     return_dict : bool, optional
         If True, return a dict containing params, registration metrics and more, by default False
 
@@ -2447,6 +2457,7 @@ def register(
         pairwise_reg_func=pairwise_reg_func,
         pairwise_reg_func_kwargs=pairwise_reg_func_kwargs,
         n_parallel_pairwise_regs=n_parallel_pairwise_regs,
+        pairwise_executor=pairwise_executor,
     )
 
     # optionally filter obtained pairwise registrations by quality
@@ -2534,10 +2545,36 @@ def compute_pairwise_registrations(
     msims,
     g_reg,
     n_parallel_pairwise_regs=None,
+    pairwise_executor=None,
     **register_kwargs,
 ):
+    """
+    Compute the pairwise registrations of the edges in `g_reg`.
+
+    Parameters
+    ----------
+    pairwise_executor : Callable, optional
+        Hook for running the pairwise registrations somewhere other than the
+        local dask scheduler, e.g. on a pool of web workers in the browser
+        runtime. Called as
+        ``pairwise_executor(msims, edges, register_kwargs)`` where `edges` is a
+        list of `(index, index)` view-index pairs, and expected to return one
+        mapping per edge with the same keys the default path produces:
+        'transform', 'quality' and 'bbox'.
+        By default None, in which case the pairwise registrations are computed
+        with dask, as configured by `n_parallel_pairwise_regs`.
+    """
     g_reg_computed = g_reg.copy()
     edges = [tuple(sorted([e[0], e[1]])) for e in g_reg.edges]
+
+    if pairwise_executor is not None:
+        params = pairwise_executor(msims, edges, dict(register_kwargs))
+        if len(params) != len(edges):
+            raise ValueError(
+                f"pairwise_executor returned {len(params)} results for "
+                f"{len(edges)} registration pairs."
+            )
+        return _assign_pairwise_registrations(g_reg_computed, edges, params)
 
     params_xds = [
         register_pair_of_msims_over_time(
@@ -2576,6 +2613,11 @@ def compute_pairwise_registrations(
                 params_xds[i : i + n_parallel_pairwise_regs],
             )[0]
 
+    return _assign_pairwise_registrations(g_reg_computed, edges, params)
+
+
+def _assign_pairwise_registrations(g_reg_computed, edges, params):
+    """Write computed pairwise registration results onto the graph edges."""
     for i, pair in enumerate(edges):
         g_reg_computed.edges[pair]["transform"] = params[i]["transform"]
         g_reg_computed.edges[pair]["quality"] = params[i]["quality"]

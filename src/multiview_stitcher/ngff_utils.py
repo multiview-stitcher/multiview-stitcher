@@ -8,20 +8,102 @@ import os, shutil
 import signal
 import threading
 import uuid
+from copy import deepcopy
 
 import dask
-import ngff_zarr
 import numpy as np
-import xarray as xr
 import zarr
 from tqdm import tqdm
 from dask import array as da
 import dask.diagnostics
-from ome_zarr import writer
 from xarray import DataTree
 
-from multiview_stitcher import msi_utils, param_utils, misc_utils
+import ngff_zarr
+
+from multiview_stitcher import _zarr_compat, msi_utils, param_utils, misc_utils
 from multiview_stitcher import spatial_image_utils as si_utils
+
+# Original axes of an image read from NGFF.  Spatial images deliberately add
+# missing singleton ``t``/``c`` dimensions, but a viewer transform attached to
+# the original OME-Zarr must still have the rank of the array on disk.
+NGFF_SOURCE_DIMS_ATTR = "_multiview_stitcher_ngff_source_dims"
+
+# Calibration of the NGFF time axis.  Spatial images carry their spatial
+# calibration in the coordinates themselves, but ``t`` coordinates are frame
+# indices, so a non-unity NGFF time scale has nowhere else to live.  Losing it
+# is not merely cosmetic: a viewer reading the original store sees the stored
+# time scale, so an image served or written as if the scale were 1 no longer
+# lines up with it along ``t``.
+NGFF_TIME_TRANSFORM_ATTR = "_multiview_stitcher_ngff_time_transform"
+
+DEFAULT_NGFF_TIME_TRANSFORM = {
+    "scale": 1.0,
+    "translation": 0.0,
+    "unit": None,
+}
+
+
+def _ngff_time_transform_of(ngff_im):
+    """The time calibration an ``ngff_zarr`` image declares for its ``t`` axis."""
+    return {
+        "scale": float((ngff_im.scale or {}).get("t", 1.0)),
+        "translation": float((ngff_im.translation or {}).get("t", 0.0)),
+        "unit": (ngff_im.axes_units or {}).get("t"),
+    }
+
+
+def _time_transform_holders(image):
+    """The images an NGFF time calibration is stored on.
+
+    A multiscale image keeps one copy per resolution level, mirroring how the
+    NGFF source dims are stored: ``msi_utils`` strips image attrs when it
+    assembles a DataTree, so the attribute has to be reattached per scale.
+    """
+    if msi_utils.is_msim(image):
+        return [
+            image[f"{scale_key}/image"]
+            for scale_key in msi_utils.get_sorted_scale_keys(image)
+        ]
+    return [image]
+
+
+def get_ngff_time_transform(image):
+    """The NGFF time scale, translation and unit carried by ``image``.
+
+    Returns the identity calibration for images that carry none, so callers
+    can use the result unconditionally.
+    """
+    holders = _time_transform_holders(image)
+    stored = holders[0].attrs.get(NGFF_TIME_TRANSFORM_ATTR) if holders else None
+    return {**DEFAULT_NGFF_TIME_TRANSFORM, **(stored or {})}
+
+
+def set_ngff_time_transform(image, time_transform):
+    """Attach an NGFF time calibration to a spatial or multiscale image.
+
+    An identity calibration is stored as the absence of the attribute, which
+    keeps images that never had a time scale byte-identical to before.
+    """
+    time_transform = {
+        **DEFAULT_NGFF_TIME_TRANSFORM,
+        **(time_transform or {}),
+    }
+    for holder in _time_transform_holders(image):
+        if time_transform == DEFAULT_NGFF_TIME_TRANSFORM:
+            holder.attrs.pop(NGFF_TIME_TRANSFORM_ATTR, None)
+        else:
+            holder.attrs[NGFF_TIME_TRANSFORM_ATTR] = dict(time_transform)
+    return image
+
+
+def copy_ngff_time_transform(source, target):
+    """Give ``target`` the time calibration of ``source``.
+
+    A derived image - a fused stack, say - spans the same timepoints as the
+    images it came from, but is built from a bare array, so the calibration
+    has to be carried across rather than inherited.
+    """
+    return set_ngff_time_transform(target, get_ngff_time_transform(source))
 
 
 def _drop_none_values(value):
@@ -147,11 +229,25 @@ class VirtualOMEZarr:
         sdims = si_utils.get_spatial_dims_from_sim(self.sims[0])
         dims = self.sims[0].dims
 
+        # A virtual store stands in for the image it was built from, so it has
+        # to declare the same time calibration: a viewer places a natively
+        # served store and a virtual one in a single coordinate space, and a
+        # ``t`` scale of 1 here against a scaled one there would put them at
+        # different points of the time axis.
+        time_transform = get_ngff_time_transform(self.msim)
+        _NSDIM_UNIT = {"t": time_transform["unit"]}
+        _NSDIM_SCALE = {"t": float(time_transform["scale"])}
+        _NSDIM_TRANSLATION = {"t": float(time_transform["translation"])}
+
         axes = [
             _drop_none_values({
                 "name": dim,
                 "type": _DIM_TYPE.get(dim, "space"),
-                "unit": "micrometer" if dim not in _DIM_TYPE else None,
+                "unit": (
+                    _NSDIM_UNIT.get(dim)
+                    if dim in _DIM_TYPE
+                    else "micrometer"
+                ),
             })
             for dim in dims
         ]
@@ -161,11 +257,15 @@ class VirtualOMEZarr:
             spacing = si_utils.get_spacing_from_sim(sim)
             origin = si_utils.get_origin_from_sim(sim)
             scale_values = [
-                float(spacing[dim]) if dim in sdims else 1.0
+                float(spacing[dim])
+                if dim in sdims
+                else _NSDIM_SCALE.get(dim, 1.0)
                 for dim in dims
             ]
             translation_values = [
-                float(origin[dim]) if dim in sdims else 0.0
+                float(origin[dim])
+                if dim in sdims
+                else _NSDIM_TRANSLATION.get(dim, 0.0)
                 for dim in dims
             ]
             datasets.append({
@@ -928,14 +1028,12 @@ def sim_to_ngff_image(sim, transform_key):
         for isdim, sdim in enumerate(sdims):
             origin[sdim] = origin[sdim] + transform_translation[isdim]
 
-    ngff_im = ngff_zarr.to_ngff_image(
+    return ngff_zarr.to_ngff_image(
         sim.data,
         dims=sim.dims,
         scale=si_utils.get_spacing_from_sim(sim),
         translation=origin,
     )
-
-    return ngff_im
 
 
 def msim_to_ngff_multiscales(msim, transform_key):
@@ -1016,6 +1114,18 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
         transform_key=transform_key,
     )
 
+    # Keep the distinction between axes stored in NGFF and singleton axes
+    # added by get_sim_from_array().  Consumers that address the original
+    # OME-Zarr (not a newly generated virtual one) need the former.
+    sim.attrs[NGFF_SOURCE_DIMS_ATTR] = list(ngff_im.dims)
+
+    # get_sim_from_array() applies scale and translation to the spatial
+    # coordinates only; ``t`` coordinates stay frame indices.  Keep the time
+    # calibration alongside them so it can be written back out and reported to
+    # viewers reading the original store.
+    if "t" in ngff_im.dims:
+        set_ngff_time_transform(sim, _ngff_time_transform_of(ngff_im))
+
     sdims = si_utils.get_spatial_dims_from_sim(sim)
 
     si_utils.set_sim_affine(
@@ -1050,18 +1160,99 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
         curr_scale_msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
 
-    msim = DataTree.from_dict(msim_dict)
-
-    return msim
+    return DataTree.from_dict(msim_dict)
 
 
 def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
     # ngff_zarr currently reads image data as dask arrays. For the zarr-backed
     # default path, reuse its parsed metadata but reopen the on-disk arrays.
     return [
-        zarr.open_array(os.path.join(zarr_path, dataset.path), mode="r")
+        _zarr_compat.open_zarr_array(zarr_path, dataset.path, mode="r")
         for dataset in ngff_multiscales.metadata.datasets
     ]
+
+
+def read_ngff_multiscales(zarr_path):
+    """Parse the NGFF multiscales metadata of an OME-Zarr v0.4/v0.5 store.
+
+    ``zarr_path`` may be a path/URL or an already-constructed zarr store, which
+    is how the browser runtime routes reads through its service worker. Parsing
+    reads metadata only - no chunk is fetched until the arrays are used.
+    """
+    return ngff_zarr.from_ngff_zarr(zarr_path)
+
+
+def write_multiscales_metadata(group, axes, datasets, ngff_version="0.4"):
+    """Write NGFF ``multiscales`` metadata into an open zarr ``group``.
+
+    The arrays are written separately - block by block, and in the browser by
+    several workers at once - so only the metadata is written here, which is
+    why ``ngff_zarr.to_ngff_zarr`` is not used: it would write the arrays too.
+    The document itself is ngff-zarr's own :class:`ngff_zarr.Metadata`, so the
+    schema has one definition rather than one per writer.
+
+    v0.4 keeps ``multiscales`` (including its ``version``) at the top level of
+    the group attributes; v0.5 nests ``multiscales`` and ``version`` inside an
+    ``ome`` attribute.
+    """
+    metadata = ngff_zarr.Metadata(
+        axes=[ngff_zarr.Axis(**dict(axis)) for axis in axes],
+        datasets=[
+            ngff_zarr.Dataset(
+                path=dataset["path"],
+                coordinateTransformations=[
+                    _ngff_transform(transform)
+                    for transform in dataset["coordinateTransformations"]
+                ],
+            )
+            for dataset in datasets
+        ],
+        coordinateTransformations=None,
+        name=group.name,
+    )
+
+    multiscale = _drop_none_values(asdict(metadata))
+    # Only `axes`, `datasets` and `name` are written. The optional keys are
+    # dropped rather than emitted empty, which keeps the document identical to
+    # what the previous two writers produced.
+    for optional in ("coordinateTransformations", "omero", "metadata",
+                     "extra", "type", "version"):
+        multiscale.pop(optional, None)
+
+    if str(ngff_version).startswith("0.4"):
+        multiscale["version"] = str(ngff_version)
+        group.attrs["multiscales"] = [multiscale]
+        return
+
+    ome = dict(group.attrs.get("ome", {}))
+    ome["version"] = str(ngff_version)
+    ome["multiscales"] = [multiscale]
+    group.attrs["ome"] = ome
+
+
+def _ngff_transform(transform):
+    """One coordinate transformation as an ngff-zarr dataclass."""
+    transform = dict(transform)
+    if transform.get("type") == "scale":
+        return ngff_zarr.Scale(scale=list(transform["scale"]))
+    if transform.get("type") == "translation":
+        return ngff_zarr.Translation(translation=list(transform["translation"]))
+    return ngff_zarr.Identity()
+
+
+def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
+    """Keyword arguments for creating the zarr group of an NGFF version.
+
+    NGFF v0.4 is a Zarr v2 hierarchy and v0.5 a Zarr v3 one; under zarr-python
+    v2 there is nothing to choose.
+    """
+    if str(ngff_version).startswith("0.4"):
+        if zarr.__version__ >= "3":
+            return {"zarr_format": 2}
+        return {}
+    if str(ngff_version).startswith("0.5"):
+        return {"zarr_format": 3}
+    raise ValueError(f"ngff_version {ngff_version} not supported")
 
 
 def update_zarr_array_creation_kwargs_for_ngff_version(
@@ -1303,18 +1494,35 @@ def calc_ngff_coordinate_transformations_and_axes(
     stack_properties_res0: dict,
     res_abs_factors: list[dict],
     nsdims: list = None,
+    time_transform: dict = None,
 ):
-    
+
     spacing = stack_properties_res0['spacing']
     origin = stack_properties_res0['origin']
     sdims = list(spacing.keys())
     n_resolutions = len(res_abs_factors)
 
+    # Resolution levels differ spatially only, so the time calibration - which
+    # the caller carries over from the images it derived this stack from -
+    # applies unchanged to every level.
+    time_transform = {
+        **DEFAULT_NGFF_TIME_TRANSFORM,
+        **(time_transform or {}),
+    }
+    nsdim_scales = [
+        float(time_transform["scale"]) if dim == "t" else 1.0
+        for dim in nsdims
+    ]
+    nsdim_translations = [
+        float(time_transform["translation"]) if dim == "t" else 0
+        for dim in nsdims
+    ]
+
     coordtfs = [
             [
                 {
                     "type": "scale",
-                    "scale": [1.0] * len(nsdims)
+                    "scale": nsdim_scales
                     + [
                         float(s * res_abs_factors[res_level][dim])
                         for dim, s in spacing.items()
@@ -1322,7 +1530,7 @@ def calc_ngff_coordinate_transformations_and_axes(
                 },
                 {
                     "type": "translation",
-                    "translation": [0] * len(nsdims)
+                    "translation": nsdim_translations
                     + [
                         origin[dim]
                         + (res_abs_factors[res_level][dim] - 1) * spacing[dim] / 2
@@ -1333,7 +1541,7 @@ def calc_ngff_coordinate_transformations_and_axes(
             # [0] * (ndim - len(sdims)) + [origin[dim] for dim in sdims]}]
             for res_level in range(n_resolutions)
         ]
-    
+
     axes = [
         {
             "name": dim,
@@ -1342,6 +1550,11 @@ def calc_ngff_coordinate_transformations_and_axes(
             else ("time" if dim == "t" else "space"),
         }
         | ({"unit": "micrometer"} if dim in sdims else {})
+        | (
+            {"unit": time_transform["unit"]}
+            if dim == "t" and time_transform["unit"]
+            else {}
+        )
         for dim in nsdims + sdims
     ]
 
@@ -1428,18 +1641,9 @@ def write_sim_to_ome_zarr(
         update_zarr_array_creation_kwargs_for_ngff_version(
             ngff_version, zarr_array_creation_kwargs)
 
-    zarr_group_creation_kwargs = {}
-    if ngff_version == "0.4":
-        if zarr.__version__ >= "3":
-            zarr_group_creation_kwargs = {
-                "zarr_format": 2,
-            }
-    elif ngff_version == "0.5":
-        zarr_group_creation_kwargs = {
-            "zarr_format": 3,
-        }
-    else:
-        raise ValueError(f"ngff_version {ngff_version} not supported")
+    zarr_group_creation_kwargs = zarr_group_creation_kwargs_for_ngff_version(
+        ngff_version
+    )
 
     dims = sim.dims
     nsdims = si_utils.get_nonspatial_dims_from_sim(sim)
@@ -1468,6 +1672,7 @@ def write_sim_to_ome_zarr(
         },
         res_abs_factors,
         nsdims=nsdims,
+        time_transform=get_ngff_time_transform(sim),
     )
 
     # parent_res_array = sim.data
@@ -1493,16 +1698,19 @@ def write_sim_to_ome_zarr(
         output_zarr_url, mode="a", **zarr_group_creation_kwargs
     )
 
-    writer.write_multiscales_metadata(
-        group=output_group,
+    multiscales_datasets = [
+        {
+            "path": f"{res_level}",
+            "coordinateTransformations": coordtfs[res_level],
+        }
+        for res_level in range(n_resolutions)
+    ]
+
+    write_multiscales_metadata(
+        output_group,
         axes=axes,
-        datasets=[
-            {
-                "path": f"{res_level}",
-                "coordinateTransformations": coordtfs[res_level],
-            }
-            for res_level in range(n_resolutions)
-        ],
+        datasets=multiscales_datasets,
+        ngff_version=ngff_version,
     )
 
     if "c" in sim.dims:
@@ -1573,7 +1781,7 @@ def read_sim_from_ome_zarr(
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
 
-    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    ngff_multiscales = read_ngff_multiscales(zarr_path)
 
     if resolution_level >= len(ngff_multiscales.images):
         raise ValueError(
@@ -1593,7 +1801,7 @@ def read_sim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = zarr.open_group(zarr_path, mode="r")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
 
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
@@ -1630,7 +1838,7 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
         If the on-disk OME-Zarr is not v0.4 or v0.5, or if the number of
         resolution levels in msim does not match the on-disk zarr.
     """
-    root = zarr.open_group(zarr_path, mode="a")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="a")
     attrs = dict(root.attrs)
 
     # Detect OME-Zarr version and retrieve the multiscales list
@@ -1730,7 +1938,7 @@ def read_msim_from_ome_zarr(
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
 
-    ngff_multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    ngff_multiscales = read_ngff_multiscales(zarr_path)
 
     data_arrays = None
     if array_backend == "zarr":
@@ -1743,13 +1951,23 @@ def read_msim_from_ome_zarr(
     )
 
     # get channel names from omero metadata if available
-    root = zarr.open_group(zarr_path, mode="r")
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
     if "omero" in root.attrs:
         omero = root.attrs["omero"]
         ch_coords = [ch["label"] for ch in omero["channels"]]
         if "c" in msim['scale0']["image"].dims:
-            msim = msim.map_over_datasets(
-                xr.DataArray.assign_coords,
-                kwargs={'c': ch_coords})
+            # A closure keeps this working across xarray releases:
+            # DataTree.map_over_datasets() only grew its `kwargs` parameter
+            # after the version shipped with Pyodide.
+            def _assign_channel_coords(ds):
+                return ds.assign_coords(c=ch_coords)
+
+            msim = msim.map_over_datasets(_assign_channel_coords)
+
+        # Display metadata is part of the image, not just a source-side aid
+        # for recovering channel labels. Keeping it on the DataTree lets
+        # virtual OME-Zarr views and derived outputs (notably browser fusion)
+        # inherit the input colors and contrast windows.
+        msim.attrs["omero"] = deepcopy(omero)
 
     return msim

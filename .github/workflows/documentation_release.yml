@@ -27,5 +27,13 @@ jobs:
       run: |
         export RELEASE_TAG_VERSION="${{ github.event.release.tag_name }}"
         echo RELEASE_TAG_VERSION="${RELEASE_TAG_VERSION:1}" >> "$GITHUB_ENV"
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Build the browser app
+      run: |
+        pip install build
+        python scripts/build_browser_app.py --neuroglancer
     - name: Build docs website
       run: mike deploy "${RELEASE_TAG_VERSION}" --push
