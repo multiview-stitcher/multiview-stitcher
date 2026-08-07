@@ -557,10 +557,30 @@ class Session:
             else RegistrationOptions.from_dict(options)
         )
 
+        if options.view_indices is None:
+            view_indices = list(range(len(self.msims)))
+        else:
+            view_indices = [int(index) for index in options.view_indices]
+            if len(set(view_indices)) != len(view_indices):
+                raise ValueError("Registration view indices must be unique.")
+            if any(
+                index < 0 or index >= len(self.msims)
+                for index in view_indices
+            ):
+                raise IndexError("A selected registration view does not exist.")
+            if len(view_indices) < 2:
+                raise ValueError("Select at least two views for registration.")
+
+        selected_msims = [self.msims[index] for index in view_indices]
+        index_in_selection = {
+            view_index: selected_index
+            for selected_index, view_index in enumerate(view_indices)
+        }
+
         if (
             options.reg_channel_index is None
-            and self.msims
-            and "c" in msi_utils.get_dims(self.msims[0])
+            and selected_msims
+            and "c" in msi_utils.get_dims(selected_msims[0])
         ):
             # The browser exposes one "register" button; pick the first channel
             # rather than making the user answer a question they did not ask.
@@ -569,11 +589,60 @@ class Session:
         if options.transform_key is None:
             options.transform_key = self.default_transform_key()
 
+        register_kwargs = options.register_kwargs()
+        if options.view_indices is not None:
+            if register_kwargs["pairs"] is not None:
+                try:
+                    register_kwargs["pairs"] = [
+                        (
+                            index_in_selection[int(first)],
+                            index_in_selection[int(second)],
+                        )
+                        for first, second in register_kwargs["pairs"]
+                    ]
+                except KeyError as error:
+                    raise ValueError(
+                        "Every manual registration pair must use selected views."
+                    ) from error
+
+            groupwise_kwargs = register_kwargs[
+                "groupwise_resolution_kwargs"
+            ]
+            if "reference_view" in groupwise_kwargs:
+                reference_view = int(groupwise_kwargs["reference_view"])
+                if reference_view not in index_in_selection:
+                    raise ValueError(
+                        "The reference view must be selected for registration."
+                    )
+                groupwise_kwargs["reference_view"] = index_in_selection[
+                    reference_view
+                ]
+
+            if hasattr(pairwise_executor, "for_view_indices"):
+                pairwise_executor = pairwise_executor.for_view_indices(
+                    view_indices
+                )
+
         params = core_registration.register(
-            self.msims,
+            selected_msims,
             pairwise_executor=pairwise_executor,
-            **options.register_kwargs(),
+            **register_kwargs,
         )
+
+        # Registration only changes the selected views, but a transform key
+        # must exist on every view to remain selectable as one coordinate
+        # system in the browser. Omitted views inherit the displayed transform
+        # unchanged under the new name.
+        if options.new_transform_key is not None:
+            selected = set(view_indices)
+            for index, msim in enumerate(self.msims):
+                if index in selected:
+                    continue
+                msi_utils.set_affine_transform(
+                    msim,
+                    transform_key=options.new_transform_key,
+                    base_transform_key=options.transform_key,
+                )
 
         # Anything derived from the transforms - a fused preview - is now out
         # of date and its URLs are retired. The views are not: the result

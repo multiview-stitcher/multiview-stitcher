@@ -113,10 +113,30 @@ class RemotePairwiseExecutor:
     a whole pair, every timepoint of it, is finished.
     """
 
-    def __init__(self, session_spec, bridge=None, max_pairs_per_task=1):
+    def __init__(
+        self,
+        session_spec,
+        bridge=None,
+        max_pairs_per_task=1,
+        view_indices=None,
+    ):
         self.session_spec = session_spec
         self.bridge = bridge or get_bridge()
         self.max_pairs_per_task = max(1, int(max_pairs_per_task))
+        self.view_indices = (
+            None
+            if view_indices is None
+            else [int(index) for index in view_indices]
+        )
+
+    def for_view_indices(self, view_indices):
+        """Return an executor mapping subset-local edges to full-session views."""
+        return type(self)(
+            self.session_spec,
+            bridge=self.bridge,
+            max_pairs_per_task=self.max_pairs_per_task,
+            view_indices=view_indices,
+        )
 
     def __call__(self, msims, edges, register_kwargs):
         if self.bridge is None:
@@ -153,10 +173,16 @@ class RemotePairwiseExecutor:
         # worker reads the values off the view it rebuilt.
         time_slices = [None] if n_t is None else [[t] for t in range(n_t)]
 
+        def worker_edge(edge):
+            first, second = (int(edge[0]), int(edge[1]))
+            if self.view_indices is None:
+                return [first, second]
+            return [self.view_indices[first], self.view_indices[second]]
+
         tasks = [
             {
                 "kind": "register_pairs",
-                "edges": [[int(a), int(b)] for a, b in group],
+                "edges": [worker_edge(edge) for edge in group],
                 "register_kwargs": options,
                 "reg_channel": reg_channel,
                 "spatial_dims": spatial_dims,

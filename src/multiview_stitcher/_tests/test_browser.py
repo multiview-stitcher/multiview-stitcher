@@ -256,6 +256,42 @@ def test_session_register_adds_transform_key(tiles_on_disk):
     assert restored[0].shape[-2:] == (3, 3)
 
 
+def test_session_registers_only_selected_views_but_sets_key_on_all():
+    session = Session()
+    session.load(example_data.example_sources("tiles-3d"))
+    base_key = si_utils.DEFAULT_TRANSFORM_KEY
+    before = [
+        msi_utils.get_transform_from_msim(msim, base_key).copy()
+        for msim in session.msims
+    ]
+
+    result = session.register(
+        RegistrationOptions(
+            new_transform_key="selected_registered",
+            view_indices=[0, 1],
+            pairs=[[0, 1]],
+            pre_registration_pruning_method=None,
+            groupwise_resolution_kwargs={"reference_view": 1},
+        )
+    )
+
+    assert len(result["params"]) == 2
+    assert "selected_registered" in session.transform_keys()
+    for index in (2, 3):
+        inherited = msi_utils.get_transform_from_msim(
+            session.msims[index], "selected_registered"
+        )
+        xr.testing.assert_allclose(inherited, before[index])
+
+
+def test_session_requires_two_selected_registration_views(tiles_on_disk):
+    session = Session()
+    session.load(tiles_on_disk)
+
+    with pytest.raises(ValueError, match="at least two views"):
+        session.register(RegistrationOptions(view_indices=[0]))
+
+
 def test_session_copies_selected_transform_key():
     session = Session()
     session.load(example_data.example_sources("tiles-3d"))
@@ -651,6 +687,41 @@ def test_distributed_registration_matches_local(tiles_on_disk):
         pairwise_executor=executor,
     )
 
+    for local_param, remote_param in zip(local["params"], remote["params"]):
+        np.testing.assert_allclose(
+            np.asarray(local_param["data"]),
+            np.asarray(remote_param["data"]),
+            atol=1e-6,
+        )
+
+
+def test_distributed_registration_maps_selected_views_to_full_session():
+    """Subset-local graph nodes must address the same full views on workers."""
+    from multiview_stitcher.browser import executors
+
+    options = RegistrationOptions(
+        new_transform_key="registered",
+        view_indices=[1, 3],
+        pairs=[[1, 3]],
+        pre_registration_pruning_method=None,
+        groupwise_resolution_kwargs={"reference_view": 1},
+    )
+
+    local_session = Session()
+    local_session.load(example_data.example_sources("tiles-3d"))
+    local = local_session.register(options)
+
+    remote_session = Session()
+    remote_session.load(example_data.example_sources("tiles-3d"))
+    remote = remote_session.register(
+        options,
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            remote_session.spec(), bridge=_pool_bridge(WorkerRuntime())
+        ),
+    )
+
+    assert "registered" in remote_session.transform_keys()
+    assert len(remote["params"]) == 2
     for local_param, remote_param in zip(local["params"], remote["params"]):
         np.testing.assert_allclose(
             np.asarray(local_param["data"]),
@@ -1420,6 +1491,32 @@ def test_registration_options_reject_unknown_methods():
         RegistrationOptions(groupwise_resolution_method="nope")
     with pytest.raises(ValueError, match="pruning method"):
         RegistrationOptions(pre_registration_pruning_method="nope")
+
+
+def test_registration_options_forward_pair_and_groupwise_controls():
+    options = RegistrationOptions(
+        reg_res_level=2,
+        pre_registration_pruning_method="keep_axis_aligned",
+        pre_reg_pruning_method_kwargs={"max_angle": 3},
+        pairs=[[0, 1], [1, 2]],
+        view_indices=[0, 1, 2],
+        groupwise_resolution_kwargs={
+            "transform": "rigid",
+            "reference_view": 1,
+        },
+    )
+
+    kwargs = options.register_kwargs()
+    assert kwargs["reg_res_level"] == 2
+    assert kwargs["pre_registration_pruning_method"] == "keep_axis_aligned"
+    assert kwargs["pre_reg_pruning_method_kwargs"] == {"max_angle": 3}
+    assert kwargs["pairs"] == [[0, 1], [1, 2]]
+    assert "view_indices" not in kwargs
+    assert options.to_dict()["view_indices"] == [0, 1, 2]
+    assert kwargs["groupwise_resolution_kwargs"] == {
+        "transform": "rigid",
+        "reference_view": 1,
+    }
 
 
 def test_fusion_options_forward_interface_controls():

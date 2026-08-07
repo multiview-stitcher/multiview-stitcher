@@ -103,6 +103,9 @@ class RegistrationOptions:
     groupwise_resolution_method: str = "global_optimization"
     groupwise_resolution_kwargs: dict = field(default_factory=dict)
     pre_registration_pruning_method: Optional[str] = "alternating_pattern"
+    pre_reg_pruning_method_kwargs: dict = field(default_factory=dict)
+    pairs: Optional[list[list[int]]] = None
+    view_indices: Optional[list[int]] = None
 
     def __post_init__(self):
         _lookup(
@@ -143,6 +146,10 @@ class RegistrationOptions:
             "pre_registration_pruning_method": (
                 self.pre_registration_pruning_method
             ),
+            "pre_reg_pruning_method_kwargs": dict(
+                self.pre_reg_pruning_method_kwargs
+            ),
+            "pairs": self.pairs,
         }
 
     def to_dict(self):

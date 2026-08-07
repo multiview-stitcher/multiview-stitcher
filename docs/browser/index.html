@@ -232,21 +232,111 @@
           </div>
 
           <div class="tabs sub-tabs" role="tablist" aria-label="Registration options">
-            <button role="tab" aria-selected="true" data-subtab="registration-common">Common</button>
-            <button role="tab" aria-selected="false" data-subtab="registration-advanced">Advanced</button>
+            <button role="tab" aria-selected="true" aria-controls="registration-common" data-subtab="registration-common">Common</button>
+            <button role="tab" aria-selected="false" aria-controls="registration-advanced" data-subtab="registration-advanced">Advanced</button>
           </div>
+
           <div id="registration-common" class="subtab-panel">
             <label for="registration-channel">Registration channel</label>
             <select id="registration-channel" disabled></select>
             <label for="registration-transform-name">New transform name</label>
             <input id="registration-transform-name" type="text" value="registered" />
-          </div>
-          <div id="registration-advanced" class="subtab-panel" hidden>
-            <fieldset>
-              <legend>Registration binning</legend>
-              <div id="registration-binning" class="dimension-fields"></div>
-              <p class="field-help">Leave blank to choose binning automatically.</p>
+            <fieldset class="registration-scope">
+              <legend>Layers to register</legend>
+              <label class="option-check" for="registration-all-layers">
+                <input id="registration-all-layers" type="radio" name="registration-layer-scope" value="all" checked />
+                <span>All layers</span>
+              </label>
+              <label class="option-check" for="registration-selected-layers">
+                <input id="registration-selected-layers" type="radio" name="registration-layer-scope" value="selected" />
+                <span>Only selected layers</span>
+              </label>
+              <p class="field-help">
+                Select a layer by clicking it in the viewer or in the loaded
+                views list. Hold Ctrl (&#8984; on macOS) while clicking to select
+                several layers. Unregistered layers keep their current placement
+                under the new transform.
+              </p>
             </fieldset>
+          </div>
+
+          <div id="registration-advanced" class="subtab-panel registration-stage-panel" hidden>
+            <div class="tabs sub-tabs nested-tabs" role="tablist" aria-label="Advanced registration options">
+              <button role="tab" aria-selected="true" aria-controls="registration-graph" data-subtab="registration-graph">Graph</button>
+              <button role="tab" aria-selected="false" aria-controls="registration-pairwise" data-subtab="registration-pairwise">Pairwise reg</button>
+              <button role="tab" aria-selected="false" aria-controls="registration-groupwise" data-subtab="registration-groupwise">Groupwise resolution</button>
+            </div>
+
+            <div id="registration-graph" class="subtab-panel">
+              <fieldset class="pair-determination">
+                <legend>Pair determination</legend>
+                <label class="option-check" for="registration-pairs-pruned">
+                  <input id="registration-pairs-pruned" type="radio" name="registration-pair-mode" value="pruned" checked />
+                  <span>Determine pairs from view overlap</span>
+                </label>
+                <div class="indented-option">
+                  <label for="registration-pruning-method">Pruning method</label>
+                  <select id="registration-pruning-method">
+                    <option value="alternating_pattern">Alternating pattern</option>
+                    <option value="shortest_paths_overlap_weighted">Shortest paths, overlap weighted</option>
+                    <option value="otsu_threshold_on_overlap">Otsu threshold on overlap</option>
+                    <option value="keep_axis_aligned">Keep axis aligned</option>
+                    <option value="">No pruning</option>
+                  </select>
+                  <div id="registration-max-angle-field" hidden>
+                    <label for="registration-max-angle">Maximum angle (degrees)</label>
+                    <input id="registration-max-angle" type="number" min="0" max="180" step="1" placeholder="default" />
+                  </div>
+                </div>
+
+                <label class="option-check" for="registration-pairs-manual">
+                  <input id="registration-pairs-manual" type="radio" name="registration-pair-mode" value="manual" />
+                  <span>Indicate pairs manually</span>
+                </label>
+                <div id="registration-manual-pair-editor" class="manual-pair-editor">
+                  <div>
+                    <label for="registration-pair-first">First view</label>
+                    <select id="registration-pair-first" disabled></select>
+                  </div>
+                  <div>
+                    <label for="registration-pair-second">Second view</label>
+                    <select id="registration-pair-second" disabled></select>
+                  </div>
+                  <button id="registration-add-pair" class="secondary-button" type="button" disabled>Add pair</button>
+                </div>
+                <div id="registration-pair-list" class="pair-list" aria-label="Selected registration pairs" aria-live="polite"></div>
+                <p id="registration-pair-list-empty" class="field-help">No manual pairs added.</p>
+              </fieldset>
+            </div>
+
+            <div id="registration-pairwise" class="subtab-panel" hidden>
+              <label for="registration-resolution-level">Registration resolution level</label>
+              <input id="registration-resolution-level" type="number" min="0" step="1" placeholder="auto" />
+              <p class="field-help">Leave blank to select a compatible level automatically.</p>
+
+              <fieldset>
+                <legend>Registration binning</legend>
+                <div id="registration-binning" class="dimension-fields"></div>
+                <p class="field-help">Leave blank to choose binning automatically.</p>
+              </fieldset>
+            </div>
+
+            <div id="registration-groupwise" class="subtab-panel" hidden>
+              <fieldset>
+                <legend>Groupwise resolution options</legend>
+                <label for="registration-groupwise-transform">Transform type</label>
+                <select id="registration-groupwise-transform">
+                  <option value="translation">Translation</option>
+                  <option value="rigid">Rigid</option>
+                  <option value="similarity">Similarity</option>
+                  <option value="affine">Affine</option>
+                </select>
+                <label for="registration-reference-view">Reference view</label>
+                <select id="registration-reference-view" disabled>
+                  <option value="">Automatic</option>
+                </select>
+              </fieldset>
+            </div>
           </div>
           <button class="primary-button" type="button" data-action="register" disabled>Register views</button>
         </section>

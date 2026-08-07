@@ -593,6 +593,22 @@ test("the browser chrome exposes the complete responsive workflow", () => {
     "example-menu",
     "placement-panel",
     "registration-panel",
+    "registration-pairwise",
+    "registration-common",
+    "registration-all-layers",
+    "registration-selected-layers",
+    "registration-advanced",
+    "registration-graph",
+    "registration-resolution-level",
+    "registration-pruning-method",
+    "registration-max-angle",
+    "registration-pair-first",
+    "registration-pair-second",
+    "registration-add-pair",
+    "registration-pair-list",
+    "registration-groupwise",
+    "registration-groupwise-transform",
+    "registration-reference-view",
     "fusion-panel",
     "output-chunksizes",
     "log-dialog",
@@ -608,8 +624,19 @@ test("the browser chrome exposes the complete responsive workflow", () => {
   assert.match(html, /href="https:\/\/github\.com\/multiview-stitcher\/multiview-stitcher"/);
   assert.match(html, /Registration &amp; Fusion in the browser \(OME-Zarr\)/);
   assert.match(html, /Hold <kbd>Ctrl<\/kbd> and scroll/);
+  assert.match(html, /Maximum angle \(degrees\)/);
+  assert.match(html, /id="registration-max-angle"[^>]*step="1"/);
   assert.match(css, /\.channel-contrast-line/);
   assert.match(app, /range\.className = "dual-range"/);
+  assert.match(app, /pre_reg_pruning_method_kwargs: pruningKwargs/);
+  assert.match(app, /pairs: manualPairs \? selectedRegistrationPairs\(\) : null/);
+  assert.match(app, /groupwise_resolution_kwargs: groupwiseResolutionKwargs/);
+  assert.match(app, /view_indices: registrationViewIndices\(\)/);
+  assert.match(app, /function registrationEligibleViews\(described = state\.session\)/);
+  assert.match(app, /selectedOnly \|\| state\.selectedViewUrls\.has\(view\.url\)/);
+  assert.match(app, /syncRegistrationScopedOptions\(\)/);
+  assert.match(app, /maxAngleDegrees \* Math\.PI\) \/ 180/);
+  assert.doesNotMatch(app, /for \(let second = first \+ 1/);
   assert.match(css, /@media \(max-width: 820px\)/);
   assert.match(css, /grid-template-areas:\s*"viewer"\s*"data"\s*"operations"/);
 });

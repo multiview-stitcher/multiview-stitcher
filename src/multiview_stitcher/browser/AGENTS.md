@@ -90,8 +90,11 @@ Different tabs for different types of operations:
     - Common options
       - drop down: Registration channel
       - Text field: New transform_key name, default to "registered"
+      - register all layers or only the selected layers; unselected layers inherit the current transform under the new key
     - Advanced options:
-      - registration binning
+      - Graph: automatic pruning (including axis-aligned maximum angle) or manually added pairs
+      - Pairwise registration: resolution level and registration binning
+      - Groupwise resolution: transform type and reference view
   - "Register" button to run registration
 
 - Fusion
