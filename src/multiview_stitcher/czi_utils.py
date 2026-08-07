@@ -96,6 +96,35 @@ def close_czi_files():
             czi.close()
 
 
+def is_multiview_czi(filepath):
+    """
+    Is this CZI a multi-view acquisition rather than a mosaic?
+
+    The two are read by different functions - `read_multiview_czi_into_sims`
+    and `io.read_mosaic_into_sims_czifile` - and neither produces anything
+    sensible from the other's files, so they have to be told apart before
+    reading.
+
+    The dimensions alone do not settle it: a multi-view file carries an ``M``
+    (mosaic tile) dimension too, fixed at 0. What distinguishes it is the
+    ``MultiView`` element of the metadata, which lists one ``View`` per angle
+    and is what `get_info_from_multiview_czi` reads the view positions from.
+    A ``V`` dimension spanning more than one index means the same thing, and
+    is checked as well so that a file whose metadata is arranged differently
+    is not silently read as a mosaic.
+    """
+
+    _require_czifile()
+
+    from xml.etree import ElementTree as etree
+
+    metadata = etree.fromstring(open_czi(filepath).metadata())
+    if len(metadata.findall(".//MultiView/View")):
+        return True
+
+    return get_czi_shape(filepath).get("V", 1) > 1
+
+
 def get_czi_shape(filepath):
     """
     Get the shape of a CZI file.

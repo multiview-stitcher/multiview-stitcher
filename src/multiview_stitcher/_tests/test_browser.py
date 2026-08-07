@@ -1250,7 +1250,7 @@ def test_czi_url_round_trip():
     assert browser_czi.parse_czi_url(url) == ("/czi/m1/a b.czi", 2, 3)
 
 
-def test_czi_url_defaults_to_the_first_scene_and_tile():
+def test_czi_url_defaults_to_the_first_scene_and_image():
     assert browser_czi.parse_czi_url("mvs-czi:/czi/m1/x.czi") == (
         "/czi/m1/x.czi",
         0,
@@ -1260,7 +1260,7 @@ def test_czi_url_defaults_to_the_first_scene_and_tile():
 
 def test_non_czi_urls_are_rejected():
     assert not browser_czi.is_czi_url("/browser/__mvs__/fs/m1/tile.ome.zarr")
-    with pytest.raises(ValueError, match="not a CZI tile URL"):
+    with pytest.raises(ValueError, match="not a CZI image URL"):
         browser_czi.parse_czi_url("mvs-example:tiles-3d/0")
 
 
@@ -1298,7 +1298,7 @@ def test_czi_tile_matches_the_reader_it_wraps(czi_path):
         ) == si_utils.get_spacing_from_sim(expected[index])
 
 
-def test_czi_tiles_are_read_lazily(czi_path):
+def test_czi_images_are_read_lazily(czi_path):
     """Enumerating tiles must not decode any subblock."""
     msim = browser_czi.build_msim(browser_czi.czi_sources(czi_path)[0]["url"])
     data = msi_utils.get_sim_from_msim(msim).data
@@ -1390,6 +1390,132 @@ def test_worker_loads_a_czi_by_path(czi_path):
         "mosaic.czi tile 0",
         "mosaic.czi tile 1",
     ]
+
+
+#: A multi-view CZI is several 3D stacks recorded at different angles. None
+#: ships with the package - they are gigabytes - so the wiring below is tested
+#: against a stand-in until a small, stable file is available.
+
+
+@pytest.fixture
+def fake_multiview_czi(monkeypatch, tmp_path):
+    """A CZI that reports itself multi-view and reads as three tilted stacks.
+
+    The angles are the point: a multi-view file cannot go through the mosaic
+    reader because its views are related by rotations, not by offsets.
+    """
+    from multiview_stitcher import czi_utils, param_utils
+    from multiview_stitcher.browser import czi as czi_module
+
+    czi_file = tmp_path / "multiview.czi"
+    czi_file.touch()  # only its path is used; both readers are stubbed below
+    path = str(czi_file)
+
+    sims = []
+    for index in range(3):
+        sim = si_utils.get_sim_from_array(
+            np.full((1, 2, 4, 8, 8), index + 1, dtype=np.uint16),
+            dims=("t", "c", "z", "y", "x"),
+            scale={"z": 2.0, "y": 0.5, "x": 0.5},
+            translation={"z": 0.0, "y": 0.0, "x": 0.0},
+            # The reader's own coordinate-system name, which is what the
+            # browser has to rename.
+            transform_key="metadata",
+            c_coords=["Cam1", "Cam2"],
+        )
+        si_utils.set_sim_affine(
+            sim,
+            param_utils.affine_to_xaffine(
+                param_utils.affine_from_rotation(
+                    index * 0.4, direction=[0, 1, 0], point=[0, 0, 0]
+                )
+            ),
+            transform_key="metadata",
+        )
+        sims.append(sim)
+
+    monkeypatch.setattr(
+        czi_utils, "is_multiview_czi", lambda filepath: str(filepath) == path
+    )
+    monkeypatch.setattr(
+        czi_utils,
+        "read_multiview_czi_into_sims",
+        lambda filepath, **kwargs: [sim.copy(deep=False) for sim in sims],
+    )
+    czi_module._images.cache_clear()
+
+    return path
+
+
+def test_a_multiview_czi_is_read_as_views_not_tiles(fake_multiview_czi):
+    sources = browser_czi.czi_sources(fake_multiview_czi, name="angles.czi")
+
+    assert len(sources) == 3
+    # "tile 0" would be wrong: these are angles of one specimen, not a grid.
+    assert [source["name"] for source in sources] == [
+        "angles.czi view 0",
+        "angles.czi view 1",
+        "angles.czi view 2",
+    ]
+
+
+def test_a_multiview_view_arrives_under_the_standard_transform_key(
+    fake_multiview_czi,
+):
+    """`read_multiview_czi_into_sims` names its coordinate system `metadata`.
+
+    A session offers only the transform keys all of its views share, so a view
+    keeping that name would leave a mixed session with none in common - and
+    the viewer with no coordinate system to draw in.
+    """
+    sim = msi_utils.get_sim_from_msim(
+        browser_dataset.open_msim(
+            browser_czi.czi_sources(fake_multiview_czi)[1]["url"]
+        )
+    )
+
+    assert si_utils.get_tranform_keys_from_sim(sim) == [
+        si_utils.DEFAULT_TRANSFORM_KEY
+    ]
+    # The rotation the reader put there must survive the rename.
+    affine = np.asarray(
+        si_utils.get_affine_from_sim(sim, si_utils.DEFAULT_TRANSFORM_KEY)
+    ).reshape(-1, 4, 4)
+    assert not np.allclose(affine[0][:3, :3], np.eye(3))
+
+
+def test_a_multiview_view_is_not_given_a_pyramid(fake_multiview_czi):
+    """Its levels would have to be computed from the full stack on demand."""
+    msim = browser_czi.build_msim(
+        browser_czi.czi_sources(fake_multiview_czi)[0]["url"]
+    )
+
+    assert msi_utils.get_sorted_scale_keys(msim) == ["scale0"]
+
+
+def test_a_mosaic_tile_still_gets_a_pyramid(czi_path):
+    msim = browser_czi.build_msim(browser_czi.czi_sources(czi_path)[0]["url"])
+
+    assert len(msi_utils.get_sorted_scale_keys(msim)) > 1
+
+
+def test_a_session_loads_multiview_views(fake_multiview_czi):
+    runtime = WorkerRuntime()
+    described = runtime.handle(
+        "load_czi", {"path": fake_multiview_czi, "name": "angles.czi"}
+    )
+
+    assert described["n_views"] == 3
+    assert described["transform_keys"] == [si_utils.DEFAULT_TRANSFORM_KEY]
+    assert described["views"][0]["ndim"] == 3
+    assert json.loads(json.dumps(described))["n_views"] == 3
+
+
+def test_the_shipped_mosaic_is_not_taken_for_multiview(czi_path):
+    """A multi-view file carries an M dimension too, so shape cannot decide."""
+    from multiview_stitcher import czi_utils
+
+    assert czi_utils.is_multiview_czi(czi_path) is False
 
 
 def test_clearing_a_session_releases_the_czi(czi_path):

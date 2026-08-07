@@ -28,8 +28,10 @@ Open the browser app
     - a **folder** &mdash; either a single OME-Zarr, or a folder containing one
       OME-Zarr per tile. Several folders can be dropped together, in which case
       each one must itself be an OME-Zarr.
-    - a **mosaic CZI file**, whose tiles are read with their positions from the
-      file metadata. One file is a whole dataset.
+    - a **CZI file**, either a mosaic (tiles laid out in a plane) or a
+      multi-view acquisition (stacks recorded at different angles). Which one
+      it is is read from the file metadata, and either way one file is a whole
+      dataset.
 
 4. Press **Register**, then **Fuse (preview)**.
 
@@ -91,8 +93,14 @@ flowchart TB
 A CZI is one file rather than a directory of chunks, so it takes a different
 route from an OME-Zarr: instead of being read over the service worker, it is
 **mounted** into each Python worker's own filesystem, where it becomes an
-ordinary path. `io.read_mosaic_into_sims_czifile` &mdash; the same function used
-on the desktop &mdash; then opens it unchanged.
+ordinary path. The same functions used on the desktop then open it unchanged
+&mdash; `io.read_mosaic_into_sims_czifile` for a mosaic, and
+`czi_utils.read_multiview_czi_into_sims` for a multi-view acquisition, whose
+views arrive with their rotations already applied from the metadata.
+
+Which reader applies is decided by `czi_utils.is_multiview_czi`, from the
+`MultiView` element of the metadata. The dimensions cannot decide it: a
+multi-view file carries a mosaic dimension too, pinned at a single tile.
 
 The mount is Emscripten's `WORKERFS`, which answers each read by slicing the
 `File` and reading that slice synchronously. Only the bytes actually needed are

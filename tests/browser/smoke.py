@@ -694,6 +694,16 @@ def main():
     )
 
     czi_path = str(sample_data.get_mosaic_sample_data_path())
+
+    # Which of the two readers applies is decided from the metadata XML, which
+    # is parsed here rather than by czifile - worth exercising in Pyodide even
+    # though only the mosaic answer can be checked without a multi-view file.
+    check(
+        "czi_kind_detected",
+        czi_utils.is_multiview_czi(czi_path) is False,
+        "the sample mosaic must not be read as a multi-view acquisition",
+    )
+
     czi_sources = browser_czi.czi_sources(czi_path)
     check("czi_tiles_enumerated", len(czi_sources) == 2, czi_sources)
 

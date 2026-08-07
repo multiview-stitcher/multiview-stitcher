@@ -1878,11 +1878,12 @@ async function unmountAllFiles() {
 }
 
 /**
- * Open one or more dropped CZI files, each as a mosaic of tiles.
+ * Open one or more dropped CZI files, each as a whole dataset.
  *
- * Every tile of the file becomes a view, so one CZI is a whole dataset. How
- * many tiles that is only the reader knows, so the page mounts the file and
- * lets Python enumerate them.
+ * A CZI is either a mosaic, whose tiles are laid out in a plane, or a
+ * multi-view acquisition, whose views are stacks recorded at different angles.
+ * Which one it is - and how many images that amounts to - only the reader can
+ * tell, so the page mounts the file and lets Python decide and enumerate.
  */
 async function loadCziFiles(handles) {
   const files = await Promise.all(handles.map((handle) => handle.getFile()));
@@ -1891,7 +1892,7 @@ async function loadCziFiles(handles) {
   let append = Boolean(state.session && state.session.n_views);
 
   log(
-    `mounted ${files.length} CZI file(s); reading tile positions` +
+    `mounted ${files.length} CZI file(s); reading positions from the metadata` +
       (append ? " and adding to the loaded views" : ""),
   );
   setStatus("opening CZI", true);
@@ -2410,7 +2411,7 @@ function wireUi() {
         );
       }
 
-      // A mixed drop is loaded folders-first, so that the tiles of a CZI
+      // A mixed drop is loaded folders-first, so that the images of a CZI
       // extend that set rather than the other way round - `load_czi` replaces
       // only when nothing is loaded yet.
       if (directories.length) await withPool(() => loadDirectories(directories));
