@@ -332,9 +332,10 @@ fieldset legend { margin: 0 0 7px; color: var(--muted); font-size: 11px; }
 .placement-scope[hidden] { display: none; }
 .scope-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
 .scope-value { color: var(--accent-bright); font-size: 9.5px; font-variant-numeric: tabular-nums; }
-.scope-channels { display: flex; flex-wrap: wrap; gap: 5px 12px; }
-.scope-channels label { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text); font-size: 10px; cursor: pointer; }
-.scope-channels input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.scope-channels, .scope-modes { display: flex; flex-wrap: wrap; gap: 5px 12px; }
+.scope-channels label, .scope-modes label { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text); font-size: 10px; cursor: pointer; }
+.scope-channels input, .scope-modes input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.scope-modes { margin-bottom: 7px; }
 .scope-block.disabled { opacity: 0.45; pointer-events: none; }
 .scope-block .field-help { margin-top: 3px; }
 kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--panel-soft); font-family: inherit; font-size: 9px; }

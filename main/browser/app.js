@@ -795,6 +795,9 @@ function noteTimeIndex() {
 
   state.timeIndex = index;
   renderTimeSlider();
+  // "Current timepoint" names whichever one is on screen, so the placement
+  // section has to follow it too.
+  updatePlacementTimeUi();
   if (!state.timeVaryingTransforms) return;
 
   clearTimeout(timeRefreshTimer);
@@ -1782,10 +1785,24 @@ function placementChannels() {
     : chosen.map(({ index }) => index);
 }
 
+/** Whether the timepoints are chosen as a range, or as the one on screen. */
+function placementTimeMode() {
+  return $("#placement-time-mode input:checked")?.value ?? "range";
+}
+
 /** The timepoint range a placement applies to, or null for all of them. */
 function placementTimeRange() {
   const count = timeCoords().length;
   if (count < 2) return null;
+
+  // "Current timepoint" is read when the drag is saved, not when the option
+  // was chosen: the timepoint that counts is the one the tile was moved at,
+  // which is the one on screen at that moment.
+  if (placementTimeMode() === "current") {
+    const index = Math.min(state.timeIndex, count - 1);
+    return [index, index];
+  }
+
   const [first, last] = state.placementTimeRange ?? [0, count - 1];
   return first === 0 && last === count - 1 ? null : [first, last];
 }
@@ -1843,7 +1860,7 @@ function renderPlacementScope(described) {
   const timeBlock = $("#placement-time").closest(".scope-block");
   const hasTime = times.length > 1;
   timeBlock.classList.toggle("disabled", !hasTime);
-  $("#placement-time").hidden = !hasTime;
+  $("#placement-time-mode").hidden = !hasTime;
   $("#placement-time-empty").hidden = hasTime;
 
   const first = $("#placement-time-first");
@@ -1851,6 +1868,9 @@ function renderPlacementScope(described) {
   for (const slider of [first, last]) {
     slider.max = String(Math.max(times.length - 1, 0));
     slider.disabled = !hasTime;
+  }
+  for (const radio of document.querySelectorAll("#placement-time-mode input")) {
+    radio.disabled = !hasTime;
   }
   if (state.placementTimeCount !== times.length) {
     state.placementTimeCount = times.length;
@@ -1889,11 +1909,19 @@ function renderTimeSlider() {
   }`;
 }
 
-/** Reflect the timepoint range in the slider fill and the heading. */
+/** Reflect the chosen timepoints in the slider fill and the heading. */
 function updatePlacementTimeUi() {
   const times = timeCoords();
+  const current = placementTimeMode() === "current";
   const row = $("#placement-time");
-  const [first, last] = state.placementTimeRange ?? [0, 0];
+  // The range slider says nothing once the timepoint on screen is the one
+  // being placed, so it goes away rather than sitting there ignored.
+  row.hidden = times.length < 2 || current;
+
+  const shown = Math.min(state.timeIndex, Math.max(times.length - 1, 0));
+  const [first, last] = current
+    ? [shown, shown]
+    : (state.placementTimeRange ?? [0, 0]);
   const span = Math.max(times.length - 1, 1);
   row.style.setProperty("--low", `${(first / span) * 100}%`);
   row.style.setProperty("--high", `${(last / span) * 100}%`);
@@ -2356,6 +2384,7 @@ async function clearSession() {
   state.channelVisibility.clear();
   state.placementChannels.clear();
   state.placementTimeRange = null;
+  $('#placement-time-mode input[value="range"]').checked = true;
   state.timeIndex = 0;
   state.timeVaryingTransforms = false;
   state.selectedViewUrls.clear();
@@ -2979,6 +3008,10 @@ function wireUi() {
       $("#placement-time-last").value = String(range[1]);
       updatePlacementTimeUi();
     });
+  }
+
+  for (const radio of document.querySelectorAll("#placement-time-mode input")) {
+    radio.addEventListener("change", updatePlacementTimeUi);
   }
 
   $("#manual-placement").addEventListener("change", (event) => {
