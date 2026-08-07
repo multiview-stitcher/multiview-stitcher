@@ -150,6 +150,47 @@ def affine_to_xaffine(affine, t_coords=None):
     return params
 
 
+def expand_affine_dims(xaffine, dims):
+    """
+    Expand an affine transform by spatial dimensions it doesn't contain,
+    e.g. to obtain a 3D transform from a 2D one.
+
+    The added dimensions are left untransformed.
+
+    Parameters
+    ----------
+    xaffine : xr.DataArray
+        Affine transform with 'x_in' and 'x_out' dimensions
+    dims : list of str
+        Spatial dimensions to add, e.g. ['z']
+
+    Returns
+    -------
+    xr.DataArray
+        Affine transform including the added dimensions
+    """
+
+    curr_dims = [
+        dim for dim in xaffine.coords["x_in"].values if dim in ["z", "y", "x"]
+    ]
+    expanded_dims = [
+        dim for dim in ["z", "y", "x"] if dim in curr_dims or dim in dims
+    ]
+
+    xaffine_expanded = identity_transform(
+        ndim=len(expanded_dims),
+        t_coords=xaffine.coords["t"] if "t" in xaffine.dims else None,
+    )
+
+    # the transform axes are labeled by dimension name ('z', 'y', 'x', '1'),
+    # so the input transform can simply be assigned by label
+    xaffine_expanded.loc[
+        {pdim: xaffine.coords[pdim] for pdim in ["x_in", "x_out"]}
+    ] = xaffine
+
+    return xaffine_expanded
+
+
 def matmul_xparams(xparams1, xparams2):
     return xr.apply_ufunc(
         np.matmul,

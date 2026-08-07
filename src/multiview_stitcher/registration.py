@@ -2189,6 +2189,41 @@ def _plot_registration_summaries(
             'ax_group_res': ax_group_res}
 
 
+def _get_singleton_spatial_dim(sims):
+    """
+    Return the spatial dimension along which all views have an extent of a
+    single pixel and share the same coordinate, or None if there's no such
+    dimension.
+
+    Such a dimension carries no information for registration and can be
+    dropped, reducing e.g. a 3D registration problem to a 2D one.
+    """
+
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+
+    # only reduce 3D input (reducing 2D input would leave a 1D problem)
+    if len(sdims) != 3:
+        return None
+
+    singleton_dims = [
+        dim for dim in sdims if all(sim.sizes[dim] == 1 for sim in sims)
+    ]
+
+    # more than one singleton dimension would again leave a 1D problem
+    if len(singleton_dims) != 1:
+        return None
+
+    dim = singleton_dims[0]
+
+    # views lying at different coordinates are not co-planar, i.e. their
+    # relative positions along the dimension would be lost by projecting
+    coords = [float(sim.coords[dim].values[0]) for sim in sims]
+    if not np.allclose(coords, coords[0]):
+        return None
+
+    return dim
+
+
 def register(
     msims: list[MultiscaleSpatialImage],
     transform_key: str = None,
@@ -2222,6 +2257,11 @@ def register(
     1) Build the overlap graph.
     2) Run pairwise registrations for selected edges.
     3) Resolve global transforms from the pairwise results.
+
+    Note: If the input views are 3D and have an extent of a single pixel along
+    one spatial dimension (e.g. z) at the same coordinate, the registration is
+    performed in 2D on the available slice and the resulting parameters are
+    broadcast back to 3D (leaving the reduced dimension untransformed).
 
     Parameters
     ----------
@@ -2393,6 +2433,36 @@ def register(
     else:
         msims_reg = msims
 
+    # If the input views are 3D but have an extent of a single pixel along one
+    # spatial dimension (at the same coordinate), register the 2D "projection"
+    # obtained by selecting the available coordinate along that dimension. The
+    # resulting 2D parameters are broadcast back to 3D after the groupwise
+    # resolution below.
+    reduced_dim = _get_singleton_spatial_dim(sims)
+    if reduced_dim is not None:
+        logger.info(
+            "Input views have a single pixel extent along dimension '%s', "
+            "performing the registration in 2D.",
+            reduced_dim,
+        )
+        # selecting the single available coordinate drops the dimension
+        # from both the images and their transforms
+        msims_reg = [
+            msi_utils.multiscale_sel_coords(
+                msim,
+                {reduced_dim: sim.coords[reduced_dim].values[0]},
+            )
+            for msim, sim in zip(msims_reg, sims)
+        ]
+
+        # dimension specific parameters must not refer to the reduced dimension
+        registration_binning, overlap_tolerance = [
+            {dim: val for dim, val in param.items() if dim != reduced_dim}
+            if isinstance(param, dict)
+            else param
+            for param in [registration_binning, overlap_tolerance]
+        ]
+
     # determine registration pairs from input images
     g = mv_graph.build_view_adjacency_graph_from_msims(
         msims_reg,
@@ -2487,6 +2557,14 @@ def register(
     params = [
         params_dict[iview] for iview in sorted(g_reg_computed.nodes())
     ]
+
+    # broadcast parameters obtained from a reduced registration back to the
+    # dimensionality of the input views
+    if reduced_dim is not None:
+        params = [
+            param_utils.expand_affine_dims(param, [reduced_dim])
+            for param in params
+        ]
 
     # optionally write registration result back to the input msims
     # under a new transform key
