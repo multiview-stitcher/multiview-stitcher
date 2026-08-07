@@ -1267,6 +1267,153 @@ function renderDimensionFields(described) {
   }
 }
 
+function registrationEligibleViews(described = state.session) {
+  const views = described?.views || [];
+  const selectedOnly = $("#registration-selected-layers").checked;
+  return views.flatMap((view, index) =>
+    !selectedOnly || state.selectedViewUrls.has(view.url)
+      ? [{ view, index }]
+      : [],
+  );
+}
+
+function syncPairDeterminationControls() {
+  const usePruning = $("#registration-pairs-pruned").checked;
+  const pruning = $("#registration-pruning-method");
+  const maxAngleField = $("#registration-max-angle-field");
+  const showMaxAngle = usePruning && pruning.value === "keep_axis_aligned";
+  const canAddPair = !usePruning && registrationEligibleViews().length >= 2;
+
+  pruning.disabled = !usePruning;
+  maxAngleField.hidden = !showMaxAngle;
+  $("#registration-max-angle").disabled = !showMaxAngle;
+  $("#registration-pair-first").disabled = !canAddPair;
+  $("#registration-pair-second").disabled = !canAddPair;
+  $("#registration-add-pair").disabled = !canAddPair;
+  for (const button of document.querySelectorAll(
+    "#registration-pair-list button",
+  )) {
+    button.disabled = usePruning;
+  }
+}
+
+function updateManualPairEmptyState() {
+  const empty = $("#registration-pair-list-empty");
+  const hasPairs = Boolean($("#registration-pair-list").children.length);
+  empty.hidden = hasPairs;
+  empty.textContent =
+    registrationEligibleViews().length < 2
+      ? "At least two layers in the registration scope are needed."
+      : "No manual pairs added.";
+}
+
+function addRegistrationPair(first, second) {
+  if (first === second) {
+    throw new Error("A registration pair must contain two different views.");
+  }
+  const [low, high] = first < second ? [first, second] : [second, first];
+  const existing = Array.from(
+    document.querySelectorAll("#registration-pair-list .pair-row"),
+  ).some(
+    (row) =>
+      Number(row.dataset.firstView) === low &&
+      Number(row.dataset.secondView) === high,
+  );
+  if (existing) {
+    throw new Error(`Pair ${low} ↔ ${high} has already been added.`);
+  }
+
+  const views = state.session?.views || [];
+  const row = document.createElement("div");
+  const text = document.createElement("span");
+  const remove = document.createElement("button");
+  row.className = "pair-row";
+  row.dataset.firstView = String(low);
+  row.dataset.secondView = String(high);
+  text.textContent = `${low}: ${views[low].name} ↔ ${high}: ${views[high].name}`;
+  remove.type = "button";
+  remove.className = "remove-pair";
+  remove.textContent = "×";
+  remove.title = `Remove pair ${low} ↔ ${high}`;
+  remove.setAttribute("aria-label", `Remove pair ${low} and ${high}`);
+  remove.addEventListener("click", () => {
+    row.remove();
+    updateManualPairEmptyState();
+  });
+  row.append(text, remove);
+  $("#registration-pair-list").appendChild(row);
+  updateManualPairEmptyState();
+}
+
+function syncRegistrationScopedOptions(described = state.session) {
+  const eligible = registrationEligibleViews(described);
+  const eligibleIndices = new Set(eligible.map(({ index }) => index));
+
+  const previousReference = $("#registration-reference-view").value;
+  const reference = $("#registration-reference-view");
+  reference.replaceChildren(new Option("Automatic", ""));
+  for (const { view, index } of eligible) {
+    reference.add(new Option(`${index}: ${view.name}`, String(index)));
+  }
+  reference.disabled = !eligible.length;
+  if (
+    previousReference === "" ||
+    eligibleIndices.has(Number(previousReference))
+  ) {
+    reference.value = previousReference;
+  }
+
+  const first = $("#registration-pair-first");
+  const second = $("#registration-pair-second");
+  const previousFirst = first.value;
+  const previousSecond = second.value;
+  first.replaceChildren();
+  second.replaceChildren();
+  for (const { view, index } of eligible) {
+    const label = `${index}: ${view.name}`;
+    first.add(new Option(label, String(index)));
+    second.add(new Option(label, String(index)));
+  }
+  if (previousFirst !== "" && eligibleIndices.has(Number(previousFirst))) {
+    first.value = previousFirst;
+  }
+  if (previousSecond !== "" && eligibleIndices.has(Number(previousSecond))) {
+    second.value = previousSecond;
+  } else if (eligible.length >= 2) {
+    second.value = String(eligible[1].index);
+  }
+  if (eligible.length >= 2 && second.value === first.value) {
+    second.value = String(
+      eligible.find(({ index }) => String(index) !== first.value).index,
+    );
+  }
+
+  // A scope or selection change can make an already-added pair invalid.
+  for (const row of document.querySelectorAll(
+    "#registration-pair-list .pair-row",
+  )) {
+    if (
+      !eligibleIndices.has(Number(row.dataset.firstView)) ||
+      !eligibleIndices.has(Number(row.dataset.secondView))
+    ) {
+      row.remove();
+    }
+  }
+
+  updateManualPairEmptyState();
+  syncPairDeterminationControls();
+}
+
+function renderRegistrationOptions(described) {
+  const reference = $("#registration-reference-view");
+  reference.replaceChildren(new Option("Automatic", ""));
+
+  // Only user-selected edges are materialized. Generating every possible
+  // pair here would turn a graph with n views into O(n²) DOM nodes.
+  $("#registration-pair-list").replaceChildren();
+  syncRegistrationScopedOptions(described);
+}
+
 function renderChannelControls(described) {
   const channels = described.views[0]?.c_coords || [];
   const controls = $("#channel-controls");
@@ -1452,6 +1599,7 @@ function selectView(url, { extend = false } = {}) {
 
   renderViews(state.session);
   syncManualPlacement();
+  syncRegistrationScopedOptions();
 }
 
 /** Select every view, or none if they are already all selected. */
@@ -1467,6 +1615,7 @@ function toggleAllSelected() {
 
   renderViews(state.session);
   syncManualPlacement();
+  syncRegistrationScopedOptions();
 }
 
 /** The viewer layers a view is drawn as - one per channel. */
@@ -1970,6 +2119,7 @@ async function applyDescribed(described) {
   renderPlacementScope(described);
   renderTimeSlider();
   renderDimensionFields(described);
+  renderRegistrationOptions(described);
   await refreshSessionSpec();
   await refreshViewer();
   setBusy(false);
@@ -2207,6 +2357,41 @@ function dimensionValues(selector, { integers = false } = {}) {
   return Object.keys(values).length ? values : null;
 }
 
+function optionalInteger(selector, label) {
+  const raw = $(selector).value.trim();
+  if (raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return value;
+}
+
+function selectedRegistrationPairs() {
+  const pairs = Array.from(
+    document.querySelectorAll("#registration-pair-list .pair-row"),
+    (row) => [
+      Number(row.dataset.firstView),
+      Number(row.dataset.secondView),
+    ],
+  );
+  if (!pairs.length) {
+    throw new Error("Choose at least one pair for manual pair determination.");
+  }
+  return pairs;
+}
+
+function registrationViewIndices() {
+  if ($("#registration-all-layers").checked) return null;
+  const indices = (state.session?.views || []).flatMap((view, index) =>
+    state.selectedViewUrls.has(view.url) ? [index] : [],
+  );
+  if (indices.length < 2) {
+    throw new Error("Select at least two layers for registration.");
+  }
+  return indices;
+}
+
 async function doCreateTransform() {
   setBusy(true);
   setStatus("creating transform", true);
@@ -2239,6 +2424,32 @@ async function doRegister() {
   const started = performance.now();
 
   try {
+    const manualPairs = $("#registration-pairs-manual").checked;
+    const pruningMethod = manualPairs
+      ? null
+      : $("#registration-pruning-method").value || null;
+    const referenceView = $("#registration-reference-view").value;
+    const groupwiseResolutionKwargs = {
+      transform: $("#registration-groupwise-transform").value,
+    };
+    if (referenceView !== "") {
+      groupwiseResolutionKwargs.reference_view = Number(referenceView);
+    }
+
+    const pruningKwargs = {};
+    if (pruningMethod === "keep_axis_aligned") {
+      const maxAngleDegrees = optionalInteger(
+        "#registration-max-angle",
+        "Maximum angle in degrees",
+      );
+      if (maxAngleDegrees !== null) {
+        if (maxAngleDegrees > 180) {
+          throw new Error("Maximum angle must be between 0 and 180 degrees.");
+        }
+        pruningKwargs.max_angle = (maxAngleDegrees * Math.PI) / 180;
+      }
+    }
+
     const result = await command("register", {
       options: {
         transform_key: state.transformKey,
@@ -2253,6 +2464,15 @@ async function doRegister() {
         registration_binning: dimensionValues("#registration-binning", {
           integers: true,
         }),
+        reg_res_level: optionalInteger(
+          "#registration-resolution-level",
+          "Registration resolution level",
+        ),
+        pre_registration_pruning_method: pruningMethod,
+        pre_reg_pruning_method_kwargs: pruningKwargs,
+        pairs: manualPairs ? selectedRegistrationPairs() : null,
+        groupwise_resolution_kwargs: groupwiseResolutionKwargs,
+        view_indices: registrationViewIndices(),
       },
       distribute: pool.size > 0,
     });
@@ -2532,13 +2752,41 @@ function wireUi() {
   for (const button of document.querySelectorAll(".sub-tabs [data-subtab]")) {
     button.addEventListener("click", () => {
       const tabs = button.closest(".sub-tabs");
-      for (const peer of tabs.querySelectorAll("[data-subtab]")) {
+      const peers = Array.from(tabs.children).filter(
+        (child) => child.matches("[data-subtab]"),
+      );
+      for (const peer of peers) {
         const selected = peer === button;
         peer.setAttribute("aria-selected", String(selected));
         $(`#${peer.dataset.subtab}`).hidden = !selected;
       }
     });
   }
+  for (const input of document.querySelectorAll(
+    'input[name="registration-pair-mode"]',
+  )) {
+    input.addEventListener("change", syncPairDeterminationControls);
+  }
+  for (const input of document.querySelectorAll(
+    'input[name="registration-layer-scope"]',
+  )) {
+    input.addEventListener("change", () => syncRegistrationScopedOptions());
+  }
+  $("#registration-pruning-method").addEventListener(
+    "change",
+    syncPairDeterminationControls,
+  );
+  $("#registration-add-pair").addEventListener("click", () => {
+    try {
+      addRegistrationPair(
+        Number($("#registration-pair-first").value),
+        Number($("#registration-pair-second").value),
+      );
+      setStatus("registration pair added");
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
 
   dropzone.addEventListener("dragover", (event) => {
     event.preventDefault();
