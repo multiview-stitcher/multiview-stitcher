@@ -64,52 +64,44 @@ POSITIONAL_COLOR_PALETTE = [
 ]
 
 
-def _sample_mask(sim, channels, time_range):
-    """Which channels and timepoints a placement applies to, or None for all.
+def _sample_selection(sim, channels, time_range):
+    """Which channels and timepoints a placement applies to.
 
-    Returned as a boolean :class:`xr.DataArray` over whichever of ``c`` and
-    ``t`` are actually restricted, so that it broadcasts against the affines.
-    None means "everywhere", which is the case worth keeping separate: it lets
-    the parameters stay free of axes they would not vary over.
+    Returned as ``{dim: boolean array}`` over whichever of ``c`` and ``t`` are
+    actually restricted. An axis the placement covers in full is left out
+    entirely, which is the case worth keeping separate: it lets the parameters
+    stay free of axes they would not vary over.
     """
-    masks = []
+    selection = {}
 
     if channels is not None and "c" in sim.dims:
         coords = sim.coords["c"].values
         wanted = {str(channel) for channel in channels}
-        selected = [str(value) in wanted for value in coords]
-        if not any(selected):
+        selected = np.array([str(value) in wanted for value in coords])
+        if not selected.any():
             raise ValueError(
                 "None of the channels selected for manual placement exist in "
                 f"the data: {sorted(wanted)} vs {[str(c) for c in coords]}."
             )
-        if not all(selected):
-            masks.append(
-                xr.DataArray(selected, dims=["c"], coords={"c": coords})
-            )
+        if not selected.all():
+            selection["c"] = selected
 
     if time_range is not None and "t" in sim.dims:
-        coords = sim.coords["t"].values
+        n_timepoints = sim.sizes["t"]
         first, last = (int(value) for value in time_range)
         first, last = max(min(first, last), 0), min(
-            max(first, last), len(coords) - 1
+            max(first, last), n_timepoints - 1
         )
-        selected = [first <= index <= last for index in range(len(coords))]
-        if not any(selected):
+        selected = np.zeros(n_timepoints, dtype=bool)
+        selected[first : last + 1] = True
+        if not selected.any():
             raise ValueError(
                 f"The timepoint range {time_range} selects no timepoint."
             )
-        if not all(selected):
-            masks.append(
-                xr.DataArray(selected, dims=["t"], coords={"t": coords})
-            )
+        if not selected.all():
+            selection["t"] = selected
 
-    if not masks:
-        return None
-    mask = masks[0]
-    for other in masks[1:]:
-        mask = mask & other
-    return mask
+    return selection
 
 
 def _apply_to_samples(current, affine, sim, channels, time_range):
@@ -120,30 +112,75 @@ def _apply_to_samples(current, affine, sim, channels, time_range):
     samples left out keep what they had, and the result gains the ``c`` or
     ``t`` axis that difference needs. Registration and fusion both broadcast
     over those axes, so nothing downstream has to know which happened.
+
+    The sample axes need no aligning - they are the image's own ``c`` and ``t``
+    coordinates - so the write is done on the array rather than with
+    ``xr.where``, whose alignment is what made a drag over a timelapse cost
+    hundreds of milliseconds per view.
     """
-    mask = _sample_mask(sim, channels, time_range)
-
-    t_coords = current.coords["t"].values if "t" in current.dims else None
-    updated = param_utils.affine_to_xaffine(
-        affine, t_coords=t_coords if mask is None else None
-    )
-
-    if mask is None:
-        return updated
-
-    combined = xr.where(mask, updated, current)
+    selection = _sample_selection(sim, channels, time_range)
 
     # A view the user did not move is reported alongside the ones they did,
-    # since the viewer hands over every layer's transform at once. Restricting
-    # a placement must not give those views an axis to say that nothing
-    # differs across it.
-    if np.allclose(*xr.broadcast(combined, current)):
+    # since the viewer hands over every layer's transform at once. Handing back
+    # the very same parameters is what keeps such a view out of the write that
+    # follows, and keeps a restricted placement from giving it an axis to say
+    # that nothing differs across it.
+    if not selection:
+        t_coords = current.coords["t"].values if "t" in current.dims else None
+        updated = param_utils.affine_to_xaffine(affine, t_coords=t_coords)
+        if updated.dims == current.dims and np.allclose(
+            updated.values, current.values
+        ):
+            return current
+        return updated
+
+    # The axes the result carries: whichever the placement distinguishes, plus
+    # whichever the parameters already had.
+    dims = [
+        dim for dim in ("t", "c") if dim in selection or dim in current.dims
+    ]
+    coords = {
+        dim: (
+            current.coords[dim].values
+            if dim in current.dims
+            else sim.coords[dim].values
+        )
+        for dim in dims
+    }
+
+    # `current`, broadcast up to those axes.
+    before = current.transpose(
+        *[dim for dim in dims if dim in current.dims], "x_in", "x_out"
+    ).values
+    for axis, dim in enumerate(dims):
+        if dim not in current.dims:
+            before = np.expand_dims(before, axis)
+    before = np.broadcast_to(
+        before, tuple(len(coords[dim]) for dim in dims) + affine.shape
+    )
+
+    values = before.copy()
+    values[
+        np.ix_(
+            *[
+                selection.get(dim, np.ones(len(coords[dim]), dtype=bool))
+                for dim in dims
+            ]
+        )
+    ] = affine
+    if np.allclose(values, before):
         return current
 
-    # `xr.where` returns the broadcast of its arguments, so the transposition
-    # keeps the matrix axes last, where every consumer expects them.
-    other = [dim for dim in combined.dims if dim not in ("x_in", "x_out")]
-    return combined.transpose(*other, "x_in", "x_out")
+    matrix_coords = param_utils.affine_to_xaffine(affine).coords
+    return xr.DataArray(
+        values,
+        dims=[*dims, "x_in", "x_out"],
+        coords={
+            **coords,
+            "x_in": matrix_coords["x_in"],
+            "x_out": matrix_coords["x_out"],
+        },
+    )
 
 
 class Session:
@@ -437,12 +474,11 @@ class Session:
                 f"Transform key '{transform_key}' is not available."
             )
 
-        params = [
-            msi_utils.get_transform_from_msim(msim, transform_key).copy(
-                deep=True
-            )
+        before = [
+            msi_utils.get_transform_from_msim(msim, transform_key)
             for msim in self.msims
         ]
+        params = list(before)
 
         for update in updates or []:
             index = int(update["index"])
@@ -502,7 +538,18 @@ class Session:
                 params[index], affine, sim, channels, time_range
             )
 
-        self.set_params(transform_key, params)
+        # Attaching a transform rewrites every scale of an msim, so only the
+        # views that moved are written back. The viewer reports every layer's
+        # transform on every drag, moved or not, and `_apply_to_samples` hands
+        # the parameters of the rest straight back.
+        for msim, param, previous in zip(self.msims, params, before):
+            if param is previous:
+                continue
+            msi_utils.set_affine_transform(
+                msim, param, transform_key=transform_key
+            )
+        self.bump_generation()
+
         return {
             "transform_key": transform_key,
             "transform_keys": self.transform_keys(),
@@ -1176,6 +1223,39 @@ class Session:
             state["layers"] = list(state.get("layers", [])) + [layer]
 
         return state
+
+    def view_transforms(
+        self,
+        transform_key=None,
+        base_url="",
+        api_base="",
+        serve_views="auto",
+        time_index=0,
+    ):
+        """The source transform each view's layers carry, keyed by their URL.
+
+        Moving to another timepoint changes which sample of a transform a layer
+        is aimed with and nothing else about the viewer, so it is applied as
+        transforms rather than as a state: rebuilding the state would replace
+        every layer, and with it the shader and contrast range each one had, to
+        say the same thing.
+        """
+        if self.is_empty():
+            return {}
+
+        state = self.neuroglancer_state(
+            transform_key=transform_key,
+            base_url=base_url,
+            api_base=api_base,
+            serve_views=serve_views,
+            time_index=time_index,
+        )
+        # Only the views: the fused preview is appended after them, and it sits
+        # in the coordinate system it was fused in whichever timepoint is shown.
+        return {
+            layer["source"]["url"]: layer["source"].get("transform")
+            for layer in state["layers"][: len(self.msims)]
+        }
 
     def channel_transforms(
         self,

@@ -143,10 +143,30 @@ URLs it has never seen. Requests for a retired route are answered with
 ## Running it locally
 
 ```bash
-python scripts/build_browser_app.py --neuroglancer   # needs Node/npm
-python -m http.server --directory docs 8000
+uv run scripts/build_browser_app.py --neuroglancer --serve
 # then open http://localhost:8000/browser/
 ```
+
+`--serve` builds the app and then serves it on localhost until you interrupt
+it. Rebuilding is what makes an edit visible, so this is one command rather
+than two: the page addresses its own sources by a build id taken from their
+contents, and a stale id is a change that does not appear.
+
+The script needs nothing from the project itself, so `uv run` runs it in an
+environment of its own instead of syncing everything first. Plain
+`python scripts/build_browser_app.py --neuroglancer --serve` works the same
+way, and the pieces are still separable:
+
+```bash
+python scripts/build_browser_app.py --neuroglancer   # build only
+python -m http.server --directory docs 8000          # serve only
+```
+
+Serve `docs`, not `docs/browser`: the app is published under `/browser/` and
+some of what it loads is addressed relative to that. It is offered on
+localhost only - the service worker it reads data through and the File System
+Access API it writes with both need a secure context, which plain HTTP is only
+on localhost.
 
 `--neuroglancer` bundles the viewer and is the only step that needs Node. If
 npm is not on your `PATH`, point at it with `--npm /path/to/npm` or `MVS_NPM`.
