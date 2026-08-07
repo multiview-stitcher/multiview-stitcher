@@ -1570,7 +1570,9 @@ def fake_multiview_czi(monkeypatch, tmp_path):
     sims = []
     for index in range(3):
         sim = si_utils.get_sim_from_array(
-            np.full((1, 2, 4, 8, 8), index + 1, dtype=np.uint16),
+            # In-plane size above `calc_resolution_levels`' minimum, so that
+            # these stand in for stacks a pyramid is actually derived for.
+            np.full((1, 2, 4, 256, 256), index + 1, dtype=np.uint16),
             dims=("t", "c", "z", "y", "x"),
             scale={"z": 2.0, "y": 0.5, "x": 0.5},
             translation={"z": 0.0, "y": 0.0, "x": 0.0},
@@ -1640,17 +1642,17 @@ def test_a_multiview_view_arrives_under_the_standard_transform_key(
     assert not np.allclose(affine[0][:3, :3], np.eye(3))
 
 
-def test_a_multiview_view_is_not_given_a_pyramid(fake_multiview_czi):
-    """Its levels would have to be computed from the full stack on demand."""
-    msim = browser_czi.build_msim(
-        browser_czi.czi_sources(fake_multiview_czi)[0]["url"]
-    )
+@pytest.mark.parametrize("kind", ["mosaic", "multiview"])
+def test_a_czi_image_gets_the_pyramid_its_shape_calls_for(
+    kind, czi_path, fake_multiview_czi
+):
+    """Both kinds are opened like an OME-Zarr input: multiscale.
 
-    assert msi_utils.get_sorted_scale_keys(msim) == ["scale0"]
-
-
-def test_a_mosaic_tile_still_gets_a_pyramid(czi_path):
-    msim = browser_czi.build_msim(browser_czi.czi_sources(czi_path)[0]["url"])
+    Neuroglancer renders the coarsest level first, so a single-level source is
+    one the viewer can only draw at full resolution.
+    """
+    path = czi_path if kind == "mosaic" else fake_multiview_czi
+    msim = browser_czi.build_msim(browser_czi.czi_sources(path)[0]["url"])
 
     assert len(msi_utils.get_sorted_scale_keys(msim)) > 1
 

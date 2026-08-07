@@ -167,20 +167,10 @@ def build_sim(url):
 def build_msim(url, scale_factors=None):
     """Open one image as a multiscale image, matching an OME-Zarr input.
 
-    A mosaic tile gets the pyramid msi_utils derives from its shape. A
-    multi-view stack gets none: its levels would have to be computed from the
-    full-resolution stack on demand, which for a whole angle of a light-sheet
-    acquisition costs more than rendering it directly.
-
-    Either way the chunking stays the CZI's own - one chunk per subblock, the
-    smallest unit the file can be read in.
+    Mosaic tiles and multi-view stacks alike get the pyramid msi_utils derives
+    from the image's shape, and the chunking stays the CZI's own - one chunk
+    per subblock, the smallest unit the file can be read in.
     """
-    path, scene_index, _ = parse_czi_url(url)
-    _, multiview = _images(path, scene_index)
-
-    if scale_factors is None and multiview:
-        scale_factors = []
-
     return msi_utils.get_msim_from_sim(
         build_sim(url), scale_factors=scale_factors
     )
