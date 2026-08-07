@@ -3,7 +3,7 @@
 `multiview-stitcher` runs without installation in your browser, with
 [Neuroglancer](https://github.com/google/neuroglancer) as the viewer.
 
-<a class="md-button md-button--primary" href="browser/index.html" target="_blank" rel="noopener">
+<a class="md-button md-button--primary" href="../browser/" target="_blank" rel="noopener">
 Open the browser app
 </a>
 

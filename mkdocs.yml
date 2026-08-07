@@ -46,6 +46,7 @@ nav:
   - index.md
   - installation.md
   - code_example.md
+  - Browser app: stitching_in_the_browser.md
   - Workflow steps:
     - Defining input data: data_loading_overview.md
     - Registration:
@@ -64,7 +65,6 @@ nav:
     - Visualization:
       - napari_stitcher.md
       - neuroglancer.md
-      - In the browser: stitching_in_the_browser.md
     - Registration quality metrics: registration_metrics.md
 
   - Troubleshooting guide:
