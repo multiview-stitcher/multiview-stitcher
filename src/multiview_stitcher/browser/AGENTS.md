@@ -86,6 +86,7 @@ Different tabs for different types of operations:
       - additional options for manual placement:
         - a small list of checkboxes for each channel: only for the checked channels the manual transformation is applied. this works together with the idea that transform_keys can be defined per channel (e.g. `xr.concat(params_c, dim='c').assign_coords({'c': channels})`). By default all channels are ticked. If all channels are treated in the same way, the parameters don't need to have a channel dimension
         - similar for timepoints: if there's a time dimension, add a double range time slider for the timepoints for which the manual transform should apply (parameters can also have a t dimension). if there's no time dimension, this should be greyed out
+          - as an alternative to the range, an option "Current timepoint": the placement then applies only to the timepoint being shown, whichever that is when the drag is made
         - similar for tiles: if several tiles are selected, the transform should be applied to all the selected tiles (add a quick explanation about this). For rotations, rotation is applied around the center of each tile.
 
 - Registration

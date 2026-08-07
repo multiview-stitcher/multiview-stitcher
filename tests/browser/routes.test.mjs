@@ -864,6 +864,37 @@ test("a placement can be restricted to some channels and timepoints", async () =
   assert.match(app, /time_range: timeRange/);
 });
 
+test("a placement can be pinned to the timepoint on screen", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(join(repoRoot, "docs", "browser", "index.html"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  assert.match(html, /name="placement-time-mode" value="current"/);
+  // A range over every timepoint is what a session starts with, so it is the
+  // checked one: an option nobody opens must place tiles as it always did.
+  assert.match(html, /name="placement-time-mode" value="range" checked/);
+
+  // Read when the drag is saved rather than when the option was chosen - the
+  // timepoint that counts is the one the tile was moved at. `placementTimeRange`
+  // is called from the save, so reading `state.timeIndex` there is what makes
+  // scrubbing and then dragging place the tile where the drag was seen.
+  const range = app.slice(
+    app.indexOf("function placementTimeRange()"),
+    app.indexOf("function renderPlacementScope"),
+  );
+  assert.match(range, /placementTimeMode\(\) === "current"/);
+  assert.match(range, /return \[index, index\]/);
+
+  // A range slider that no longer says anything does not stay on screen, and
+  // the heading follows the viewer while it is the timepoint being named.
+  assert.match(app, /row\.hidden = times\.length < 2 \|\| current/);
+  const follow = app.slice(
+    app.indexOf("function noteTimeIndex()"),
+    app.indexOf("/** The layers a state describes"),
+  );
+  assert.match(follow, /updatePlacementTimeUi\(\)/);
+});
+
 test("a transform that varies over time or channel is shown as one sample", async () => {
   const { readFileSync } = await import("node:fs");
   const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
