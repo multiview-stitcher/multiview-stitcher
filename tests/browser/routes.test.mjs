@@ -840,6 +840,20 @@ test("a transform that varies over time or channel is shown as one sample", asyn
   // travel inside the state, since the state has one layer per view.
   assert.match(app, /command\("channel_transforms"/);
   assert.match(viewer, /setChannelTransforms\(transforms\)/);
+
+  // Registering a timelapse resolves one transform per timepoint just like a
+  // time-scoped manual placement does, so it has to flip the same flag -
+  // otherwise the viewer keeps showing the sample it was built with as the
+  // user scrubs time, and a registered timelapse looks unregistered past
+  // frame zero.
+  const register = app.slice(
+    app.indexOf("async function doRegister"),
+    app.indexOf("async function doFusePreview"),
+  );
+  assert.match(
+    register,
+    /if \(timeCoords\(\)\.length > 1\) state\.timeVaryingTransforms = true;/,
+  );
 });
 
 test("views can be selected in the list, which is what a drag acts on", async () => {

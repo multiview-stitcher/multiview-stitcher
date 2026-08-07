@@ -2263,6 +2263,11 @@ async function doRegister() {
         (pool.size ? ` on ${pool.size} worker(s)` : ""),
     );
 
+    // Registering a timelapse resolves one transform per timepoint, so from
+    // here on the viewer has to follow the timepoint the same way it does
+    // after a time-scoped manual placement.
+    if (timeCoords().length > 1) state.timeVaryingTransforms = true;
+
     state.session.transform_keys = result.transform_keys;
     state.transformKey = result.transform_key;
     state.previewRoute = null;
