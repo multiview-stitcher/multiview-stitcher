@@ -34,6 +34,9 @@ The interface should
   - selected layers are subtly highlighted
   - clicking a layer that is uniquely under the pointer selects it; ctrl / cmd
     adds it to or removes it from the selection, as in the layers list
+  - a hidden layer is not highlighted, pointed at, picked or dragged: the
+    visibility toggle takes a layer out of the way entirely. It stays selected
+    while hidden, and comes back as it was
 
 ## Left panel
 

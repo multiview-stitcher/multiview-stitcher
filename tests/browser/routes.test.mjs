@@ -888,7 +888,7 @@ test("a layer is highlighted at the same weight on both sides of the window", as
   assert.match(css, /\.view-list li\.highlighted/);
   assert.match(css, /\.mvs-layer-highlight \{/);
   assert.match(css, /\.mvs-layer-highlight\.subtle/);
-  assert.match(app, /subtle: \[\.\.\.state\.selectedViewUrls\]\.flatMap\(layerUrlsOf\)/);
+  assert.match(app, /subtle: \[\.\.\.state\.selectedViewUrls\]\.flatMap\(shownLayerUrlsOf\)/);
   assert.match(app, /verySubtle: state\.hoveredViewUrl/);
 
   // One field for what is pointed at, written from either side. The list and
@@ -923,6 +923,37 @@ test("an outline is the layer's own edges, and so is the hit test", async () => 
   assert.match(viewer, /layerSlabs\(\s*layer,/);
   assert.match(viewer, /containsPoint\(geometry, point\)/);
   assert.match(geometry, /layerGeometry\(placementOf\(transform\), rows\)/);
+
+  // Both spacings are needed, and for different parts of the matrix: the
+  // linear coefficients act on physical coordinates and so are scaled by the
+  // *source* dimension each consumes, while the translation lands in output
+  // indices. Reading either with the other's spacing shears every layer whose
+  // rotation mixes two axes that are not spaced alike.
+  assert.match(viewer, /sourceScales: transform\.inputSpace\.scales/);
+  assert.match(viewer, /outputScales: transform\.outputSpace\.scales/);
+});
+
+test("a hidden layer takes no part in pointing, picking or placing", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  // One helper decides it, so the outline, the hover, the click and the drag
+  // cannot end up disagreeing about whether a layer is there.
+  assert.match(app, /function shownLayerUrlsOf\(viewUrl\)/);
+  assert.match(app, /state\.viewVisibility\.get\(viewUrl\) === false \? \[\]/);
+
+  const uses = app.match(/shownLayerUrlsOf/g) || [];
+  assert.ok(uses.length >= 5, `expected every list to use it, saw ${uses.length}`);
+  assert.match(app, /subtle: \[\.\.\.state\.selectedViewUrls\]\.flatMap\(shownLayerUrlsOf\)/);
+  assert.match(app, /movableUrls: \[\.\.\.state\.currentViewLayerUrls\.keys\(\)\]\.flatMap\(\s*shownLayerUrlsOf,?\s*\)/);
+
+  // And a change of visibility has to be said again, or the outline of a
+  // layer that has just been hidden stays where it was.
+  const visibility = app.slice(
+    app.indexOf("function applyDisplayVisibility"),
+    app.indexOf("async function applyPositionalColors"),
+  );
+  assert.match(visibility, /syncManualPlacement\(\)/);
 });
 
 test("clicking a tile in the viewer selects it, exactly as its row does", async () => {

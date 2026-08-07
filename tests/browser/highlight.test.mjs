@@ -96,16 +96,23 @@ function placement({ leading = [], linear, shift, size, scales }) {
     outputUpper[leading.length + row] = high;
   }
 
+  const spacings = scales ?? [
+    ...leading.map(() => 1),
+    ...size.map(() => 1),
+  ];
+
   return {
     rank,
     sourceRank: rank,
     matrix,
     sourceLower,
     sourceUpper,
+    // The two spaces of a multiview-stitcher layer are the same grid; a
+    // placement moves the image within it rather than resampling it.
+    sourceScales: spacings,
+    outputScales: spacings,
     outputLower,
     outputUpper,
-    outputScales:
-      scales ?? [...leading.map(() => 1), ...size.map(() => 1)],
   };
 }
 
@@ -364,6 +371,39 @@ test("a transform that mixes in an axis the viewer cannot state falls back", () 
   const geometry = layerGeometry(mixed, [1, 2]);
   assert.ok(geometry.bounds, "the mixed transform must not be solved");
   assert.equal(geometry.lower, undefined);
+});
+
+test("a rotation between axes of different spacing is read in metres", () => {
+  // A Neuroglancer transform's linear coefficients act on *physical*
+  // coordinates, so each one has to be scaled by the spacing of the source
+  // dimension it consumes. Reading them with the output dimension's spacing
+  // instead is invisible while the two axes are spaced alike - turning a tile
+  // in a plane of square pixels - and shears the layer by their ratio the
+  // moment they are not, which is every cross-section that cuts along z.
+  const quarterTurn = [
+    [0, -1],
+    [1, 0],
+  ];
+  const geometry = layerGeometry(
+    placement({ linear: quarterTurn, size: [10, 40], scales: [4, 1] }),
+    [0, 1],
+  );
+
+  // Ten voxels along the coarse axis is forty metres, and a quarter turn puts
+  // them on the other axis - still forty metres, not ten.
+  const [x, y] = [0, 1].map(
+    (row) =>
+      geometry.matrix[row][0] * 10 +
+      geometry.matrix[row][1] * 0 +
+      geometry.translation[row],
+  );
+  assert.ok(Math.abs(x) < 1e-9, `x: ${x}`);
+  assert.ok(Math.abs(y - 40) < 1e-9, `y: ${y}`);
+
+  // And the same mistake, seen from the other side: a point well inside the
+  // turned layer is on it.
+  assert.equal(containsPoint(geometry, [-20, 20]), true);
+  assert.equal(containsPoint(geometry, [20, 20]), false);
 });
 
 test("what counts as being on a layer is the layer, not the box around it", () => {

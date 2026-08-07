@@ -959,13 +959,18 @@ function channelVisibility() {
 
 function applyDisplayVisibility() {
   if (!viewer.mounted) return 0;
-  return viewer.setDisplayVisibility(
+  const missing = viewer.setDisplayVisibility(
     {
       ...inputLayerVisibility(),
       ...fusedLayerVisibility(),
     },
     channelVisibility(),
   );
+
+  // What is drawn decides what can be pointed at, picked and outlined, so the
+  // single place visibility changes is the single place that is re-stated.
+  syncManualPlacement();
+  return missing;
 }
 
 async function applyPositionalColors() {
@@ -1469,6 +1474,19 @@ function layerUrlsOf(viewUrl) {
   return Array.from(state.currentViewLayerUrls.get(viewUrl) || []);
 }
 
+/**
+ * The same, unless the view is hidden, in which case none.
+ *
+ * A layer that is not on screen is not one to point at, pick, outline or drag:
+ * every one of those would be the app acting on something the user cannot see,
+ * and an outline around nothing is the most obviously wrong of them. Hiding a
+ * view is therefore how you take it out of the way of the ones you are still
+ * working on.
+ */
+function shownLayerUrlsOf(viewUrl) {
+  return state.viewVisibility.get(viewUrl) === false ? [] : layerUrlsOf(viewUrl);
+}
+
 /** The view a viewer layer was drawn from, if it is one of ours. */
 function viewUrlOfLayer(layerUrl) {
   for (const [viewUrl, layerUrls] of state.currentViewLayerUrls) {
@@ -1522,8 +1540,10 @@ function applyLayerHighlights() {
 
   if (!viewer.mounted) return;
   viewer.setLayerHighlights({
-    subtle: [...state.selectedViewUrls].flatMap(layerUrlsOf),
-    verySubtle: state.hoveredViewUrl ? layerUrlsOf(state.hoveredViewUrl) : [],
+    subtle: [...state.selectedViewUrls].flatMap(shownLayerUrlsOf),
+    verySubtle: state.hoveredViewUrl
+      ? shownLayerUrlsOf(state.hoveredViewUrl)
+      : [],
   });
 }
 
@@ -1538,9 +1558,10 @@ function syncLayerInteraction() {
   }
 
   viewer.setLayerInteraction({
-    // Input views only, as for placement: a fused preview is derived from
-    // where the tiles are and is not a thing to point at or pick.
-    urls: [...state.currentViewLayerUrls.keys()].flatMap(layerUrlsOf),
+    // Input views that are on screen. A fused preview is derived from where
+    // the tiles are and is not a thing to point at or pick; a hidden view is
+    // not there to point at at all.
+    urls: [...state.currentViewLayerUrls.keys()].flatMap(shownLayerUrlsOf),
     onHover: (layerUrl) =>
       noteHoveredView(layerUrl ? viewUrlOfLayer(layerUrl) : null),
     onPick: (layerUrl, { extend }) => {
@@ -1744,12 +1765,15 @@ function syncManualPlacement() {
   }
 
   viewer.setManualPlacement({
-    // Input views only: a fused image is derived from where the tiles are, so
-    // dragging it would describe nothing the session can save.
-    movableUrls: [...state.currentViewLayerUrls.keys()].flatMap(layerUrlsOf),
+    // Input views that are on screen: a fused image is derived from where the
+    // tiles are, so dragging it would describe nothing the session can save,
+    // and a hidden tile would move without ever showing that it had.
+    movableUrls: [...state.currentViewLayerUrls.keys()].flatMap(
+      shownLayerUrlsOf,
+    ),
     // Several selected views make a drag move them all; one breaks a tie
     // where tiles overlap.
-    selectedUrls: [...state.selectedViewUrls].flatMap(layerUrlsOf),
+    selectedUrls: [...state.selectedViewUrls].flatMap(shownLayerUrlsOf),
     // Only the chosen channels follow the pointer. A timepoint range cannot
     // be shown this way - one source transform covers the whole time axis -
     // so the drag shows the timepoint on screen and the session stores the

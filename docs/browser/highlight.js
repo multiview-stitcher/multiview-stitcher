@@ -41,9 +41,12 @@
  * Neuroglancer, and nothing Neuroglancer-shaped reaches this module:
  *
  *   - `rank`, `sourceRank`: the output and source dimension counts;
- *   - `matrix`: `(rank + 1) x (sourceRank + 1)`, column-major, mapping source
- *     indices to output indices - the layer's placement, rotation and all;
+ *   - `matrix`: `(rank + 1) x (sourceRank + 1)`, column-major, carrying the
+ *     layer's placement - rotation and all. It is *not* in one set of units:
+ *     its linear coefficients act on physical coordinates, while its last
+ *     column translates in output indices. See `sourceGeometry`;
  *   - `sourceLower`, `sourceUpper`: the layer's own box, in source indices;
+ *   - `sourceScales`: source indices to metres;
  *   - `outputLower`, `outputUpper`: the axis-aligned box Neuroglancer reports
  *     around the *result*, in output indices;
  *   - `outputScales`: output indices to metres.
@@ -79,8 +82,24 @@ export function layerGeometry(placement, rows) {
  * source coordinates. A layer-local axis such as a channel drops out here,
  * which is right - a tile covers every channel and constrains nothing along
  * one.
+ *
+ * The units are the subtle part. A Neuroglancer transform is not in one set of
+ * them: its linear coefficients act on *physical* coordinates - Neuroglancer
+ * rescales them by the source and output spacings itself - while its last
+ * column translates in output indices. So a coefficient is turned into metres
+ * per source index by the spacing of the source dimension it consumes, and the
+ * translation by the spacing of the output dimension it lands in.
+ *
+ * Reading the coefficients with the output spacing instead is invisible until
+ * a rotation mixes two axes that are spaced *differently*: turning a tile in a
+ * cross-section of isotropic pixels comes out right, and turning the same tile
+ * in one that cuts along z - four times coarser here - comes out sheared by
+ * exactly that factor.
  */
-function sourceGeometry({ rank, sourceRank, matrix, sourceLower, sourceUpper, outputScales }, rows) {
+function sourceGeometry(
+  { rank, sourceRank, matrix, sourceLower, sourceUpper, sourceScales, outputScales },
+  rows,
+) {
   if (!rows.length) return null;
   const at = (row, column) => matrix[(rank + 1) * column + row];
 
@@ -111,7 +130,7 @@ function sourceGeometry({ rank, sourceRank, matrix, sourceLower, sourceUpper, ou
 
   return {
     matrix: rows.map((row) =>
-      columns.map((column) => at(row, column) * outputScales[row]),
+      columns.map((column) => at(row, column) * sourceScales[column]),
     ),
     translation: rows.map((row) => at(row, sourceRank) * outputScales[row]),
     lower: columns.map((column) => sourceLower[column]),
