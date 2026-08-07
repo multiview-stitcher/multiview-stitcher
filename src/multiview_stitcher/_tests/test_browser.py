@@ -1313,6 +1313,46 @@ def test_neuroglancer_state_hides_side_panels_and_uses_dimension_layout():
     assert state["selectedLayer"] == {"visible": False}
 
 
+@pytest.mark.parametrize(
+    ("shape", "expected_layout"),
+    [
+        ((1, 8, 9), "xy"),
+        ((7, 1, 9), "xz"),
+        ((7, 8, 1), "yz"),
+    ],
+)
+def test_singleton_spatial_dimension_uses_its_2d_cross_section_layout(
+    shape, expected_layout
+):
+    session = Session()
+    session.sources = [SourceSpec(url="singleton.ome.zarr")]
+    sim = si_utils.get_sim_from_array(
+        np.zeros((3, 1) + shape),
+        dims=["t", "c", "z", "y", "x"],
+        scale={"z": 1.0, "y": 1.0, "x": 1.0},
+        translation={"z": 0.0, "y": 0.0, "x": 0.0},
+        c_coords=["channel 0"],
+        t_coords=[0, 1, 2],
+    )
+    session.msims = [msi_utils.get_msim_from_sim(sim, scale_factors=[])]
+
+    state = session.neuroglancer_state(serve_views="virtual")
+
+    assert state["layout"] == expected_layout
+
+
+def test_stored_singleton_z_with_a_channel_axis_uses_xy_layout(
+    singleton_z_tiles_on_disk,
+):
+    session = Session()
+    session.load(singleton_z_tiles_on_disk)
+    sim = msi_utils.get_sim_from_msim(session.msims[0])
+
+    assert sim.sizes["c"] == 1
+    assert sim.sizes["z"] == 1
+    assert session.neuroglancer_state()["layout"] == "xy"
+
+
 def test_neuroglancer_state_can_show_every_channel():
     session = Session()
     session.load(example_data.example_sources("tiles-3d")[:1])

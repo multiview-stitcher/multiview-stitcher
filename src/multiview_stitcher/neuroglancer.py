@@ -103,6 +103,27 @@ def _project_source_transform(affine, dims, source_dims):
     return affine[np.ix_(keep, keep)]
 
 
+def _default_layout(sims):
+    """Choose a viewer panel from spatial shapes, ignoring c/t axes."""
+    sdims = spatial_image_utils.get_spatial_dims_from_sim(sims[0])
+    if len(sdims) == 2:
+        return "xy"
+
+    spatial_shapes = [
+        spatial_image_utils.get_shape_from_sim(sim) for sim in sims
+    ]
+    displayed_dims = frozenset(
+        dim
+        for dim in sdims
+        if any(shape[dim] > 1 for shape in spatial_shapes)
+    )
+    return {
+        frozenset(("x", "y")): "xy",
+        frozenset(("x", "z")): "xz",
+        frozenset(("y", "z")): "yz",
+    }.get(displayed_dims, "4panel")
+
+
 def generate_neuroglancer_json(
     ome_zarr_paths: list[str],
     ome_zarr_urls: list[str],
@@ -144,7 +165,7 @@ def generate_neuroglancer_json(
         )
         sim = ome_zarr_sim0
     sdims = spatial_image_utils.get_spatial_dims_from_sim(sim)
-    ndim = len(sdims)
+    len(sdims)
     dims = sim.dims
     spacing = spatial_image_utils.get_spacing_from_sim(sim)
 
@@ -343,7 +364,7 @@ def generate_neuroglancer_json(
         }
 
     if layout is None:
-        layout = "xy" if ndim == 2 else "4panel"
+        layout = _default_layout(sims if sims is not None else [sim])
 
     ng_config = {
         "dimensions": output_dimensions,
