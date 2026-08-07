@@ -1,9 +1,9 @@
 {
-  "wheel": "multiview_stitcher-0.1.60.dev38+gd3e67eae3-py3-none-any.whl",
-  "sha256": "4b99f1902e63e7f82f7fcd7ea36e3a07310baebda4e6f7c23d99e2569bd5854d",
-  "build": "c84e4203e85e",
+  "wheel": "multiview_stitcher-0.1.60.dev39+ga630cd468-py3-none-any.whl",
+  "sha256": "a02e4c924002e9c97f62d481f0116e1030f445c0e3e98f23f1bfb1f1b7fbfa2c",
+  "build": "cfb8a95db666",
   "pyodide_lock": "pyodide-lock.json",
-  "size": 2369620,
+  "size": 2369680,
   "pyodide_version": "314.0.4",
   "browser_dependencies": [
     "dask[array]!=2025.11.0",
