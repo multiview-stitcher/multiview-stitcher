@@ -65,7 +65,13 @@ button { color: inherit; }
 /* Kept at its natural width: the status area beside it is the one that gives,
    and a shrinking brand only turns the title into two lines or an ellipsis. */
 .brand { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
-.brand img { width: 39px; height: 39px; object-fit: contain; flex: 0 0 auto; }
+
+/* The <symbol> the logos reference is never drawn where it is declared. */
+.logo-defs { display: none; }
+/* Drawn in the surrounding text colour - white here, so black and white
+   whichever way the desktop is themed. */
+.logo { color: var(--text); }
+.brand .logo { width: 39px; height: 39px; flex: 0 0 auto; }
 .brand h1 { margin: 0; font-size: 15px; line-height: 1.2; font-weight: 690; letter-spacing: 0.01em; white-space: nowrap; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
 
@@ -364,7 +370,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px
 .dialog-footer button { width: auto; }
 .about-dialog { max-width: 475px; }
 .about-content { padding: 24px; text-align: center; }
-.about-content > img { width: 66px; height: 66px; }
+.about-content > .logo { width: 66px; height: 66px; }
 .about-content > p { max-width: 355px; margin: 14px auto; color: var(--muted); }
 .about-content a { color: var(--accent); text-decoration: none; }
 .about-content a:hover { color: var(--accent-bright); text-decoration: underline; }
@@ -391,7 +397,7 @@ kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px
   body { height: auto; min-height: 100%; overflow: auto; }
   .app-header { position: sticky; top: 0; min-height: 58px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "status status"; gap: 5px 10px; padding: 7px 12px; }
   .brand { grid-area: brand; }
-  .brand img { width: 31px; height: 31px; }
+  .brand .logo { width: 31px; height: 31px; }
   .status-area { grid-area: status; min-height: 13px; }
   #progress { max-width: none; }
   .header-actions { grid-area: actions; }

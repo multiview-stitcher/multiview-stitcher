@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>multiview-stitcher</title>
+    <link rel="icon" type="image/svg+xml" href="logo.svg" />
     <link
       rel="stylesheet"
       href="neuroglancer/neuroglancer.css"
@@ -12,9 +13,35 @@
     <link rel="stylesheet" href="app.css" id="app-stylesheet" />
   </head>
   <body>
+    <!--
+      The logo, defined once and referenced by <use> below. Inline rather than
+      <img src="logo.svg"> so that it paints in currentColor: the file follows
+      the system colour scheme, and on a light desktop it would draw a black
+      logo onto this app's permanently dark header. logo.svg holds the same
+      geometry for the favicon - edit the two together.
+    -->
+    <svg class="logo-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="mvs-logo" viewBox="16.5 4.851 104.671 98.649">
+        <g fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round">
+          <polygon points="60,55 20,35 60,15 80,25 60,35 80,45" />
+          <polygon points="100,80 60,100 60,55 80,45 80,55 100,45" />
+          <polygon points="60,55 20,35 20,80 60,100" />
+          <polygon points="60,55 100,80 60,100 20,80" />
+        </g>
+        <g fill="currentColor" fill-opacity="0.75" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
+          <polygon points="69.954,35.111 86.006,27.085 102.058,35.111 86.006,43.137" />
+          <polygon points="99.356,15.547 109.013,10.719 118.671,15.547 109.013,20.376" />
+          <polygon points="92.589,10.123 98.133,7.351 103.677,10.123 98.133,12.895" />
+          <polygon points="86.218,21.261 94.928,16.906 103.638,21.261 94.928,25.616" />
+          <polygon points="98.141,34.969 106.677,30.701 115.214,34.969 106.677,39.237" />
+          <polygon points="100.386,28.46 106.866,25.22 113.346,28.46 106.866,31.7" />
+        </g>
+      </symbol>
+    </svg>
+
     <header class="app-header">
       <div class="brand">
-        <img src="../images/logo.svg" alt="" />
+        <svg class="logo" aria-hidden="true"><use href="#mvs-logo" /></svg>
         <div>
           <h1>multiview-stitcher</h1>
           <p>Registration &amp; Fusion in the browser (OME-Zarr)</p>
@@ -403,7 +430,7 @@
         <button class="icon-button" type="button" data-close-dialog aria-label="Close about dialog">&times;</button>
       </div>
       <div class="about-content">
-        <img src="../images/logo.svg" alt="multiview-stitcher logo" />
+        <svg class="logo" role="img" aria-label="multiview-stitcher logo"><use href="#mvs-logo" /></svg>
         <p>Registration and fusion for tiled, multiview microscopy data&mdash;running locally in your browser.</p>
         <div class="privacy-note"><strong>Your data stays local.</strong><span>Images are processed on this device and are never uploaded.</span></div>
         <p class="built-with">Built with <a href="https://neuroglancer-docs.web.app/" target="_blank" rel="noopener">Neuroglancer</a>, <a href="https://ngff.openmicroscopy.org/" target="_blank" rel="noopener">OME-Zarr</a>, and <a href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a>.</p>

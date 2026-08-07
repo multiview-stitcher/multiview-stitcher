@@ -89,6 +89,7 @@ REQUIRED_FILES = (
     "index.html",
     "app.js",
     "app.css",
+    "logo.svg",
     "config.json",
     "sw.js",
     "py-runtime.js",
