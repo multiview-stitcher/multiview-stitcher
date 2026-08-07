@@ -99,8 +99,12 @@ src/multiview_stitcher/_benchmarks/data
 
 .devcontainer
 
-# Browser app: the static client is tracked, the build outputs are not
+# Browser app: the static client is tracked, the build outputs are not.
+# The async-computation worker sits beside them rather than inside
+# docs/browser/neuroglancer/ because the chunk worker loads it from a URL
+# relative to itself, one directory up - it is build output all the same.
 docs/browser/packages/
 docs/browser/neuroglancer/
+docs/browser/async_computation.bundle.js
 tests/browser/node_modules/
 .ng-build/
