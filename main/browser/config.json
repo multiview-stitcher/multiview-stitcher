@@ -24,7 +24,9 @@
   "browser_dependencies": [
     "dask[array]!=2025.11.0",
     "dask-image",
-    "ngff-zarr"
+    "ngff-zarr",
+    "czifile==2019.7.2.3",
+    "tifffile"
   ],
   "default_n_workers": 3,
   "max_n_workers": 12

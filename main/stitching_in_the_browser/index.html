@@ -370,6 +370,13 @@
 <nav aria-label="How it works" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
+<a class="md-nav__link" href="#reading-a-czi">
+<span class="md-ellipsis">
+      Reading a CZI
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#cache-invalidation">
 <span class="md-ellipsis">
       Cache invalidation
@@ -681,6 +688,13 @@
 <nav aria-label="How it works" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
+<a class="md-nav__link" href="#reading-a-czi">
+<span class="md-ellipsis">
+      Reading a CZI
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#cache-invalidation">
 <span class="md-ellipsis">
       Cache invalidation
@@ -760,15 +774,26 @@ inside your browser.</p>
    needs the <a href="https://developer.mozilla.org/en-US/docs/Web/API/File_System_API">File System Access API</a>,
    which Firefox and Safari do not implement yet.</li>
 <li>Choose how many Python web workers to start.</li>
-<li>Press <strong>Load example</strong> for a generated 3D 2×2 tile dataset, or drop a
-   folder onto the landing area — either a single OME-Zarr, or a folder
-   containing one OME-Zarr per tile. Several folders can be dropped together,
-   in which case each one must itself be an OME-Zarr.</li>
-<li>Press <strong>Register</strong>, then <strong>Fuse (preview)</strong>.</li>
+<li>
+<p>Press <strong>Load example</strong> for a generated 3D 2×2 tile dataset, or drop your
+   data onto the landing area:</p>
+<ul>
+<li>a <strong>folder</strong> — either a single OME-Zarr, or a folder containing one
+  OME-Zarr per tile. Several folders can be dropped together, in which case
+  each one must itself be an OME-Zarr.</li>
+<li>a <strong>CZI file</strong>, either a mosaic (tiles laid out in a plane) or a
+  multi-view acquisition (stacks recorded at different angles). Which one
+  it is is read from the file metadata, and either way one file is a whole
+  dataset.</li>
+</ul>
+</li>
+<li>
+<p>Press <strong>Register</strong>, then <strong>Fuse (preview)</strong>.</p>
+</li>
 </ol>
-<p>Dropping further folders <em>adds</em> their images to the views already loaded, so a
-dataset can be assembled tile by tile from several places; dropping the same
-folder twice changes nothing. Registration and fusion show their progress in
+<p>Dropping further folders or files <em>adds</em> their images to the views already
+loaded, so a dataset can be assembled tile by tile from several places;
+dropping the same folder twice changes nothing. Registration and fusion show their progress in
 the header, and the compute workers start as soon as you pick how many to use
 rather than on the first action. Each view has an individual remove button, and
 <strong>Clear</strong> starts over. The viewer's layers always mirror the list, in the same
@@ -814,6 +839,23 @@ executed by <a href="https://pyodide.org/">Pyodide</a>.</p>
   difference. The fused preview is always virtual: its chunks are fused on
   demand, spread over the worker pool.</li>
 </ul>
+<h3 id="reading-a-czi">Reading a CZI</h3>
+<p>A CZI is one file rather than a directory of chunks, so it takes a different
+route from an OME-Zarr: instead of being read over the service worker, it is
+<strong>mounted</strong> into each Python worker's own filesystem, where it becomes an
+ordinary path. The same functions used on the desktop then open it unchanged
+— <code>io.read_mosaic_into_sims_czifile</code> for a mosaic, and
+<code>czi_utils.read_multiview_czi_into_sims</code> for a multi-view acquisition, whose
+views arrive with their rotations already applied from the metadata.</p>
+<p>Which reader applies is decided by <code>czi_utils.is_multiview_czi</code>, from the
+<code>MultiView</code> element of the metadata. The dimensions cannot decide it: a
+multi-view file carries a mosaic dimension too, pinned at a single tile.</p>
+<p>The mount is Emscripten's <code>WORKERFS</code>, which answers each read by slicing the
+<code>File</code> and reading that slice synchronously. Only the bytes actually needed are
+ever read, so a multi-gigabyte CZI is seeked through rather than loaded: opening
+a mosaic touches its header and subblock directory, and each tile is decoded on
+demand. Every worker mounts the file for itself, which is what lets a compute
+worker open a tile knowing nothing but its URL.</p>
 <h3 id="cache-invalidation">Cache invalidation</h3>
 <p>Every URL the viewer receives carries a session <em>generation</em>. Anything that
 changes what those URLs should return — a new registration, a new fusion
@@ -842,8 +884,10 @@ URLs it has never seen. Requests for a retired route are answered with
 <h2 id="current-limitations">Current limitations</h2>
 <ul>
 <li>Chromium only, because of the File System Access API.</li>
-<li>OME-Zarr v0.4 input (Pyodide ships zarr v2). Reading other formats, e.g.
-  CZI or TIFF, is not available in the browser yet.</li>
+<li>Input is OME-Zarr, or <strong>uncompressed</strong> mosaic CZI. Compressed CZI (LZW, JPEG,
+  JPEG XR, ZSTD) cannot be decoded in the browser: that needs
+  <a href="https://pypi.org/project/imagecodecs/">imagecodecs</a>, a C extension with no
+  WebAssembly build. Other formats, e.g. TIFF, are not available yet.</li>
 <li>Registration uses phase correlation and fusion uses weighted averaging;
   methods depending on packages without a WebAssembly build (ANTsPy,
   ITK-Elastix) are not available.</li>

@@ -37,7 +37,6 @@ const { carryCameraOver, centreOnData } = await import(
   `./camera.js${buildTag}`
 );
 const {
-  boundsContain,
   composeAffine,
   dragAngle,
   fromPhysicalMatrix,
@@ -50,23 +49,43 @@ const {
   translateMatrix,
   translationForDrag,
 } = await import(`./placement.js${buildTag}`);
+const { containsPoint, coveragePolygon, layerGeometry, layerSlabs } =
+  await import(`./highlight.js${buildTag}`);
 
 //: Events that mean the user is driving the camera. Until one arrives, the
 //: viewer keeps the camera on the data as the layers report their bounds.
 const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown"];
 
-//: Neuroglancer action a ctrl+drag raises while manual placement is on. Bound
-//: on the app's own slice-view map, so it applies in the cross-sections only.
-//: Modifiers are matched exactly, so the two gestures need a binding each -
-//: adding alt to the translation binding would not match it.
+//: Neuroglancer action a placement drag raises while manual placement is on.
+//: Bound on the app's own slice-view map, so it applies in the cross-sections
+//: only. Modifiers are matched exactly, so the two gestures need a binding
+//: each - adding control to the translation binding would not match it.
+//:
+//: Alt moves, control+alt turns. Alt displaces `move-annotation`, which needs
+//: an annotation layer to do anything; control+alt is unbound in a slice view.
+//: A control+alt *drag* and a control *click* are different gestures, so the
+//: two can share the modifier without ever meaning the same thing.
 const MOVE_LAYER_ACTION = "mvs-move-layer";
 const MOVE_LAYER_EVENTS = [
-  "at:control+mousedown0",
+  "at:alt+mousedown0",
   "at:control+alt+mousedown0",
 ];
 
+//: Bound while layers can be picked, to an action nothing listens for. The
+//: pick itself is handled from the pointer events - only there can a press
+//: that turned into a pan be told from a click - so all these bindings do is
+//: take the gesture off Neuroglancer's `annotate`, which answers a ctrl+click
+//: with "the annotate command requires a layer to be selected".
+const PICK_LAYER_ACTION = "mvs-pick-layer";
+const PICK_LAYER_EVENTS = ["at:control+mousedown0", "at:meta+mousedown0"];
+
 //: Viewport pixels a rotation's plane basis is measured over. See `#planeBasis`.
 const BASIS_SPAN = 256;
+
+//: How far the pointer may travel between press and release and still count as
+//: a click. A plain drag in a cross-section pans the camera, and panning must
+//: not end in a selection.
+const CLICK_SLOP_PX = 4;
 
 const POSITIONAL_COLOR_SHADER = `#uicontrol invlerp contrast
 #uicontrol vec3 color color
@@ -100,6 +119,18 @@ export class NeuroglancerViewer {
   #placement = null;
   #onMoveLayer = null;
   #drag = null;
+  #interaction = null;
+  #highlights = new Map();
+  #overlay = null;
+  #drawnHighlights = null;
+  #frame = null;
+  #pointerInside = false;
+  #hoveredUrl = null;
+  #press = null;
+  #onPointerEnter = null;
+  #onPointerLeave = null;
+  #onPointerDown = null;
+  #onPointerUp = null;
 
   /**
    * Mount a viewer into `target`.
@@ -123,6 +154,8 @@ export class NeuroglancerViewer {
     this.#onToolPalettesChanged = () => this.#hideSidePanels();
     this.#viewer.toolPalettes.changedShallow.add(this.#onToolPalettesChanged);
     this.#hideSidePanels();
+
+    this.#mountOverlay();
 
     // Fresh viewer, so the camera is ours to place until the user moves it.
     this.#cameraPlaced = false;
@@ -296,6 +329,12 @@ export class NeuroglancerViewer {
     // save. `reset()` re-mounts, and the app re-applies its placement then.
     this.#placement = null;
     this.#unbindManualPlacement();
+    this.#unbindLayerInteraction();
+    if (this.#frame !== null) cancelAnimationFrame(this.#frame);
+    this.#frame = null;
+    this.#highlights = new Map();
+    this.#overlay = null;
+    this.#drawnHighlights = null;
     this.#viewer.state.changed.remove(this.#onStateChanged);
     this.#viewer.navigationState.position.changed.remove(
       this.#onPositionChanged,
@@ -675,6 +714,390 @@ export class NeuroglancerViewer {
     return this.#drag !== null;
   }
 
+  // -------------------------------------------------------------------
+  // Hovering and picking layers
+  // -------------------------------------------------------------------
+
+  /**
+   * Let the user point at and pick layers in the viewer.
+   *
+   * Separate from `setManualPlacement`, and on whether or not that is: moving
+   * a tile is a mode the user turns on, while knowing which tile is under the
+   * pointer - and saying "that one" - is how the viewer answers a question the
+   * views list otherwise has to be read for.
+   *
+   * A layer is only ever named when it is the *only* one under the pointer.
+   * Where tiles overlap the pointer does not identify one, and a highlight or
+   * a selection that guessed would be worse than none: the views list is
+   * there, and it is unambiguous.
+   *
+   * `interaction` carries:
+   *   - `urls`: the layers that take part, by source URL.
+   *   - `onHover(url | null)`: the layer under the pointer whenever that
+   *     changes, so the app can show it wherever else the layer appears.
+   *   - `onPick(url, { extend })`: a click on one. `extend` is set for
+   *     ctrl / cmd, which the app is expected to treat as adding to or
+   *     removing from a selection rather than replacing it.
+   *
+   * Pass null to switch it off.
+   */
+  setLayerInteraction(interaction) {
+    this.#require();
+
+    if (!interaction) {
+      this.#unbindLayerInteraction();
+      return;
+    }
+
+    const wasOff = this.#interaction === null;
+    this.#interaction = {
+      urls: new Set(interaction.urls ?? []),
+      onHover: interaction.onHover ?? (() => {}),
+      onPick: interaction.onPick ?? (() => {}),
+    };
+
+    if (wasOff) this.#bindLayerInteraction();
+    this.#requestFrame();
+  }
+
+  /**
+   * Outline layers on top of what is drawn, at one of two strengths.
+   *
+   * `subtle` is the weight the views list gives a selected row and `verySubtle`
+   * the weight it gives one under the pointer, so that the two halves of the
+   * app say the same thing about a layer at the same volume. A layer named in
+   * both takes the stronger of the two.
+   *
+   * Addressed by source URL, like every other layer operation here, and drawn
+   * from each layer's live bounds - so an outline follows a tile through a
+   * placement drag rather than being left behind by it.
+   */
+  setLayerHighlights(highlights) {
+    const wanted = new Map();
+    for (const url of highlights?.verySubtle ?? []) wanted.set(url, "very-subtle");
+    for (const url of highlights?.subtle ?? []) wanted.set(url, "subtle");
+
+    this.#highlights = wanted;
+    this.#requestFrame();
+  }
+
+  #bindLayerInteraction() {
+    const target = this.#target;
+
+    for (const binding of PICK_LAYER_EVENTS) {
+      this.#viewer.inputEventBindings.sliceView.set(binding, {
+        action: PICK_LAYER_ACTION,
+        stopPropagation: true,
+      });
+    }
+
+    this.#onPointerEnter = () => {
+      this.#pointerInside = true;
+      this.#requestFrame();
+    };
+    this.#onPointerLeave = () => {
+      this.#pointerInside = false;
+      this.#press = null;
+      this.#reportHover(null);
+      this.#requestFrame();
+    };
+
+    // Pressed and released rather than clicked, so that a press which turns
+    // into a pan is not a pick. Neuroglancer claims `mousedown` in the cross-
+    // sections and stops it there; `pointerdown` is a different event and
+    // reaches us anyway, and the capture phase keeps it that way.
+    this.#onPointerDown = (event) => {
+      if (event.button !== 0) return;
+      // Alt is a placement drag and shift a camera rotation. Neither is a
+      // pick, and both would otherwise end in one wherever they were short.
+      // Control alone is not excluded: that is the pick that extends.
+      if (event.altKey || event.shiftKey) return;
+      if (!this.#orthogonalPanelAt(event.target)) return;
+      this.#press = {
+        x: event.clientX,
+        y: event.clientY,
+        extend: event.ctrlKey || event.metaKey,
+      };
+    };
+
+    this.#onPointerUp = (event) => {
+      const press = this.#press;
+      this.#press = null;
+      if (!press || event.button !== 0 || !this.#interaction) return;
+      if (
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) >
+        CLICK_SLOP_PX
+      ) {
+        return;
+      }
+
+      const under = this.#urlsUnderPointer();
+      if (under.length === 1) {
+        this.#interaction.onPick(under[0], { extend: press.extend });
+      }
+    };
+
+    target.addEventListener("pointerenter", this.#onPointerEnter);
+    target.addEventListener("pointerleave", this.#onPointerLeave);
+    target.addEventListener("pointerdown", this.#onPointerDown, {
+      capture: true,
+    });
+    // On the window: a press that is released outside the viewer is not a
+    // click, and this is where that is noticed rather than left pending.
+    window.addEventListener("pointerup", this.#onPointerUp, { capture: true });
+  }
+
+  #unbindLayerInteraction() {
+    if (this.#interaction) {
+      for (const binding of PICK_LAYER_EVENTS) {
+        this.#viewer?.inputEventBindings.sliceView.delete(binding);
+      }
+    }
+
+    if (this.#onPointerDown) {
+      this.#target?.removeEventListener("pointerenter", this.#onPointerEnter);
+      this.#target?.removeEventListener("pointerleave", this.#onPointerLeave);
+      this.#target?.removeEventListener("pointerdown", this.#onPointerDown, {
+        capture: true,
+      });
+      window.removeEventListener("pointerup", this.#onPointerUp, {
+        capture: true,
+      });
+    }
+
+    this.#onPointerEnter = null;
+    this.#onPointerLeave = null;
+    this.#onPointerDown = null;
+    this.#onPointerUp = null;
+    this.#interaction = null;
+    this.#press = null;
+    this.#pointerInside = false;
+    this.#hoveredUrl = null;
+  }
+
+  /** The layers taking part in interaction that the pointer is on. */
+  #urlsUnderPointer() {
+    const interaction = this.#interaction;
+    if (!interaction || !interaction.urls.size) return [];
+
+    const pointer = this.#pointerPosition();
+    if (!pointer) return [];
+
+    return this.#urlsAtPosition(
+      pointer.position,
+      pointer.globalNames,
+      pointer.globalScales,
+      interaction.urls,
+    );
+  }
+
+  #reportHover(url) {
+    if (this.#hoveredUrl === url) return;
+    this.#hoveredUrl = url;
+    this.#interaction?.onHover(url);
+  }
+
+  // -------------------------------------------------------------------
+  // The highlight overlay
+  // -------------------------------------------------------------------
+
+  #mountOverlay() {
+    const overlay = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    );
+    overlay.setAttribute("class", "mvs-layer-highlights");
+    overlay.setAttribute("aria-hidden", "true");
+    this.#target.appendChild(overlay);
+    this.#overlay = overlay;
+    this.#drawnHighlights = null;
+  }
+
+  /**
+   * Redraw on every frame the overlay is wanted for.
+   *
+   * The outlines are computed from the panels' own projection, which changes
+   * with every pan, zoom, rotation, layout change, window resize and placement
+   * drag. Following each of those signals separately would be a list to keep
+   * complete; following the frame clock cannot fall behind any of them. The
+   * loop runs only while there is something to draw or the pointer is over the
+   * viewer, and a frame that computes the same outlines as the last one
+   * touches no DOM.
+   */
+  #requestFrame() {
+    if (this.#frame !== null || !this.#viewer) return;
+    this.#frame = requestAnimationFrame(() => {
+      this.#frame = null;
+      if (!this.#viewer) return;
+
+      // A drag holds the tile under the pointer by definition; re-deciding
+      // what is hovered while one is running says nothing and only flickers.
+      if (this.#pointerInside && !this.#drag) {
+        const under = this.#urlsUnderPointer();
+        this.#reportHover(under.length === 1 ? under[0] : null);
+      }
+      this.#drawHighlights();
+
+      if (this.#highlights.size || this.#pointerInside) this.#requestFrame();
+    });
+  }
+
+  #drawHighlights() {
+    if (!this.#overlay) return;
+
+    const shapes = this.#highlightShapes();
+    // Compared before anything is written: the loop runs at frame rate and a
+    // still viewer must not be rebuilding SVG sixty times a second.
+    const drawn = JSON.stringify(shapes);
+    if (drawn === this.#drawnHighlights) return;
+    this.#drawnHighlights = drawn;
+
+    this.#overlay.replaceChildren(
+      ...shapes.map(({ strength, points }) => {
+        const polygon = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "polygon",
+        );
+        polygon.setAttribute("class", `mvs-layer-highlight ${strength}`);
+        polygon.setAttribute(
+          "points",
+          points.map(([x, y]) => `${x},${y}`).join(" "),
+        );
+        return polygon;
+      }),
+    );
+  }
+
+  /** One outline per highlighted layer per cross-section panel it shows in. */
+  #highlightShapes() {
+    if (!this.#highlights.size) return [];
+
+    const viewer = this.#viewer;
+    const space = viewer.navigationState.coordinateSpace.value;
+    const position = viewer.navigationState.position.value;
+    if (!space?.valid || position?.length !== space.rank) return [];
+
+    const { displayDimensionIndices } =
+      viewer.navigationState.pose.displayDimensions.value;
+    const scales = this.#displayScales();
+    // The centre of every cross-section panel is the navigation position, so
+    // that is the point the panel's plane is described around.
+    const centre = displayCoordinates(position, displayDimensionIndices).map(
+      (value, display) => value * scales[display],
+    );
+
+    const globalScales = Array.from(space.scales);
+    const geometry = new Map();
+    for (const url of this.#highlights.keys()) {
+      const layer = this.#layerGeometry(url, Array.from(space.names));
+      if (layer) geometry.set(url, layer);
+    }
+    if (!geometry.size) return [];
+
+    // Which of the three on-screen axes each viewer dimension is drawn as, so
+    // a panel's own basis can be restated in the dimensions a layer is placed
+    // in. One the panel does not draw simply does not move with the pointer.
+    const displayAxisOf = new Map();
+    displayDimensionIndices.forEach((global, display) => {
+      if (global >= 0) displayAxisOf.set(global, display);
+    });
+
+    const targetRect = this.#target.getBoundingClientRect();
+    const shapes = [];
+
+    for (const panel of viewer.display.panels) {
+      if (!panel.sliceView) continue;
+      const rect = panel.element.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+
+      const plane = this.#planeBasis(
+        panel,
+        displayCoordinates(position, displayDimensionIndices),
+      );
+      const left = rect.left - targetRect.left;
+      const top = rect.top - targetRect.top;
+      const along = (vector) => (global) => {
+        const display = displayAxisOf.get(global);
+        return display === undefined ? 0 : vector[display];
+      };
+
+      for (const [url, layer] of geometry) {
+        const slabs = layerSlabs(
+          layer,
+          layer.globals.map((global) =>
+            displayAxisOf.has(global)
+              ? centre[displayAxisOf.get(global)]
+              : position[global] * globalScales[global],
+          ),
+          layer.globals.map(along(plane.u)),
+          layer.globals.map(along(plane.v)),
+        );
+        if (!slabs) continue;
+
+        const points = coveragePolygon({
+          width: rect.width,
+          height: rect.height,
+          slabs,
+        });
+        if (!points.length) continue;
+
+        shapes.push({
+          strength: this.#highlights.get(url),
+          points: points.map(([x, y]) => [
+            round(x + left),
+            round(y + top),
+          ]),
+        });
+      }
+    }
+
+    return shapes;
+  }
+
+  /**
+   * Where a layer is, in terms the viewer's own coordinate space can state.
+   *
+   * `globals` lists the viewer dimensions the layer is placed in; every array
+   * that goes in or comes out is indexed the same way. Two shapes come back,
+   * and which one says how faithfully the layer can be described:
+   *
+   *   - `{ matrix, translation, lower, upper }`: the layer's own box, and the
+   *     affine map from its source coordinates into those dimensions in
+   *     physical units. This is the *image*, edge for edge, whatever rotation
+   *     the tile carries;
+   *   - `{ bounds }`: the axis-aligned box the layer's output space reports,
+   *     used when the transform mixes those dimensions with ones the viewer
+   *     cannot state a position in. An over-covering answer beats none.
+   *
+   * The outline and the hit test are both built from this, so what is drawn
+   * around a tile and what counts as being on it cannot come apart.
+   */
+  #layerGeometry(url, globalNames) {
+    for (const dataSource of this.#sourcesReading(url)) {
+      const loadState = dataSource.loadState;
+      if (!loadState || loadState.error) continue;
+
+      const transform = loadState.transform.value;
+      const outputNames = Array.from(transform.outputSpace.names);
+
+      // The dimensions the two spaces share. A layer-local one - a channel
+      // axis the viewer has no position along - is not among them.
+      const globals = [];
+      const rows = [];
+      for (let global = 0; global < globalNames.length; global += 1) {
+        const row = outputNames.indexOf(globalNames[global]);
+        if (row === -1) continue;
+        globals.push(global);
+        rows.push(row);
+      }
+      if (!rows.length) return null;
+
+      return { globals, ...layerGeometry(placementOf(transform), rows) };
+    }
+
+    return null;
+  }
+
   /**
    * Start a drag, having worked out which layer it moves.
    *
@@ -692,21 +1115,16 @@ export class NeuroglancerViewer {
     const panel = this.#orthogonalPanelAt(event.target);
     if (!panel) return;
 
-    const space = viewer.navigationState.coordinateSpace.value;
-    const mouse = viewer.mouseState;
-    if (!space?.valid || !mouse.active) return;
+    const pointer = this.#pointerPosition();
+    if (!pointer) return;
+    const { position, globalNames, globalScales } = pointer;
 
-    const position = Array.from(
-      mouse.unsnappedPosition?.length === space.rank
-        ? mouse.unsnappedPosition
-        : mouse.position,
+    const under = this.#urlsAtPosition(
+      position,
+      globalNames,
+      globalScales,
+      placement.movableUrls,
     );
-    if (position.length !== space.rank) return;
-
-    const globalNames = Array.from(space.names);
-    const globalScales = Array.from(space.scales);
-
-    const under = this.#urlsAtPosition(position, globalNames, globalScales);
     const { urls, reason } = pickDragTarget(under, placement.selectedUrls);
     if (!urls.length) {
       placement.onRefused(reason);
@@ -729,10 +1147,10 @@ export class NeuroglancerViewer {
     const { displayDimensionIndices } =
       viewer.navigationState.pose.displayDimensions.value;
     const origin = displayCoordinates(position, displayDimensionIndices);
-    // Alt turns the tile instead of moving it. Read from the event rather than
-    // from a second action, so the two gestures share one code path up to here
-    // - the target is picked the same way either way.
-    const mode = event.altKey ? "rotate" : "translate";
+    // Control turns the tile instead of moving it - both gestures carry alt.
+    // Read from the event rather than from a second action, so the two share
+    // one code path up to here: the target is picked the same way either way.
+    const mode = event.ctrlKey ? "rotate" : "translate";
     // The tile the pointer grabbed, which is the one a rotation is measured
     // around. Every tile then turns by that angle about its own centre.
     const anchor = urls.find((url) => under.includes(url)) ?? urls[0];
@@ -966,37 +1384,57 @@ export class NeuroglancerViewer {
   }
 
   /**
-   * The movable layers whose data covers a global position.
+   * Where the pointer is in the global coordinate space, if it is anywhere.
    *
-   * Judged from each layer's own transformed bounds rather than from what was
-   * drawn, so a tile counts as being under the pointer wherever it *is* -
-   * including where it is hidden behind another one, or dark.
+   * Shared by every gesture that has to know what it is on: a drag, a hover
+   * and a click all mean the same thing by "the layer under the pointer".
    */
-  #urlsAtPosition(position, globalNames, globalScales) {
+  #pointerPosition() {
+    const viewer = this.#viewer;
+    const space = viewer?.navigationState.coordinateSpace.value;
+    const mouse = viewer?.mouseState;
+    if (!space?.valid || !mouse?.active) return null;
+
+    const position = Array.from(
+      mouse.unsnappedPosition?.length === space.rank
+        ? mouse.unsnappedPosition
+        : mouse.position,
+    );
+    if (position.length !== space.rank) return null;
+
+    return {
+      position,
+      globalNames: Array.from(space.names),
+      globalScales: Array.from(space.scales),
+    };
+  }
+
+  /**
+   * Which of `wanted` cover a global position, in layer order.
+   *
+   * Judged from where each layer *is* rather than from what was drawn, so a
+   * tile counts as being under the pointer even where it is hidden behind
+   * another one, or dark. Through the same geometry the outline is drawn from,
+   * so the tile a pointer picks is the tile the user sees outlined - which
+   * stops being automatic the moment a tile is turned, since the corners of a
+   * rotated tile fall outside the upright box around it and vice versa.
+   */
+  #urlsAtPosition(position, globalNames, globalScales, wanted) {
     const urls = [];
 
     for (const managed of this.#viewer.layerManager.managedLayers) {
       for (const dataSource of managed.layer?.dataSources ?? []) {
         const url = dataSource.spec?.url;
-        if (!this.#placement.movableUrls.has(url)) continue;
+        if (!wanted.has(url)) continue;
         if (urls.includes(url)) continue;
 
-        const loadState = dataSource.loadState;
-        if (!loadState || loadState.error) continue;
+        const geometry = this.#layerGeometry(url, globalNames);
+        if (!geometry) continue;
 
-        const { outputSpace } = loadState.transform.value;
-        const contained = boundsContain(
-          {
-            names: Array.from(outputSpace.names),
-            scales: Array.from(outputSpace.scales),
-            lowerBounds: Array.from(outputSpace.bounds.lowerBounds),
-            upperBounds: Array.from(outputSpace.bounds.upperBounds),
-          },
-          position,
-          globalNames,
-          globalScales,
+        const point = geometry.globals.map(
+          (global) => position[global] * globalScales[global],
         );
-        if (contained) urls.push(url);
+        if (containsPoint(geometry, point)) urls.push(url);
       }
     }
 
@@ -1318,6 +1756,38 @@ function tileCentre(outputSpace) {
  * A display axis that is not drawn from any dimension - a 2D dataset has no
  * third - contributes nothing, which is what keeps a drag inside the plane.
  */
+/** A tenth of a pixel is finer than an outline can show; see `#drawHighlights`. */
+function round(value) {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * A layer's transform as plain data, for `highlight.js` to reason about.
+ *
+ * `RenderLayerTransform.transform` maps the layer's *source* coordinates - its
+ * voxel grid - into its output space, as a column-major matrix of `rank + 1`
+ * rows and `sourceRank + 1` columns. Both ends are in index units; the output
+ * space carries the scales that turn its own indices into metres.
+ *
+ * A registration or a placement drag is a rotation in that matrix. The output
+ * space's `bounds` are the axis-aligned box around the *result*, which is why
+ * they cannot describe a turned tile: they are the box the tile is inscribed
+ * in, not the tile. The source box is the tile, and the matrix is how it is
+ * placed - so that is what an outline has to be drawn from.
+ */
+function placementOf(transform) {
+  return {
+    rank: transform.rank,
+    sourceRank: transform.sourceRank,
+    matrix: transform.transform,
+    sourceLower: transform.inputSpace.bounds.lowerBounds,
+    sourceUpper: transform.inputSpace.bounds.upperBounds,
+    outputLower: transform.outputSpace.bounds.lowerBounds,
+    outputUpper: transform.outputSpace.bounds.upperBounds,
+    outputScales: transform.outputSpace.scales,
+  };
+}
+
 function displayCoordinates(position, displayDimensionIndices) {
   return Array.from({ length: 3 }, (_, display) => {
     const global = displayDimensionIndices[display];

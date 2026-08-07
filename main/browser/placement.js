@@ -5,7 +5,8 @@
  * exercised under `node --test` without a browser. `viewer.js` owns the pointer
  * handling and every call into Neuroglancer; what is decided here is *which*
  * tile a drag moves and *how far*, which is where the dimension bookkeeping -
- * and so the bugs - live.
+ * and so the bugs - live. Where a layer *is*, and so which ones are under the
+ * pointer to choose between, is `highlight.js`.
  *
  * Three coordinate systems meet in this file:
  *
@@ -26,6 +27,9 @@
 /**
  * Which layers a drag should move.
  *
+ * `candidates` is in layer order, which is the order of the views list; the
+ * last of them is the one drawn on top.
+ *
  * Selecting several tiles makes the drag act on all of them - the way to move
  * a whole row of a grid, or to correct a stage offset shared by a batch. That
  * takes precedence over what the pointer is on, because with a multi-selection
@@ -35,9 +39,12 @@
  *
  * With one tile selected or none, the pointer decides where it can: a single
  * tile under it is unambiguous. Where tiles overlap - which, for a tiled
- * acquisition, is most of the interesting places - it cannot, and the choice
- * falls to the selection. An overlap with nothing selected is left alone
- * rather than guessed at: moving the wrong tile is worse than moving none.
+ * acquisition, is most of the interesting places - the selection breaks the
+ * tie, and with nothing selected the last layer does: it is the one on top, so
+ * it is the tile the user is looking at, and a drag that does something
+ * visible and undoable beats one that refuses and explains itself. A selection
+ * the pointer is nowhere near is still refused, since there the user has
+ * already named a tile and it is not this one.
  *
  * Returns `{urls, reason}`, with `urls` empty when no drag should start.
  */
@@ -54,40 +61,12 @@ export function pickDragTarget(candidates, selected) {
   }
 
   if (urls.length === 1) return { urls: [urls[0]], reason: "only" };
-  if (chosen.length === 1 && urls.includes(chosen[0])) {
-    return { urls: [chosen[0]], reason: "selected" };
+  if (chosen.length === 1) {
+    return urls.includes(chosen[0])
+      ? { urls: [chosen[0]], reason: "selected" }
+      : { urls: [], reason: "ambiguous" };
   }
-  return { urls: [], reason: "ambiguous" };
-}
-
-/**
- * Whether a global position falls inside one layer's transformed bounds.
- *
- * The bounds come from the layer's own output space, so they already carry
- * whatever transform the layer is being shown under. Dimensions the layer does
- * not have - a channel dimension is local to the layer, and the global space
- * has no `c'` - place no constraint: a tile is under the pointer whatever
- * channel is on screen.
- */
-export function boundsContain(
-  { names, scales, lowerBounds, upperBounds },
-  position,
-  globalNames,
-  globalScales,
-) {
-  for (let output = 0; output < names.length; output += 1) {
-    const global = globalNames.indexOf(names[output]);
-    if (global === -1) continue;
-
-    const lower = lowerBounds[output];
-    const upper = upperBounds[output];
-    if (!Number.isFinite(lower) && !Number.isFinite(upper)) continue;
-
-    const value =
-      position[global] * (globalScales[global] / scales[output]);
-    if (value < lower || value >= upper) return false;
-  }
-  return true;
+  return { urls: [urls[urls.length - 1]], reason: "topmost" };
 }
 
 /**

@@ -10,7 +10,8 @@
  *   PUT/DELETE  same                          -> a write to, or removal from,
  *                                               that directory
  *   GET  <base>/__mvs__/zarr/<route>/<key>    -> a chunk computed in Python
- *   POST <base>/__mvs__/rpc/<endpoint>        -> work farmed out to the pool
+ *   POST <base>/__mvs__/rpc/dispatch          -> start work on the pool
+ *   POST <base>/__mvs__/rpc/poll              -> ask how that work is going
  *
  * The worker holds no state of its own: every request is forwarded to the
  * page, which owns the directory handles and the worker pool. Requests are
@@ -21,12 +22,18 @@
 
 importScripts("routes.js");
 
-// A file read is quick and should fail loudly rather than hang. Anything that
-// runs Python - fusing a chunk, a whole registration - legitimately takes far
-// longer, especially on the first request to a worker, which opens the inputs.
+// A file read is quick and should fail loudly rather than hang. Computing a
+// chunk in Python legitimately takes far longer, especially on the first
+// request to a worker, which opens the inputs.
+//
+// An RPC no longer waits for the work it starts: the page runs the job and
+// answers a poll within seconds, whatever the job goes on to do. So this
+// bounds how long the *page* may take to reply, not how long a registration
+// runs - and a browser terminating this worker mid-request is no longer a way
+// to lose one.
 const FILE_TIMEOUT_MS = 60 * 1000;
 const COMPUTE_TIMEOUT_MS = 10 * 60 * 1000;
-const RPC_TIMEOUT_MS = 30 * 60 * 1000;
+const RPC_TIMEOUT_MS = 2 * 60 * 1000;
 
 self.addEventListener("install", (event) => {
   // Take over immediately: the page cannot read anything until we are active.
