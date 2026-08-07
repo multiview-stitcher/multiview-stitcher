@@ -73,6 +73,35 @@ def tiles_on_disk(tmp_path):
     return urls
 
 
+@pytest.fixture
+def singleton_z_tiles_on_disk(tmp_path):
+    """Two overlapping 3D tiles whose z axis contains a single plane."""
+    image = np.random.default_rng(0).random((64, 120))
+    urls = []
+
+    for index, (offset, shift) in enumerate(((0, 0.0), (40, 3.0))):
+        sim = si_utils.get_sim_from_array(
+            image[None, :, offset : offset + 80],
+            dims=["z", "y", "x"],
+            scale={"z": 1.0, "y": 1.0, "x": 1.0},
+            translation={
+                "z": 3.0,
+                "y": 0.0,
+                "x": float(offset) + shift,
+            },
+        )
+        url = str(tmp_path / f"singleton_z_tile_{index}.ome.zarr")
+        ngff_utils.write_sim_to_ome_zarr(
+            sim,
+            output_zarr_url=url,
+            overwrite=True,
+            show_progressbar=False,
+        )
+        urls.append(url)
+
+    return urls
+
+
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
@@ -623,6 +652,36 @@ def test_distributed_registration_matches_local(tiles_on_disk):
     )
 
     for local_param, remote_param in zip(local["params"], remote["params"]):
+        np.testing.assert_allclose(
+            np.asarray(local_param["data"]),
+            np.asarray(remote_param["data"]),
+            atol=1e-6,
+        )
+
+
+def test_distributed_registration_reduces_a_singleton_spatial_dimension(
+    singleton_z_tiles_on_disk,
+):
+    """Workers must register the same reduced 2D views as the main worker."""
+    from multiview_stitcher.browser import executors
+
+    local_session = Session()
+    local_session.load(singleton_z_tiles_on_disk)
+    local = local_session.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+
+    remote_session = Session()
+    remote_session.load(singleton_z_tiles_on_disk)
+    remote = remote_session.register(
+        RegistrationOptions(new_transform_key="registered"),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            remote_session.spec(), bridge=_pool_bridge(WorkerRuntime())
+        ),
+    )
+
+    for local_param, remote_param in zip(local["params"], remote["params"]):
+        assert np.asarray(remote_param["data"]).shape[-2:] == (4, 4)
         np.testing.assert_allclose(
             np.asarray(local_param["data"]),
             np.asarray(remote_param["data"]),

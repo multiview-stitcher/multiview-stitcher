@@ -591,7 +591,7 @@ class Session:
             "generation": self.generation,
         }
 
-    def registration_msims(self, reg_channel=None):
+    def registration_msims(self, reg_channel=None, spatial_dims=None):
         """Views as `register` prepares them, i.e. reduced to one channel.
 
         `registration.register` selects the registration channel before
@@ -600,16 +600,58 @@ class Session:
         return transforms of the wrong rank. The channel is identified by its
         coordinate value rather than an index, so it cannot drift out of step
         with what the caller actually selected.
+
+        It also projects a singleton spatial dimension before dispatching
+        pairwise work. ``spatial_dims`` describes the dimensions left in the
+        dispatched views, allowing a worker rebuilt from the original session
+        to repeat that projection.
         """
-        if reg_channel is None or not self.msims:
+        if not self.msims:
             return self.msims
 
-        return [
-            msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
-            if "c" in msi_utils.get_dims(msim)
-            else msim
-            for msim in self.msims
-        ]
+        msims = self.msims
+        if reg_channel is not None:
+            msims = [
+                msi_utils.multiscale_sel_coords(msim, {"c": reg_channel})
+                if "c" in msi_utils.get_dims(msim)
+                else msim
+                for msim in msims
+            ]
+
+        if spatial_dims is None:
+            return msims
+
+        wanted = set(spatial_dims)
+        reduced = []
+        for msim in msims:
+            sim = msi_utils.get_sim_from_msim(msim)
+            current = set(msi_utils.get_spatial_dims(msim))
+            if not wanted.issubset(current):
+                raise ValueError(
+                    "Registration worker cannot select spatial dimensions "
+                    f"{sorted(wanted)} from {sorted(current)}."
+                )
+
+            projected = current - wanted
+            non_singletons = [
+                dim for dim in projected if sim.sizes[dim] != 1
+            ]
+            if non_singletons:
+                raise ValueError(
+                    "Registration worker can only project singleton spatial "
+                    f"dimensions, got {sorted(non_singletons)}."
+                )
+
+            selection = {
+                dim: sim.coords[dim].values[0] for dim in projected
+            }
+            reduced.append(
+                msi_utils.multiscale_sel_coords(msim, selection)
+                if selection
+                else msim
+            )
+
+        return reduced
 
     def select_timepoints(self, msim, time_indices):
         """The view reduced to ``time_indices``, positions into its time axis.
@@ -632,14 +674,19 @@ class Session:
         )
 
     def compute_pairwise(
-        self, edges, register_kwargs, reg_channel=None, time_indices=None
+        self,
+        edges,
+        register_kwargs,
+        reg_channel=None,
+        spatial_dims=None,
+        time_indices=None,
     ):
         """Compute a subset of pairwise registrations - the compute-worker side.
 
         Runs the exact same code path as a local registration; only the set of
         edges, and optionally the set of timepoints, differs.
         """
-        msims = self.registration_msims(reg_channel)
+        msims = self.registration_msims(reg_channel, spatial_dims)
 
         results = []
         for pair in edges:

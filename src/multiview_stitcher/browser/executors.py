@@ -135,8 +135,10 @@ class RemotePairwiseExecutor:
         )
         options = serialize_register_kwargs(register_kwargs)
         # Workers rebuild full views from the spec, so they have to repeat the
-        # channel selection that `register` already applied to `msims`.
+        # channel and singleton-spatial-dimension selections that `register`
+        # already applied to `msims`.
         reg_channel = selected_channel(msims[0])
+        spatial_dims = list(msi_utils.get_spatial_dims(msims[0]))
         n_t = n_timepoints(msims[0])
 
         # One pair per task by default: the pool queues tasks over its workers,
@@ -157,6 +159,7 @@ class RemotePairwiseExecutor:
                 "edges": [[int(a), int(b)] for a, b in group],
                 "register_kwargs": options,
                 "reg_channel": reg_channel,
+                "spatial_dims": spatial_dims,
                 "time_indices": indices,
                 "units": len(group),
             }

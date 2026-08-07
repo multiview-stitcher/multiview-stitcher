@@ -295,6 +295,7 @@ class WorkerRuntime:
                 task["edges"],
                 register_kwargs,
                 reg_channel=task.get("reg_channel"),
+                spatial_dims=task.get("spatial_dims"),
                 time_indices=task.get("time_indices"),
             )
         }
