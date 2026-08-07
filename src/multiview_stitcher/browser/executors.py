@@ -10,6 +10,8 @@ serialised.
 
 import math
 
+import xarray as xr
+
 from multiview_stitcher import msi_utils
 from multiview_stitcher.browser import serialization
 from multiview_stitcher.browser.bridge import get_bridge
@@ -17,6 +19,17 @@ from multiview_stitcher.browser.specs import (
     PAIRWISE_REGISTRATION_FUNCS,
     FusionOptions,
 )
+
+
+def n_timepoints(msim):
+    """How many timepoints a view has, or None if it has no time axis.
+
+    None and 1 are deliberately different: a view without a time axis must be
+    registered as it is, since selecting a timepoint on it would fail, while a
+    single-timepoint view is selected from like any other.
+    """
+    sim = msi_utils.get_sim_from_msim(msim)
+    return int(sim.sizes["t"]) if "t" in sim.dims else None
 
 
 def selected_channel(msim):
@@ -62,6 +75,23 @@ def deserialize_register_kwargs(payload):
     return kwargs
 
 
+def concat_over_time(parts):
+    """Join per-timepoint pairwise results into one result over time.
+
+    Each part is what one call of the pairwise registration function produced,
+    already carrying the timepoint it was computed for as a coordinate. Joining
+    them here is what lets the timepoints of one pair be registered on
+    different workers while `register` still receives a single array per edge.
+    """
+    if len(parts) == 1:
+        return parts[0]
+
+    return {
+        key: xr.concat([part[key] for part in parts], dim="t")
+        for key in ("transform", "quality", "bbox")
+    }
+
+
 def split_evenly(items, n_parts):
     """Split ``items`` into at most ``n_parts`` contiguous, near-equal parts."""
     items = list(items)
@@ -76,8 +106,11 @@ def split_evenly(items, n_parts):
 class RemotePairwiseExecutor:
     """`pairwise_executor` for `registration.register` backed by a worker pool.
 
-    Each pairwise registration becomes one task, which lets the pool keep every
-    worker busy even when the pairs differ a lot in cost.
+    One task is one call of the pairwise registration function: a pair of views
+    at one timepoint. That is the smallest piece of work there is, so the pool
+    stays balanced however unevenly the pairs are matched, and it is the unit
+    the progress bar counts - a timelapse otherwise shows nothing at all until
+    a whole pair, every timepoint of it, is finished.
     """
 
     def __init__(self, session_spec, bridge=None, max_pairs_per_task=1):
@@ -104,60 +137,79 @@ class RemotePairwiseExecutor:
         # Workers rebuild full views from the spec, so they have to repeat the
         # channel selection that `register` already applied to `msims`.
         reg_channel = selected_channel(msims[0])
+        n_t = n_timepoints(msims[0])
 
-        # One task per pair by default: the pool queues tasks over its workers,
+        # One pair per task by default: the pool queues tasks over its workers,
         # which balances the load even when pairs differ a lot in cost.
         groups = [
             list(edges[i : i + self.max_pairs_per_task])
             for i in range(0, len(edges), self.max_pairs_per_task)
         ]
 
+        # Timepoints are addressed by index rather than by coordinate value:
+        # the index survives JSON whatever the coordinate is made of, and the
+        # worker reads the values off the view it rebuilt.
+        time_slices = [None] if n_t is None else [[t] for t in range(n_t)]
+
         tasks = [
             {
                 "kind": "register_pairs",
-                "session": spec,
                 "edges": [[int(a), int(b)] for a, b in group],
                 "register_kwargs": options,
                 "reg_channel": reg_channel,
+                "time_indices": indices,
                 "units": len(group),
             }
+            for indices in time_slices
             for group in groups
         ]
 
-        results = self.bridge.dispatch(
-            tasks,
-            batch_size=max(1, self.max_pairs_per_task * 4),
-            progress={"label": "registering", "unit": "pair"},
-        )
+        # With one timepoint a task is a pair and the bar can say so. Over a
+        # timelapse it is one pair at one timepoint, and naming both is the
+        # difference between a bar that looks stuck and one that explains why
+        # there is so much of it.
+        over_time = len(time_slices) > 1
+        progress = {
+            "label": "registering",
+            "unit": "registration" if over_time else "pair",
+        }
+        if over_time:
+            progress["detail"] = f"{len(edges)} pairs × {n_t} timepoints"
 
-        pairwise = []
-        for result in results:
-            pairwise += [
-                serialization.pairwise_result_from_json(item)
-                for item in result["pairwise"]
-            ]
+        results = self.bridge.dispatch(tasks, session=spec, progress=progress)
 
-        if len(pairwise) != len(edges):
+        pairwise = [
+            serialization.pairwise_result_from_json(item)
+            for result in results
+            for item in result["pairwise"]
+        ]
+
+        expected = len(edges) * len(time_slices)
+        if len(pairwise) != expected:
             raise RuntimeError(
                 f"Worker pool returned {len(pairwise)} pairwise results for "
-                f"{len(edges)} pairs."
+                f"{len(edges)} pairs over {len(time_slices)} timepoint(s)."
             )
 
-        return pairwise
+        # Tasks were laid out timepoint by timepoint, each covering every edge
+        # in order, so one edge's timepoints are `len(edges)` apart. Joining
+        # them gives back the one array over time `register` resolves from.
+        return [
+            concat_over_time(pairwise[edge :: len(edges)])
+            for edge in range(len(edges))
+        ]
 
 
 class RemoteFusionExecutor:
     """Fuse the blocks of a Zarr output across the worker pool."""
 
-    #: Blocks per task. Small tasks keep each dispatch request short, which
-    #: matters because a service worker is killed if one of its events runs
-    #: too long - and a whole fusion easily does.
+    #: Blocks per task. Small tasks keep the pool balanced and the progress
+    #: bar moving; the cost of one more task is a few hundred bytes of JSON.
     blocks_per_task = 4
 
-    def __init__(self, session_spec, bridge=None, n_workers=None):
+    def __init__(self, session_spec, bridge=None):
         self.session_spec = session_spec
         self.bridge = bridge or get_bridge()
-        self.n_workers = n_workers or 1
 
     def __call__(self, options, levels):
         """Fuse every block of every level across the pool.
@@ -190,7 +242,6 @@ class RemoteFusionExecutor:
                 tasks.append(
                     {
                         "kind": "fuse_blocks",
-                        "session": spec,
                         "options": options_payload,
                         "level": level["level"],
                         "block_ids": ids[start : start + self.blocks_per_task],
@@ -200,11 +251,9 @@ class RemoteFusionExecutor:
                     }
                 )
 
-        # One batch per pass over the pool: every worker stays busy, and no
-        # single request outlives what a service worker is allowed to run.
         results = self.bridge.dispatch(
             tasks,
-            batch_size=self.n_workers,
+            session=spec,
             progress={"label": "fusing", "unit": "block"},
         )
         return sum(int(result.get("n_blocks", 0)) for result in results)

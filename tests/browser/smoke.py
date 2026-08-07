@@ -33,7 +33,7 @@ def check(name, condition, detail=""):
         raise AssertionError(f"{name} failed: {detail}")
 
 
-def build_dataset(root="/data"):
+def build_dataset(root="/data", n_timepoints=1, tile_size=256, prefix="tile"):
     """Write two overlapping tiles as multiscale OME-Zarr v0.4."""
     import os
 
@@ -44,8 +44,8 @@ def build_dataset(root="/data"):
     sims = sample_data.generate_tiled_dataset(
         ndim=2,
         N_c=1,
-        N_t=1,
-        tile_size=256,
+        N_t=n_timepoints,
+        tile_size=tile_size,
         tiles_x=2,
         tiles_y=1,
         overlap=64,
@@ -56,7 +56,7 @@ def build_dataset(root="/data"):
 
     urls = []
     for index, sim in enumerate(sims):
-        url = f"{root}/tile_{index}.ome.zarr"
+        url = f"{root}/{prefix}_{index}.ome.zarr"
         msim = msi_utils.get_msim_from_sim(
             sim, scale_factors=[{"y": 2, "x": 2}]
         )
@@ -189,6 +189,57 @@ def main():
         "ok": True,
         "detail": "identical transforms",
     }
+
+    # --- a timelapse, one timepoint per task ----------------------------
+    # Each timepoint of a pair is registered on its own and the results are
+    # joined back into one array over time. That join is an xarray concat on
+    # coordinates that have been through JSON, which is exactly the sort of
+    # thing an older array stack in the browser gets subtly wrong.
+    time_urls = build_dataset(
+        n_timepoints=3, tile_size=128, prefix="timelapse"
+    )
+    time_local = Session()
+    time_local.load(time_urls)
+    time_expected = time_local.register(
+        RegistrationOptions(new_transform_key="registered")
+    )
+
+    dispatched = []
+
+    class RecordingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            dispatched.extend(payload["tasks"])
+            return super().call(endpoint, payload)
+
+    time_pool = Session()
+    time_pool.load(time_urls)
+    time_actual = time_pool.register(
+        RegistrationOptions(new_transform_key="registered"),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            time_pool.spec(),
+            bridge=RecordingBridge(runner=WorkerRuntime().run_task),
+        ),
+    )
+
+    check(
+        "timelapse_dispatched_per_timepoint",
+        dispatched
+        and all(len(task["time_indices"]) == 1 for task in dispatched)
+        and sorted({task["time_indices"][0] for task in dispatched})
+        == [0, 1, 2],
+        [task["time_indices"] for task in dispatched],
+    )
+    np.testing.assert_allclose(
+        np.asarray(time_expected["params"][1]["data"]),
+        np.asarray(time_actual["params"][1]["data"]),
+        atol=1e-6,
+    )
+    check(
+        "timelapse_registration_matches",
+        time_actual["params"][1]["coords"]["t"]
+        == time_expected["params"][1]["coords"]["t"],
+        time_actual["params"][1]["coords"],
+    )
 
     # --- fuse lazily and read one chunk ---------------------------------
     preview = session.fuse_preview(

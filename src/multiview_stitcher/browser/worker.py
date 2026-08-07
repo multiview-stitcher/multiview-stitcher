@@ -199,9 +199,7 @@ class WorkerRuntime:
             bridge = self.bridge or get_bridge()
             if bridge is not None:
                 executor = executors.RemoteFusionExecutor(
-                    session.spec(),
-                    bridge=bridge,
-                    n_workers=int(payload.get("n_workers", 1) or 1),
+                    session.spec(), bridge=bridge
                 )
 
         if executor is not None:
@@ -297,6 +295,7 @@ class WorkerRuntime:
                 task["edges"],
                 register_kwargs,
                 reg_channel=task.get("reg_channel"),
+                time_indices=task.get("time_indices"),
             )
         }
 

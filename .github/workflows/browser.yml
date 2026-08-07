@@ -46,9 +46,9 @@ jobs:
         working-directory: tests/browser
         run: npm install
 
-      - name: Check the service-worker routing contract
+      - name: Check the page's own logic and the routing contract
         working-directory: tests/browser
-        run: node --test routes.test.mjs
+        run: node --test camera.test.mjs highlight.test.mjs jobs.test.mjs placement.test.mjs routes.test.mjs
 
       - name: Run the smoke test
         working-directory: tests/browser

@@ -18,10 +18,10 @@
 /* global mvsRoutes */
 
 // index.html loads this module as `app.js?v=<build>`; the same tag is passed
-// to viewer.js so the two can never come from different builds.
-const { NeuroglancerViewer } = await import(
-  `./viewer.js${new URL(import.meta.url).search}`
-);
+// on so no two halves of the app can come from different builds.
+const buildTag = new URL(import.meta.url).search;
+const { NeuroglancerViewer } = await import(`./viewer.js${buildTag}`);
+const { DispatchJobs } = await import(`./jobs.js${buildTag}`);
 
 const APP_BASE = new URL(".", window.location.href).pathname;
 const API_BASE = `${APP_BASE}__mvs__`;
@@ -42,6 +42,7 @@ const state = {
   viewVisibility: new Map(), // input source url -> visible
   channelVisibility: new Map(), // channel key -> visible
   selectedViewUrls: new Set(), // input source urls picked in the views list
+  hoveredViewUrl: null, // input source url under the pointer, in either half
   positionalColors: false,
   manualPlacement: false,
   placementChannels: new Map(), // channel key -> placement applies to it
@@ -117,8 +118,11 @@ function hasViews() {
  * Show how far a long job has got.
  *
  * The work runs inside one blocking call in the session worker, so the page
- * cannot observe it directly. It learns instead from each batch of tasks the
- * pool is handed, which is why work is dispatched in batches at all.
+ * cannot observe it directly. It learns instead from the tasks the pool is
+ * handed, counting each one as it finishes - which is why the unit of work is
+ * kept as small as it sensibly can be. `detail` says what those units are made
+ * of when the job has more than one dimension to it: a registration over time
+ * counts pairs *and* timepoints, and "48 registrations" alone says neither.
  */
 function setProgress(progress) {
   const container = $("#progress");
@@ -130,7 +134,7 @@ function setProgress(progress) {
     return;
   }
 
-  const { label, unit, completed, total } = progress;
+  const { label, unit, detail, completed, total } = progress;
   const fraction = Math.max(0, Math.min(1, completed / total));
 
   container.hidden = false;
@@ -138,7 +142,8 @@ function setProgress(progress) {
   $("#progress-bar").style.width = `${(fraction * 100).toFixed(1)}%`;
   $("#progress-percent").textContent = `${Math.round(fraction * 100)}%`;
   $("#progress-label").textContent =
-    `${label} ${completed}/${total} ${unit}${total === 1 ? "" : "s"}`;
+    `${label} ${completed}/${total} ${unit}${total === 1 ? "" : "s"}` +
+    (detail ? ` (${detail})` : "");
 }
 
 function clearProgress() {
@@ -360,17 +365,56 @@ class ComputePool {
     });
   }
 
-  /** Run every task, keeping all workers busy; results keep the input order. */
-  async dispatch(tasks, sessionSpec) {
+  /**
+   * Run every task, keeping all workers busy; results keep the input order.
+   *
+   * The session spec travels once per request rather than inside every task -
+   * it is the bulk of the payload and a job can be thousands of tasks - so it
+   * is put back on each task here. `onTaskDone` is called as each finishes,
+   * which is what lets the progress bar advance per task rather than per
+   * request.
+   */
+  async dispatch(tasks, sessionSpec, onTaskDone = () => {}) {
     return await Promise.all(
       tasks.map(async (task) => {
         const response = await this.run({
           message: { type: "task", task: { ...task, session: task.session || sessionSpec } },
         });
+        onTaskDone(task);
         return response.result;
       }),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch jobs
+// ---------------------------------------------------------------------------
+
+/**
+ * Work the pool is running for a blocked Python worker. See `jobs.js` for why
+ * a job is started and polled for rather than waited out on one request.
+ */
+const dispatchJobs = new DispatchJobs();
+
+/** Run one batch on the pool, reporting progress as its tasks come back. */
+function startDispatchJob(id, { tasks, session, progress }) {
+  const base = progress ? Number(progress.completed) || 0 : 0;
+  // A submit for a job already running is a retry of a request that was lost
+  // on the way back; that job's progress is further along than this says.
+  if (progress && !dispatchJobs.has(id)) {
+    setProgress({ ...progress, completed: base });
+  }
+
+  return dispatchJobs.start(
+    id,
+    (job) =>
+      pool.dispatch(tasks, session || state.sessionSpec, (task) => {
+        job.completed += Number(task.units) || 1;
+        if (progress) setProgress({ ...progress, completed: job.completed });
+      }),
+    { completed: base },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -571,26 +615,27 @@ async function handleServiceWorkerMessage(event) {
 
     if (type === "rpc") {
       const payload = event.data.payload || {};
-      if (event.data.endpoint !== "dispatch") {
-        throw new Error(`unknown rpc endpoint '${event.data.endpoint}'`);
-      }
-      if (payload.progress) setProgress(payload.progress);
 
-      const results = await pool.dispatch(payload.tasks || [], state.sessionSpec);
-
-      // Python can only report progress when it dispatches, so the last
-      // batch's completion never arrives on its own - and a job that fits in
-      // a single batch would sit at 0% and then disappear. This batch is
-      // finished now, so count it here.
-      if (payload.progress && payload.progress.batch) {
-        setProgress({
-          ...payload.progress,
-          completed: payload.progress.completed + payload.progress.batch,
+      // Submitting starts the work and answers at once; the caller then polls
+      // for it. See `jobs.js` for why the two are separate.
+      if (event.data.endpoint === "dispatch") {
+        startDispatchJob(payload.job, {
+          tasks: payload.tasks || [],
+          session: payload.session,
+          progress: payload.progress,
         });
+        reply({ result: { job: payload.job } });
+        return;
       }
 
-      reply({ result: { results } });
-      return;
+      if (event.data.endpoint === "poll") {
+        reply({
+          result: await dispatchJobs.poll(payload.job, payload.timeout_ms),
+        });
+        return;
+      }
+
+      throw new Error(`unknown rpc endpoint '${event.data.endpoint}'`);
     }
 
     throw new Error(`unknown service-worker message '${type}'`);
@@ -1424,6 +1469,91 @@ function layerUrlsOf(viewUrl) {
   return Array.from(state.currentViewLayerUrls.get(viewUrl) || []);
 }
 
+/** The view a viewer layer was drawn from, if it is one of ours. */
+function viewUrlOfLayer(layerUrl) {
+  for (const [viewUrl, layerUrls] of state.currentViewLayerUrls) {
+    if (Array.from(layerUrls).includes(layerUrl)) return viewUrl;
+  }
+  return null;
+}
+
+/** The name of the view a viewer layer belongs to, if it is one of ours. */
+function viewNameOfLayer(layerUrl) {
+  const viewUrl = viewUrlOfLayer(layerUrl);
+  const view = (state.session?.views || []).find(
+    (candidate) => candidate.url === viewUrl,
+  );
+  return view ? view.name : null;
+}
+
+/**
+ * Point at a view, from either of the two places it appears.
+ *
+ * One field, whichever side wrote it last. The pointer can only be over the
+ * viewer or over the list, and each reports leaving before the other reports
+ * arriving, so there is nothing to arbitrate.
+ */
+function noteHoveredView(url) {
+  if (state.hoveredViewUrl === url) return;
+  state.hoveredViewUrl = url;
+  applyLayerHighlights();
+}
+
+/** Stop pointing at `url`, unless something else already points elsewhere. */
+function clearHoveredView(url) {
+  if (state.hoveredViewUrl === url) noteHoveredView(null);
+}
+
+/**
+ * Show the same thing about a layer in the viewer as in the views list.
+ *
+ * Selected rows and outlined tiles are the *subtle* weight, a row or tile
+ * under the pointer the *very subtle* one - so that a glance at either half of
+ * the window answers the same question, and pointing at a row in the list
+ * shows which tile it is without having to hide the others.
+ */
+function applyLayerHighlights() {
+  for (const item of document.querySelectorAll("#views li[data-view-url]")) {
+    item.classList.toggle(
+      "highlighted",
+      item.dataset.viewUrl === state.hoveredViewUrl,
+    );
+  }
+
+  if (!viewer.mounted) return;
+  viewer.setLayerHighlights({
+    subtle: [...state.selectedViewUrls].flatMap(layerUrlsOf),
+    verySubtle: state.hoveredViewUrl ? layerUrlsOf(state.hoveredViewUrl) : [],
+  });
+}
+
+/** Let the viewer report and change which views are pointed at and picked. */
+function syncLayerInteraction() {
+  if (!viewer.mounted) return;
+
+  if (!hasViews()) {
+    viewer.setLayerInteraction(null);
+    viewer.setLayerHighlights(null);
+    return;
+  }
+
+  viewer.setLayerInteraction({
+    // Input views only, as for placement: a fused preview is derived from
+    // where the tiles are and is not a thing to point at or pick.
+    urls: [...state.currentViewLayerUrls.keys()].flatMap(layerUrlsOf),
+    onHover: (layerUrl) =>
+      noteHoveredView(layerUrl ? viewUrlOfLayer(layerUrl) : null),
+    onPick: (layerUrl, { extend }) => {
+      const viewUrl = viewUrlOfLayer(layerUrl);
+      // The same call the views list makes, so clicking a tile and clicking
+      // its row cannot drift apart - including ctrl / cmd to add or remove.
+      if (viewUrl) selectView(viewUrl, { extend });
+    },
+  });
+
+  applyLayerHighlights();
+}
+
 /** The timepoints the loaded data has, as their coordinate values. */
 function timeCoords() {
   return state.session?.views?.[0]?.t_coords || [];
@@ -1593,7 +1723,7 @@ function syncManualPlacement() {
       ? `${selected} selected`
       : selected === 1
         ? "1 selected"
-        : "whichever is under the pointer";
+        : "the topmost under the pointer";
   // Placement writes into whatever coordinate system is on screen, including
   // the one an OME-Zarr came with, so the panel says which that is rather than
   // leaving the user to infer it from the other side of the window.
@@ -1602,6 +1732,12 @@ function syncManualPlacement() {
   target.textContent = `Drags are saved into “${state.transformKey}”.`;
 
   if (!viewer.mounted) return;
+
+  // Pointing at layers and picking them is not part of the mode: it is how the
+  // viewer answers "which tile is this?" whether or not anything is being
+  // placed, and it is what keeps the two lists of layers in step.
+  syncLayerInteraction();
+
   if (!active) {
     viewer.setManualPlacement(null);
     return;
@@ -1619,20 +1755,30 @@ function syncManualPlacement() {
     // so the drag shows the timepoint on screen and the session stores the
     // range, which is why the viewer is refreshed afterwards.
     channels: placementChannels(),
-    onDragStart: (urls, mode) =>
+    // Named rather than counted where there is one tile: with several under
+    // the pointer and nothing selected the drag takes the topmost, and the
+    // status line is where that choice becomes visible.
+    onDragStart: (urls, mode) => {
+      const name = urls.length === 1 ? viewNameOfLayer(urls[0]) : null;
       setStatus(
         `${mode === "rotate" ? "turning" : "moving"} ` +
-          `${urls.length === 1 ? "a tile" : `${urls.length} tiles`} in ` +
-          `${state.transformKey}`,
+          (urls.length === 1
+            ? name
+              ? `“${name}”`
+              : "a tile"
+            : `${urls.length} tiles`) +
+          ` in ${state.transformKey}`,
         true,
-      ),
+      );
+    },
     onDragEnd: () =>
       schedulePlacementSync(viewer.getState(), { fromDrag: true }),
     onRefused: (reason) =>
       setStatus(
         {
           ambiguous:
-            "several tiles here - select one in the views list to move it",
+            "several tiles here, and none of them the selected one - " +
+            "clear the selection or select one of these",
           "outside-selection":
             "start the drag on one of the selected tiles to move them",
           "no-channels": "no channel here is set to be placed",
@@ -1658,6 +1804,7 @@ function renderViews(described) {
     // is the target, minus its own controls.
     const selected = state.selectedViewUrls.has(view.url);
     item.className = "selectable";
+    item.dataset.viewUrl = view.url;
     item.tabIndex = 0;
     item.setAttribute("role", "option");
     item.setAttribute("aria-selected", String(selected));
@@ -1674,6 +1821,11 @@ function renderViews(described) {
       event.preventDefault();
       select(event);
     });
+
+    // Pointing at a row outlines the tile in the viewer, which is the quickest
+    // way to find out which of a grid of near-identical tiles a row is.
+    item.addEventListener("pointerenter", () => noteHoveredView(view.url));
+    item.addEventListener("pointerleave", () => clearHoveredView(view.url));
 
     if (!state.viewVisibility.has(view.url)) {
       state.viewVisibility.set(view.url, true);
@@ -1765,6 +1917,8 @@ function renderViews(described) {
 
   // After the loop above, so every view has a recorded visibility to read.
   renderViewToggle(described.views);
+  // The rows were rebuilt, so whatever is pointed at has to be said again.
+  applyLayerHighlights();
 
   $("#dataset-summary").textContent = described.n_views
     ? `${described.n_views} · ${described.views[0].ndim}D`
@@ -2163,7 +2317,6 @@ async function doFuseToDisk() {
         output_zarr_url: `${API_BASE}/fs/${mount}/${OUTPUT_NAME}`,
       },
       distribute: pool.size > 0,
-      n_workers: pool.size || 1,
     });
 
     log(
