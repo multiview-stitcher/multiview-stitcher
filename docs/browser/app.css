@@ -40,11 +40,19 @@ select { font: inherit; }
 
 button { color: inherit; }
 
+/*
+ * Laid out with flex rather than as three columns with fixed minimum widths.
+ *
+ * Those minimums could not be given up, so a window narrower than their sum
+ * did not shrink the header - it overflowed, and the progress bar was drawn
+ * across the logo on one side and the buttons on the other. Here the two ends
+ * keep the width their contents need and the status area takes whatever is
+ * left over, down to nothing.
+ */
 .app-header {
   min-height: var(--header);
   flex: 0 0 var(--header);
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(260px, 520px) minmax(220px, 1fr);
+  display: flex;
   align-items: center;
   gap: 24px;
   padding: 0 18px;
@@ -54,12 +62,14 @@ button { color: inherit; }
   z-index: 10;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand img { width: 39px; height: 39px; object-fit: contain; }
-.brand h1 { margin: 0; font-size: 15px; line-height: 1.2; font-weight: 690; letter-spacing: 0.01em; }
+/* Kept at its natural width: the status area beside it is the one that gives,
+   and a shrinking brand only turns the title into two lines or an ellipsis. */
+.brand { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+.brand img { width: 39px; height: 39px; object-fit: contain; flex: 0 0 auto; }
+.brand h1 { margin: 0; font-size: 15px; line-height: 1.2; font-weight: 690; letter-spacing: 0.01em; white-space: nowrap; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
 
-.status-area { min-width: 0; display: flex; align-items: center; justify-content: center; }
+.status-area { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; }
 #status {
   color: var(--muted);
   font-size: 11.5px;
@@ -79,13 +89,16 @@ button { color: inherit; }
   white-space: nowrap;
 }
 
-#progress { width: 100%; }
+#progress { width: 100%; max-width: 520px; min-width: 0; }
 .progress-copy { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; color: var(--muted); font-size: 10.5px; }
-#progress-percent { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+/* The label carries what the units are made of, so it is the part that gives
+   way when there is no room for it. */
+#progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#progress-percent { flex: 0 0 auto; color: var(--accent-bright); font-variant-numeric: tabular-nums; }
 .track { height: 4px; overflow: hidden; border-radius: 999px; background: #24313b; }
 #progress-bar { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #29a8c0, var(--accent-bright)); transition: width 180ms ease-out; }
 
-.header-actions { justify-self: end; display: flex; align-items: center; gap: 7px; }
+.header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
 .quiet-button,
 .text-button,
 .icon-button {
@@ -188,10 +201,22 @@ button { color: inherit; }
 
 .view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
 .view-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
-.view-list li:hover { border-color: var(--line-strong); }
 .view-list li.selectable { cursor: pointer; }
-/* Subtle on purpose: which tile is selected only decides where a ctrl+drag
-   goes when tiles overlap, so it should not read as louder than visibility. */
+/*
+ * Two strengths, used in the viewer as well as here (see `.mvs-layer-
+ * highlight`) so that a tile and its row are always saying the same thing.
+ *
+ *   - `.highlighted`, the *very subtle* one: this is the layer being pointed
+ *     at. It is applied to a row under the pointer and to the row of a tile
+ *     under the pointer in the viewer, which are the same gesture from either
+ *     side of the window;
+ *   - `.selected`, the *subtle* one: this layer has been picked. Subtle on
+ *     purpose - which tile is selected only decides where a placement drag
+ *     goes when tiles overlap, so it should not read as louder than
+ *     visibility.
+ */
+.view-list li:hover,
+.view-list li.highlighted { border-color: var(--line-strong); background: rgba(255, 255, 255, 0.035); }
 .view-list li.selected { border-color: var(--accent); background: var(--accent-soft); }
 .view-list li.selected strong { color: var(--accent-bright); }
 .view-list li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -236,6 +261,20 @@ button { color: inherit; }
 .viewer-empty-icon { width: 72px; height: 52px; margin-bottom: 18px; border: 1px solid #2a3944; transform: skewY(-13deg); box-shadow: 11px 8px 0 -1px #081015, 11px 8px 0 0 #22313c, 22px 16px 0 -1px #060b0f, 22px 16px 0 0 #18252e; }
 .viewer-empty h2 { margin: 0; font-size: 14px; font-weight: 620; }
 .viewer-empty p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+
+/*
+ * Layer outlines, drawn over the cross-sections by `viewer.js`.
+ *
+ * The two strengths are the ones the views list uses, at the same weights and
+ * in the same colours: `.very-subtle` for the layer under the pointer, matching
+ * `.view-list li.highlighted`, and `.subtle` for a selected one, matching
+ * `.view-list li.selected`. Faint on purpose - an outline that competed with
+ * the data would be worse than no outline, since the data is what the user is
+ * lining up.
+ */
+.mvs-layer-highlights { position: absolute; inset: 0; z-index: 5; overflow: visible; pointer-events: none; }
+.mvs-layer-highlight { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.42); stroke-width: 1; }
+.mvs-layer-highlight.subtle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
 
 .main-tabs { display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 12px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
@@ -320,16 +359,19 @@ kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px
 
 @media (max-width: 1120px) {
   :root { --left-sidebar: 270px; --right-sidebar: 290px; }
-  .app-header { grid-template-columns: 220px minmax(180px, 1fr) auto; gap: 14px; }
+  .app-header { gap: 14px; }
   .brand p { display: none; }
 }
 
+/* Below this the header cannot hold all three side by side and the status area
+   moves to a row of its own, where the progress bar has the full width. */
 @media (max-width: 820px) {
   body { height: auto; min-height: 100%; overflow: auto; }
-  .app-header { position: sticky; top: 0; min-height: 58px; grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "status status"; gap: 5px 10px; padding: 7px 12px; }
+  .app-header { position: sticky; top: 0; min-height: 58px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "status status"; gap: 5px 10px; padding: 7px 12px; }
   .brand { grid-area: brand; }
   .brand img { width: 31px; height: 31px; }
   .status-area { grid-area: status; min-height: 13px; }
+  #progress { max-width: none; }
   .header-actions { grid-area: actions; }
   .workspace { display: grid; grid-template-columns: 1fr; grid-template-areas: "viewer" "data" "operations"; }
   #viewer-shell { height: 58vh; min-height: 360px; }

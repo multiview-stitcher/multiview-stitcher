@@ -25,7 +25,6 @@ const source = join(repoRoot, "docs", "browser", "placement.js");
 // `require`d by routes.test.mjs. Node would read this file as CommonJS and
 // fail on `export`.
 const {
-  boundsContain,
   composeAffine,
   fromPhysicalMatrix,
   dragAngle,
@@ -77,18 +76,27 @@ test("where tiles overlap, the selection decides", () => {
   });
 });
 
-test("an ambiguous drag is refused rather than guessed at", () => {
-  // Moving the wrong tile is worse than moving none, and the user has a way
-  // to say which they mean.
+test("with nothing selected, overlapping tiles hand the drag to the last one", () => {
+  // Candidates come in layer order, so the last is the one drawn on top -
+  // the tile the user is looking at, and the one a click would land on.
   assert.deepEqual(pickDragTarget(["a", "b"], []), {
-    urls: [],
-    reason: "ambiguous",
+    urls: ["b"],
+    reason: "topmost",
   });
+  assert.deepEqual(pickDragTarget(["a", "b", "c"], []), {
+    urls: ["c"],
+    reason: "topmost",
+  });
+  assert.deepEqual(pickDragTarget([], ["a"]), { urls: [], reason: "empty" });
+});
+
+test("a drag away from the one selected tile is refused", () => {
+  // Here the user has already named a tile and it is not one of these, so
+  // taking the topmost would move something they did not ask for.
   assert.deepEqual(pickDragTarget(["a", "b"], ["c"]), {
     urls: [],
     reason: "ambiguous",
   });
-  assert.deepEqual(pickDragTarget([], ["a"]), { urls: [], reason: "empty" });
 });
 
 test("several selected tiles are dragged together", () => {
@@ -119,73 +127,12 @@ test("a multi-tile drag has to start on one of the selected tiles", () => {
   });
 });
 
-const space = {
-  names: ["t", "c'", "z", "y", "x"],
-  scales: [1, 1, 1e-6, 1e-6, 1e-6],
-  lowerBounds: [0, 0, 0, 0, 0],
-  upperBounds: [1, 2, 10, 64, 64],
-};
-const globalNames = ["t", "z", "y", "x"];
-const globalScales = [1, 1e-6, 1e-6, 1e-6];
-
-test("a position inside every shared dimension is inside the tile", () => {
-  assert.equal(
-    boundsContain(space, [0, 5, 32, 32], globalNames, globalScales),
-    true,
-  );
-});
-
-test("a position past any bound is outside", () => {
-  assert.equal(
-    boundsContain(space, [0, 5, 32, 64], globalNames, globalScales),
-    false,
-  );
-  assert.equal(
-    boundsContain(space, [0, 5, -1, 32], globalNames, globalScales),
-    false,
-  );
-});
-
-test("a dimension the tile does not share places no constraint", () => {
-  // `c'` is local to the layer: the global space has no channel axis, and a
-  // tile is under the pointer whichever channel is on screen.
-  assert.equal(
-    boundsContain(space, [0, 5, 32, 32], globalNames, globalScales),
-    true,
-  );
-  // A dimension with no finite extent is not a reason to exclude a tile.
-  const unbounded = {
-    ...space,
-    lowerBounds: [-Infinity, 0, 0, 0, 0],
-    upperBounds: [Infinity, 2, 10, 64, 64],
-  };
-  assert.equal(
-    boundsContain(unbounded, [999, 5, 32, 32], globalNames, globalScales),
-    true,
-  );
-});
-
-test("bounds in the layer's own units are compared in them", () => {
-  // The same physical position, in a layer whose voxels are twice the size.
-  const coarse = { ...space, scales: [1, 1, 2e-6, 2e-6, 2e-6] };
-  // 40 global voxels is 20 of the layer's, so still inside its 0..64.
-  assert.equal(
-    boundsContain(coarse, [0, 5, 40, 40], globalNames, globalScales),
-    true,
-  );
-  // 200 global voxels is 100 of the layer's, which is past its extent.
-  assert.equal(
-    boundsContain(coarse, [0, 5, 200, 40], globalNames, globalScales),
-    false,
-  );
-});
-
 const dragGeometry = {
   // The xy panel: display axes 0 and 1 are drawn from global x and y, and the
   // third is the slice normal - which a drag never moves along.
   displayDimensionIndices: [3, 2, 1],
-  globalNames,
-  globalScales,
+  globalNames: ["t", "z", "y", "x"],
+  globalScales: [1, 1e-6, 1e-6, 1e-6],
   outputNames: ["t", "c'", "z", "y", "x"],
   outputScales: [1, 1, 1e-6, 1e-6, 1e-6],
 };

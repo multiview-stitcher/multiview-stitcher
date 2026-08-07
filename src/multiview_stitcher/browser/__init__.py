@@ -21,6 +21,7 @@ Everything here also runs on CPython, which is what the test suite exercises.
 
 from multiview_stitcher.browser.bridge import (
     Bridge,
+    BridgeError,
     LocalBridge,
     TaskError,
     XHRBridge,
@@ -55,6 +56,7 @@ from multiview_stitcher.browser.worker import (
 
 __all__ = [
     "Bridge",
+    "BridgeError",
     "FusionOptions",
     "LocalBridge",
     "RegistrationOptions",

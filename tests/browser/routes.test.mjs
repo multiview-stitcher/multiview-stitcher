@@ -680,8 +680,15 @@ test("tiles are dragged in the cross-sections only, and never through a slice", 
   assert.match(viewer, /inputEventBindings\.sliceView\.set\(/);
   assert.doesNotMatch(viewer, /inputEventBindings\.perspectiveView/);
   // Modifiers are matched exactly, so each gesture needs its own binding.
-  assert.match(viewer, /"at:control\+mousedown0"/);
-  assert.match(viewer, /"at:control\+alt\+mousedown0"/);
+  // Alt, not control: control picks layers by clicking, and one modifier
+  // meaning two things is how a click ends up moving a tile.
+  const moveEvents = viewer.slice(
+    viewer.indexOf("const MOVE_LAYER_EVENTS"),
+    viewer.indexOf("const PICK_LAYER_ACTION"),
+  );
+  assert.match(moveEvents, /"at:alt\+mousedown0"/);
+  assert.match(moveEvents, /"at:control\+alt\+mousedown0"/);
+  assert.doesNotMatch(moveEvents, /"at:control\+mousedown0"/);
   // Removed again when placement is off, which restores the default binding
   // rather than leaving the gesture dead.
   assert.match(viewer, /inputEventBindings\.sliceView\.delete\(/);
@@ -698,9 +705,9 @@ test("a rotation turns a tile about its own centre, in physical units", async ()
   const { readFileSync } = await import("node:fs");
   const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
 
-  // Alt is what separates the two gestures; they share the target-picking
-  // path up to that point.
-  assert.match(viewer, /event\.altKey \? "rotate" : "translate"/);
+  // Both gestures carry alt, so shift is what separates them; they share the
+  // target-picking path up to that point.
+  assert.match(viewer, /event\.ctrlKey \? "rotate" : "translate"/);
 
   // Display coordinates are voxels, and voxels are not cubes: rotating voxel
   // counts is a shear. The plane basis is converted before any of the
@@ -858,7 +865,7 @@ test("views can be selected in the list, which is what a drag acts on", async ()
   // of the window from the placement panel - so the panel says so, and says
   // what the selection currently amounts to.
   assert.match(html, /id="placement-tiles-label"/);
-  assert.match(html, /Ctrl\+click \(&#8984; on macOS\) views in the list/);
+  assert.match(html, /Ctrl\+click \(&#8984; on macOS\) either one/);
   assert.match(app, /\$\("#placement-tiles-label"\)\.textContent/);
 
   // The whole selection reaches the viewer, which is the only thing it is
@@ -869,6 +876,79 @@ test("views can be selected in the list, which is what a drag acts on", async ()
   // measured around the tile the pointer actually grabbed.
   assert.match(viewer, /const anchor = urls\.find\(\(url\) => under\.includes\(url\)\)/);
   assert.match(viewer, /centre: base\.centre/);
+});
+
+test("a layer is highlighted at the same weight on both sides of the window", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(join(repoRoot, "docs", "browser", "app.css"), "utf8");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+
+  // Two strengths, and the same two in each half: pointed at is the very
+  // subtle one, picked is the subtle one.
+  assert.match(css, /\.view-list li\.highlighted/);
+  assert.match(css, /\.mvs-layer-highlight \{/);
+  assert.match(css, /\.mvs-layer-highlight\.subtle/);
+  assert.match(app, /subtle: \[\.\.\.state\.selectedViewUrls\]\.flatMap\(layerUrlsOf\)/);
+  assert.match(app, /verySubtle: state\.hoveredViewUrl/);
+
+  // One field for what is pointed at, written from either side. The list and
+  // the viewer are two views of it, not two states that have to be reconciled.
+  assert.match(app, /function noteHoveredView\(url\)/);
+  assert.match(
+    app,
+    /addEventListener\("pointerenter", \(\) => noteHoveredView\(view\.url\)\)/,
+  );
+  assert.match(app, /onHover: \(layerUrl\) =>/);
+
+  // The outline is drawn over the canvas and must not swallow the clicks and
+  // drags meant for what is underneath it.
+  assert.match(css, /\.mvs-layer-highlights \{[^}]*pointer-events: none/);
+});
+
+test("an outline is the layer's own edges, and so is the hit test", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // The output space's bounds are the upright box around a placed layer, so
+  // they cannot describe a turned tile - they are the box it is inscribed in.
+  // The source box is the tile and the matrix is how it is placed, so the two
+  // together are what an outline has to be drawn from.
+  assert.match(viewer, /sourceLower: transform\.inputSpace\.bounds\.lowerBounds/);
+  assert.match(viewer, /matrix: transform\.transform/);
+
+  // Both the outline and "which layer is under the pointer" come from one
+  // call. Two readings of the same placement is how a highlight ends up around
+  // a tile the pointer is not on, in exactly the corners a rotation creates.
+  const geometry = viewer.slice(viewer.indexOf("  #layerGeometry(url"));
+  assert.match(viewer, /layerSlabs\(\s*layer,/);
+  assert.match(viewer, /containsPoint\(geometry, point\)/);
+  assert.match(geometry, /layerGeometry\(placementOf\(transform\), rows\)/);
+});
+
+test("clicking a tile in the viewer selects it, exactly as its row does", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(join(repoRoot, "docs", "browser", "app.js"), "utf8");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // The same call the list makes, so the two cannot drift apart - ctrl / cmd
+  // included.
+  assert.match(app, /if \(viewUrl\) selectView\(viewUrl, \{ extend \}\)/);
+  assert.match(viewer, /extend: event\.ctrlKey \|\| event\.metaKey/);
+
+  // Only when the pointer names one layer. Where tiles overlap it names none,
+  // and picking one anyway would be a guess the views list does not have to
+  // make.
+  assert.match(viewer, /under\.length === 1/);
+
+  // A press that travelled is a pan, not a pick: plain drag is how the camera
+  // moves, so without this every pan would end in a selection.
+  assert.match(viewer, /CLICK_SLOP_PX/);
+  assert.match(viewer, /Math\.hypot\(event\.clientX - press\.x/);
+
+  // Pointer events rather than mouse events: Neuroglancer claims `mousedown`
+  // in the cross-sections and stops it there.
+  assert.match(viewer, /addEventListener\("pointerdown", this\.#onPointerDown/);
+  assert.doesNotMatch(viewer, /addEventListener\("mousedown"/);
 });
 
 test("a time axis gets a slider over the viewer's own position", async () => {

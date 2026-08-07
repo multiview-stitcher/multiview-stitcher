@@ -649,6 +649,163 @@ def test_pairwise_executor_rejects_unknown_registration_func():
 
 
 # ---------------------------------------------------------------------------
+# Distributed registration over time
+# ---------------------------------------------------------------------------
+
+
+def _timelapse_sources(n_views=2):
+    return example_data.example_sources("tiles-2d-20t-2c")[:n_views]
+
+
+def test_a_timelapse_is_dispatched_one_timepoint_at_a_time():
+    """One task is one call of the pairwise registration function.
+
+    A task per pair would be a single unit of work spanning every timepoint:
+    minutes of it for a real acquisition, with the progress bar showing
+    nothing and the page holding one request open for the whole of it.
+    """
+    from multiview_stitcher.browser import executors
+
+    dispatched = []
+
+    class RecordingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            dispatched.extend(payload["tasks"])
+            return super().call(endpoint, payload)
+
+    session = Session()
+    session.load(_timelapse_sources())
+
+    session.register(
+        RegistrationOptions(new_transform_key="registered"),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            session.spec(),
+            bridge=RecordingBridge(runner=WorkerRuntime().run_task),
+        ),
+    )
+
+    assert dispatched
+    assert all(len(task["time_indices"]) == 1 for task in dispatched)
+    assert sorted(
+        {task["time_indices"][0] for task in dispatched}
+    ) == list(range(20))
+    # Every pair, at every timepoint, and nothing twice.
+    pairs = {tuple(task["edges"][0]) for task in dispatched}
+    assert len(dispatched) == len(pairs) * 20
+
+
+def test_registration_over_time_counts_timepoints_in_its_progress():
+    from multiview_stitcher.browser import executors
+
+    reported = []
+
+    class ReportingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            if payload.get("progress"):
+                reported.append(payload["progress"])
+            return super().call(endpoint, payload)
+
+    session = Session()
+    session.load(_timelapse_sources())
+    session.register(
+        RegistrationOptions(),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            session.spec(),
+            bridge=ReportingBridge(runner=WorkerRuntime().run_task),
+        ),
+    )
+
+    assert reported
+    progress = reported[0]
+    assert progress["label"] == "registering"
+    assert progress["unit"] == "registration"
+    # One pair over twenty timepoints, and the bar says which is which.
+    assert progress["total"] == 20
+    assert progress["detail"] == "1 pairs × 20 timepoints"
+
+
+def test_a_timepoint_is_registered_under_its_own_starting_transform():
+    """A per-timepoint task must select the transform of that timepoint too.
+
+    Manual placement can leave the starting coordinate system varying over
+    time, and the worker rebuilds it from the session spec. Selecting the
+    timepoint's image while registering it under some other timepoint's
+    transform would come out as a plausible, wrong shift.
+    """
+    from multiview_stitcher.browser import executors
+
+    session = _timelapse_session()
+    # A placement on the later half only, which is what makes the starting
+    # transform differ between timepoints.
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 12), time_range=[10, 19]
+    )
+    assert "t" in _x_translation(session, "manual").dims
+
+    expected = session.register(
+        RegistrationOptions(
+            transform_key="manual", new_transform_key="local"
+        )
+    )
+    actual = session.register(
+        RegistrationOptions(
+            transform_key="manual", new_transform_key="remote"
+        ),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            session.spec(), bridge=_pool_bridge(WorkerRuntime(), max_workers=3)
+        ),
+    )
+
+    for local_param, remote_param in zip(
+        expected["params"], actual["params"]
+    ):
+        np.testing.assert_allclose(
+            np.asarray(local_param["data"]),
+            np.asarray(remote_param["data"]),
+            atol=1e-6,
+        )
+
+
+def test_distributed_registration_over_time_matches_local():
+    """Splitting a timelapse across workers must not change the result.
+
+    The timepoints of one pair are registered separately and joined back into
+    the array over time that `register` resolves from - a boundary where an
+    ordering or coordinate mistake would go unnoticed until the transforms
+    came out attached to the wrong timepoints.
+    """
+    from multiview_stitcher.browser import executors
+
+    sources = _timelapse_sources()
+
+    local = Session()
+    local.load(sources)
+    expected = local.register(RegistrationOptions(new_transform_key="reg"))
+
+    remote = Session()
+    remote.load(sources)
+    actual = remote.register(
+        RegistrationOptions(new_transform_key="reg"),
+        pairwise_executor=executors.RemotePairwiseExecutor(
+            remote.spec(),
+            bridge=_pool_bridge(WorkerRuntime(), max_workers=3),
+        ),
+    )
+
+    for local_param, remote_param in zip(
+        expected["params"], actual["params"]
+    ):
+        assert local_param["dims"] == remote_param["dims"]
+        assert "t" in local_param["dims"]
+        assert local_param["coords"]["t"] == remote_param["coords"]["t"]
+        np.testing.assert_allclose(
+            np.asarray(local_param["data"]),
+            np.asarray(remote_param["data"]),
+            atol=1e-6,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Fusion
 # ---------------------------------------------------------------------------
 
@@ -747,7 +904,6 @@ def test_parallel_block_writes_match_sequential(tiles_on_disk, tmp_path):
             executor = executors.RemoteFusionExecutor(
                 session.spec(),
                 bridge=_pool_bridge(worker, max_workers=n_workers),
-                n_workers=n_workers,
             )
             written = executor(plan["options"], plan["levels"])
             assert written == plan["n_blocks"]
@@ -1979,11 +2135,7 @@ def test_read_only_store_refuses_writes(tmp_path):
 
 
 def test_dispatch_sends_work_in_batches():
-    """One request must not stay open for a whole fusion.
-
-    A browser terminates a service worker whose event outruns its budget, so a
-    single request covering every block is eventually killed mid-flight.
-    """
+    """Batches bound how much JSON one request carries, nothing more."""
     calls = []
 
     class RecordingBridge(LocalBridge):
@@ -1998,10 +2150,201 @@ def test_dispatch_sends_work_in_batches():
     assert len(results) == 10
     assert calls == [3, 3, 3, 1]
 
-    # Without a batch size the behaviour is unchanged: one request.
+    # A job below the default batch size is one request.
     calls.clear()
     assert len(bridge.dispatch(tasks)) == 10
     assert calls == [10]
+
+
+def test_dispatch_identifies_each_batch():
+    """Every request carries an id, so a repeat of it can be recognised.
+
+    A request that is lost on the way is retried, and the page has to be able
+    to tell "run this" from "you already are".
+    """
+    jobs = []
+
+    class RecordingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            jobs.append(payload["job"])
+            return super().call(endpoint, payload)
+
+    bridge = RecordingBridge(runner=lambda task: {"n_blocks": 1})
+    bridge.dispatch([{"kind": "fuse_blocks"} for _ in range(4)], batch_size=2)
+
+    assert len(jobs) == 2
+    assert all(jobs)
+    assert len(set(jobs)) == 2
+
+
+def test_dispatch_sends_the_session_once_per_request():
+    """The session spec is the bulk of a payload and a job is many tasks.
+
+    It travels beside the tasks rather than inside each of them, and the side
+    running them puts it back on - which the local bridge has to do exactly as
+    the page does, or CPython and the browser would run different tasks.
+    """
+    payloads = []
+    seen = []
+
+    class RecordingBridge(LocalBridge):
+        def call(self, endpoint, payload):
+            payloads.append(payload)
+            return super().call(endpoint, payload)
+
+    bridge = RecordingBridge(runner=lambda task: seen.append(task) or {})
+    bridge.dispatch(
+        [{"kind": "fuse_blocks"} for _ in range(3)],
+        session={"sources": ["a"], "generation": 2},
+    )
+
+    assert [task.get("session") for task in payloads[0]["tasks"]] == [
+        None,
+        None,
+        None,
+    ]
+    assert payloads[0]["session"] == {"sources": ["a"], "generation": 2}
+    assert all(
+        task["session"] == {"sources": ["a"], "generation": 2} for task in seen
+    )
+
+
+class _FakePage:
+    """The page's half of the dispatch protocol, as `jobs.js` implements it.
+
+    Work is started by one request and collected by later ones, so nothing here
+    ever answers slowly. `drop` makes the next few requests fail the way a
+    terminated service worker does - after the page has already seen them,
+    which is the case a retry has to survive without running anything twice.
+    """
+
+    def __init__(self, runner, finish_after=0, drop_calls=()):
+        self.runner = runner
+        self.finish_after = finish_after
+        self.drop_calls = set(drop_calls)
+        self.jobs = {}
+        self.calls = []
+        self.runs = 0
+
+    def endpoints(self):
+        return [endpoint for endpoint, _ in self.calls]
+
+    def call(self, endpoint, payload):
+        dropped = len(self.calls) in self.drop_calls
+        self.calls.append((endpoint, payload))
+
+        response = self._handle(endpoint, payload)
+        if dropped:
+            raise RuntimeError("NetworkError: the request never came back")
+        return response
+
+    def _handle(self, endpoint, payload):
+        if endpoint == "dispatch":
+            job = payload["job"]
+            if job not in self.jobs:
+                self.runs += 1
+                self.jobs[job] = {
+                    "polls": 0,
+                    "results": [
+                        self.runner(task) for task in payload["tasks"]
+                    ],
+                }
+            return {"job": job}
+
+        if endpoint == "poll":
+            job = self.jobs[payload["job"]]
+            job["polls"] += 1
+            if job["polls"] <= self.finish_after:
+                return {"done": False, "completed": 0}
+            return {"done": True, "results": job["results"]}
+
+        raise AssertionError(f"unknown endpoint {endpoint}")
+
+
+def _polling_bridge(page):
+    """An `XHRBridge` whose transport is a fake page rather than a browser."""
+    from multiview_stitcher.browser.bridge import XHRBridge
+
+    class _Bridge(XHRBridge):
+        def call(self, endpoint, payload):
+            return page.call(endpoint, payload)
+
+    bridge = _Bridge()
+    bridge.poll_timeout_ms = 0
+    return bridge
+
+
+def test_the_browser_bridge_submits_work_and_then_polls_for_it(monkeypatch):
+    """No request may stay open while the work it started runs.
+
+    A browser terminates a service worker whose fetch event outlives its
+    budget, and one pairwise registration over a timelapse outlives any budget
+    there is - which is how registering a timelapse used to end in
+    `NetworkError` with the pool still working.
+    """
+    page = _FakePage(runner=lambda task: {"n": task["units"]}, finish_after=3)
+    bridge = _polling_bridge(page)
+
+    results = bridge.dispatch([{"kind": "x", "units": 2} for _ in range(2)])
+
+    assert results == [{"n": 2}, {"n": 2}]
+    assert page.endpoints() == ["dispatch", "poll", "poll", "poll", "poll"]
+
+
+def test_a_lost_request_is_retried_without_running_the_work_twice(monkeypatch):
+    """A request may be lost after the page has acted on it.
+
+    Both endpoints are therefore idempotent and identified by the caller: a
+    repeated submit joins the job already running, and a finished job can be
+    collected again.
+    """
+    from multiview_stitcher.browser import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module.time, "sleep", lambda seconds: None)
+
+    # The first submit and the first poll are lost on the way back, after the
+    # page has already acted on them.
+    page = _FakePage(runner=lambda task: {"n": 1}, drop_calls=(0, 2))
+    bridge = _polling_bridge(page)
+
+    results = bridge.dispatch([{"kind": "x"} for _ in range(3)])
+
+    assert results == [{"n": 1}] * 3
+    assert page.endpoints() == ["dispatch", "dispatch", "poll", "poll"]
+    assert page.runs == 1, "the retried submit must join, not re-run"
+
+
+def test_an_answer_from_the_page_is_not_retried(monkeypatch):
+    """A 4xx or 5xx is an answer; repeating the question cannot change it."""
+    from multiview_stitcher.browser import bridge as bridge_module
+    from multiview_stitcher.browser.store import FetchError
+
+    monkeypatch.setattr(bridge_module.time, "sleep", lambda seconds: None)
+
+    calls = []
+
+    class _Bridge(bridge_module.XHRBridge):
+        def call(self, endpoint, payload):
+            calls.append(endpoint)
+            raise FetchError("500 from /rpc/dispatch: no page claimed this")
+
+    with pytest.raises(FetchError):
+        _Bridge().dispatch([{"kind": "x"}])
+
+    assert calls == ["dispatch"]
+
+
+def test_a_page_that_never_answers_fails_the_job(monkeypatch):
+    from multiview_stitcher.browser import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module.time, "sleep", lambda seconds: None)
+
+    class _Bridge(bridge_module.XHRBridge):
+        def call(self, endpoint, payload):
+            raise RuntimeError("NetworkError")
+
+    with pytest.raises(bridge_module.BridgeError, match="did not answer"):
+        _Bridge().dispatch([{"kind": "x"}])
 
 
 def test_dispatch_reports_a_failing_batch_immediately():
@@ -2024,23 +2367,28 @@ def test_dispatch_reports_a_failing_batch_immediately():
 
 
 def test_fusion_executor_splits_levels_into_small_tasks(tiles_on_disk):
+    """A fusion becomes many small tasks, not one per level.
+
+    Small tasks are what keeps every worker busy to the end of a level and
+    what makes the progress bar move at all; a task per level would leave the
+    pool idle behind the slowest one.
+    """
     from multiview_stitcher.browser import executors
 
     session = Session()
     session.load(tiles_on_disk)
 
-    dispatched = []
+    tasks = []
 
     class CountingBridge(LocalBridge):
         def call(self, endpoint, payload):
-            dispatched.append(len(payload["tasks"]))
+            tasks.extend(payload["tasks"])
             return super().call(endpoint, payload)
 
     worker = WorkerRuntime()
     executor = executors.RemoteFusionExecutor(
         session.spec(),
         bridge=CountingBridge(runner=worker.run_task),
-        n_workers=2,
     )
 
     import tempfile
@@ -2053,9 +2401,11 @@ def test_fusion_executor_splits_levels_into_small_tasks(tiles_on_disk):
         written = executor(plan["options"], plan["levels"])
 
     assert written == plan["n_blocks"]
-    # Batched: several requests, none of them the whole job.
-    assert len(dispatched) > 1
-    assert max(dispatched) <= 2
+    assert len(tasks) > len(plan["levels"])
+    assert max(len(task["block_ids"]) for task in tasks) <= (
+        executors.RemoteFusionExecutor.blocks_per_task
+    )
+    assert sum(task["units"] for task in tasks) == plan["n_blocks"]
 
 
 # ---------------------------------------------------------------------------
@@ -2064,10 +2414,12 @@ def test_fusion_executor_splits_levels_into_small_tasks(tiles_on_disk):
 
 
 def test_dispatch_reports_progress_per_batch():
-    """The page can only learn about progress from the batches it is handed.
+    """Each request says how much of the job was finished before it.
 
-    The work itself runs inside one blocking call in the session worker, so
-    each dispatch carries how much of the job is already done.
+    The work runs inside one blocking call in the session worker, so this is
+    all Python can say about it. The rest is the page's to count: it knows
+    what each task of the request it is holding is worth, and adds them up as
+    they finish - which is how the bar reaches its total at all.
     """
     seen = []
 
@@ -2083,15 +2435,10 @@ def test_dispatch_reports_progress_per_batch():
         tasks, batch_size=2, progress={"label": "fusing", "unit": "block"}
     )
 
-    # Each payload also says what its own batch is worth, so the page can
-    # finish the bar: the last batch's completion is never reported here.
     assert seen == [
-        {"label": "fusing", "unit": "block",
-         "completed": 0, "total": 12, "batch": 6},
-        {"label": "fusing", "unit": "block",
-         "completed": 6, "total": 12, "batch": 6},
+        {"label": "fusing", "unit": "block", "completed": 0, "total": 12},
+        {"label": "fusing", "unit": "block", "completed": 6, "total": 12},
     ]
-    assert seen[-1]["completed"] + seen[-1]["batch"] == seen[-1]["total"]
 
 
 def test_progress_counts_blocks_not_tasks(tiles_on_disk, tmp_path):
@@ -2116,7 +2463,6 @@ def test_progress_counts_blocks_not_tasks(tiles_on_disk, tmp_path):
     executor = executors.RemoteFusionExecutor(
         session.spec(),
         bridge=ReportingBridge(runner=WorkerRuntime().run_task),
-        n_workers=2,
     )
     executor(plan["options"], plan["levels"])
 
@@ -2231,20 +2577,21 @@ def test_worker_session_cache_tracks_transforms(tiles_on_disk):
 
 
 def test_progress_reports_enough_to_reach_the_total(tiles_on_disk, tmp_path):
-    """A job small enough for one batch must still be able to show 100%.
+    """A job small enough for one request must still be able to show 100%.
 
-    Progress can only travel with a dispatch, so the last batch's completion
-    is never reported by Python. Each payload carries what its own batch is
-    worth, which is what lets the page finish the bar.
+    Python reports what was done before each request, which for a single-
+    request job is nothing at all. The rest has to be in the request itself:
+    the units of its tasks add up to what is left of the total, so the page
+    can finish the bar by counting them off as they complete.
     """
     from multiview_stitcher.browser import executors
 
-    reported = []
+    requests = []
 
     class ReportingBridge(LocalBridge):
         def call(self, endpoint, payload):
             if payload.get("progress"):
-                reported.append(payload["progress"])
+                requests.append(payload)
             return super().call(endpoint, payload)
 
     session = Session()
@@ -2255,18 +2602,20 @@ def test_progress_reports_enough_to_reach_the_total(tiles_on_disk, tmp_path):
     executor = executors.RemoteFusionExecutor(
         session.spec(),
         bridge=ReportingBridge(runner=WorkerRuntime().run_task),
-        n_workers=2,
     )
     executor(plan["options"], plan["levels"])
 
-    assert reported
-    for item in reported:
-        assert item["batch"] >= 1
-        assert item["completed"] + item["batch"] <= item["total"]
+    assert requests
+    for payload in requests:
+        progress = payload["progress"]
+        units = sum(task["units"] for task in payload["tasks"])
+        assert progress["completed"] + units <= progress["total"]
 
-    last = reported[-1]
-    assert last["completed"] + last["batch"] == last["total"], (
-        "the final batch must account for the rest of the work"
+    last = requests[-1]
+    assert last["progress"]["completed"] + sum(
+        task["units"] for task in last["tasks"]
+    ) == last["progress"]["total"], (
+        "the final request must account for the rest of the work"
     )
 
 

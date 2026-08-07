@@ -607,11 +607,33 @@ class Session:
             for msim in self.msims
         ]
 
-    def compute_pairwise(self, edges, register_kwargs, reg_channel=None):
+    def select_timepoints(self, msim, time_indices):
+        """The view reduced to ``time_indices``, positions into its time axis.
+
+        Indices rather than coordinate values: an index survives JSON whatever
+        the time coordinate is made of, and the values are read here off the
+        view the worker rebuilt. Selecting with a list keeps the time axis, so
+        the result is one that can be joined back onto the other timepoints.
+        """
+        if time_indices is None:
+            return msim
+
+        sim = msi_utils.get_sim_from_msim(msim)
+        if "t" not in sim.dims:
+            return msim
+
+        values = sim.coords["t"].values
+        return msi_utils.multiscale_sel_coords(
+            msim, {"t": [values[int(index)] for index in time_indices]}
+        )
+
+    def compute_pairwise(
+        self, edges, register_kwargs, reg_channel=None, time_indices=None
+    ):
         """Compute a subset of pairwise registrations - the compute-worker side.
 
         Runs the exact same code path as a local registration; only the set of
-        edges differs.
+        edges, and optionally the set of timepoints, differs.
         """
         msims = self.registration_msims(reg_channel)
 
@@ -619,8 +641,8 @@ class Session:
         for pair in edges:
             index_a, index_b = int(pair[0]), int(pair[1])
             param_ds = core_registration.register_pair_of_msims_over_time(
-                msims[index_a],
-                msims[index_b],
+                self.select_timepoints(msims[index_a], time_indices),
+                self.select_timepoints(msims[index_b], time_indices),
                 **register_kwargs,
             ).compute()
             results.append(serialization.pairwise_result_to_json(param_ds))
