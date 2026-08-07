@@ -144,9 +144,16 @@ export class NeuroglancerViewer {
     // Keep Neuroglancer's standard layer and shader controls available. The
     // panels themselves start closed, but users can open either one from the
     // viewer toolbar whenever they need the full controls.
+    //
+    // The layer bar is the exception: it lists the layers horizontally across
+    // the top, which is what the app's own layers list already does, on a row
+    // that grows with the number of tiles and takes the height from the data.
+    // Everything it leads to is still reachable through the layer list panel,
+    // whose button stays in the top row.
     this.#viewer = setupDefaultViewer({
       target,
       showToolPaletteButton: false,
+      showLayerPanel: false,
     });
 
     // Neuroglancer opens a tool palette on its own, so hiding the button that

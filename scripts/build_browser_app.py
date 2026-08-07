@@ -15,11 +15,26 @@ Usage::
     python scripts/build_browser_app.py                # wheel + manifest
     python scripts/build_browser_app.py --neuroglancer # also bundle the viewer
     python scripts/build_browser_app.py --check        # verify, change nothing
+    python scripts/build_browser_app.py --serve        # build, then serve it
+
+With uv, ``uv run scripts/build_browser_app.py --serve`` is the whole task:
+the inline metadata below is all this script needs, so uv runs it in an
+environment of its own rather than syncing the project first.
 """
 
+# /// script
+# requires-python = ">=3.11"
+# # Only to build the wheel the page installs - see `build_wheel`. Everything
+# # else here is standard library. Declared so that `uv run` supplies it: a
+# # virtual environment uv created has no pip in it.
+# dependencies = ["pip"]
+# ///
+
 import argparse
+import functools
 import glob
 import hashlib
+import http.server
 import json
 import os
 import re
@@ -503,6 +518,50 @@ def check():
     return ok
 
 
+#: Default port for ``--serve``.
+SERVE_PORT = 8000
+
+
+def serve(port=SERVE_PORT):
+    """Serve the app the way it is deployed, until interrupted.
+
+    The whole of ``docs`` is served rather than ``docs/browser``, so that the
+    app sits under ``/browser/`` as it does on the site. Some of what it loads
+    is addressed relative to that: neuroglancer's chunk worker asks for a
+    sibling bundle a directory up, and from its own root that request 404s -
+    which shows up as images that never leave grey, not as an error.
+
+    Bound to localhost, and not offered on any other address. Both the service
+    worker the app reads its data through and the File System Access API it
+    writes with are limited to secure contexts, and over plain HTTP only
+    localhost is one - served to another machine on the network, the page
+    would load and then be unable to open anything.
+    """
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler,
+        directory=str(REPO_ROOT / "docs"),
+    )
+    # Threading, because a single-threaded server is occupied by a connection
+    # from the moment it accepts one: a browser's speculative preconnect, held
+    # open without a request on it, stalls every other fetch until it times
+    # out. `python -m http.server` has been threaded since 3.7 for this reason.
+    with http.server.ThreadingHTTPServer(
+        ("127.0.0.1", port), handler
+    ) as http_server:
+        # Flushed: this is the line the user is waiting for, and Python
+        # buffers stdout whenever it is not a terminal.
+        print(
+            f"serving http://localhost:{port}/browser/ - ctrl-c to stop",
+            flush=True,
+        )
+        try:
+            http_server.serve_forever()
+        except KeyboardInterrupt:
+            print()
+
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -519,6 +578,17 @@ def main(argv=None):
         "--check",
         action="store_true",
         help="only verify that the app directory is complete",
+    )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="after building, serve the app on localhost for testing",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=SERVE_PORT,
+        help=f"port for --serve (default {SERVE_PORT})",
     )
     args = parser.parse_args(argv)
 
@@ -545,6 +615,18 @@ def main(argv=None):
             "note: no Neuroglancer bundle found - "
             "run again with --neuroglancer to build one"
         )
+
+    if args.serve:
+        # Serving a page whose viewer is missing is worse than not serving:
+        # it loads, and then fails at the point a dataset is opened.
+        if not (NEUROGLANCER_DIR / "neuroglancer.js").is_file():
+            print(
+                "not serving without a viewer bundle - "
+                "run again with --neuroglancer",
+                file=sys.stderr,
+            )
+            return 1
+        return serve(port=args.port)
 
     return 0
 

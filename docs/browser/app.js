@@ -775,12 +775,12 @@ function mountViewer() {
 }
 
 /**
- * Follow the timepoint being viewed, refreshing when it moves.
+ * Follow the timepoint being viewed, re-aiming the layers when it moves.
  *
  * Only worth doing once a transform actually varies over time: a source
- * transform is one matrix, so the state has to be rebuilt to show a different
- * timepoint's, and doing that on every scrub of a dataset whose placement is
- * the same throughout would be pure cost.
+ * transform is one matrix, so the layers have to be re-aimed to show a
+ * different timepoint's, and doing that on every scrub of a dataset whose
+ * placement is the same throughout would be pure cost.
  */
 function noteTimeIndex() {
   if (timeCoords().length < 2) return;
@@ -799,7 +799,7 @@ function noteTimeIndex() {
 
   clearTimeout(timeRefreshTimer);
   timeRefreshTimer = setTimeout(() => {
-    refreshViewer().catch((error) =>
+    refreshTransforms().catch((error) =>
       log(`could not follow the timepoint: ${error.message}`, "warn"),
     );
   }, 200);
@@ -1117,6 +1117,51 @@ function applyContrastLimits(row, channelIndex, min, max) {
   }
 }
 
+/** What Python needs in order to place the layers: which coordinate system,
+ * at which timepoint, and where the URLs it builds have to point. */
+function viewerGeometry() {
+  return {
+    transform_key: state.transformKey,
+    base_url: window.location.origin,
+    // The service worker only claims URLs inside its own scope, so Python
+    // must build viewer URLs below this prefix rather than at the site root.
+    api_base: API_BASE,
+    // A source transform is one matrix, so it can only be one timepoint's.
+    // Showing the one being viewed is what makes a placement stored for a
+    // range of them legible.
+    time_index: state.timeIndex,
+  };
+}
+
+/**
+ * Re-aim the layers without rebuilding the viewer.
+ *
+ * This is how the timepoint is followed. Moving through time changes which
+ * sample of each transform a layer carries and nothing else: not the layers,
+ * not their shaders or contrast ranges, not the layout. Going through
+ * `refreshViewer` would take all of those apart and put them back to say the
+ * same thing, on every step of a scrub.
+ */
+async function refreshTransforms() {
+  if (!hasViews()) return;
+
+  const geometry = viewerGeometry();
+  const transforms = await command("view_transforms", geometry);
+
+  try {
+    viewer.setLayerTransforms(transforms);
+  } catch (error) {
+    // The viewer's layers are not the ones we last applied - the user can
+    // rename or remove them in Neuroglancer's own UI. Fall back to the full
+    // state rather than leaving half the views at the wrong timepoint.
+    log(`re-applying the full viewer state: ${error.message}`, "warn");
+    await refreshViewer();
+    return;
+  }
+
+  await applyChannelTransforms(geometry);
+}
+
 async function refreshViewer() {
   if (!hasViews()) {
     // No views: back to a blank viewer, not an empty layer list on top of the
@@ -1129,17 +1174,7 @@ async function refreshViewer() {
     return;
   }
 
-  const geometry = {
-    transform_key: state.transformKey,
-    base_url: window.location.origin,
-    // The service worker only claims URLs inside its own scope, so Python
-    // must build viewer URLs below this prefix rather than at the site root.
-    api_base: API_BASE,
-    // A source transform is one matrix, so it can only be one timepoint's.
-    // Showing the one being viewed is what makes a placement stored for a
-    // range of them legible.
-    time_index: state.timeIndex,
-  };
+  const geometry = viewerGeometry();
   const ngState = await command("neuroglancer_state", {
     ...geometry,
     preview_route: state.previewRoute,

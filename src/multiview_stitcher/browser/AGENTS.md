@@ -24,6 +24,9 @@ The interface should
 - for yx data, the layout should be 'xy'
 - for zyx data, the layout should be 4 panels
 - don't show an open layer panel, but don't make it inaccessible
+- don't show the layer bar - neuroglancer's horizontal list of layers across
+  the top of the viewer. The left panel already lists them, and that row grows
+  with the number of tiles
 - don't show the tool palette
 - layers can be highlighted over their borders as shown - the image's own edges,
   so a tile that has been turned is outlined at its angle rather than by the

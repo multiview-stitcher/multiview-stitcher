@@ -553,7 +553,7 @@ def get_nonspatial_dims_from_sim(sim):
 
 def get_origin_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
-    origin = {dim: float(sim.coords[dim][0]) for dim in spatial_dims}
+    origin = {dim: float(sim.coords[dim].values[0]) for dim in spatial_dims}
 
     if asarray:
         origin = np.array([origin[sd] for sd in spatial_dims])
@@ -573,11 +573,14 @@ def get_shape_from_sim(sim, asarray=False):
 
 def get_spacing_from_sim(sim, asarray=False):
     spatial_dims = get_spatial_dims_from_sim(sim)
+    # Read the coordinate's own array rather than indexing the DataArray:
+    # indexing builds another DataArray, and subtracting two of those goes
+    # through xarray's alignment machinery - milliseconds of it, to take the
+    # difference of two floats.
+    coord_values = {dim: sim.coords[dim].values for dim in spatial_dims}
     spacing = {
-        dim: float(sim.coords[dim][1] - sim.coords[dim][0])
-        if len(sim.coords[dim]) > 1
-        else 1.0
-        for dim in spatial_dims
+        dim: float(values[1] - values[0]) if len(values) > 1 else 1.0
+        for dim, values in coord_values.items()
     }
 
     if asarray:

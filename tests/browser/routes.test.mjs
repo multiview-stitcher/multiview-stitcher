@@ -667,7 +667,6 @@ test("channel and contrast controls update loaded layers in place", async () => 
   assert.match(viewer, /showToolPaletteButton: false/);
   assert.doesNotMatch(viewer, /showLayerListPanelButton: false/);
   assert.doesNotMatch(viewer, /showLayerSidePanelButton: false/);
-  assert.doesNotMatch(viewer, /showLayerPanel: false/);
   assert.match(viewer, /this\.#viewer\.selectedLayer\.visible = false/);
   assert.match(viewer, /this\.#viewer\.layerListPanelState\.location\.visible = false/);
   assert.match(viewer, /setPositionalColors\(colors = null\)/);
@@ -693,6 +692,22 @@ test("the tool palette Neuroglancer opens by itself is closed again", async () =
   // multi-channel layer.
   assert.doesNotMatch(viewer, /palette\.dispose\(\)/);
   assert.doesNotMatch(viewer, /toolPalettes\.reset\(\)/);
+});
+
+test("the horizontal layer bar is off, and its contents still reachable", async () => {
+  const { readFileSync } = await import("node:fs");
+  const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
+
+  // Neuroglancer's layer bar lists the layers across the top of the viewer,
+  // which the app's own layers list already does - on a row that grows with
+  // the number of tiles, taking the height from the data.
+  assert.match(viewer, /showLayerPanel: false/);
+
+  // The button that opens the layer list panel is what keeps every layer's
+  // own controls reachable once the bar is gone, so it must stay in the top
+  // row. Only the panel itself is closed, and only to begin with.
+  assert.doesNotMatch(viewer, /showLayerListPanelButton: false/);
+  assert.match(viewer, /layerListPanelState\.location\.visible = false/);
 });
 
 test("tiles are dragged in the cross-sections only, and never through a slice", async () => {
@@ -855,10 +870,26 @@ test("a transform that varies over time or channel is shown as one sample", asyn
   const viewer = readFileSync(join(repoRoot, "docs", "browser", "viewer.js"), "utf8");
 
   // A source transform is one matrix. Over time that means showing the
-  // timepoint being viewed, and rebuilding when it moves.
+  // timepoint being viewed, and re-aiming the layers when it moves.
   assert.match(app, /time_index: state\.timeIndex/);
   assert.match(app, /function noteTimeIndex\(\)/);
   assert.match(app, /if \(!state\.timeVaryingTransforms\) return;/);
+
+  // Re-aiming, not rebuilding: a scrub changes which sample of each transform
+  // a layer carries and nothing else, so asking for a whole viewer state on
+  // every step would take apart every layer, shader and contrast range to say
+  // the same thing.
+  const follow = app.slice(
+    app.indexOf("function noteTimeIndex()"),
+    app.indexOf("/** The layers a state describes"),
+  );
+  assert.match(follow, /refreshTransforms\(\)/);
+  assert.ok(
+    !/refreshViewer\(\)/.test(follow),
+    "following the timepoint must not rebuild the viewer state",
+  );
+  assert.match(app, /command\("view_transforms"/);
+  assert.match(app, /viewer\.setLayerTransforms\(transforms\)/);
   // A drag can only show one timepoint of a placement stored for a range of
   // them, so what the session holds is what ends up on screen.
   assert.match(app, /if \(hadPreview \|\| timeRange\)/);

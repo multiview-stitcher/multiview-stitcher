@@ -149,6 +149,15 @@ class WorkerRuntime:
             time_range=payload.get("time_range"),
         )
 
+    def _cmd_view_transforms(self, payload):
+        return self._require_session().view_transforms(
+            transform_key=payload.get("transform_key"),
+            base_url=payload.get("base_url", ""),
+            api_base=payload.get("api_base", ""),
+            serve_views=payload.get("serve_views", "auto"),
+            time_index=payload.get("time_index", 0),
+        )
+
     def _cmd_channel_transforms(self, payload):
         return self._require_session().channel_transforms(
             transform_key=payload.get("transform_key"),

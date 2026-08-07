@@ -522,6 +522,52 @@ def test_a_placement_can_be_restricted_to_channels_and_timepoints_at_once():
             assert float(after.sel(c=channel).isel(t=time)) != float(moved)
 
 
+def test_a_drag_rewrites_only_the_view_that_moved(monkeypatch):
+    """The viewer hands over every layer's transform, moved or not.
+
+    Attaching one rewrites every scale of an msim, so a drag on a single tile
+    must not cost the whole session - and the views that stayed put must not
+    pick up a time axis from a placement that was restricted to a range.
+    """
+    session = _timelapse_session()
+
+    written = []
+    attach = msi_utils.set_affine_transform
+
+    def record(msim, *args, **kwargs):
+        written.append(msim)
+        return attach(msim, *args, **kwargs)
+
+    monkeypatch.setattr(
+        session_module.msi_utils, "set_affine_transform", record
+    )
+
+    state = session.neuroglancer_state(transform_key="manual")
+    updates = [
+        {
+            "index": index,
+            "transform": json.loads(json.dumps(layer["source"]["transform"])),
+        }
+        for index, layer in enumerate(state["layers"])
+    ]
+    x_row = list(updates[0]["transform"]["outputDimensions"]).index("x")
+    updates[0]["transform"]["matrix"][x_row][-1] += 10
+    session.update_neuroglancer_transforms(
+        "manual", updates, time_range=[5, 5]
+    )
+
+    assert len(written) == 1 and written[0] is session.msims[0], (
+        "only the view that moved is written back"
+    )
+
+    after = [
+        msi_utils.get_transform_from_msim(msim, "manual")
+        for msim in session.msims
+    ]
+    assert "t" in after[0].dims
+    assert "t" not in after[1].dims, "an unmoved view gains no time axis"
+
+
 def test_a_placement_out_of_range_is_reported_rather_than_ignored():
     session = _timelapse_session()
 
@@ -633,6 +679,51 @@ def test_the_viewer_shows_the_transform_of_the_timepoint_being_viewed():
     # Out of range is clamped rather than raising: the viewer's position can
     # briefly outrun the data while a state is being applied.
     assert x_translation(999) == x_translation(19)
+
+
+def test_following_the_timepoint_needs_no_new_viewer_state():
+    """Moving through time re-aims the layers; it does not rebuild the viewer.
+
+    A source transform is one matrix, so a transform with a time axis shows a
+    different one at each timepoint - but that is the only thing that differs.
+    Asking for the transforms alone is what lets the app apply them to the
+    layers it already has, instead of taking apart every layer, shader and
+    contrast range to say the same thing on every step of a scrub.
+    """
+    session = _timelapse_session()
+    session.update_neuroglancer_transforms(
+        "manual", _nudged(session, 10), time_range=[5, 5]
+    )
+
+    def transforms(time_index):
+        return session.view_transforms(
+            transform_key="manual", api_base="/api", time_index=time_index
+        )
+
+    def x_translation(spec):
+        return spec["matrix"][list(spec["outputDimensions"]).index("x")][-1]
+
+    # One entry per view, keyed by the URL its layers read - the app's own
+    # handle on a layer, since Neuroglancer is free to rename it.
+    assert list(transforms(0)) == [
+        layer["source"]["url"]
+        for layer in session.neuroglancer_state(
+            transform_key="manual", api_base="/api"
+        )["layers"]
+    ]
+
+    moved, still = (x_translation(next(iter(transforms(t).values()))) for t in (5, 0))
+    assert moved != still
+
+    # And they are the transforms the full state carries, not a second opinion.
+    for time_index in (0, 5):
+        state = session.neuroglancer_state(
+            transform_key="manual", api_base="/api", time_index=time_index
+        )
+        assert transforms(time_index) == {
+            layer["source"]["url"]: layer["source"]["transform"]
+            for layer in state["layers"]
+        }
 
 
 def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
