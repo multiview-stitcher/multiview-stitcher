@@ -1764,10 +1764,11 @@ function round(value) {
 /**
  * A layer's transform as plain data, for `highlight.js` to reason about.
  *
- * `RenderLayerTransform.transform` maps the layer's *source* coordinates - its
- * voxel grid - into its output space, as a column-major matrix of `rank + 1`
- * rows and `sourceRank + 1` columns. Both ends are in index units; the output
- * space carries the scales that turn its own indices into metres.
+ * `RenderLayerTransform.transform` carries the layer's placement into its
+ * output space, as a column-major matrix of `rank + 1` rows and
+ * `sourceRank + 1` columns. Both spaces come with the spacings that turn their
+ * own indices into metres, which the matrix needs: it is not in one set of
+ * units, and `sourceGeometry` says which part is in which.
  *
  * A registration or a placement drag is a rotation in that matrix. The output
  * space's `bounds` are the axis-aligned box around the *result*, which is why
@@ -1782,6 +1783,7 @@ function placementOf(transform) {
     matrix: transform.transform,
     sourceLower: transform.inputSpace.bounds.lowerBounds,
     sourceUpper: transform.inputSpace.bounds.upperBounds,
+    sourceScales: transform.inputSpace.scales,
     outputLower: transform.outputSpace.bounds.lowerBounds,
     outputUpper: transform.outputSpace.bounds.upperBounds,
     outputScales: transform.outputSpace.scales,
