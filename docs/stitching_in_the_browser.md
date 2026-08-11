@@ -117,6 +117,26 @@ changes what those URLs should return &mdash; a new registration, a new fusion
 URLs it has never seen. Requests for a retired route are answered with
 "not found" rather than with data computed before the change.
 
+## Registration methods
+
+Under **Registration &rarr; Advanced &rarr; Pairwise reg**:
+
+| Method | What it does |
+| --- | --- |
+| **Phase correlation** (default) | Finds a translation per pair. Fast, and enough for most tiled acquisitions. |
+| **Elastix** | The same [elastix](https://elastix.dev/) the desktop package uses, [compiled to WebAssembly](https://github.com/InsightSoftwareConsortium/ITKElastix). Recovers translation, rigid, similarity or affine transforms. |
+
+Elastix runs a translation stage first and hands its result to the transform
+type you choose, which is also applied to the groupwise resolution &mdash; a
+rigid pairwise result resolved into translations would lose its rotations.
+Resolution levels, iterations per level and the similarity metric are exposed
+next to it.
+
+Its WebAssembly module is around 2.5&nbsp;MB compressed and is fetched the
+first time a worker registers with it, then kept for the rest of the session;
+sessions that never select elastix never download it. The service worker
+fetches it once and shares it with every worker.
+
 ## Fusion modes
 
 | Mode | What happens |
@@ -131,9 +151,10 @@ URLs it has never seen. Requests for a retired route are answered with
   JPEG XR, ZSTD) cannot be decoded in the browser: that needs
   [imagecodecs](https://pypi.org/project/imagecodecs/), a C extension with no
   WebAssembly build. Other formats, e.g. TIFF, are not available yet.
-- Registration uses phase correlation and fusion uses weighted averaging;
-  methods depending on packages without a WebAssembly build (ANTsPy,
-  ITK-Elastix) are not available.
+- Registration offers phase correlation and elastix (see above); fusion uses
+  weighted averaging. Methods whose packages have no WebAssembly build - ANTsPy,
+  and the `itk-elastix` bindings the desktop uses - are not available. Elastix
+  is there through `itkwasm-elastix` instead.
 - Fusing **to disk** runs on the session worker rather than the pool: several
   workers writing into one mounted directory cannot be reconciled safely
   today. Preview fusion and registration do use the whole pool.

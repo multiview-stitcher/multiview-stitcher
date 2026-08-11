@@ -1335,6 +1335,51 @@ function syncPairDeterminationControls() {
   }
 }
 
+function syncRegistrationMethod() {
+  const elastix = $("#registration-method").value === "itk_elastix";
+  $("#registration-elastix-options").hidden = !elastix;
+  if (elastix) syncElastixTransform();
+}
+
+/**
+ * Keep the groupwise transform type in step with the elastix stage.
+ *
+ * The two have to agree: resolving rigid pairwise results into translations
+ * throws the rotations away, and asking for an affine resolution of
+ * translation-only pairs has nothing to fit.
+ */
+function syncElastixTransform() {
+  $("#registration-groupwise-transform").value = $(
+    "#registration-elastix-transform",
+  ).value;
+}
+
+function elastixRegistrationKwargs() {
+  const transform = $("#registration-elastix-transform").value;
+  const kwargs = {
+    // A translation stage first, then the transform that was asked for: it
+    // costs little and is what gives the second stage a sane starting point.
+    transform_types:
+      transform === "translation" ? [transform] : ["translation", transform],
+    number_of_resolutions:
+      optionalInteger(
+        "#registration-elastix-resolutions",
+        "Elastix resolution levels",
+      ) || 2,
+  };
+
+  const iterations = optionalInteger(
+    "#registration-elastix-iterations",
+    "Elastix iterations per level",
+  );
+  if (iterations !== null) kwargs.number_of_iterations = iterations;
+
+  const metric = $("#registration-elastix-metric").value;
+  if (metric) kwargs.metric = metric;
+
+  return kwargs;
+}
+
 function updateManualPairEmptyState() {
   const empty = $("#registration-pair-list-empty");
   const hasPairs = Boolean($("#registration-pair-list").children.length);
@@ -2514,9 +2559,14 @@ async function doRegister() {
       }
     }
 
+    const method = $("#registration-method").value;
+
     const result = await command("register", {
       options: {
         transform_key: state.transformKey,
+        pairwise_reg_func: method,
+        pairwise_reg_func_kwargs:
+          method === "itk_elastix" ? elastixRegistrationKwargs() : {},
         new_transform_key: namedTransform(
           "#registration-transform-name",
           "registered",
@@ -2840,6 +2890,14 @@ function wireUi() {
     "change",
     syncPairDeterminationControls,
   );
+  $("#registration-method").addEventListener("change", syncRegistrationMethod);
+  $("#registration-elastix-transform").addEventListener(
+    "change",
+    syncElastixTransform,
+  );
+  // A reload restores the selects but not what they imply, so the panel is
+  // brought in line with them once here.
+  syncRegistrationMethod();
   $("#registration-add-pair").addEventListener("click", () => {
     try {
       addRegistrationPair(

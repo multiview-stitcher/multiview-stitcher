@@ -347,6 +347,49 @@
             </div>
 
             <div id="registration-pairwise" class="subtab-panel" hidden>
+              <label for="registration-method">Method</label>
+              <select id="registration-method">
+                <option value="phase_correlation">Phase correlation</option>
+                <option value="itk_elastix">Elastix</option>
+              </select>
+              <p class="field-help">
+                Phase correlation finds a translation. Elastix, compiled to
+                WebAssembly, can also recover rotation, scale and shear; its
+                module is around 2.5&nbsp;MB and is downloaded the first time
+                a worker uses it.
+              </p>
+
+              <fieldset id="registration-elastix-options" hidden>
+                <legend>Elastix options</legend>
+                <label for="registration-elastix-transform">Transform type</label>
+                <select id="registration-elastix-transform">
+                  <option value="translation">Translation</option>
+                  <option value="rigid" selected>Rigid</option>
+                  <option value="similarity">Similarity</option>
+                  <option value="affine">Affine</option>
+                </select>
+                <p class="field-help">
+                  A translation stage runs first and hands its result to the
+                  chosen transform. Picking one here sets the groupwise
+                  transform type to match.
+                </p>
+
+                <label for="registration-elastix-resolutions">Resolution levels</label>
+                <input id="registration-elastix-resolutions" type="number" min="1" step="1" value="2" />
+                <p class="field-help">More levels start the optimizer at a coarser scale, which tolerates larger displacements.</p>
+
+                <label for="registration-elastix-iterations">Iterations per level</label>
+                <input id="registration-elastix-iterations" type="number" min="1" step="1" placeholder="default" />
+
+                <label for="registration-elastix-metric">Metric</label>
+                <select id="registration-elastix-metric">
+                  <option value="">Mattes mutual information (default)</option>
+                  <option value="AdvancedNormalizedCorrelation">Normalized correlation</option>
+                  <option value="AdvancedMeanSquares">Mean squares</option>
+                  <option value="NormalizedMutualInformation">Normalized mutual information</option>
+                </select>
+              </fieldset>
+
               <label for="registration-resolution-level">Registration resolution level</label>
               <input id="registration-resolution-level" type="number" min="0" step="1" placeholder="auto" />
               <p class="field-help">Leave blank to select a compatible level automatically.</p>

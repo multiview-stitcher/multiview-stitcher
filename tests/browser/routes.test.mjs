@@ -456,6 +456,15 @@ test("the Python runtime is fetched once, not once per worker", async () => {
   // Cross-origin runtime assets are intercepted; everything else is not.
   assert.match(sw, /RUNTIME_ASSET\.test\(url\.pathname\)/);
   assert.match(sw, /url\.origin !== self\.location\.origin/);
+
+  // itk-wasm ships its pipelines zstd-compressed, so elastix arrives as
+  // `elastix.wasm.zst` - a 2.4 MB file every registering worker asks for.
+  const pattern = new RegExp(
+    sw.match(/const RUNTIME_ASSET = (\/.*\/);/)[1].slice(1, -1),
+  );
+  assert.ok(pattern.test("/npm/@itk-wasm/elastix/dist/pipelines/elastix.wasm.zst"));
+  assert.ok(pattern.test("/pyodide/v314.0.4/full/numpy.whl"));
+  assert.ok(!pattern.test("/some/image.png"));
 });
 
 test("the shipped pyodide lockfile drops the dependency nothing imports", async () => {
@@ -600,6 +609,7 @@ test("the browser chrome exposes the complete responsive workflow", () => {
     "registration-advanced",
     "registration-graph",
     "registration-resolution-level",
+    "registration-method",
     "registration-pruning-method",
     "registration-max-angle",
     "registration-pair-first",
@@ -1151,6 +1161,54 @@ test("a mounted CZI is readable by every Python worker", async () => {
   // Workers started after the file was mounted have to be caught up, which is
   // what `state.fileMounts` is kept for.
   assert.match(app, /state\.fileMounts/);
+});
+
+test("elastix is offered as a registration method, with its options", async () => {
+  const { readFileSync } = await import("node:fs");
+  const dir = join(repoRoot, "docs", "browser");
+  const html = readFileSync(join(dir, "index.html"), "utf8");
+  const app = readFileSync(join(dir, "app.js"), "utf8");
+  const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+
+  // Three small pure-Python wheels; the WebAssembly pipeline behind them is
+  // fetched from a CDN the first time a worker registers with elastix, so
+  // naming it here costs a boot nothing but makes the method selectable.
+  assert.match(config.browser_dependencies.join(" "), /itkwasm-elastix/);
+
+  for (const id of [
+    "registration-method",
+    "registration-elastix-options",
+    "registration-elastix-transform",
+    "registration-elastix-resolutions",
+    "registration-elastix-iterations",
+    "registration-elastix-metric",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+
+  // The value has to be a key of specs.PAIRWISE_REGISTRATION_FUNCS: Python
+  // rejects anything else, and it is the only thing that names the function.
+  assert.match(html, /<option value="itk_elastix"/);
+
+  const register = app.slice(
+    app.indexOf("async function doRegister"),
+    app.indexOf("async function doFusePreview"),
+  );
+  assert.match(register, /pairwise_reg_func: method/);
+  assert.match(
+    register,
+    /method === "itk_elastix" \? elastixRegistrationKwargs\(\) : \{\}/,
+  );
+
+  // A translation stage runs before the chosen transform, and the groupwise
+  // resolution is kept at the same transform type - resolving rigid pairwise
+  // results into translations would throw the rotations away again.
+  assert.match(
+    app,
+    /transform === "translation" \? \[transform\] : \["translation", transform\]/,
+  );
+  assert.match(app, /function syncElastixTransform\(\)/);
+  assert.match(app, /\$\("#registration-groupwise-transform"\)\.value = \$\(/);
 });
 
 test("CZI reading is installable in Pyodide", async () => {

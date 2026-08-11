@@ -72,7 +72,9 @@ self.addEventListener("activate", (event) => {
  */
 const RUNTIME_CACHE = "mvs-python-runtime-v1";
 
-const RUNTIME_ASSET = /\.(whl|wasm|zip|data|js|mjs|json)$/;
+// `.zst` is how itk-wasm ships its pipelines: elastix arrives as a 2.4 MB
+// compressed WebAssembly module, once per worker that registers with it.
+const RUNTIME_ASSET = /\.(whl|wasm|wasm\.zst|zip|data|js|mjs|json)$/;
 
 /** Fetches in progress, so that N workers wanting one file make one request. */
 const inFlight = new Map();

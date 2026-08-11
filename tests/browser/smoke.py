@@ -75,7 +75,6 @@ def build_dataset(root="/data", n_timepoints=1, tile_size=256, prefix="tile"):
 def main():
     import zarr
     import zarr.abc.store
-
     from multiview_stitcher import ngff_utils
     from multiview_stitcher.browser import (
         FusionOptions,
@@ -824,6 +823,38 @@ def main():
         "czi_registered",
         np.all(np.isfinite(czi_shift)),
         czi_shift.round(2).tolist(),
+    )
+
+    # --- elastix, compiled to WebAssembly --------------------------------
+    # itk-wasm ships a different implementation per platform and picks one from
+    # `sys.platform`; in Pyodide only the asynchronous half exists, and
+    # `browser.elastix` bridges it. Getting the wrong half, or reaching for a
+    # module only the emscripten distribution has, are boundaries CPython
+    # cannot see - so both pieces that path uses are asserted here.
+    #
+    # Registering for real is not: itk-wasm loads its pipeline with a dynamic
+    # `import()` of an https URL, which browsers do and Node refuses.
+    from itkwasm import environment_dispatch
+    from itkwasm_elastix_emscripten.js_package import js_package
+    from multiview_stitcher.browser.specs import PAIRWISE_REGISTRATION_FUNCS
+
+    check(
+        "elastix_selectable",
+        "itk_elastix" in PAIRWISE_REGISTRATION_FUNCS,
+        sorted(PAIRWISE_REGISTRATION_FUNCS),
+    )
+    elastix_impl = environment_dispatch(
+        "itkwasm_elastix", "default_parameter_map_async"
+    )
+    check(
+        "elastix_emscripten_build",
+        elastix_impl.__module__.startswith("itkwasm_elastix_emscripten"),
+        elastix_impl.__module__,
+    )
+    check(
+        "elastix_js_module_available",
+        js_package.config.module_url.startswith("data:text/javascript"),
+        "browser.elastix calls this JavaScript module directly",
     )
 
     # --- the JSON worker API JavaScript actually calls -------------------

@@ -744,6 +744,193 @@ def test_session_spec_round_trip_reproduces_transforms(tiles_on_disk):
 
 
 # ---------------------------------------------------------------------------
+# Elastix through WebAssembly
+# ---------------------------------------------------------------------------
+
+
+def _elastix_pair(ndim, affine, spacing=None, origin=None):
+    """A blob phantom and the same phantom moved by ``affine`` (fixed to moving).
+
+    Blobs rather than a smooth gradient: elastix has to have something to lock
+    onto along every axis, and a phantom that is nearly invariant along one of
+    them registers well in the others while saying nothing about that one.
+    """
+    from scipy import ndimage
+    from skimage import data
+
+    dims = si_utils.SPATIAL_DIMS[-ndim:]
+    spacing = spacing or dict.fromkeys(dims, 1.0)
+    origin = origin or dict.fromkeys(dims, 0.0)
+    scale = np.array([spacing[dim] for dim in dims])
+    shift = np.array([origin[dim] for dim in dims])
+
+    fixed = ndimage.gaussian_filter(
+        data.binary_blobs(
+            length=64, n_dim=ndim, volume_fraction=0.3, rng=1
+        ).astype(np.float32),
+        1.5,
+    )
+
+    # In pixels: the affine acts on physical coordinates, while the phantom is
+    # resampled on its own grid.
+    matrix = np.diag(1 / scale) @ affine[:ndim, :ndim] @ np.diag(scale)
+    offset = (
+        affine[:ndim, :ndim] @ shift + affine[:ndim, ndim] - shift
+    ) / scale
+    pixel_affine = np.eye(ndim + 1)
+    pixel_affine[:ndim, :ndim] = matrix
+    pixel_affine[:ndim, ndim] = offset
+
+    inverse = np.linalg.inv(pixel_affine)
+    moving = ndimage.affine_transform(
+        fixed, inverse[:ndim, :ndim], offset=inverse[:ndim, ndim], order=1
+    )
+
+    return (
+        xr.DataArray(fixed, dims=dims),
+        xr.DataArray(moving, dims=dims),
+        spacing,
+        origin,
+    )
+
+
+@pytest.mark.parametrize(
+    "ndim, transform_types, degrees",
+    [
+        (2, ["translation"], 0.0),
+        (2, ["translation", "rigid"], 4.0),
+        (2, ["translation", "similarity"], 4.0),
+        (3, ["translation", "rigid"], 4.0),
+        (3, ["translation", "affine"], 4.0),
+    ],
+)
+def test_elastix_recovers_a_known_transform(ndim, transform_types, degrees):
+    pytest.importorskip("itkwasm_elastix")
+    from multiview_stitcher.browser.elastix import registration_elastix
+
+    # Anisotropic spacing and a shifted origin, as views out of a microscope
+    # have: what elastix is asked for, and reports, is in physical units.
+    dims = si_utils.SPATIAL_DIMS[-ndim:]
+    spacing = dict(zip(dims, [2.0, 0.5, 0.5][-ndim:]))
+    origin = dict(zip(dims, [7.0, -3.0, 11.0][-ndim:]))
+
+    angle = np.deg2rad(degrees)
+    affine = np.eye(ndim + 1)
+    # A rotation in the yx plane, i.e. the last two spatial axes.
+    affine[ndim - 2 : ndim, ndim - 2 : ndim] = [
+        [np.cos(angle), -np.sin(angle)],
+        [np.sin(angle), np.cos(angle)],
+    ]
+    # Stated in pixels and converted, so that every case displaces the phantom
+    # by the same few pixels whatever its spacing - the question here is which
+    # convention the result is in, not how far elastix can reach.
+    affine[:ndim, ndim] = np.linspace(3.0, -2.0, ndim) * [
+        spacing[dim] for dim in dims
+    ]
+
+    fixed, moving, spacing, origin = _elastix_pair(
+        ndim, affine, spacing=spacing, origin=origin
+    )
+
+    result = registration_elastix(
+        fixed,
+        moving,
+        fixed_origin=origin,
+        moving_origin=origin,
+        fixed_spacing=spacing,
+        moving_spacing=spacing,
+        initial_affine=np.eye(ndim + 1),
+        transform_types=transform_types,
+        number_of_resolutions=3,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(result["affine_matrix"]), affine, atol=0.25
+    )
+    assert result["quality"] > 0.5
+
+
+def test_elastix_starts_from_the_initial_affine():
+    """The transform is absolute, so a head start must not move the answer."""
+    pytest.importorskip("itkwasm_elastix")
+    from multiview_stitcher.browser.elastix import registration_elastix
+
+    ndim = 2
+    affine = np.eye(3)
+    affine[:2, 2] = [4.0, -3.0]
+    fixed, moving, spacing, origin = _elastix_pair(ndim, affine)
+
+    initial = np.eye(3)
+    initial[:2, 2] = [3.0, -2.0]
+
+    results = [
+        registration_elastix(
+            fixed,
+            moving,
+            fixed_origin=origin,
+            moving_origin=origin,
+            fixed_spacing=spacing,
+            moving_spacing=spacing,
+            initial_affine=start,
+            transform_types=["translation"],
+            number_of_resolutions=3,
+        )["affine_matrix"]
+        for start in (np.eye(3), initial)
+    ]
+
+    for recovered in results:
+        np.testing.assert_allclose(np.asarray(recovered), affine, atol=0.25)
+
+
+def test_a_session_registers_with_elastix(tiles_on_disk):
+    """The method is reachable by name, i.e. from the browser UI."""
+    pytest.importorskip("itkwasm_elastix")
+
+    session = Session()
+    session.load(tiles_on_disk)
+
+    result = session.register(
+        RegistrationOptions(
+            new_transform_key="elastix",
+            pairwise_reg_func="itk_elastix",
+            pairwise_reg_func_kwargs={
+                "transform_types": ["translation"],
+                "number_of_resolutions": 3,
+            },
+        )
+    )
+
+    assert "elastix" in session.transform_keys()
+    assert len(result["params"]) == 2
+
+
+def test_the_browser_pins_the_webassembly_backend():
+    """Which elastix the browser runs cannot depend on what else is installed.
+
+    `itk-elastix` is importable in a development environment and never in
+    Pyodide, so an automatically chosen backend would leave the browser's path
+    untested exactly where it is testable.
+    """
+    from dask.utils import has_keyword
+
+    from multiview_stitcher.browser.elastix import (
+        ITKWasmElastixBackend,
+        registration_elastix,
+    )
+
+    assert registration_elastix.func is registration.registration_ITKElastix
+    assert registration_elastix.keywords == {"backend": "itkwasm"}
+    assert isinstance(
+        registration._get_elastix_backend("itkwasm"), ITKWasmElastixBackend
+    )
+
+    # `register` decides what to hand a pairwise registration function from
+    # its signature, so pinning the backend must not hide one.
+    for keyword in ("fixed_data", "moving_data", "initial_affine"):
+        assert has_keyword(registration_elastix, keyword), keyword
+
+
+# ---------------------------------------------------------------------------
 # Distributed registration
 # ---------------------------------------------------------------------------
 

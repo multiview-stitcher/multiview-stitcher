@@ -97,7 +97,12 @@ Different tabs for different types of operations:
       - register all layers or only the selected layers; unselected layers inherit the current transform under the new key
     - Advanced options:
       - Graph: automatic pruning (including axis-aligned maximum angle) or manually added pairs
-      - Pairwise registration: resolution level and registration binning
+      - Pairwise registration: method, resolution level and registration binning
+        - method is phase correlation (translation only) or elastix, which is
+          compiled to WebAssembly and can also recover rotation, scale and
+          shear. Its options - transform type, resolution levels, iterations
+          per level, metric - appear only when it is selected, and choosing a
+          transform type sets the groupwise one to match
       - Groupwise resolution: transform type and reference view
   - "Register" button to run registration
 

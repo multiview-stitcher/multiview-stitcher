@@ -11,7 +11,7 @@ Below is a list of features which are either already implemented or are on the r
 ### Pairwise registration methods
 - [x] Phase correlation
 - [x] ANTsPy
-- [x] ITKElastix (`itk-elastix`)
+- [x] ITKElastix (`itk-elastix`, or `itkwasm-elastix` in the browser)
 - [ ] Bead alignment
 - [ ] Phase correlation for rotation + translation
 

@@ -12,7 +12,9 @@ OME-Zarr handling all run through the ordinary
 * keeps the stateful dataset in one persistent Pyodide worker
   (:mod:`.session`),
 * spreads registration and fusion over a pool of workers
-  (:mod:`.bridge`, :mod:`.executors`, :mod:`.fusion`), and
+  (:mod:`.bridge`, :mod:`.executors`, :mod:`.fusion`),
+* supplies the one backend the browser cannot borrow as it is - elastix, as
+  WebAssembly rather than as a native extension (:mod:`.elastix`) - and
 * exposes a single command/task entry point for JavaScript
   (:mod:`.worker`).
 

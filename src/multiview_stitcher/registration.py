@@ -21,7 +21,7 @@ from skimage.exposure import rescale_intensity
 from skimage.metrics import structural_similarity
 
 from multiview_stitcher.param_resolution import groupwise_resolution
-from multiview_stitcher.transforms import AffineTransform, TranslationTransform
+from multiview_stitcher.transforms import AffineTransform
 
 try:
     import ants
@@ -82,6 +82,9 @@ def _format_point_bounds_for_log(points):
 
 
 def _get_callable_name(func):
+    # `func` unwraps a functools.partial, e.g. a backend pinned to a
+    # registration function, which carries no name of its own.
+    func = getattr(func, "func", func)
     return getattr(func, "__name__", func.__class__.__name__)
 
 
@@ -250,7 +253,7 @@ def _get_overlap_bboxes(
                         ),
                     )
             for sim in [sim1, sim2]]
-        
+
         corners_target_space = corners_intrinsic
 
         # Transform the halfspace from world space (input_transform_key) into
@@ -1646,20 +1649,20 @@ def register_pair_of_msims(
                 f"Resolution level {reg_res_level} (scale{reg_res_level}) "
                 f"does not exist in the multiscale image"
             )
-        
+
         # Get sims at the specified resolution level
         sim1 = msi_utils.get_sim_from_msim(msim1, scale=scale_key)
         sim2 = msi_utils.get_sim_from_msim(msim2, scale=scale_key)
-        
+
         # Check if binning is compatible with this resolution level
         sim0_1 = msi_utils.get_sim_from_msim(msim1, scale="scale0")
         shape0 = {dim: len(sim0_1.coords[dim]) for dim in spatial_dims}
         shape_level = {dim: len(sim1.coords[dim]) for dim in spatial_dims}
-        
+
         actual_factors = {
             dim: shape0[dim] / shape_level[dim] for dim in spatial_dims
         }
-        
+
         for dim in spatial_dims:
             if dim in registration_binning:
                 actual_factor = int(round(actual_factors[dim]))
@@ -1670,15 +1673,15 @@ def register_pair_of_msims(
                         f"not a divisor of registration_binning[{dim}]="
                         f"{registration_binning[dim]}"
                     )
-                
+
         # calculate remaining binning to be applied after selecting the resolution level
         registration_binning = {
             dim: registration_binning[dim] // int(round(actual_factors[dim]))
             for dim in spatial_dims
         }
-        
+
         # registration_binning will be applied below
-        
+
     elif reg_res_level is not None:
         # Only reg_res_level specified: use that level directly
         scale_key = f"scale{reg_res_level}"
@@ -2285,11 +2288,11 @@ def register(
         coordinate system in the input views (with the given name), by default None
     registration_binning : dict, optional
         Binning applied to each dimension during registration, by default None.
-        If reg_res_level is also provided, the binning factors must be compatible 
+        If reg_res_level is also provided, the binning factors must be compatible
         with the resolution level.
     reg_res_level : int, optional
         Resolution level to use for registration (e.g., 0 for scale0, 1 for scale1).
-        If None and registration_binning is provided, the optimal resolution level 
+        If None and registration_binning is provided, the optimal resolution level
         is automatically determined. By default None.
     overlap_tolerance : float or dict, optional
         Extend overlap regions considered for pairwise registration.
@@ -2456,12 +2459,12 @@ def register(
         ]
 
         # dimension specific parameters must not refer to the reduced dimension
-        registration_binning, overlap_tolerance = [
+        registration_binning, overlap_tolerance = (
             {dim: val for dim, val in param.items() if dim != reduced_dim}
             if isinstance(param, dict)
             else param
             for param in [registration_binning, overlap_tolerance]
-        ]
+        )
 
     # determine registration pairs from input images
     g = mv_graph.build_view_adjacency_graph_from_msims(
@@ -2922,54 +2925,144 @@ E.g. using pip:
     return reg_result
 
 
-def _get_elastix_probe_points(ndim, samples_per_axis=5, cube_extent=10.0):
-    axes = [np.linspace(0.0, cube_extent, samples_per_axis) for _ in range(ndim)]
-    grid = np.meshgrid(*axes, indexing="ij")
-    return np.stack(grid, axis=-1).reshape(-1, ndim)
+#: Transform stages `registration_ITKElastix` can run, as
+#: ``{name: (elastix default parameter map, elastix transform)}``. The default
+#: map only supplies defaults - metric, optimizer, pyramid - so a similarity
+#: transform can borrow the rigid one and swap the transform itself.
+ELASTIX_TRANSFORM_TYPES = {
+    "translation": ("translation", "TranslationTransform"),
+    "rigid": ("rigid", "EulerTransform"),
+    "similarity": ("rigid", "SimilarityTransform"),
+    "affine": ("affine", "AffineTransform"),
+}
+
+#: Stages run when none are given: a translation to get close, then a rigid
+#: refinement.
+DEFAULT_ELASTIX_TRANSFORM_TYPES = ("translation", "rigid")
 
 
-def _to_itk_spatial_order(values):
-    return tuple(float(value) for value in values[::-1])
+class _ITKElastixBackend:
+    """elastix through `itk-elastix`, a native extension.
 
+    One of the two backends `registration_ITKElastix` can run on. A backend is
+    only asked for the three things that are not the same in both: how to make
+    an image, where the defaults for a transform come from, and how to run one
+    stage. Everything else - the stages, the parameter maps, the initial
+    transform, reading the result back - is shared, so a change to how this
+    package registers with elastix takes effect in every runtime at once.
+    """
 
-def _points_to_itk_spatial_order(points):
-    return np.asarray(points, dtype=float)[:, ::-1]
+    name = "itk"
 
+    install_hint = (
+        "Please install the itk-elastix package to use ITKElastix for "
+        "registration.\n"
+        "E.g. using pip:\n"
+        "- `pip install multiview-stitcher[itk-elastix]` or\n"
+        "- `pip install itk-elastix`"
+    )
 
-def _points_from_itk_spatial_order(points):
-    return np.asarray(points, dtype=float)[:, ::-1]
+    @staticmethod
+    def load():
+        try:
+            # Bound to the module global as well, so that `registration.itk`
+            # keeps meaning what it did before this was imported lazily.
+            global itk
+            import itk
+        except ImportError:
+            raise ImportError(_ITKElastixBackend.install_hint) from None
 
+        return itk
 
-def _write_elastix_point_set_file(path, points):
-    with open(path, "w", encoding="ascii") as point_file:
-        point_file.write("point\n")
-        point_file.write(f"{len(points)}\n")
-        for point in points:
-            point_file.write(
-                " ".join(str(float(value)) for value in point) + "\n"
+    def image(self, data, origin, spacing, dims):
+        itk = self.load()
+        image = itk.image_view_from_array(np.asarray(data, dtype=np.float32))
+        # ITK counts its axes the other way round from ours.
+        image.SetOrigin(tuple(float(origin[dim]) for dim in dims)[::-1])
+        image.SetSpacing(tuple(float(spacing[dim]) for dim in dims)[::-1])
+        return image
+
+    def default_parameter_map(self, name, number_of_resolutions):
+        itk = self.load()
+        return dict(
+            itk.ParameterObject.GetDefaultParameterMap(
+                name, number_of_resolutions
             )
+        )
+
+    def run(
+        self,
+        parameter_maps,
+        fixed,
+        moving,
+        initial_parameter_object,
+        **kwargs,
+    ):
+        itk = self.load()
+
+        initial = itk.ParameterObject.New()
+        for parameter_map in initial_parameter_object:
+            initial.AddParameterMap(parameter_map)
+
+        result, parameters = itk.elastix_registration_method(
+            fixed_image=fixed,
+            moving_image=moving,
+            parameter_object=parameter_maps,
+            initial_transform_parameter_object=initial,
+            **{"log_to_console": False, **kwargs},
+        )
+
+        return itk.array_view_from_image(result), [
+            dict(parameters.GetParameterMap(index))
+            for index in range(parameters.GetNumberOfParameterMaps())
+        ]
 
 
-def _parse_elastix_output_points(path):
-    transformed_points = []
-    with open(path, encoding="ascii") as output_file:
-        for line in output_file:
-            if "OutputPoint = [" not in line:
-                continue
-            point_str = line.split("OutputPoint = [", 1)[1].split("]", 1)[0]
-            transformed_points.append([float(value) for value in point_str.split()])
+def _get_elastix_backend(name=None):
+    """The elastix backend to register with.
 
-    return _points_from_itk_spatial_order(transformed_points)
+    Without a name, `itk-elastix` is used where it can be - it is what the
+    desktop package installs - and the WebAssembly build otherwise, which is
+    the only one that exists in the browser.
+    """
+    if name == "itk":
+        return _ITKElastixBackend()
+    if name == "itkwasm":
+        # Imported here rather than at the top of the module: it is the
+        # backend that is optional, not the browser, and this keeps a desktop
+        # registration from pulling the browser runtime in behind it.
+        from multiview_stitcher.browser.elastix import ITKWasmElastixBackend
 
+        return ITKWasmElastixBackend()
+    if name is not None:
+        raise ValueError(
+            f"Unknown elastix backend '{name}'. Available: 'itk', 'itkwasm'."
+        )
 
-def _get_itk_image_from_data(data, *, origin, spacing):
-    image = itk.image_view_from_array(np.asarray(data, dtype=np.float32))
-    image.SetOrigin(_to_itk_spatial_order(origin))
-    image.SetSpacing(_to_itk_spatial_order(spacing))
-    return image
+    try:
+        _ITKElastixBackend.load()
+    except ImportError as itk_missing:
+        backend = _get_elastix_backend("itkwasm")
+        try:
+            backend.load()
+        except ImportError:
+            # Neither is installed, so say so about both rather than about
+            # whichever happened to be tried last.
+            raise ImportError(
+                f"{itk_missing}\n\n{backend.install_hint}"
+            ) from None
+        return backend
+
+    return _ITKElastixBackend()
 
 
 def _get_elastix_affine_parameter_map(initial_affine, ndim):
+    """An affine in our axis order as the elastix transform to start from.
+
+    A parameter map rather than a transform file or an in-memory ITK
+    transform: it is the one description of a transform both backends read,
+    and it comes back unchanged at the head of the chain elastix returns.
+    """
     affine = np.asarray(initial_affine, dtype=float)
     itk_matrix = affine[:ndim, :ndim][::-1, ::-1]
     center_of_rotation = np.zeros(ndim, dtype=float)
@@ -3012,34 +3105,25 @@ def _get_elastix_affine_parameter_map(initial_affine, ndim):
 
 
 def _get_elastix_parameter_map(
+    backend,
     transform_type,
     number_of_resolutions=2,
     number_of_iterations=None,
     metric=None,
     write_result_image=False,
 ):
-    transform_type_map = {
-        "translation": ("translation", "TranslationTransform"),
-        "rigid": ("rigid", "EulerTransform"),
-        "similarity": ("rigid", "SimilarityTransform"),
-        "affine": ("affine", "AffineTransform"),
-    }
-
-    normalized_transform_type = transform_type.lower()
-    if normalized_transform_type not in transform_type_map:
-        raise ValueError(
-            f"Unsupported elastix transform type: {transform_type}"
-        )
-
-    default_map_name, elastix_transform_name = transform_type_map[
-        normalized_transform_type
-    ]
-    parameter_map = itk.ParameterObject.GetDefaultParameterMap(
-        default_map_name, number_of_resolutions
+    """The elastix parameter map for one stage."""
+    default_map, elastix_transform = ELASTIX_TRANSFORM_TYPES[transform_type]
+    parameter_map = backend.default_parameter_map(
+        default_map, number_of_resolutions
     )
-    parameter_map["Transform"] = [elastix_transform_name]
+
+    parameter_map["Transform"] = [elastix_transform]
+    # The images arrive already placed by the initial transform; letting
+    # elastix guess an initialisation of its own would discard that.
     parameter_map["AutomaticTransformInitialization"] = ["false"]
-    parameter_map["WriteResultImage"] = [str(write_result_image).lower()]
+    # Only the last stage's resampled image is used, for the link quality.
+    parameter_map["WriteResultImage"] = [str(bool(write_result_image)).lower()]
 
     if number_of_iterations is not None:
         parameter_map["MaximumNumberOfIterations"] = [
@@ -3052,53 +3136,120 @@ def _get_elastix_parameter_map(
     return parameter_map
 
 
-def _write_initial_elastix_transform(
-    path,
-    *,
-    initial_affine,
-    ndim,
-):
-    parameter_object = itk.ParameterObject.New()
-    parameter_object.AddParameterMap(
-        _get_elastix_affine_parameter_map(initial_affine, ndim)
+def _elastix_axis_flip(ndim):
+    """Change of basis between ITK's (x, y, z) and our (z, y, x) axis order."""
+    flip = np.eye(ndim + 1)
+    flip[:ndim, :ndim] = np.eye(ndim)[::-1]
+    return flip
+
+
+def _elastix_rotation_2d(angle):
+    cos, sin = np.cos(angle), np.sin(angle)
+    return np.array([[cos, -sin], [sin, cos]])
+
+
+def _elastix_rotation_3d(angle_x, angle_y, angle_z, compute_zyx=False):
+    def rotation(axis, angle):
+        cos, sin = np.cos(angle), np.sin(angle)
+        first, second = [(1, 2), (2, 0), (0, 1)][axis]
+        matrix = np.eye(3)
+        matrix[first, first] = matrix[second, second] = cos
+        matrix[first, second], matrix[second, first] = -sin, sin
+        return matrix
+
+    rotations = [
+        rotation(axis, angle)
+        for axis, angle in enumerate((angle_x, angle_y, angle_z))
+    ]
+    if compute_zyx:
+        return rotations[0] @ rotations[1] @ rotations[2]
+    return rotations[2] @ rotations[1] @ rotations[0]
+
+
+def _elastix_versor_rotation(versor):
+    """The rotation of an ITK versor, i.e. a unit quaternion's vector part."""
+    x, y, z = versor
+    w = np.sqrt(max(0.0, 1.0 - (x * x + y * y + z * z)))
+    return np.array(
+        [
+            [
+                1 - 2 * (y * y + z * z),
+                2 * (x * y - w * z),
+                2 * (x * z + w * y),
+            ],
+            [
+                2 * (x * y + w * z),
+                1 - 2 * (x * x + z * z),
+                2 * (y * z - w * x),
+            ],
+            [
+                2 * (x * z - w * y),
+                2 * (y * z + w * x),
+                1 - 2 * (x * x + y * y),
+            ],
+        ]
     )
-    parameter_object.WriteParameterFile(path)
 
 
-def _get_affine_from_elastix_transform_parameter_object(
-    transform_parameter_object,
-    *,
-    moving_image,
-    ndim,
-):
-    fixed_points = _get_elastix_probe_points(ndim)
+def _affine_from_elastix_parameter_map(parameter_map, ndim):
+    """One elastix transform as a homogeneous matrix, in ITK axis order.
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        input_points_path = os.path.join(tmpdir, "input_points.txt")
-        output_dir = os.path.join(tmpdir, "transformix_output")
-        os.makedirs(output_dir)
+    Every transform packs its parameters differently and all of them turn
+    about a centre of rotation: ``y = M (x - c) + c + t``.
+    """
+    name = parameter_map["Transform"][0]
+    parameters = np.array(parameter_map["TransformParameters"], dtype=float)
+    center = np.array(
+        parameter_map.get("CenterOfRotationPoint", ["0"] * ndim), dtype=float
+    )
 
-        _write_elastix_point_set_file(
-            input_points_path,
-            _points_to_itk_spatial_order(fixed_points),
+    if name == "TranslationTransform":
+        matrix, offset = np.eye(ndim), parameters[:ndim]
+    elif name == "EulerTransform" and ndim == 2:
+        matrix, offset = _elastix_rotation_2d(parameters[0]), parameters[1:3]
+    elif name == "EulerTransform":
+        matrix = _elastix_rotation_3d(
+            *parameters[:3],
+            compute_zyx=parameter_map.get("ComputeZYX", ["false"])[0]
+            == "true",
+        )
+        offset = parameters[3:6]
+    elif name == "SimilarityTransform" and ndim == 2:
+        matrix = parameters[0] * _elastix_rotation_2d(parameters[1])
+        offset = parameters[2:4]
+    elif name == "SimilarityTransform":
+        matrix = parameters[6] * _elastix_versor_rotation(parameters[:3])
+        offset = parameters[3:6]
+    elif name == "AffineTransform":
+        matrix = parameters[: ndim**2].reshape(ndim, ndim)
+        offset = parameters[ndim**2 : ndim**2 + ndim]
+    else:
+        raise ValueError(
+            f"Cannot convert an elastix '{name}' transform to an affine "
+            "matrix."
         )
 
-        itk.transformix_filter(
-            moving_image=moving_image,
-            transform_parameter_object=transform_parameter_object,
-            output_directory=output_dir,
-            fixed_point_set_file_name=input_points_path,
-            log_to_console=False,
+    homogeneous = np.eye(ndim + 1)
+    homogeneous[:ndim, :ndim] = matrix
+    homogeneous[:ndim, ndim] = offset + center - matrix @ center
+    return homogeneous
+
+
+def affine_from_elastix_parameter_object(parameter_object, ndim):
+    """The affine an elastix parameter object amounts to, in our axis order.
+
+    The object is the chain of transforms elastix has accumulated, oldest
+    first: the initial transform, then one map per stage that ran. Composing
+    means applying them in that order, so the product runs the other way.
+    """
+    composed = np.eye(ndim + 1)
+    for parameter_map in parameter_object:
+        composed = (
+            _affine_from_elastix_parameter_map(parameter_map, ndim) @ composed
         )
 
-        moving_points = _parse_elastix_output_points(
-            os.path.join(output_dir, "outputpoints.txt")
-        )
-
-    fixed_to_moving = AffineTransform()
-    fixed_to_moving.estimate(fixed_points, moving_points)
-
-    return param_utils.affine_to_xaffine(fixed_to_moving.params)
+    flip = _elastix_axis_flip(ndim)
+    return flip @ composed @ flip
 
 
 def registration_ITKElastix(
@@ -3111,6 +3262,7 @@ def registration_ITKElastix(
     moving_spacing,
     initial_affine,
     transform_types=None,
+    backend=None,
     **elastix_registration_kwargs,
 ):
     """
@@ -3121,7 +3273,12 @@ def registration_ITKElastix(
     transform_types : list of str, optional
         Sequence of transform types to apply in successive stages.
         Supported values: 'Translation', 'Rigid', 'Similarity', 'Affine'.
-        By default ['Translation', 'Rigid', 'Similarity'].
+        By default ['Translation', 'Rigid'].
+    backend : str, optional
+        Which elastix to run: 'itk' for the `itk-elastix` package, 'itkwasm'
+        for the WebAssembly build (`itkwasm-elastix`), which is what the
+        browser runtime has. By default whichever is available, preferring
+        `itk-elastix`.
     **elastix_registration_kwargs
         Additional keyword arguments. The following are handled explicitly
         and applied to the elastix parameter map for each stage:
@@ -3141,38 +3298,35 @@ def registration_ITKElastix(
             - 'AdvancedNormalizedCorrelation'
             - 'NormalizedMutualInformation'
 
-        Remaining kwargs are forwarded to ``itk.elastix_registration_method``
-        (e.g. ``log_to_console=True``).
+        Remaining kwargs are forwarded to the backend's registration call
+        (e.g. ``log_to_console=True``, which only the 'itk' backend takes).
     """
+    # Checked before a backend is loaded: a mistyped stage should not be
+    # reported only after an import or a download.
+    transform_types = [
+        name.lower()
+        for name in (transform_types or DEFAULT_ELASTIX_TRANSFORM_TYPES)
+    ]
+    unsupported = [
+        name for name in transform_types if name not in ELASTIX_TRANSFORM_TYPES
+    ]
+    if not transform_types or unsupported:
+        raise ValueError(
+            "elastix needs at least one transform type"
+            + (f", and cannot run {unsupported}" if unsupported else "")
+            + f". Available: {sorted(ELASTIX_TRANSFORM_TYPES)}."
+        )
 
-    try:
-        global itk
-        import itk
-    except ImportError:
-        raise ImportError(
-            "Please install the itk-elastix package to use ITKElastix for registration.\n"
-            "E.g. using pip:\n"
-            "- `pip install multiview-stitcher[itk-elastix]` or\n"
-            "- `pip install itk-elastix`"
-        ) from None
-
-    if transform_types is None:
-        transform_types = ["Translation", "Rigid"]
-
-    transform_types = [t.title() for t in transform_types]
+    backend = _get_elastix_backend(backend)
 
     spatial_dims = fixed_data.dims
     ndim = len(spatial_dims)
 
-    fixed_image = _get_itk_image_from_data(
-        fixed_data.data,
-        origin=[fixed_origin[dim] for dim in spatial_dims],
-        spacing=[fixed_spacing[dim] for dim in spatial_dims],
+    fixed_image = backend.image(
+        fixed_data.data, fixed_origin, fixed_spacing, spatial_dims
     )
-    moving_image = _get_itk_image_from_data(
-        moving_data.data,
-        origin=[moving_origin[dim] for dim in spatial_dims],
-        spacing=[moving_spacing[dim] for dim in spatial_dims],
+    moving_image = backend.image(
+        moving_data.data, moving_origin, moving_spacing, spatial_dims
     )
 
     number_of_iterations = elastix_registration_kwargs.pop(
@@ -3183,74 +3337,44 @@ def registration_ITKElastix(
     )
     metric = elastix_registration_kwargs.pop("metric", None)
 
-    default_elastix_registration_kwargs = {
-        "log_to_console": False,
-    }
-    elastix_registration_kwargs = {
-        **default_elastix_registration_kwargs,
-        **elastix_registration_kwargs,
-    }
+    # One elastix call per transform type. Each stage is handed the whole
+    # chain accumulated so far as the transform to start from - the initial
+    # affine, then whatever the stages before it found - and hands back that
+    # same chain with its own result appended. This is what elastix does
+    # internally for a multi-stage parameter object, done a stage at a time so
+    # that the chain is a value we hold rather than a file it writes.
+    parameter_object = [
+        _get_elastix_affine_parameter_map(initial_affine, ndim)
+    ]
+    result_image = None
 
-    # Run one elastix call per transform type, threading the composed affine
-    # forward as the initial transform for each successive stage.  This avoids
-    # elastix's multi-stage chaining, which breaks when output_directory is not
-    # set (IntialTransformParameterFileName becomes '' for stages beyond the
-    # first) and can also partially undo the initial transform when chaining.
-    with tempfile.TemporaryDirectory() as tmpdir:
-        current_affine = initial_affine
-        result_image = None
-
-        for i_stage, transform_type in enumerate(transform_types):
-            is_last = i_stage == len(transform_types) - 1
-            stage_dir = os.path.join(tmpdir, f"stage_{i_stage}")
-            os.makedirs(stage_dir)
-
-            initial_transform_path = os.path.join(
-                stage_dir, "initial_transform.txt"
-            )
-            _write_initial_elastix_transform(
-                initial_transform_path,
-                initial_affine=current_affine,
-                ndim=ndim,
-            )
-
-            single_stage_po = itk.ParameterObject.New()
-            single_stage_po.AddParameterMap(
+    for index, transform_type in enumerate(transform_types):
+        result_image, parameter_object = backend.run(
+            [
                 _get_elastix_parameter_map(
+                    backend,
                     transform_type,
                     number_of_resolutions=number_of_resolutions,
                     number_of_iterations=number_of_iterations,
                     metric=metric,
-                    write_result_image=is_last,
+                    write_result_image=index == len(transform_types) - 1,
                 )
-            )
-
-            result_image, result_parameter_object = itk.elastix_registration_method(
-                fixed_image=fixed_image,
-                moving_image=moving_image,
-                parameter_object=single_stage_po,
-                initial_transform_parameter_file_name=initial_transform_path,
-                output_directory=stage_dir,
-                **elastix_registration_kwargs,
-            )
-
-            current_affine = _get_affine_from_elastix_transform_parameter_object(
-                result_parameter_object,
-                moving_image=moving_image,
-                ndim=ndim,
-            )
-
-        affine_matrix = current_affine
-
-    quality = link_quality_metric_func(
-        np.asarray(fixed_data.data),
-        itk.array_view_from_image(result_image),
-    )
+            ],
+            fixed_image,
+            moving_image,
+            parameter_object,
+            **elastix_registration_kwargs,
+        )
 
     return {
-        "affine_matrix": affine_matrix,
-        "quality": quality,
+        "affine_matrix": param_utils.affine_to_xaffine(
+            affine_from_elastix_parameter_object(parameter_object, ndim)
+        ),
+        "quality": link_quality_metric_func(
+            np.asarray(fixed_data.data), np.asarray(result_image)
+        ),
     }
+
 
 
 def get_pairs_from_sample_masks(
