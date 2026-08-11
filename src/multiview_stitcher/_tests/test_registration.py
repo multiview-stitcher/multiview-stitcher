@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 import os
 import tempfile
@@ -13,6 +14,7 @@ from scipy import ndimage
 from skimage.exposure import rescale_intensity
 
 from multiview_stitcher import (
+    elastix,
     io,
     msi_utils,
     param_utils,
@@ -25,7 +27,10 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 ITK_ELASTIX_MARK = pytest.mark.skipif(
-    registration.itk is None,
+    # By availability rather than by importing itk here: the elastix backend
+    # imports it only when a registration runs, and a mark that read such a
+    # lazily bound attribute skipped every one of these tests, installed or not.
+    importlib.util.find_spec("itk") is None,
     reason="itk-elastix is not installed",
 )
 
@@ -1736,60 +1741,68 @@ def test_registration_non_identity_initial_transform_recovery(
     )
 
 
-@ITK_ELASTIX_MARK
-def test_itk_elastix_initial_transform_handles_large_translation():
-    initial_affine = np.array(
-        [
-            [np.sqrt(0.5), np.sqrt(0.5), 0.0, -242.19528185],
-            [-np.sqrt(0.5), np.sqrt(0.5), 0.0, 174.87901171],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
+@pytest.mark.parametrize(
+    "initial_affine",
+    [
+        # A rotation with a large translation, which an earlier
+        # representation of the initial transform lost.
+        np.array(
+            [
+                [np.sqrt(0.5), np.sqrt(0.5), 0.0, -242.19528185],
+                [-np.sqrt(0.5), np.sqrt(0.5), 0.0, 174.87901171],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        np.array(
+            [
+                [1.02, 0.03, -3.5],
+                [-0.02, 0.99, 812.25],
+                [0.0, 0.0, 1.0],
+            ]
+        ),
+    ],
+)
+def test_the_elastix_initial_transform_survives_its_parameter_map(
+    initial_affine,
+):
+    """What elastix is started from is what it can be read back as.
+
+    Both backends are handed the initial transform as this parameter map and
+    return it at the head of the chain they report, so the affine that comes
+    out of a registration is only as faithful as this round trip is. It needs
+    no elastix of either kind: the map and the reader are ours.
+    """
+    ndim = initial_affine.shape[-1] - 1
+    parameter_object = [
+        elastix.initial_transform_parameter_map(initial_affine, ndim)
+    ]
+    recovered = elastix.affine_from_parameter_object(parameter_object, ndim)
+
+    np.testing.assert_allclose(recovered, initial_affine, atol=1e-9)
+
+    # And a point transformed by what was read back lands where the original
+    # affine sends it - the property the transform is used for.
+    points = np.random.default_rng(0).random((8, ndim)) * 100
+    np.testing.assert_allclose(
+        transformation.transform_pts(points, initial_affine),
+        transformation.transform_pts(points, recovered),
+        atol=1e-6,
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_path = os.path.join(tmpdir, "initial_transform.txt")
-        registration._write_initial_elastix_transform(
-            output_path,
-            initial_affine=initial_affine,
-            ndim=3,
+
+def test_an_unsupported_elastix_transform_type_is_named():
+    """And is reported before any elastix is loaded or downloaded."""
+    fixed = xr.DataArray(np.zeros((4, 4)), dims=["y", "x"])
+
+    with pytest.raises(ValueError, match="bspline"):
+        registration.registration_ITKElastix(
+            fixed,
+            fixed,
+            fixed_origin={"y": 0.0, "x": 0.0},
+            moving_origin={"y": 0.0, "x": 0.0},
+            fixed_spacing={"y": 1.0, "x": 1.0},
+            moving_spacing={"y": 1.0, "x": 1.0},
+            initial_affine=np.eye(3),
+            transform_types=["bspline"],
         )
-
-        assert os.path.exists(output_path)
-        assert os.path.getsize(output_path) > 0
-
-        input_points = registration._get_elastix_probe_points(3)
-        expected_points = transformation.transform_pts(
-            input_points, initial_affine
-        )
-
-        input_points_path = os.path.join(tmpdir, "input_points.txt")
-        output_dir = os.path.join(tmpdir, "transformix_output")
-        os.mkdir(output_dir)
-
-        registration._write_elastix_point_set_file(
-            input_points_path,
-            registration._points_to_itk_spatial_order(input_points),
-        )
-
-        parameter_object = registration.itk.ParameterObject.New()
-        parameter_object.ReadParameterFile(output_path)
-
-        dummy_image = registration._get_itk_image_from_data(
-            np.zeros((1, 1, 1), dtype=np.float32),
-            origin=[0.0, 0.0, 0.0],
-            spacing=[1.0, 1.0, 1.0],
-        )
-
-        registration.itk.transformix_filter(
-            moving_image=dummy_image,
-            transform_parameter_object=parameter_object,
-            output_directory=output_dir,
-            fixed_point_set_file_name=input_points_path,
-            log_to_console=False,
-        )
-
-        transformed_points = registration._parse_elastix_output_points(
-            os.path.join(output_dir, "outputpoints.txt")
-        )
-        assert np.allclose(transformed_points, expected_points)

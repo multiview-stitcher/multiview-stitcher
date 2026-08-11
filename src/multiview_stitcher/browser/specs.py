@@ -14,11 +14,17 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 from multiview_stitcher import fusion, registration
+from multiview_stitcher.browser import elastix
 
-#: Pairwise registration functions selectable from the browser.
+#: Pairwise registration functions selectable from the browser. `itk_elastix`
+#: is `elastix.registration_ITKElastix` on the WebAssembly backend - the only
+#: elastix that exists in the browser, see `browser.elastix`. Naming it here
+#: costs nothing: itkwasm-elastix is imported only once a registration
+#: actually asks for it.
 PAIRWISE_REGISTRATION_FUNCS = {
     "phase_correlation": registration.phase_correlation_registration,
     "marker_based": registration.registration_marker_based,
+    "itk_elastix": elastix.registration_elastix,
 }
 
 #: Fusion functions selectable from the browser.

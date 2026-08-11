@@ -77,6 +77,11 @@ ants = [
 itk-elastix = [
     "itk-elastix >=0.25.2",
 ]
+# elastix compiled to WebAssembly. This is what makes it available in the
+# browser; on CPython it runs through wasmtime and needs no compiler.
+itkwasm-elastix = [
+    "itkwasm-elastix >=1.0.2",
+]
 czi = [
     "czifile ==2019.7.2.3",
     "imagecodecs >=2023.7.10",
@@ -93,6 +98,7 @@ dev = [
     "nbmake",  # notebook testing
     "antspyx >=0.6.0",
     "itk-elastix >=0.25.2",
+    "itkwasm-elastix >=1.0.2",
     "czifile ==2019.7.2.3",
     "h5py",
     "imagecodecs >=2023.7.10",
@@ -132,6 +138,10 @@ browser = [
     # unconditionally and would not load at all.
     "czifile ==2019.7.2.3",
     "tifffile",
+    # elastix as WebAssembly, the browser's only route to a registration
+    # beyond a translation. Pure-Python wheels: the pipeline itself is a
+    # WebAssembly module fetched on first use.
+    "itkwasm-elastix",
 ]
 gpu-cuda12 = [
     "cupy-cuda12x",

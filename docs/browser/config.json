@@ -26,7 +26,8 @@
     "dask-image",
     "ngff-zarr",
     "czifile==2019.7.2.3",
-    "tifffile"
+    "tifffile",
+    "itkwasm-elastix"
   ],
   "default_n_workers": 3,
   "max_n_workers": 12
