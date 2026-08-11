@@ -14,6 +14,7 @@ from scipy import ndimage
 from skimage.exposure import rescale_intensity
 
 from multiview_stitcher import (
+    elastix,
     io,
     msi_utils,
     param_utils,
@@ -26,9 +27,9 @@ from multiview_stitcher.io import METADATA_TRANSFORM_KEY
 
 
 ITK_ELASTIX_MARK = pytest.mark.skipif(
-    # By availability, not by `registration.itk`: that stays None until a
-    # registration imports it, so reading it here skipped every one of these
-    # tests whether itk-elastix was installed or not.
+    # By availability rather than by importing itk here: the elastix backend
+    # imports it only when a registration runs, and a mark that read such a
+    # lazily bound attribute skipped every one of these tests, installed or not.
     importlib.util.find_spec("itk") is None,
     reason="itk-elastix is not installed",
 )
@@ -1774,11 +1775,9 @@ def test_the_elastix_initial_transform_survives_its_parameter_map(
     """
     ndim = initial_affine.shape[-1] - 1
     parameter_object = [
-        registration._get_elastix_affine_parameter_map(initial_affine, ndim)
+        elastix.initial_transform_parameter_map(initial_affine, ndim)
     ]
-    recovered = registration.affine_from_elastix_parameter_object(
-        parameter_object, ndim
-    )
+    recovered = elastix.affine_from_parameter_object(parameter_object, ndim)
 
     np.testing.assert_allclose(recovered, initial_affine, atol=1e-9)
 

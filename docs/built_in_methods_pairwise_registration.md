@@ -73,11 +73,12 @@ run in the browser. The same elastix compiled to WebAssembly is published as
 
 The two share everything that decides the registration - the stages, the
 parameter maps, the initial transform and how the resulting affine is read
-back - and differ only in three things: how an image is made, where a
-transform's defaults come from and how one stage is run. Those three live in
-the backend (`browser.elastix.ITKWasmElastixBackend` for the WebAssembly one),
-so a change to how this package registers with elastix takes effect in both
-runtimes at once.
+back, all of which live in `multiview_stitcher.elastix` - and differ only in
+three things: how an image is made, where a transform's defaults come from and
+how one stage is run. Those three are what a *backend* provides
+(`browser.elastix.ITKWasmElastixBackend` for the WebAssembly one), so a change
+to how this package registers with elastix takes effect in both runtimes at
+once.
 
 In the browser the method is selectable under Registration &rarr; Advanced
 &rarr; Pairwise reg (see

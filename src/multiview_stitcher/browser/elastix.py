@@ -1,5 +1,5 @@
 """
-The WebAssembly backend of `registration.registration_ITKElastix`.
+The WebAssembly backend of `elastix.registration_ITKElastix`.
 
 `itk-elastix` is a native extension with no WebAssembly build. The same
 elastix compiled to WebAssembly is published as `itkwasm-elastix`, and that
@@ -11,8 +11,8 @@ Only the three things that differ between the two elastix builds live here:
 how an image is made, where a transform's defaults come from, and how one
 stage is run. The registration itself - the stages, the parameter maps, the
 initial transform, reading the affine back out - is
-`registration.registration_ITKElastix`, so this backend follows any change
-made there.
+:func:`multiview_stitcher.elastix.registration_ITKElastix`, so this backend
+follows any change made there.
 
 Nothing here is imported until a registration asks for elastix. That laziness
 is the point: the pipeline is a 16 MB WebAssembly module (2.4 MB over the
@@ -24,7 +24,7 @@ import functools
 
 import numpy as np
 
-from multiview_stitcher import registration
+from multiview_stitcher import elastix
 from multiview_stitcher.browser import env
 
 _IMPORT_ERROR = (
@@ -165,5 +165,5 @@ class ITKWasmElastixBackend:
 #: pairwise registration function by inspecting its signature, and a
 #: ``*args, **kwargs`` wrapper has none to inspect.
 registration_elastix = functools.partial(
-    registration.registration_ITKElastix, backend="itkwasm"
+    elastix.registration_ITKElastix, backend="itkwasm"
 )

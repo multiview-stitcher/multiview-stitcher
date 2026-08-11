@@ -15,6 +15,7 @@ import pytest
 import xarray as xr
 
 from multiview_stitcher import (
+    elastix,
     fusion,
     msi_utils,
     ngff_utils,
@@ -918,11 +919,9 @@ def test_the_browser_pins_the_webassembly_backend():
         registration_elastix,
     )
 
-    assert registration_elastix.func is registration.registration_ITKElastix
+    assert registration_elastix.func is elastix.registration_ITKElastix
     assert registration_elastix.keywords == {"backend": "itkwasm"}
-    assert isinstance(
-        registration._get_elastix_backend("itkwasm"), ITKWasmElastixBackend
-    )
+    assert isinstance(elastix.get_backend("itkwasm"), ITKWasmElastixBackend)
 
     # `register` decides what to hand a pairwise registration function from
     # its signature, so pinning the backend must not hide one.
