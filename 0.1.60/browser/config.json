@@ -1,0 +1,34 @@
+{
+  "pyodide_version": "314.0.4",
+  "pyodide_index_url": "https://cdn.jsdelivr.net/pyodide/v314.0.4/full/",
+  "pyodide_packages": [
+    "micropip",
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "networkx",
+    "xarray",
+    "numcodecs",
+    "toolz",
+    "cloudpickle",
+    "packaging",
+    "pyyaml",
+    "click",
+    "fsspec",
+    "tqdm",
+    "crc32c",
+    "donfig",
+    "typing-extensions",
+    "zarr"
+  ],
+  "browser_dependencies": [
+    "dask[array]!=2025.11.0",
+    "dask-image",
+    "ngff-zarr",
+    "czifile==2019.7.2.3",
+    "tifffile",
+    "itkwasm-elastix"
+  ],
+  "default_n_workers": 3,
+  "max_n_workers": 12
+}
