@@ -1,0 +1,427 @@
+:root {
+  color-scheme: dark;
+  --bg: #090d11;
+  --panel: #111820;
+  --panel-raised: #17212b;
+  --panel-soft: #0d141b;
+  --line: #26333f;
+  --line-strong: #384959;
+  --text: #f3f6f8;
+  --muted: #91a0ad;
+  --faint: #62717e;
+  --accent: #43c8dd;
+  --accent-bright: #72e2ef;
+  --accent-soft: rgba(67, 200, 221, 0.12);
+  --warning: #eeb868;
+  --error: #ff796f;
+  --left-sidebar: 306px;
+  --right-sidebar: 330px;
+  --header: 68px;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+button,
+input,
+select { font: inherit; }
+
+button { color: inherit; }
+
+/*
+ * Laid out with flex rather than as three columns with fixed minimum widths.
+ *
+ * Those minimums could not be given up, so a window narrower than their sum
+ * did not shrink the header - it overflowed, and the progress bar was drawn
+ * across the logo on one side and the buttons on the other. Here the two ends
+ * keep the width their contents need and the status area takes whatever is
+ * left over, down to nothing.
+ */
+.app-header {
+  min-height: var(--header);
+  flex: 0 0 var(--header);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(17, 24, 32, 0.96);
+  box-shadow: 0 5px 24px rgba(0, 0, 0, 0.24);
+  z-index: 10;
+}
+
+/* Kept at its natural width: the status area beside it is the one that gives,
+   and a shrinking brand only turns the title into two lines or an ellipsis. */
+.brand { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
+
+/* The <symbol> the logos reference is never drawn where it is declared. */
+.logo-defs { display: none; }
+/* Drawn in the surrounding text colour - white here, so black and white
+   whichever way the desktop is themed. */
+.logo { color: var(--text); }
+.brand .logo { width: 39px; height: 39px; flex: 0 0 auto; }
+.brand h1 { margin: 0; font-size: 15px; line-height: 1.2; font-weight: 690; letter-spacing: 0.01em; white-space: nowrap; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+.status-area { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; }
+#status {
+  color: var(--muted);
+  font-size: 11.5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#status.busy { color: var(--accent-bright); }
+#inactive {
+  color: #20190c;
+  background: var(--warning);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#progress { width: 100%; max-width: 520px; min-width: 0; }
+.progress-copy { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; color: var(--muted); font-size: 10.5px; }
+/* The label carries what the units are made of, so it is the part that gives
+   way when there is no room for it. */
+#progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#progress-percent { flex: 0 0 auto; color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.track { height: 4px; overflow: hidden; border-radius: 999px; background: #24313b; }
+#progress-bar { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #29a8c0, var(--accent-bright)); transition: width 180ms ease-out; }
+
+.header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+.quiet-button,
+.text-button,
+.icon-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.quiet-button { padding: 7px 11px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+.quiet-button:hover { color: var(--text); background: var(--panel-raised); }
+.github-link { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.github-link svg { width: 15px; height: 15px; fill: currentColor; }
+.badge { margin-left: 4px; padding: 1px 5px; border-radius: 999px; color: #071014; background: var(--accent); font-size: 9px; font-weight: 800; }
+.viewer-help-short,
+.about-short { display: none; }
+.worker-control { display: flex; align-items: center; gap: 6px; padding: 0 7px; color: var(--muted); font-size: 10.5px; }
+.worker-control input { width: 43px; height: 29px; padding: 3px 4px; border: 1px solid var(--line-strong); border-radius: 5px; outline: none; color: var(--text); background: var(--panel-soft); text-align: center; }
+.worker-control input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.worker-control input:disabled { opacity: 0.45; }
+
+.workspace {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: var(--left-sidebar) minmax(0, 1fr) var(--right-sidebar);
+  grid-template-areas: "data viewer operations";
+}
+
+.side-panel { min-width: 0; overflow-y: auto; background: var(--panel); scrollbar-color: var(--line-strong) transparent; }
+#data-panel { grid-area: data; border-right: 1px solid var(--line); }
+#operations-panel { grid-area: operations; border-left: 1px solid var(--line); }
+
+.panel-heading { min-height: 75px; display: flex; align-items: center; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); }
+.eyebrow { display: block; margin-bottom: 3px; color: var(--accent); font-size: 8.5px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; }
+.panel-heading h2,
+.dialog-header h2 { margin: 0; font-size: 15px; font-weight: 670; }
+
+.side-panel section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.side-panel h3 { margin: 0 0 12px; color: #dce3e8; font-size: 10px; font-weight: 760; letter-spacing: 0.1em; text-transform: uppercase; }
+.side-panel label { display: block; margin: 0 0 5px; color: var(--muted); font-size: 11px; }
+
+.side-panel select,
+.side-panel input[type="text"],
+.side-panel input[type="number"] {
+  width: 100%;
+  min-height: 35px;
+  margin: 0 0 12px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  outline: none;
+  color: var(--text);
+  background: var(--panel-soft);
+}
+.side-panel select:focus,
+.side-panel input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.side-panel select:disabled,
+.side-panel input:disabled,
+.side-panel button:disabled { opacity: 0.42; cursor: not-allowed; }
+
+.dropzone {
+  min-height: 146px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 17px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  text-align: center;
+  background: var(--panel-soft);
+  cursor: pointer;
+  transition: border-color 140ms, background 140ms, transform 140ms;
+}
+.dropzone:hover,
+.dropzone:focus-visible,
+.dropzone.dragging { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.dragging { transform: scale(1.01); }
+.dropzone.disabled { opacity: 0.45; pointer-events: none; }
+.drop-icon { width: 29px; height: 29px; margin-bottom: 7px; color: var(--accent); }
+.drop-icon svg { width: 100%; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.dropzone strong { font-size: 12px; }
+.dropzone > span { margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+.dropzone button { margin-top: 12px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text); background: var(--panel-raised); cursor: pointer; }
+.dropzone button:hover { border-color: var(--accent); }
+/* Wraps rather than squeezing both buttons onto one line on a narrow panel. */
+.drop-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+.data-actions { position: relative; display: flex; justify-content: space-between; gap: 10px; margin: 8px 0 15px; }
+.text-button { padding: 3px 0; color: var(--accent); font-size: 10.5px; }
+.text-button:hover { color: var(--accent-bright); }
+.text-button.danger { color: var(--muted); }
+.text-button.danger:hover { color: var(--error); }
+.example-picker { position: relative; }
+.example-menu { position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; width: max-content; min-width: 210px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-raised); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42); }
+.example-menu button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 4px; color: var(--text); background: transparent; text-align: left; font-size: 10.5px; cursor: pointer; }
+.example-menu button:hover,
+.example-menu button:focus-visible { outline: none; background: var(--accent-soft); color: var(--accent-bright); }
+.section-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-title-actions { display: flex; align-items: baseline; gap: 10px; }
+.count-label { color: var(--muted); font-size: 10px; }
+.empty-state { margin: 1px 0 0; color: var(--faint); font-size: 10.5px; }
+
+.view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.view-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
+.view-list li.selectable { cursor: pointer; }
+/*
+ * Two strengths, used in the viewer as well as here (see `.mvs-layer-
+ * highlight`) so that a tile and its row are always saying the same thing.
+ *
+ *   - `.highlighted`, the *very subtle* one: this is the layer being pointed
+ *     at. It is applied to a row under the pointer and to the row of a tile
+ *     under the pointer in the viewer, which are the same gesture from either
+ *     side of the window;
+ *   - `.selected`, the *subtle* one: this layer has been picked. Subtle on
+ *     purpose - which tile is selected only decides where a placement drag
+ *     goes when tiles overlap, so it should not read as louder than
+ *     visibility.
+ */
+.view-list li:hover,
+.view-list li.highlighted { border-color: var(--line-strong); background: rgba(255, 255, 255, 0.035); }
+.view-list li.selected { border-color: var(--accent); background: var(--accent-soft); }
+.view-list li.selected strong { color: var(--accent-bright); }
+.view-list li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.view-list li.derived-view { border-color: #26515a; background: rgba(45, 179, 196, 0.06); }
+.view-list li > div { min-width: 0; }
+.view-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 620; }
+.view-list .view-detail { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.visibility-toggle { position: relative; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.view-list .remove { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; color: var(--faint); background: transparent; font-size: 17px; cursor: pointer; }
+.view-list .remove:hover { color: var(--error); background: rgba(255, 121, 111, 0.08); }
+
+/* Tucked up under the field it explains. After a button or a group of them
+   there is no such gap to close, so the pull-up is cancelled. */
+.field-help { margin: -5px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+.primary-button + .field-help,
+.secondary-button + .field-help,
+.split-actions + .field-help,
+.gesture-list + .field-help { margin-top: 9px; }
+.option-check { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; color: var(--muted); font-size: 10.5px; cursor: pointer; }
+.option-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.channel-controls { display: grid; gap: 8px; }
+.channel-control { padding: 8px 9px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); }
+.channel-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--text); font-size: 10.5px; font-weight: 620; }
+.channel-heading input { flex: 0 0 auto; }
+.channel-contrast-line { display: grid; grid-template-columns: 55px minmax(70px, 1fr) 55px; align-items: center; gap: 7px; }
+.channel-contrast-line > input[type="text"] { height: 26px; margin: 0; padding: 4px 5px; text-align: center; font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.channel-contrast-line > input[type="text"]::placeholder { color: var(--faint); }
+.dual-range { --low: 0%; --high: 100%; position: relative; height: 26px; margin: 0 1px; }
+.dual-range-track { position: absolute; top: 11px; right: 0; left: 0; height: 4px; border-radius: 999px; background: linear-gradient(to right, var(--line-strong) 0 var(--low), var(--accent) var(--low) var(--high), var(--line-strong) var(--high) 100%); }
+.dual-range input[type="range"] { position: absolute; inset: 0; width: 100%; height: 26px; margin: 0; padding: 0; border: 0; background: transparent; appearance: none; pointer-events: none; }
+.dual-range input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.dual-range input[type="range"]::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: -5px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent-bright); appearance: none; pointer-events: auto; cursor: ew-resize; box-shadow: 0 0 0 1px var(--accent); }
+.dual-range input[type="range"]::-moz-range-track { height: 4px; background: transparent; }
+.dual-range input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent-bright); pointer-events: auto; cursor: ew-resize; box-shadow: 0 0 0 1px var(--accent); }
+.dual-range input[type="range"]:disabled::-webkit-slider-thumb { cursor: not-allowed; opacity: 0.45; }
+.dual-range input[type="range"]:disabled::-moz-range-thumb { cursor: not-allowed; opacity: 0.45; }
+
+#viewer-shell { grid-area: viewer; position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #030506; }
+#viewer { width: 100%; height: 100%; min-height: 0; background: #030506; position: relative; }
+.viewer-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding: 24px; text-align: center; pointer-events: none; background: radial-gradient(circle at center, #101820 0, #070b0e 55%, #030506 100%); }
+.viewer-empty[hidden] { display: none; }
+.viewer-empty-icon { width: 72px; height: 52px; margin-bottom: 18px; border: 1px solid #2a3944; transform: skewY(-13deg); box-shadow: 11px 8px 0 -1px #081015, 11px 8px 0 0 #22313c, 22px 16px 0 -1px #060b0f, 22px 16px 0 0 #18252e; }
+.viewer-empty h2 { margin: 0; font-size: 14px; font-weight: 620; }
+.viewer-empty p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+
+/*
+ * Layer outlines, drawn over the cross-sections by `viewer.js`.
+ *
+ * The two strengths are the ones the views list uses, at the same weights and
+ * in the same colours: `.very-subtle` for the layer under the pointer, matching
+ * `.view-list li.highlighted`, and `.subtle` for a selected one, matching
+ * `.view-list li.selected`. Faint on purpose - an outline that competed with
+ * the data would be worse than no outline, since the data is what the user is
+ * lining up.
+ */
+.mvs-layer-highlights { position: absolute; inset: 0; z-index: 5; overflow: visible; pointer-events: none; }
+.mvs-layer-highlight { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.42); stroke-width: 1; }
+.mvs-layer-highlight.subtle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+
+.main-tabs { display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 12px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.main-tabs button { padding: 13px 4px 11px; border-bottom: 2px solid transparent; font-size: 10px; }
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--accent-bright); border-color: var(--accent); }
+.operation-panel { padding: 18px !important; border-bottom: 0 !important; }
+.operation-intro { display: grid; grid-template-columns: auto 1fr; gap: 11px; margin-bottom: 20px; }
+.step-icon { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #27606b; border-radius: 50%; color: var(--accent); font-size: 9px; font-weight: 800; }
+.operation-intro h3 { margin: 0 0 4px; color: var(--text); font-size: 12px; letter-spacing: 0; text-transform: none; }
+.operation-intro p { margin: 0; color: var(--muted); font-size: 10px; }
+.sub-tabs { display: flex; gap: 17px; margin: 0 0 15px; border-bottom: 1px solid var(--line); }
+.sub-tabs button { padding: 5px 0 7px; border-bottom: 1px solid transparent; font-size: 10px; }
+.subtab-panel { min-height: 118px; }
+.subtab-panel[hidden],
+.operation-panel[hidden] { display: none; }
+.registration-stage-panel { min-height: 260px; }
+.nested-tabs { margin-top: -4px; }
+.registration-scope { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+.registration-scope > .option-check { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+.registration-scope > .option-check input { flex: 0 0 auto; }
+.registration-scope > .field-help { margin-top: 3px; }
+.pair-determination { padding-top: 12px; border-top: 1px solid var(--line); }
+.pair-determination > .option-check { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+.pair-determination > .option-check input { flex: 0 0 auto; }
+.indented-option { margin: 0 0 13px 22px; }
+#registration-max-angle-field[hidden] { display: none; }
+.manual-pair-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; margin: 0 0 9px 22px; }
+.manual-pair-editor select { margin-bottom: 0; }
+.manual-pair-editor .secondary-button { grid-column: 1 / -1; min-height: 31px; }
+.pair-list { display: grid; gap: 5px; max-height: 150px; margin: 0 0 8px 22px; overflow-y: auto; }
+.pair-list:empty { display: none; }
+.pair-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 5px 7px; border: 1px solid #27606b; border-radius: 5px; color: var(--text); background: var(--accent-soft); font-size: 9.5px; }
+.pair-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-row .remove-pair { flex: 0 0 auto; width: 21px; height: 21px; padding: 0; border: 0; border-radius: 4px; color: var(--faint); background: transparent; font-size: 15px; cursor: pointer; }
+.pair-row .remove-pair:hover { color: var(--error); background: rgba(255, 121, 111, 0.08); }
+
+fieldset { min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
+fieldset legend { margin: 0 0 7px; color: var(--muted); font-size: 11px; }
+#manual-placement-section { margin: 18px 0 0; padding-top: 15px; border-top: 1px solid var(--line); }
+.gesture-list { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 5px 10px; margin: 2px 0 0; }
+.gesture-list dt { color: var(--muted); font-size: 9.5px; white-space: nowrap; }
+.gesture-list dd { margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+#time-section[hidden] { display: none; }
+#time-slider { width: 100%; height: 22px; margin: 2px 0 7px; accent-color: var(--accent); cursor: pointer; }
+.placement-scope { display: grid; gap: 11px; margin-top: 12px; }
+.placement-scope[hidden] { display: none; }
+.scope-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+.scope-value { color: var(--accent-bright); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.scope-channels, .scope-modes { display: flex; flex-wrap: wrap; gap: 5px 12px; }
+.scope-channels label, .scope-modes label { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text); font-size: 10px; cursor: pointer; }
+.scope-channels input, .scope-modes input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.scope-modes { margin-bottom: 7px; }
+.scope-block.disabled { opacity: 0.45; pointer-events: none; }
+.scope-block .field-help { margin-top: 3px; }
+kbd { padding: 1px 4px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--panel-soft); font-family: inherit; font-size: 9px; }
+.field-help.warning { color: var(--warning); }
+.field-help.warning[hidden] { display: none; }
+.dimension-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.dimension-fields label { text-align: center; text-transform: uppercase; font-size: 9px; }
+.dimension-fields input { margin-bottom: 7px !important; text-align: center; }
+
+/* Block, not the default inline-block: an inline button sits on a text
+   baseline, and the descender space below it is what let the help text that
+   follows ride up into the button. */
+.primary-button,
+.secondary-button { display: block; width: 100%; min-height: 36px; padding: 7px 10px; border-radius: 6px; font-weight: 650; font-size: 11px; cursor: pointer; }
+.primary-button { border: 1px solid var(--accent); color: #051114; background: var(--accent); }
+.primary-button:hover:not(:disabled) { border-color: var(--accent-bright); background: var(--accent-bright); }
+.secondary-button { border: 1px solid var(--line-strong); color: var(--text); background: var(--panel-raised); }
+.secondary-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-bright); }
+.operation-panel > .primary-button { margin-top: 16px; }
+.split-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; margin-top: 16px; }
+.split-actions + .field-help { margin-top: 7px; }
+
+.app-dialog { width: min(620px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 32px)); padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--text); background: var(--panel); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58); }
+.app-dialog::backdrop { background: rgba(2, 5, 8, 0.72); backdrop-filter: blur(3px); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.icon-button { width: 31px; height: 31px; border-radius: 5px; color: var(--muted); font-size: 22px; }
+.icon-button:hover { color: var(--text); background: var(--panel-raised); }
+.log { min-height: 240px; max-height: 55vh; padding: 13px 18px; overflow-y: auto; color: var(--muted); background: #090e13; font: 10.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.log-line { overflow-wrap: anywhere; }
+.log-error { color: var(--error); }
+.log-warn { color: var(--warning); }
+.dialog-footer { padding: 11px 18px; border-top: 1px solid var(--line); text-align: right; }
+.dialog-footer button { width: auto; }
+.about-dialog { max-width: 475px; }
+.about-content { padding: 24px; text-align: center; }
+.about-content > .logo { width: 66px; height: 66px; }
+.about-content > p { max-width: 355px; margin: 14px auto; color: var(--muted); }
+.about-content a { color: var(--accent); text-decoration: none; }
+.about-content a:hover { color: var(--accent-bright); text-decoration: underline; }
+.built-with { font-size: 10.5px; }
+.privacy-note { display: flex; flex-direction: column; gap: 3px; margin: 20px 0; padding: 13px; border: 1px solid #24535d; border-radius: 7px; color: var(--accent-bright); background: var(--accent-soft); font-size: 11px; }
+.privacy-note span { color: var(--muted); font-size: 10px; }
+.runtime-info { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px !important; }
+.help-dialog { max-width: 440px; }
+.help-content { display: grid; gap: 8px; padding: 18px; }
+.help-content > div { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; padding: 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-soft); }
+.help-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #27606b; border-radius: 50%; color: var(--accent-bright); font-weight: 800; }
+.help-content strong { font-size: 11px; }
+.help-content p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+
+@media (max-width: 1120px) {
+  :root { --left-sidebar: 270px; --right-sidebar: 290px; }
+  .app-header { gap: 14px; }
+  .brand p { display: none; }
+}
+
+/* Below this the header cannot hold all three side by side and the status area
+   moves to a row of its own, where the progress bar has the full width. */
+@media (max-width: 820px) {
+  body { height: auto; min-height: 100%; overflow: auto; }
+  .app-header { position: sticky; top: 0; min-height: 58px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "status status"; gap: 5px 10px; padding: 7px 12px; }
+  .brand { grid-area: brand; }
+  .brand .logo { width: 31px; height: 31px; }
+  .status-area { grid-area: status; min-height: 13px; }
+  #progress { max-width: none; }
+  .header-actions { grid-area: actions; }
+  .workspace { display: grid; grid-template-columns: 1fr; grid-template-areas: "viewer" "data" "operations"; }
+  #viewer-shell { height: 58vh; min-height: 360px; }
+  #data-panel,
+  #operations-panel { border: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .panel-heading { min-height: 62px; }
+  .side-panel section { padding-left: 16px; padding-right: 16px; }
+}
+
+@media (max-width: 440px) {
+  .brand h1 { font-size: 13px; }
+  .brand > div { flex: 0 0 auto; }
+  .brand h1 { min-width: 126px; white-space: nowrap; }
+  .quiet-button { padding: 6px 7px; }
+  .worker-control { padding: 0 2px; }
+  .worker-control span { display: none; }
+  .viewer-help-label { display: none; }
+  .github-link span { display: none; }
+  .viewer-help-short,
+  .about-short { display: inline; }
+  .about-label { display: none; }
+  #viewer-shell { min-height: 300px; height: 52vh; }
+  .split-actions { grid-template-columns: 1fr; }
+}
