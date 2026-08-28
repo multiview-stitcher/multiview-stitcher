@@ -49,7 +49,12 @@ dependencies = [
     "tqdm",
     "matplotlib",
     "scikit-image >=0.21.0",
-    "ngff-zarr >=0.12.2",
+    # Below 0.44: from there on ngff-zarr reads through zarrista instead of
+    # zarr-python, which drops both the zarr store objects the browser reads
+    # through (its service worker serves them over HTTP) and any read at all
+    # in Pyodide, whose zarrista wheel is missing symbols its own Python layer
+    # imports. Kept in step with docs/browser/config.json.
+    "ngff-zarr >=0.12.2,<0.44",
     "aiohttp"
 ]
 dynamic = [
