@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
 
+concurrency:
+  # gh-pages is also written by the docs preview workflow; one writer at a time.
+  group: gh-pages
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Deploy docs to GitHub Pages

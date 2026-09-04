@@ -8,15 +8,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
 
-concurrency:
-  group: docs-preview-${{ github.event.number }}
-  cancel-in-progress: true
-
 jobs:
   build:
     name: Build docs website
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    concurrency:
+      group: docs-preview-${{ github.event.number }}
+      cancel-in-progress: true
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -49,9 +48,15 @@ jobs:
     # Pull requests from forks get a read-only token and cannot push to
     # gh-pages. They still get the build above and its site artifact.
     if: >-
-      always() && needs.build.result != 'failure'
+      always()
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    concurrency:
+      # Merging a pull request deploys the main docs and closes this preview at
+      # the same time; both push to gh-pages, so they have to take turns.
+      group: gh-pages
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
