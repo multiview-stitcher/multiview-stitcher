@@ -440,6 +440,85 @@ def test_plot_and_return_dict(plot_summary, return_dict, monkeypatch):
 #     )
 
 
+def _jittering_timelapse(ndim=2, N_t=12, sigma=1, seed=0):
+    """A timelapse of a sample drifting smoothly with random shifts on top.
+
+    Returns the timelapse and the random shifts (in pixels) it contains,
+    i.e. the deviation of the imaged sample from its smooth trajectory.
+    """
+    rng = np.random.default_rng(seed)
+
+    im = rng.integers(0, 100, (10,) * ndim).astype(np.uint16)
+    im = ndimage.zoom(im, [6] * ndim, order=1)
+
+    drift = np.cumsum([[1.5] * ndim] * N_t, axis=0)
+    jitter = (rng.random((N_t, ndim)) - 0.5) * 6
+    positions = drift + jitter
+
+    tl = np.array(
+        [
+            ndimage.shift(im, position, order=1, mode="reflect")
+            for position in positions
+        ]
+    )
+
+    # the jitter is what remains of the trajectory after smoothing it
+    random_shifts = positions - ndimage.gaussian_filter(
+        positions, [sigma, 0], mode="nearest"
+    )
+
+    return tl, random_shifts
+
+
+@pytest.mark.parametrize("reg_res_level", [None, 0])
+def test_stabilize(reg_res_level):
+    ndim, N_t, sigma = 2, 12, 1
+    tl, random_shifts = _jittering_timelapse(ndim=ndim, N_t=N_t, sigma=sigma)
+
+    spacing = {dim: 0.5 for dim in ["y", "x"][-ndim:]}
+    sim = spatial_image_utils.get_sim_from_array(
+        tl,
+        dims=["t"] + ["y", "x"][-ndim:],
+        scale=spacing,
+        transform_key=METADATA_TRANSFORM_KEY,
+    )
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    params = registration.stabilize(
+        [msim],
+        reg_res_level=reg_res_level,
+        sigma=sigma,
+        transform_key=METADATA_TRANSFORM_KEY,
+        new_transform_key="stabilized",
+    )
+
+    assert len(params) == 1
+    assert list(params[0].coords["t"].values) == list(sim.coords["t"].values)
+    assert "stabilized" in msi_utils.get_transforms_from_dataset_as_dict(
+        msim["scale0"].ds
+    )
+
+    # the obtained parameters should compensate the random shifts
+    obtained_shifts = np.array(
+        [
+            param_utils.translation_from_affine(param)
+            / np.array([spacing[dim] for dim in ["y", "x"][-ndim:]])
+            for param in params[0].data
+        ]
+    )
+
+    assert np.std(random_shifts + obtained_shifts) < np.std(random_shifts) / 2
+
+
+def test_stabilize_requires_enough_timepoints():
+    tl, _ = _jittering_timelapse(N_t=4)
+    sim = spatial_image_utils.get_sim_from_array(tl, dims=["t", "y", "x"])
+    msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+
+    with pytest.raises(ValueError, match="at least 8 timepoints"):
+        registration.stabilize([msim])
+
+
 def test_get_optimal_registration_binning():
     ndim = 3
     sims = [

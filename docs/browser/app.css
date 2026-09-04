@@ -299,6 +299,8 @@ button { color: inherit; }
 .subtab-panel { min-height: 118px; }
 .subtab-panel[hidden],
 .operation-panel[hidden] { display: none; }
+/* A panel the selected method does not use, e.g. the graph under stabilization. */
+.subtab-panel[inert] { opacity: 0.42; }
 .registration-stage-panel { min-height: 260px; }
 .nested-tabs { margin-top: -4px; }
 .registration-scope { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }

@@ -1333,12 +1333,41 @@ function syncPairDeterminationControls() {
   )) {
     button.disabled = usePruning;
   }
+  syncStabilizationControls();
 }
 
 function syncRegistrationMethod() {
-  const elastix = $("#registration-method").value === "itk_elastix";
+  const method = $("#registration-method").value;
+  const elastix = method === "itk_elastix";
   $("#registration-elastix-options").hidden = !elastix;
+  $("#registration-stabilization-help").hidden = method !== "stabilization";
   if (elastix) syncElastixTransform();
+  syncStabilizationControls();
+}
+
+/**
+ * Take the options stabilization does not use out of play.
+ *
+ * Stabilization is offered among the pairwise methods, but it is not one:
+ * it registers each view with itself over time. Neither the registration
+ * graph nor the groupwise resolution takes part in it, so both panels are
+ * made inert - unreachable and visibly dimmed - while it is selected, rather
+ * than accepting settings that would be silently ignored.
+ */
+function syncStabilizationControls() {
+  const stabilization = $("#registration-method").value === "stabilization";
+  for (const id of ["registration-graph", "registration-groupwise"]) {
+    $(`#${id}`).inert = stabilization;
+    const tab = document.querySelector(
+      `.nested-tabs [data-subtab="${id}"]`,
+    );
+    tab.disabled = stabilization;
+    if (stabilization && tab.getAttribute("aria-selected") === "true") {
+      document
+        .querySelector('.nested-tabs [data-subtab="registration-pairwise"]')
+        .click();
+    }
+  }
 }
 
 /**
@@ -2495,8 +2524,15 @@ function registrationViewIndices() {
   const indices = (state.session?.views || []).flatMap((view, index) =>
     state.selectedViewUrls.has(view.url) ? [index] : [],
   );
-  if (indices.length < 2) {
-    throw new Error("Select at least two layers for registration.");
+  // Stabilization takes each view on its own, so one of them is enough.
+  const minimum =
+    $("#registration-method").value === "stabilization" ? 1 : 2;
+  if (indices.length < minimum) {
+    throw new Error(
+      minimum === 1
+        ? "Select at least one layer for stabilization."
+        : "Select at least two layers for registration.",
+    );
   }
   return indices;
 }
@@ -2533,15 +2569,22 @@ async function doRegister() {
   const started = performance.now();
 
   try {
-    const manualPairs = $("#registration-pairs-manual").checked;
-    const pruningMethod = manualPairs
-      ? null
-      : $("#registration-pruning-method").value || null;
+    const method = $("#registration-method").value;
+    const stabilization = method === "stabilization";
+    // Stabilization registers each view with itself over time: neither the
+    // registration graph nor the groupwise resolution takes part in it, so
+    // their options are left out rather than sent along to be ignored.
+    const manualPairs =
+      !stabilization && $("#registration-pairs-manual").checked;
+    const pruningMethod =
+      manualPairs || stabilization
+        ? null
+        : $("#registration-pruning-method").value || null;
     const referenceView = $("#registration-reference-view").value;
-    const groupwiseResolutionKwargs = {
-      transform: $("#registration-groupwise-transform").value,
-    };
-    if (referenceView !== "") {
+    const groupwiseResolutionKwargs = stabilization
+      ? {}
+      : { transform: $("#registration-groupwise-transform").value };
+    if (!stabilization && referenceView !== "") {
       groupwiseResolutionKwargs.reference_view = Number(referenceView);
     }
 
@@ -2558,8 +2601,6 @@ async function doRegister() {
         pruningKwargs.max_angle = (maxAngleDegrees * Math.PI) / 180;
       }
     }
-
-    const method = $("#registration-method").value;
 
     const result = await command("register", {
       options: {
@@ -2588,13 +2629,14 @@ async function doRegister() {
         groupwise_resolution_kwargs: groupwiseResolutionKwargs,
         view_indices: registrationViewIndices(),
       },
-      distribute: pool.size > 0,
+      distribute: !stabilization && pool.size > 0,
     });
 
     log(
-      `registered ${result.params.length} view(s) in ` +
+      `${stabilization ? "stabilized" : "registered"} ` +
+        `${result.params.length} view(s) in ` +
         `${((performance.now() - started) / 1000).toFixed(1)}s` +
-        (pool.size ? ` on ${pool.size} worker(s)` : ""),
+        (!stabilization && pool.size ? ` on ${pool.size} worker(s)` : ""),
     );
 
     // Registering a timelapse resolves one transform per timepoint, so from
@@ -2611,7 +2653,7 @@ async function doRegister() {
     renderTransformKeys(result.transform_keys);
     await refreshSessionSpec();
     await refreshViewer();
-    setStatus("registered");
+    setStatus(stabilization ? "stabilized" : "registered");
   } finally {
     clearProgress();
     setBusy(false);
@@ -2686,7 +2728,7 @@ async function doFuseToDisk() {
       `wrote ${result.n_blocks} block(s) across ${result.levels.length} ` +
         `resolution level(s) to ${OUTPUT_NAME} in ` +
         `${((performance.now() - started) / 1000).toFixed(1)}s` +
-        (pool.size ? ` on ${pool.size} worker(s)` : ""),
+        (!stabilization && pool.size ? ` on ${pool.size} worker(s)` : ""),
     );
     setStatus("fused image written to disk");
   } finally {

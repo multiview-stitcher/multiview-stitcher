@@ -615,7 +615,7 @@ class Session:
                 for index in view_indices
             ):
                 raise IndexError("A selected registration view does not exist.")
-            if len(view_indices) < 2:
+            if len(view_indices) < 2 and not options.is_stabilization:
                 raise ValueError("Select at least two views for registration.")
 
         selected_msims = [self.msims[index] for index in view_indices]
@@ -635,6 +635,14 @@ class Session:
 
         if options.transform_key is None:
             options.transform_key = self.default_transform_key()
+
+        if options.is_stabilization:
+            # Stabilization registers every view with itself over time, so
+            # none of the pairwise/groupwise machinery below applies to it.
+            params = core_registration.stabilize(
+                selected_msims, **options.stabilize_kwargs()
+            )
+            return self._finish_registration(options, view_indices, params)
 
         register_kwargs = options.register_kwargs()
         if options.view_indices is not None:
@@ -676,6 +684,16 @@ class Session:
             **register_kwargs,
         )
 
+        return self._finish_registration(options, view_indices, params)
+
+    def _finish_registration(self, options, view_indices, params):
+        """Attach a registration result and report it back to the page.
+
+        Shared by every way of registering - pairwise/groupwise registration
+        and stabilization alike - which all end in the same three steps: give
+        the views that were left out the new transform key too, retire what was
+        derived from the old transforms, and hand the parameters to the page.
+        """
         # Registration only changes the selected views, but a transform key
         # must exist on every view to remain selectable as one coordinate
         # system in the browser. Omitted views inherit the displayed transform
