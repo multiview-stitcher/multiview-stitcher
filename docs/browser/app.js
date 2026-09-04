@@ -2728,7 +2728,7 @@ async function doFuseToDisk() {
       `wrote ${result.n_blocks} block(s) across ${result.levels.length} ` +
         `resolution level(s) to ${OUTPUT_NAME} in ` +
         `${((performance.now() - started) / 1000).toFixed(1)}s` +
-        (!stabilization && pool.size ? ` on ${pool.size} worker(s)` : ""),
+        (pool.size ? ` on ${pool.size} worker(s)` : ""),
     );
     setStatus("fused image written to disk");
   } finally {
