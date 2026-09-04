@@ -1,0 +1,73 @@
+name: Docs preview
+
+# Builds the docs website (including the browser app) for every pull request
+# and publishes it under gh-pages/pr-preview/pr-<N>/, next to the versions mike
+# deploys. The preview is removed again when the pull request closes.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+concurrency:
+  group: docs-preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build docs website
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install dependencies
+      run: pip install -r docs/docs_requirements.txt build
+    - name: Build the browser app
+      run: python scripts/build_browser_app.py --neuroglancer
+    - name: Build docs website
+      run: mkdocs build --site-dir site
+    - name: Upload the site
+      uses: actions/upload-artifact@v4
+      with:
+        name: docs-site
+        path: site
+        retention-days: 7
+
+  preview:
+    name: Publish preview
+    needs: build
+    # Pull requests from forks get a read-only token and cannot push to
+    # gh-pages. They still get the build above and its site artifact.
+    if: >-
+      always() && needs.build.result != 'failure'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Download the site
+      if: github.event.action != 'closed'
+      uses: actions/download-artifact@v4
+      with:
+        name: docs-site
+        path: site
+    - name: Deploy preview
+      uses: rossjrw/pr-preview-action@v1
+      with:
+        source-dir: site
+        preview-branch: gh-pages
+        umbrella-dir: pr-preview
+        action: auto
