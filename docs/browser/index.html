@@ -351,12 +351,20 @@
               <select id="registration-method">
                 <option value="phase_correlation">Phase correlation</option>
                 <option value="itk_elastix">Elastix</option>
+                <option value="stabilization">Stabilization</option>
               </select>
               <p class="field-help">
                 Phase correlation finds a translation. Elastix, compiled to
                 WebAssembly, can also recover rotation, scale and shear; its
                 module is around 2.5&nbsp;MB and is downloaded the first time
                 a worker uses it.
+              </p>
+              <p id="registration-stabilization-help" class="field-help" hidden>
+                Stabilization registers each view with itself over time,
+                removing the jitter of a timelapse while keeping the smooth
+                part of its motion. It needs at least eight timepoints, and
+                uses neither the registration graph nor the groupwise
+                resolution.
               </p>
 
               <fieldset id="registration-elastix-options" hidden>

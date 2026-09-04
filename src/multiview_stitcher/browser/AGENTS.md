@@ -103,6 +103,12 @@ Different tabs for different types of operations:
           shear. Its options - transform type, resolution levels, iterations
           per level, metric - appear only when it is selected, and choosing a
           transform type sets the groupwise one to match
+        - stabilization is offered as a third method although it is not a
+          pairwise one: it registers each view with itself over time, removing
+          the jitter of a timelapse while keeping its smooth motion. While it
+          is selected, the graph and groupwise panels are dimmed and
+          unreachable, as neither takes part in it, and one selected layer is
+          enough to run it
       - Groupwise resolution: transform type and reference view
   - "Register" button to run registration
 

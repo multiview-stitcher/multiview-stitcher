@@ -285,6 +285,50 @@ def test_session_registers_only_selected_views_but_sets_key_on_all():
         xr.testing.assert_allclose(inherited, before[index])
 
 
+def test_session_stabilizes_a_timelapse():
+    """Stabilization is offered as a method, but replaces the whole pipeline."""
+    session = Session()
+    session.load(example_data.example_sources("tiles-2d-20t-2c")[:2])
+
+    result = session.register(
+        RegistrationOptions(
+            pairwise_reg_func="stabilization",
+            new_transform_key="stabilized",
+            reg_res_level=1,
+        )
+    )
+
+    assert result["transform_key"] == "stabilized"
+    assert "stabilized" in session.transform_keys()
+    assert len(result["params"]) == 2
+
+    restored = serialization.params_from_json(result["params"])
+    # one transform per timepoint, so that the jitter can be taken out of each
+    assert restored[0].sizes["t"] == 20
+
+
+def test_stabilization_needs_only_one_view():
+    """Each view is stabilized on its own, so a single one is a valid ask."""
+    session = Session()
+    session.load(example_data.example_sources("tiles-2d-20t-2c")[:2])
+
+    result = session.register(
+        RegistrationOptions(
+            pairwise_reg_func="stabilization",
+            new_transform_key="stabilized",
+            reg_res_level=1,
+            view_indices=[0],
+        )
+    )
+
+    assert len(result["params"]) == 1
+    # the view left out keeps its placement under the new key
+    for msim in session.msims:
+        assert "stabilized" in msi_utils.get_transforms_from_dataset_as_dict(
+            msim["scale0"].ds
+        )
+
+
 def test_session_requires_two_selected_registration_views(tiles_on_disk):
     session = Session()
     session.load(tiles_on_disk)

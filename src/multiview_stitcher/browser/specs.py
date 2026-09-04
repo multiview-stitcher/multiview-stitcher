@@ -27,6 +27,12 @@ PAIRWISE_REGISTRATION_FUNCS = {
     "itk_elastix": elastix.registration_elastix,
 }
 
+#: Name under which stabilization is offered next to the pairwise registration
+#: functions in the browser. It is not one of them: it registers each view with
+#: itself over time instead of registering pairs of views, and therefore
+#: replaces the pairwise/groupwise pipeline rather than being a step of it.
+STABILIZATION_METHOD = "stabilization"
+
 #: Fusion functions selectable from the browser.
 FUSION_FUNCS = {
     "weighted_average": fusion.weighted_average_fusion,
@@ -114,11 +120,12 @@ class RegistrationOptions:
     view_indices: Optional[list[int]] = None
 
     def __post_init__(self):
-        _lookup(
-            PAIRWISE_REGISTRATION_FUNCS,
-            self.pairwise_reg_func,
-            "pairwise registration function",
-        )
+        if not self.is_stabilization:
+            _lookup(
+                PAIRWISE_REGISTRATION_FUNCS,
+                self.pairwise_reg_func,
+                "pairwise registration function",
+            )
         if self.groupwise_resolution_method not in GROUPWISE_RESOLUTION_METHODS:
             raise ValueError(
                 f"Unknown groupwise resolution method "
@@ -129,6 +136,24 @@ class RegistrationOptions:
                 f"Unknown pruning method "
                 f"'{self.pre_registration_pruning_method}'."
             )
+
+    @property
+    def is_stabilization(self):
+        """Whether the selected method stabilizes each view over time.
+
+        Stabilization replaces the pairwise and groupwise steps, so the options
+        describing them are ignored when it is selected.
+        """
+        return self.pairwise_reg_func == STABILIZATION_METHOD
+
+    def stabilize_kwargs(self):
+        """Keyword arguments for `registration.stabilize`."""
+        return {
+            "transform_key": self.transform_key,
+            "new_transform_key": self.new_transform_key,
+            "reg_channel_index": self.reg_channel_index or 0,
+            "reg_res_level": self.reg_res_level,
+        }
 
     def register_kwargs(self):
         """Keyword arguments for `registration.register`, minus the executor."""

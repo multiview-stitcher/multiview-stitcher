@@ -2964,3 +2964,238 @@ def get_pairs_from_sample_masks(
     )
 
     return pairs, fused_labels
+
+
+#: Number of frame pairs registered in parallel during stabilization
+#: when `n_parallel` is not given.
+DEFAULT_N_PARALLEL_STABILIZATION = 4
+
+
+def _phase_correlation_shift(fixed_data, moving_data):
+    """
+    Displacement in pixels of the content of `moving_data` relative to
+    `fixed_data`, obtained by phase correlation.
+
+    This is the negative of what skimage returns, which is the shift that
+    registers the moving image with the fixed one.
+
+    Parameters
+    ----------
+    fixed_data, moving_data : array-like
+        Images of equal shape containing only spatial dimensions.
+
+    Returns
+    -------
+    np.ndarray of shape (ndim,)
+    """
+    shift = skimage.registration.phase_cross_correlation(
+        np.asarray(fixed_data),
+        np.asarray(moving_data),
+        upsample_factor=10,
+        normalization=None,
+    )[0]
+
+    return -np.array(shift, dtype=float)
+
+
+def get_stabilization_shifts(tl, sigma=2, n_parallel=None):
+    """
+    Obtain the shifts stabilizing a timelapse.
+
+    Correct for random shifts (e.g. of the stage) in the absence of reference
+    points that are fixed relative to the stage, assuming that in their absence
+    the imaged sample moves smoothly in time:
+    - obtain the shifts between consecutive frames using phase correlation
+    - accumulate them into a raw trajectory
+    - smooth the trajectory in time
+    - consider the difference between the smoothed and the raw trajectory
+      to be the random shifts to correct for
+
+    Parameters
+    ----------
+    tl : array-like of shape (N_t, *spatial_shape)
+        Timelapse, the first dimension being time.
+    sigma : float, optional
+        Standard deviation (in timepoints) of the gaussian filter used for
+        smoothing the trajectory, by default 2
+    n_parallel : int, optional
+        Number of frame pairs to register in parallel, by default
+        `DEFAULT_N_PARALLEL_STABILIZATION`. Limits memory usage.
+
+    Returns
+    -------
+    np.ndarray of shape (N_t, ndim)
+        Shift in pixels to apply to each timepoint in order to remove the
+        random shifts from the trajectory.
+    """
+    if n_parallel is None:
+        n_parallel = DEFAULT_N_PARALLEL_STABILIZATION
+
+    shifts_delayed = [
+        delayed(_phase_correlation_shift)(tl[it - 1], tl[it])
+        for it in range(1, len(tl))
+    ]
+
+    shifts = []
+    for i in range(0, len(shifts_delayed), n_parallel):
+        shifts += list(compute(shifts_delayed[i : i + n_parallel])[0])
+
+    # the trajectory of the sample, taking the first timepoint as a reference
+    ndim = len(np.shape(tl)) - 1
+    trajectory = np.cumsum([np.zeros(ndim)] + shifts, axis=0)
+
+    # the trajectory is small (N_t x ndim), so it's smoothed in memory
+    # rather than using a chunked filter
+    trajectory_smoothed = ndimage.gaussian_filter(
+        trajectory, [sigma, 0], mode="nearest"
+    )
+
+    # move each timepoint from where the sample is onto the smooth trajectory
+    return trajectory_smoothed - trajectory
+
+
+def _get_stabilization_res_scale(msim, reg_res_level=None):
+    """
+    Determine the scale key at which to stabilize a view.
+
+    If `reg_res_level` is None, the resolution level is determined in the same
+    way as in `register`: from the binning suggested by the registration
+    binning heuristic.
+
+    Parameters
+    ----------
+    msim : MultiscaleSpatialImage
+    reg_res_level : int, optional
+        Resolution level to use (e.g. 0 for scale0), by default None
+
+    Returns
+    -------
+    str
+        Scale key, e.g. 'scale0'
+    """
+    scale_keys = msi_utils.get_sorted_scale_keys(msim)
+
+    if reg_res_level is not None:
+        scale_key = f"scale{reg_res_level}"
+        if scale_key not in scale_keys:
+            raise ValueError(
+                f"Resolution level {reg_res_level} ({scale_key}) "
+                f"does not exist in the multiscale image"
+            )
+        return scale_key
+
+    sim = msi_utils.get_sim_from_msim(msim, scale="scale0")
+    spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+
+    # the binning heuristic expects spatial dimensions only
+    sim_spatial = sim.isel(
+        {dim: 0 for dim in sim.dims if dim not in spatial_dims}
+    )
+    registration_binning = get_optimal_registration_binning(
+        sim_spatial, sim_spatial
+    )
+
+    scale_key, _ = msi_utils.get_res_level_from_binning_factors(
+        msim, registration_binning
+    )
+
+    return scale_key
+
+
+def stabilize(
+    msims,
+    reg_channel_index=0,
+    reg_res_level=None,
+    sigma=2,
+    transform_key=None,
+    new_transform_key=None,
+    n_parallel=None,
+):
+    """
+    Stabilize views over time.
+
+    Each view is stabilized independently of the others, i.e. no registration
+    between views is performed. Within a view, the random shifts between
+    timepoints are determined by `get_stabilization_shifts` and returned as
+    one transform per view and timepoint.
+
+    Parameters
+    ----------
+    msims : list of MultiscaleSpatialImage
+        Input views, containing a 't' dimension of at least 8 timepoints.
+    reg_channel_index : int, optional
+        Index of the channel to use for stabilization, by default 0
+    reg_res_level : int, optional
+        Resolution level to use for stabilization (e.g. 0 for scale0).
+        By default None, in which case the level is determined in the same way
+        as in `register`.
+    sigma : float, optional
+        Standard deviation (in timepoints) of the gaussian filter used for
+        smoothing the trajectory of each view, by default 2
+    transform_key : str, optional
+        Extrinsic coordinate system to use as a starting point for the
+        stabilization, by default None
+    new_transform_key : str, optional
+        If set, the stabilization result is registered as a new extrinsic
+        coordinate system in the input views (with the given name),
+        by default None
+    n_parallel : int, optional
+        Number of frame pairs to register in parallel, by default
+        `DEFAULT_N_PARALLEL_STABILIZATION`
+
+    Returns
+    -------
+    list of xr.DataArray
+        One transform per view, with a 't' dimension, stabilizing the view
+        relative to the coordinate system given by `transform_key`.
+    """
+    params = []
+    for imsim, msim in enumerate(msims):
+        scale_key = _get_stabilization_res_scale(
+            msim, reg_res_level=reg_res_level
+        )
+        logger.info(
+            "Stabilizing view %s at resolution level %s", imsim, scale_key
+        )
+
+        sim = msi_utils.get_sim_from_msim(msim, scale=scale_key)
+
+        if "c" in sim.dims:
+            sim = sim.sel(c=sim.coords["c"][reg_channel_index])
+
+        if "t" not in sim.dims or len(sim.coords["t"]) < 8:
+            raise ValueError(
+                "Need at least 8 timepoints to perform stabilization."
+            )
+
+        spatial_dims = spatial_image_utils.get_spatial_dims_from_sim(sim)
+        sim = sim.transpose(*(["t"] + spatial_dims))
+
+        shifts = get_stabilization_shifts(
+            sim.data, sigma=sigma, n_parallel=n_parallel
+        )
+
+        # the shifts are in pixels of the resolution level used
+        spacing = spatial_image_utils.get_spacing_from_sim(sim, asarray=True)
+
+        xparams = xr.concat(
+            [
+                param_utils.affine_to_xaffine(
+                    param_utils.affine_from_translation(shift * spacing)
+                )
+                for shift in shifts
+            ],
+            dim="t",
+        ).assign_coords({"t": sim.coords["t"].values})
+
+        params.append(xparams)
+
+        if new_transform_key is not None:
+            msi_utils.set_affine_transform(
+                msim,
+                xparams,
+                transform_key=new_transform_key,
+                base_transform_key=transform_key,
+            )
+
+    return params
