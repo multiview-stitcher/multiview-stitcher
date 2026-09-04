@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+concurrency:
+  # gh-pages is also written by the docs preview workflow; one writer at a time.
+  group: gh-pages
+  cancel-in-progress: false
+
 jobs:
   docs-main:
     runs-on: ubuntu-latest
