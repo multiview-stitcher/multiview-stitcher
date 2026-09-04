@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="16.5 4.851 104.671 98.649" role="img">
+  <title>multiview-stitcher</title>
+  <desc>
+    Wireframe isometric cube with floating quads whose edges align with the
+    cube's own.
+  </desc>
+
+  <!--
+    The app's favicon, in black or white so it stays legible against either
+    browser chrome.
+
+    The same mark is inlined as a <symbol> in index.html for the header and
+    the About dialog: a file like this one follows the *system* colour scheme,
+    which on a light desktop would draw a black logo onto this app's
+    permanently dark header. Inlined, it paints in currentColor instead. The
+    two are the same geometry - edit them together.
+  -->
+  <style>
+    svg { color: #000; }
+
+    @media (prefers-color-scheme: dark) {
+      svg { color: #fff; }
+    }
+  </style>
+
+  <!-- cube outline only -->
+  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round">
+    <polygon points="60,55 20,35 60,15 80,25 60,35 80,45" />
+    <polygon points="100,80 60,100 60,55 80,45 80,55 100,45" />
+    <polygon points="60,55 20,35 20,80 60,100" />
+    <polygon points="60,55 100,80 60,100 20,80" />
+  </g>
+
+  <!-- floating aligned quads -->
+  <g
+    fill="currentColor"
+    fill-opacity="0.75"
+    stroke="currentColor"
+    stroke-width="1"
+    stroke-linejoin="round"
+  >
+    <polygon points="69.954,35.111 86.006,27.085 102.058,35.111 86.006,43.137" />
+    <polygon points="99.356,15.547 109.013,10.719 118.671,15.547 109.013,20.376" />
+    <polygon points="92.589,10.123 98.133,7.351 103.677,10.123 98.133,12.895" />
+    <polygon points="86.218,21.261 94.928,16.906 103.638,21.261 94.928,25.616" />
+    <polygon points="98.141,34.969 106.677,30.701 115.214,34.969 106.677,39.237" />
+    <polygon points="100.386,28.46 106.866,25.22 113.346,28.46 106.866,31.7" />
+  </g>
+</svg>
