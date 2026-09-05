@@ -1342,9 +1342,18 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#registration-in-ome-zarr-06" class="md-nav__link">
+  <a href="#supported-06-draft" class="md-nav__link">
     <span class="md-ellipsis">
-      Registration in OME-Zarr 0.6
+      Supported 0.6 draft
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coordinate-systems-and-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Coordinate systems and registration
     </span>
   </a>
   
@@ -1562,9 +1571,18 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#registration-in-ome-zarr-06" class="md-nav__link">
+  <a href="#supported-06-draft" class="md-nav__link">
     <span class="md-ellipsis">
-      Registration in OME-Zarr 0.6
+      Supported 0.6 draft
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coordinate-systems-and-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Coordinate systems and registration
     </span>
   </a>
   
@@ -1607,7 +1625,9 @@
 <p class="admonition-title">Note</p>
 <p><code>multiview-stitcher</code> works with any numpy-like input arrays. Therefore, as long as the data can be read into a numpy array, it can be used with <code>multiview-stitcher</code>.</p>
 </div>
-<p>For attaching metadata to arrays, multiview-stitcher works with <a href="https://github.com/spatial-image/spatial-image">SpatialImage</a> objects (with additional transform matrices attached). They can be constructed from Numpy, Dask or CuPy arrays as such:</p>
+<p>A SpatialImage (<code>sim</code>) in multiview-stitcher is an <code>xarray.DataArray</code> with
+spatial coordinates and named affine transformations. It can wrap NumPy, Dask
+or CuPy arrays:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">spatial_image_utils</span> <span class="k">as</span> <span class="n">si_utils</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">sim</span> <span class="o">=</span> <span class="n">si_utils</span><span class="o">.</span><span class="n">get_sim_from_array</span><span class="p">(</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">tile_array</span><span class="p">,</span>
@@ -1618,7 +1638,8 @@
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">c_coords</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;DAPI&#39;</span><span class="p">,</span> <span class="s1">&#39;GFP&#39;</span><span class="p">],</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>A multiscale version of this object is represented by instances of <a href="https://github.com/spatial-image/multiscale-spatial-image">MultiscaleSpatialImage</a>, which can be created as such:</p>
+<p>A MultiscaleSpatialImage (<code>msim</code>) is an <code>xarray.DataTree</code> with resolution
+levels named <code>scale0</code>, <code>scale1</code>, and so on. Create one with:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">msi_utils</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_msim_from_sim</span><span class="p">(</span><span class="n">sim</span><span class="p">,</span> <span class="n">scale_factors</span><span class="o">=</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">])</span>
 </span></code></pre></div>
@@ -1626,62 +1647,78 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">sim</span> <span class="o">=</span> <span class="n">msi_utils</span><span class="o">.</span><span class="n">get_sim_from_msim</span><span class="p">(</span><span class="n">msim</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="s2">&quot;scale0&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="ome-zarr">OME-Zarr</h2>
-<p><code>multiview_stitcher.ngff_utils</code> reads OME-Zarr 0.4, 0.5 and 0.6 and
-writes these formats without loading an entire image into memory. The default
-output remains 0.4. Version 0.4 uses Zarr v2; 0.5 and 0.6 use Zarr v3.</p>
-<h3 id="registration-in-ome-zarr-06">Registration in OME-Zarr 0.6</h3>
-<p>Version 0.6 support targets the <code>ngff-zarr</code> 0.43 metadata model. The reader
-accepts <code>0.6</code> and the <code>0.6.dev4</code> label emitted by that library; the built-in
-writer also emits <code>0.6.dev4</code> (the exact schema revision), selected through
-<code>ngff_version="0.6"</code>. Other prerelease labels, including <code>0.6rc0</code>, are rejected
-rather than assumed compatible. Keep <code>ngff-zarr&gt;=0.43,&lt;0.44</code>: 0.44 changes the
-storage backend and does not accept the Zarr stores used by the browser.</p>
-<p>Pixel spacing and origin map each resolution into an <code>intrinsic</code> physical
-coordinate system. A separate static affine maps those physical coordinates
-into <code>registered</code> (or another chosen name). Registration is never baked into
-pixels or folded into the per-level calibration.</p>
+<p><code>multiview_stitcher.ngff_utils</code> provides lazy reads and chunked writes for
+OME-Zarr 0.4/0.5 and a subset of the 0.6 draft. The default output is 0.4.
+OME-Zarr 0.4 uses Zarr format 2; 0.5 and the supported 0.6 draft use format 3.
+These are storage-format versions, distinct from the <code>zarr-python</code> version.</p>
+<h3 id="supported-06-draft">Supported 0.6 draft</h3>
+<p><code>ngff_version="0.6"</code> selects the <strong>0.6.dev4</strong> schema bundled with
+<a href="https://github.com/fideus-labs/ngff-zarr/tree/py-v0.43.0/py/ngff_zarr/spec/0.6"><code>ngff-zarr</code> 0.43</a>.
+The writer records <code>ome.version="0.6.dev4"</code>; the reader accepts that value and
+<code>"0.6"</code> as an alias for this model. This is not support for all 0.6 revisions:
+other labels, including the <a href="https://ngff.openmicroscopy.org/specifications/dev/index.html">0.6rc0 release candidate</a>,
+are rejected. The package requires <code>ngff-zarr&gt;=0.43,&lt;0.44</code> to retain compatibility
+with the Zarr store objects used by the browser runtime.</p>
+<h3 id="coordinate-systems-and-registration">Coordinate systems and registration</h3>
+<p>Each resolution level's dataset coordinate transformation maps array indices
+to the <strong>intrinsic coordinate system</strong>, the image's native physical coordinate
+system. Scale describes pixel spacing (and time sampling, when present);
+translation describes the origin, including the offset needed to align pyramid
+levels. The 0.6 writer represents scale followed by translation as a <code>sequence</code>.</p>
+<p>An <strong>additional coordinate transformation</strong> at the multiscales level maps
+intrinsic coordinates to another named coordinate system. This is where the
+adapter stores a registration affine, shared by every resolution level.
+The image arrays are not resampled when exporting this transformation.</p>
+<p>The package's <code>transform_key</code> selects an affine attached to a sim or msim.
+<code>target_coordinate_system</code> names a coordinate system in OME-Zarr metadata.
+They need not match. The writer uses <code>intrinsic</code> and <code>registered</code> as default
+coordinate-system names; NGFF does not require those literal names.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span> <span class="nn">multiview_stitcher</span> <span class="kn">import</span> <span class="n">ngff_utils</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># sim already carries a registration under this transform key.</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># sim has an affine stored under &quot;affine_registered&quot; after registration.</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">ngff_utils</span><span class="o">.</span><span class="n">write_sim_to_ome_zarr</span><span class="p">(</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">sim</span><span class="p">,</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">ngff_version</span><span class="o">=</span><span class="s2">&quot;0.6&quot;</span><span class="p">,</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">target_coordinate_system</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">)</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_msim_from_ome_zarr</span><span class="p">(</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">target_coordinate_system</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="p">)</span>
-</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
-</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="c1"># After refining msim&#39;s registration, update metadata without rewriting pixels.</span>
-</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="n">ngff_utils</span><span class="o">.</span><span class="n">update_ome_zarr_multiscales_metadata</span><span class="p">(</span>
-</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span> <span class="n">msim</span><span class="p">,</span> <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">sim</span><span class="p">,</span> <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">ngff_version</span><span class="o">=</span><span class="s2">&quot;0.6&quot;</span><span class="p">,</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;affine_registered&quot;</span><span class="p">,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">target_coordinate_system</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="p">)</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">msim</span> <span class="o">=</span> <span class="n">ngff_utils</span><span class="o">.</span><span class="n">read_msim_from_ome_zarr</span><span class="p">(</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">target_coordinate_system</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;affine_registered&quot;</span><span class="p">,</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="p">)</span>
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># After refining that affine, update it without rewriting image arrays.</span>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="n">ngff_utils</span><span class="o">.</span><span class="n">update_ome_zarr_multiscales_metadata</span><span class="p">(</span>
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="s2">&quot;tile.ome.zarr&quot;</span><span class="p">,</span> <span class="n">msim</span><span class="p">,</span>
+</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="n">transform_key</span><span class="o">=</span><span class="s2">&quot;affine_registered&quot;</span><span class="p">,</span>
 </span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="n">target_coordinate_system</span><span class="o">=</span><span class="s2">&quot;registered&quot;</span><span class="p">,</span>
 </span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>Omitting <code>transform_key</code> when writing exports calibration only. On reading,
-omitting <code>target_coordinate_system</code> selects the sole registration; multiple
-registrations require explicit selection. Select the intrinsic system by name
-to load the unregistered image. Both <code>array_backend="zarr"</code> (default) and
-<code>array_backend="dask"</code> keep reads lazy.</p>
-<p>Supported registrations are inline identity, scale, translation, rotation,
-affine, and sequences of these, acting on <code>yx</code> or <code>zyx</code>. Time and channel axes
-must remain unchanged by registration. Intrinsic and target axis names, order,
-and units must match. Unsupported nonlinear, array-backed, indirect,
-axis-mixing, or time/channel-varying registrations raise errors. Parent <code>scene</code>
-collections are not traversed; pass an individual image group.</p>
-<p>Use <code>msim_to_ngff_multiscales(msim, transform_key="registered",
-ngff_version="0.6")</code> to export an existing pyramid through <code>ngff-zarr</code>.
-For fused output, pass <code>zarr_options={"ome_zarr": True, "ngff_version": "0.6"}</code>
-to <code>fusion.fuse</code>. Fusion resamples onto its output grid, so its output records
-that grid's calibration without reapplying the input registration.</p>
-<p>OME-Zarr 0.4/0.5 cannot store a general registration affine. The legacy
-scale/translation converter rejects rotations, shear, and varying transforms;
-use 0.6 to retain a full static affine.</p>
+<p>Omitting <code>transform_key</code> in <code>write_sim_to_ome_zarr</code> writes only dataset
+calibration. On reading, omitting <code>target_coordinate_system</code> selects the sole
+additional transformation; multiple candidates require explicit selection.
+Selecting the intrinsic coordinate system retains calibration and stores an
+identity affine under <code>transform_key</code>. Both <code>array_backend="zarr"</code> (default)
+and <code>array_backend="dask"</code> keep image reads lazy.</p>
+<p>This adapter supports inline <code>identity</code>, <code>scale</code>, <code>translation</code>, <code>rotation</code>,
+<code>affine</code>, and <code>sequence</code> transformations that reduce to a static spatial affine.
+Here, <strong>static</strong> means identical across timepoints and channels. The adapter
+requires spatial axes ordered as <code>yx</code> or <code>zyx</code>, matching intrinsic/target axis
+names and units, and no transformation of time or channel coordinates by the
+registration affine. These are implementation limits, not general NGFF rules.
+Array-backed parameters, nonlinear transformations, and paths through
+intermediate coordinate systems are unsupported. Parent <code>scene</code> groups are
+not traversed; pass an individual image group.</p>
+<p>Use <code>msim_to_ngff_multiscales(..., ngff_version="0.6")</code> to convert an existing
+pyramid to ngff-zarr's in-memory <code>Multiscales</code> representation. For fused output,
+pass <code>zarr_options={"ome_zarr": True, "ngff_version": "0.6"}</code> to <code>fusion.fuse</code>.
+Fusion resamples images onto its output grid and writes that grid's calibration.</p>
+<p>OME-Zarr 0.4/0.5 support scale and translation coordinate transformations, but
+not the general <code>affine</code> transformation type. The legacy
+<code>sim_to_ngff_image</code> converter can fold a static translation into the origin;
+it rejects other registration affines rather than discarding their components.</p>
 <h2 id="further-file-formats">Further file formats</h2>
 <p><a href="https://github.com/bioio-devs/bioio"><code>bioio</code></a> is a very convenient library for reading a large variety of image files and it includes support for lazy loading. Here's example code of how to use <code>bioio</code> to load an image file into a tile compatible with <code>multiview-stitcher</code>:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span> <span class="nn">bioio</span> <span class="kn">import</span> <span class="n">BioImage</span>
