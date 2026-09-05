@@ -3,7 +3,9 @@
 !!! note
     `multiview-stitcher` works with any numpy-like input arrays. Therefore, as long as the data can be read into a numpy array, it can be used with `multiview-stitcher`.
 
-For attaching metadata to arrays, multiview-stitcher works with [SpatialImage](https://github.com/spatial-image/spatial-image) objects (with additional transform matrices attached). They can be constructed from Numpy, Dask or CuPy arrays as such:
+A SpatialImage (`sim`) in multiview-stitcher is an `xarray.DataArray` with
+spatial coordinates and named affine transformations. It can wrap NumPy, Dask
+or CuPy arrays:
 
 ```python
 from multiview_stitcher import spatial_image_utils as si_utils
@@ -17,7 +19,8 @@ sim = si_utils.get_sim_from_array(
 )
 ```
 
-A multiscale version of this object is represented by instances of [MultiscaleSpatialImage](https://github.com/spatial-image/multiscale-spatial-image), which can be created as such:
+A MultiscaleSpatialImage (`msim`) is an `xarray.DataTree` with resolution
+levels named `scale0`, `scale1`, and so on. Create one with:
 
 ```python
 from multiview_stitcher import msi_utils
@@ -33,71 +36,90 @@ sim = msi_utils.get_sim_from_msim(msim, scale="scale0")
 
 ## OME-Zarr
 
-`multiview_stitcher.ngff_utils` reads OME-Zarr 0.4, 0.5 and 0.6 and
-writes these formats without loading an entire image into memory. The default
-output remains 0.4. Version 0.4 uses Zarr v2; 0.5 and 0.6 use Zarr v3.
+`multiview_stitcher.ngff_utils` provides lazy reads and chunked writes for
+OME-Zarr 0.4/0.5 and a subset of the 0.6 draft. The default output is 0.4.
+OME-Zarr 0.4 uses Zarr format 2; 0.5 and the supported 0.6 draft use format 3.
+These are storage-format versions, distinct from the `zarr-python` version.
 
-### Registration in OME-Zarr 0.6
+### Supported 0.6 draft
 
-Version 0.6 support targets the `ngff-zarr` 0.43 metadata model. The reader
-accepts `0.6` and the `0.6.dev4` label emitted by that library; the built-in
-writer also emits `0.6.dev4` (the exact schema revision), selected through
-`ngff_version="0.6"`. Other prerelease labels, including `0.6rc0`, are rejected
-rather than assumed compatible. Keep `ngff-zarr>=0.43,<0.44`: 0.44 changes the
-storage backend and does not accept the Zarr stores used by the browser.
+`ngff_version="0.6"` selects the **0.6.dev4** schema bundled with
+[`ngff-zarr` 0.43](https://github.com/fideus-labs/ngff-zarr/tree/py-v0.43.0/py/ngff_zarr/spec/0.6).
+The writer records `ome.version="0.6.dev4"`; the reader accepts that value and
+`"0.6"` as an alias for this model. This is not support for all 0.6 revisions:
+other labels, including the [0.6rc0 release candidate](https://ngff.openmicroscopy.org/specifications/dev/index.html),
+are rejected. The package requires `ngff-zarr>=0.43,<0.44` to retain compatibility
+with the Zarr store objects used by the browser runtime.
 
-Pixel spacing and origin map each resolution into an `intrinsic` physical
-coordinate system. A separate static affine maps those physical coordinates
-into `registered` (or another chosen name). Registration is never baked into
-pixels or folded into the per-level calibration.
+### Coordinate systems and registration
+
+Each resolution level's dataset coordinate transformation maps array indices
+to the **intrinsic coordinate system**, the image's native physical coordinate
+system. Scale describes pixel spacing (and time sampling, when present);
+translation describes the origin, including the offset needed to align pyramid
+levels. The 0.6 writer represents scale followed by translation as a `sequence`.
+
+An **additional coordinate transformation** at the multiscales level maps
+intrinsic coordinates to another named coordinate system. This is where the
+adapter stores a registration affine, shared by every resolution level.
+The image arrays are not resampled when exporting this transformation.
+
+The package's `transform_key` selects an affine attached to a sim or msim.
+`target_coordinate_system` names a coordinate system in OME-Zarr metadata.
+They need not match. The writer uses `intrinsic` and `registered` as default
+coordinate-system names; NGFF does not require those literal names.
 
 ```python
 from multiview_stitcher import ngff_utils
 
-# sim already carries a registration under this transform key.
+# sim has an affine stored under "affine_registered" after registration.
 ngff_utils.write_sim_to_ome_zarr(
-    sim,
-    "tile.ome.zarr",
+    sim, "tile.ome.zarr",
     ngff_version="0.6",
-    transform_key="registered",
+    transform_key="affine_registered",
     target_coordinate_system="registered",
 )
 
 msim = ngff_utils.read_msim_from_ome_zarr(
     "tile.ome.zarr",
-    transform_key="registered",
     target_coordinate_system="registered",
+    transform_key="affine_registered",
 )
 
-# After refining msim's registration, update metadata without rewriting pixels.
+# After refining that affine, update it without rewriting image arrays.
 ngff_utils.update_ome_zarr_multiscales_metadata(
-    "tile.ome.zarr", msim, transform_key="registered",
+    "tile.ome.zarr", msim,
+    transform_key="affine_registered",
     target_coordinate_system="registered",
 )
 ```
 
-Omitting `transform_key` when writing exports calibration only. On reading,
-omitting `target_coordinate_system` selects the sole registration; multiple
-registrations require explicit selection. Select the intrinsic system by name
-to load the unregistered image. Both `array_backend="zarr"` (default) and
-`array_backend="dask"` keep reads lazy.
+Omitting `transform_key` in `write_sim_to_ome_zarr` writes only dataset
+calibration. On reading, omitting `target_coordinate_system` selects the sole
+additional transformation; multiple candidates require explicit selection.
+Selecting the intrinsic coordinate system retains calibration and stores an
+identity affine under `transform_key`. Both `array_backend="zarr"` (default)
+and `array_backend="dask"` keep image reads lazy.
 
-Supported registrations are inline identity, scale, translation, rotation,
-affine, and sequences of these, acting on `yx` or `zyx`. Time and channel axes
-must remain unchanged by registration. Intrinsic and target axis names, order,
-and units must match. Unsupported nonlinear, array-backed, indirect,
-axis-mixing, or time/channel-varying registrations raise errors. Parent `scene`
-collections are not traversed; pass an individual image group.
+This adapter supports inline `identity`, `scale`, `translation`, `rotation`,
+`affine`, and `sequence` transformations that reduce to a static spatial affine.
+Here, **static** means identical across timepoints and channels. The adapter
+requires spatial axes ordered as `yx` or `zyx`, matching intrinsic/target axis
+names and units, and no transformation of time or channel coordinates by the
+registration affine. These are implementation limits, not general NGFF rules.
+Array-backed parameters, nonlinear transformations, and paths through
+intermediate coordinate systems are unsupported. Parent `scene` groups are
+not traversed; pass an individual image group.
 
-Use `msim_to_ngff_multiscales(msim, transform_key="registered",
-ngff_version="0.6")` to export an existing pyramid through `ngff-zarr`.
-For fused output, pass `zarr_options={"ome_zarr": True, "ngff_version": "0.6"}`
-to `fusion.fuse`. Fusion resamples onto its output grid, so its output records
-that grid's calibration without reapplying the input registration.
+Use `msim_to_ngff_multiscales(..., ngff_version="0.6")` to convert an existing
+pyramid to ngff-zarr's in-memory `Multiscales` representation. For fused output,
+pass `zarr_options={"ome_zarr": True, "ngff_version": "0.6"}` to `fusion.fuse`.
+Fusion resamples images onto its output grid and writes that grid's calibration.
 
-OME-Zarr 0.4/0.5 cannot store a general registration affine. The legacy
-scale/translation converter rejects rotations, shear, and varying transforms;
-use 0.6 to retain a full static affine.
+OME-Zarr 0.4/0.5 support scale and translation coordinate transformations, but
+not the general `affine` transformation type. The legacy
+`sim_to_ngff_image` converter can fold a static translation into the origin;
+it rejects other registration affines rather than discarding their components.
 
 
 ## Further file formats

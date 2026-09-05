@@ -1,7 +1,9 @@
-"""OME-Zarr 0.6 metadata and static spatial affine adapters.
+"""Adapters for the OME-Zarr 0.6.dev4 coordinate-transformation model.
 
-Pixel calibration stays on each dataset; registration maps intrinsic physical
-coordinates to a named output system. No pixel I/O or resampling happens here.
+Dataset coordinate transformations map array coordinates to the intrinsic
+coordinate system. Additional transformations map intrinsic coordinates to a
+named output coordinate system. This adapter supports static spatial affines;
+static means identical across timepoints and channels. No image I/O occurs here.
 """
 
 from copy import deepcopy
@@ -13,7 +15,7 @@ from multiview_stitcher import spatial_image_utils as si_utils
 
 
 def transform_matrix(transform, ndim):
-    """Evaluate an inline, dimension-preserving linear NGFF transformation."""
+    """Evaluate an inline, dimension-preserving affine coordinate transformation."""
     tf = asdict(transform) if not isinstance(transform, dict) else transform
     kind = tf.get("type")
     matrix = np.eye(ndim + 1)
@@ -101,7 +103,7 @@ def registration_transform(axes, affine, intrinsic, target):
 
 
 def build_metadata(axes, datasets, name, affine=None, target="registered"):
-    """Build metadata with ngff-zarr's version-specific data model."""
+    """Build metadata with ngff-zarr 0.43's 0.6.dev4 data model."""
     from ngff_zarr.v06.zarr_metadata import (
         Axis,
         CoordinateSystem,
@@ -175,7 +177,7 @@ def validate_calibration(metadata):
     names = [ax.name for ax in axes]
     spatial = [ax.name for ax in axes if ax.type == "space"]
     if spatial not in (["y", "x"], ["z", "y", "x"]):
-        raise NotImplementedError("NGFF spatial axes must be y,x or z,y,x.")
+        raise NotImplementedError("This adapter requires spatial axes ordered as y,x or z,y,x.")
     expected = [d for d in ("t", "c", "z", "y", "x") if d in names]
     if names != expected or len(set(names)) != len(names):
         raise NotImplementedError("Unsupported NGFF axis names or order.")
@@ -279,7 +281,7 @@ def spatial_affine(metadata, target=None):
         (a.name, a.type, a.unit) for a in systems[target].axes
     ]:
         raise NotImplementedError(
-            "Registration axes and units must match intrinsic."
+            "This adapter requires target axes and units to match intrinsic."
         )
     _, tf, reverse = matches[0]
     matrix = transform_matrix(tf, len(axes))

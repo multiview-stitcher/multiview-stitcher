@@ -1008,13 +1008,13 @@ def serve_virtual_ome_zarrs(
 
 
 def sim_to_ngff_image(sim, transform_key):
-    """
-    Convert a spatial_image (multiview-stitcher flavor) into a
-    ngff_image in-memory representation compatible with NGFF v0.4.
+    """Convert a SpatialImage (sim) to an ngff-zarr NgffImage.
 
-    The translational component of the affine transform associated to
-    the given transform_key will be added to the
-    `translate` coordinateTransformation of the NGFF image.
+    Spacing and origin become scale and translation. If transform_key is
+    provided, its static translation is added to the origin. General affine
+    transformations are rejected: NgffImage carries calibration, whereas
+    additional OME-Zarr coordinate transformations belong to Multiscales
+    metadata. Use msim_to_ngff_multiscales(..., ngff_version="0.6") for those.
     """
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
@@ -1156,9 +1156,12 @@ def msim_to_ngff_multiscales(
 
 
 def ngff_image_to_sim(ngff_im, transform_key, data=None, affine=None):
-    """
-    Convert a ngff_image in-memory representation compatible with NGFF v0.4
-    into a spatial_image (multiview-stitcher flavor).
+    """Convert an ngff-zarr NgffImage to a SpatialImage (xarray.DataArray).
+
+    Scale and translation define the sim's spatial coordinates. The optional
+    homogeneous spatial affine maps these coordinates to a target coordinate
+    system and is stored under transform_key; None stores identity. Additional
+    OME-Zarr coordinate transformations must be resolved by the caller.
     """
 
     # Reuse the general sim constructor so zarr-backed reads preserve chunk
@@ -1204,9 +1207,12 @@ def ngff_multiscales_to_msim(
     data_arrays=None,
     target_coordinate_system=None,
 ):
-    """
-    Convert a list of ngff_image in-memory representations compatible with NGFF v0.4
-    into a multiscale_spatial_image (multiview-stitcher flavor).
+    """Convert ngff-zarr Multiscales to a MultiscaleSpatialImage (DataTree).
+
+    Each resolution level retains its scale and translation. A supported
+    additional coordinate transformation is resolved to a spatial affine and
+    stored under transform_key. target_coordinate_system selects the OME-Zarr
+    coordinate system; it need not have the same name as transform_key.
     """
 
     if data_arrays is None:
@@ -1241,7 +1247,7 @@ def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
 
 
 def read_ngff_multiscales(zarr_path):
-    """Parse OME-Zarr v0.4/v0.5/v0.6 metadata without computing pixels.
+    """Parse OME-Zarr 0.4/0.5 or supported 0.6 draft metadata lazily.
 
     ``zarr_path`` may be a path/URL or an already-constructed zarr store, which
     is how the browser runtime routes reads through its service worker. Parsing
@@ -1285,17 +1291,16 @@ def write_multiscales_metadata(
     affine=None,
     target_coordinate_system="registered",
 ):
-    """Write NGFF ``multiscales`` metadata into an open zarr ``group``.
+    """Write OME-Zarr multiscales metadata without writing image arrays.
 
-    The arrays are written separately - block by block, and in the browser by
-    several workers at once - so only the metadata is written here, which is
-    why ``ngff_zarr.to_ngff_zarr`` is not used: it would write the arrays too.
-    The document itself is ngff-zarr's own :class:`ngff_zarr.Metadata`, so the
-    schema has one definition rather than one per writer.
+    Version-specific ngff-zarr metadata classes describe the document. OME-Zarr
+    0.4 stores multiscales at the top level of group attributes. OME-Zarr 0.5
+    and the supported 0.6 draft use the ome namespace.
 
-    v0.4 keeps ``multiscales`` (including its ``version``) at the top level of
-    the group attributes; v0.5 nests ``multiscales`` and ``version`` inside an
-    ``ome`` attribute.
+    ngff_version="0.6" writes the 0.6.dev4 schema revision: dataset coordinate
+    transformations map array coordinates to the intrinsic coordinate system.
+    If affine is given, a multiscales-level coordinate transformation maps
+    intrinsic coordinates to target_coordinate_system.
     """
     zarr_group_creation_kwargs_for_ngff_version(ngff_version)
     if ngff_version == "0.6":
@@ -1359,10 +1364,10 @@ def _ngff_transform(transform):
 
 
 def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
-    """Keyword arguments for creating the zarr group of an NGFF version.
+    """Select the Zarr storage format for the requested OME-Zarr version.
 
-    NGFF v0.4 is a Zarr v2 hierarchy and v0.5 a Zarr v3 one; under zarr-python
-    v2 there is nothing to choose. Version 0.6 also uses Zarr v3.
+    OME-Zarr 0.4 uses Zarr format 2. OME-Zarr 0.5 and the supported 0.6 draft
+    use Zarr format 3. The package requires zarr-python 3 or later.
     """
     if str(ngff_version).startswith("0.4"):
         if zarr.__version__ >= "3":
@@ -1692,8 +1697,9 @@ def write_sim_to_ome_zarr(
     target_coordinate_system: str = "registered",
 ):
     """
-    Write (and compute) a spatial_image (multiview-stitcher flavor)
-    to a multiscale NGFF zarr file (v0.4, v0.5 or v0.6).
+    Write a SpatialImage (sim) as an OME-Zarr multiscale image.
+
+    Supports 0.4, 0.5 and the 0.6.dev4 draft via ngff_version="0.6".
     Returns the input sim.
 
     If overwrite is False, image data will be read from the zarr file
@@ -1706,28 +1712,30 @@ def write_sim_to_ome_zarr(
 
     Parameters
     ----------
-    sim : spatial_image
-        spatial_image to write
+    sim : xarray.DataArray
+        SpatialImage to write
     output_zarr_url : str
         Path to the output zarr file
     downscale_factors_per_spatial_dim : dict, optional
         Downscale factors per spatial dimension to use for
-        generating the resolution levels, by default None (no downscaling)
+        generating the resolution levels, by default None (automatic factors of 2 where the level size allows)
     overwrite : bool, optional
         Whether to overwrite existing data in the output zarr file,
         by default False
     ngff_version : str, optional
-        NGFF version to use, by default "0.4"
+        OME-Zarr version selector: "0.4" (default), "0.5", or "0.6".
+        "0.6" writes the 0.6.dev4 draft schema, not the 0.6rc0 release candidate.
     zarr_array_creation_kwargs : dict, optional
         Additional keyword arguments to pass to zarr.open
         when creating the zarr arrays, by default None
     show_progressbar : bool, optional
         Whether to show a progress bar (tqdm),
     transform_key : str or None, optional
-        Static registration to export; requires ngff_version="0.6".
+        Package key selecting a static spatial affine; requires ngff_version="0.6".
         None writes only voxel calibration.
     target_coordinate_system : str, optional
-        Name of the output system for the exported registration ("registered").
+        OME-Zarr output coordinate-system name, by default "registered".
+        This name is independent of the package transform_key.
     batch_options : dict, optional
         Options for processing chunks in independent batches. Keys:
         - batch_func: Callable, optional
@@ -1900,33 +1908,34 @@ def read_sim_from_ome_zarr(
     array_backend="zarr",
     target_coordinate_system=None,
 ):
-    """
-    Read a multiscale NGFF zarr file (v0.4/v0.5/v0.6) into a spatial_image
-    (multiview-stitcher flavor) at a given resolution level.
+    """Read one resolution level as a SpatialImage (xarray.DataArray).
 
-    NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
-    an identity transform will be set for the given transform_key.
-    For v0.6, import the unique registration, or select one explicitly with
-    target_coordinate_system. Selecting the intrinsic system skips registration.
+    Supports OME-Zarr 0.4/0.5 and the 0.6.dev4 model, including its "0.6"
+    version alias. In 0.4/0.5, scale and translation define sim coordinates;
+    the separate affine under transform_key is identity. The 0.6 adapter can
+    also import an additional coordinate transformation as a spatial affine.
 
     Parameters
     ----------
-    zarr_path : str or Path
-        Path to the zarr file
+    zarr_path : str, Path or zarr store
+        Image group to read. Parent scene groups are not traversed.
     resolution_level : int, optional
-        Resolution level to read, by default 0 (highest resolution)
+        Resolution level to read; 0 is the highest resolution.
     transform_key : str, optional
-        By default si_utils.DEFAULT_TRANSFORM_KEY
-    array_backend : str, optional
-        Backend to use for reading the zarr file.
-        Options are 'dask' or 'zarr'. Default is 'zarr'.
+        Package key under which to store the affine; defaults to
+        si_utils.DEFAULT_TRANSFORM_KEY ("affine_metadata").
+    array_backend : {"zarr", "dask"}, optional
+        Lazy array backend, by default "zarr".
+    target_coordinate_system : str or None, optional
+        OME-Zarr coordinate-system name, independent of transform_key. None
+        selects the sole supported additional transformation, or identity if
+        none is present. Multiple candidates require explicit selection.
+        Selecting the intrinsic coordinate system retains calibration only.
 
     Returns
     -------
-    spatial_image with transform_key set
-
-    target_coordinate_system selects a named v0.6 registration. None selects
-    the sole registration, or identity when none is present. Ambiguity raises.
+    xarray.DataArray
+        SpatialImage (sim) with the affine stored under transform_key.
     """
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
@@ -2032,36 +2041,36 @@ def update_ome_zarr_multiscales_metadata(
     transform_key,
     target_coordinate_system="registered",
 ):
-    """
-    Update the multiscales coordinate transformations (scale and translation)
-    of an OME-Zarr file on disk using the spacing and origin from the
-    resolution levels of an in-memory msim.
+    """Update image coordinate transformations without writing image arrays.
 
-    For v0.6, update only the static intrinsic-to-target registration. Voxel
-    calibration and pixel data are preserved; differing grids are rejected.
-    target_coordinate_system defaults to "registered". None for transform_key
-    writes an identity registration.
+    For OME-Zarr 0.4/0.5, update each resolution level's scale and translation
+    from msim; a selected static translation is added to the origin.
+    For the supported 0.6 draft, update only the additional transformation
+    between the intrinsic and target coordinate systems. Dataset calibration
+    is preserved, and differing spatial grids are rejected.
 
-    Only the "ome" key (v0.5/v0.6) or "multiscales" key (v0.4) of the zarr group
-    attributes is modified; other metadata (e.g. "omero") is preserved.
+    Other group metadata, including omero display settings, is preserved.
 
     Parameters
     ----------
-    zarr_path : str
-        Path to the OME-Zarr file on disk.
-    msim : multiscale_spatial_image
-        In-memory multiscale image whose resolution levels provide the spacing
-        and origin (and optionally the translational component of a transform)
-        to write back to disk.
+    zarr_path : str, Path or zarr store
+        Image group to update.
+    msim : xarray.DataTree
+        MultiscaleSpatialImage with the same resolution levels as the image.
     transform_key : str or None
-        Transform key from which to extract the translational component of the
-        affine. Pass None to use the sim origin only.
+        Package key selecting the affine. In 0.4/0.5 it must be a static
+        translation; None uses the sim origin alone. In the 0.6 adapter it may
+        be a full static spatial affine; None writes an identity transformation.
+    target_coordinate_system : str, optional
+        Output coordinate-system name for the 0.6 transformation, by default
+        "registered". Independent of transform_key; unused for 0.4/0.5.
 
     Raises
     ------
     ValueError
-        If the on-disk OME-Zarr version is unsupported, or if the number of
-        resolution levels in msim does not match the on-disk zarr.
+        If the version, resolution levels or spatial grid are incompatible.
+    NotImplementedError
+        If the selected transformation is outside the supported subset.
     """
     root = _zarr_compat.open_zarr_group(zarr_path, mode="a")
     attrs = dict(root.attrs)
@@ -2078,7 +2087,7 @@ def update_ome_zarr_multiscales_metadata(
         if not ngff_version.startswith("0.5"):
             raise ValueError(
                 f"On-disk OME-Zarr has unsupported version '{ngff_version}'. "
-                "Only v0.4 and v0.5 are supported."
+                "Supported versions are 0.4, 0.5, 0.6 and 0.6.dev4."
             )
         multiscales = attrs["ome"]["multiscales"]
     elif "multiscales" in attrs:
@@ -2087,7 +2096,7 @@ def update_ome_zarr_multiscales_metadata(
         if not ngff_version_in_meta.startswith("0.4"):
             raise ValueError(
                 f"On-disk OME-Zarr has unsupported multiscales version "
-                f"'{ngff_version_in_meta}'. Only v0.4 and v0.5 are supported."
+                f"'{ngff_version_in_meta}'. Supported versions are 0.4, 0.5, 0.6 and 0.6.dev4."
             )
         ngff_version = "0.4"
     else:
@@ -2146,31 +2155,32 @@ def read_msim_from_ome_zarr(
     array_backend="zarr",
     target_coordinate_system=None,
 ):
-    """
-    Read a multiscale NGFF zarr file (v0.4/v0.5/v0.6) into a multiscale_spatial_image
-    (multiview-stitcher flavor).
+    """Read a MultiscaleSpatialImage (xarray.DataTree).
 
-    NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
-    an identity transform will be set for the given transform_key.
-    For v0.6, import the unique registration, or select one explicitly with
-    target_coordinate_system. Selecting the intrinsic system skips registration.
+    Supports OME-Zarr 0.4/0.5 and the 0.6.dev4 model, including its "0.6"
+    version alias. In 0.4/0.5, scale and translation define sim coordinates;
+    the separate affine under transform_key is identity. The 0.6 adapter can
+    also import an additional coordinate transformation as a spatial affine.
 
     Parameters
     ----------
-    zarr_path : str or Path
-        Path to the zarr file
+    zarr_path : str, Path or zarr store
+        Image group to read. Parent scene groups are not traversed.
     transform_key : str, optional
-        By default si_utils.DEFAULT_TRANSFORM_KEY
-    array_backend : str, optional
-        Backend to use for reading the zarr file.
-        Options are 'dask' or 'zarr'. Default is 'zarr'.
+        Package key under which to store the affine; defaults to
+        si_utils.DEFAULT_TRANSFORM_KEY ("affine_metadata").
+    array_backend : {"zarr", "dask"}, optional
+        Lazy array backend, by default "zarr".
+    target_coordinate_system : str or None, optional
+        OME-Zarr coordinate-system name, independent of transform_key. None
+        selects the sole supported additional transformation, or identity if
+        none is present. Multiple candidates require explicit selection.
+        Selecting the intrinsic coordinate system retains calibration only.
 
     Returns
     -------
-    multiscale_spatial_image with transform_key set
-
-    target_coordinate_system selects a named v0.6 registration. None selects
-    the sole registration, or identity when none is present. Ambiguity raises.
+    xarray.DataTree
+        MultiscaleSpatialImage (msim) with the affine stored under transform_key.
     """
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
