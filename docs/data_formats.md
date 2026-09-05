@@ -33,12 +33,71 @@ sim = msi_utils.get_sim_from_msim(msim, scale="scale0")
 
 ## OME-Zarr
 
-!!! note
-    NGFF 0.4 (the latest OME-Zarr standard) currently only supports translation transformations. Therefore, affine transformations cannot yet be stored in OME-Zarr files.
+`multiview_stitcher.ngff_utils` reads OME-Zarr 0.4, 0.5 and 0.6 and
+writes these formats without loading an entire image into memory. The default
+output remains 0.4. Version 0.4 uses Zarr v2; 0.5 and 0.6 use Zarr v3.
 
-Some support for reading and writing OME-Zarrs is provided by [multiscaleimage.MultiscaleImage](https://github.com/spatial-image/multiscale-spatial-image).
+### Registration in OME-Zarr 0.6
 
-Further, `multiview_stitcher.ngff_utils` provides some convenience functions for reading and writing OME-Zarrs using [`ngff-zarr`](https://github.com/thewtex/ngff-zarr).
+Version 0.6 support targets the `ngff-zarr` 0.43 metadata model. The reader
+accepts `0.6` and the `0.6.dev4` label emitted by that library; the built-in
+writer also emits `0.6.dev4` (the exact schema revision), selected through
+`ngff_version="0.6"`. Other prerelease labels, including `0.6rc0`, are rejected
+rather than assumed compatible. Keep `ngff-zarr>=0.43,<0.44`: 0.44 changes the
+storage backend and does not accept the Zarr stores used by the browser.
+
+Pixel spacing and origin map each resolution into an `intrinsic` physical
+coordinate system. A separate static affine maps those physical coordinates
+into `registered` (or another chosen name). Registration is never baked into
+pixels or folded into the per-level calibration.
+
+```python
+from multiview_stitcher import ngff_utils
+
+# sim already carries a registration under this transform key.
+ngff_utils.write_sim_to_ome_zarr(
+    sim,
+    "tile.ome.zarr",
+    ngff_version="0.6",
+    transform_key="registered",
+    target_coordinate_system="registered",
+)
+
+msim = ngff_utils.read_msim_from_ome_zarr(
+    "tile.ome.zarr",
+    transform_key="registered",
+    target_coordinate_system="registered",
+)
+
+# After refining msim's registration, update metadata without rewriting pixels.
+ngff_utils.update_ome_zarr_multiscales_metadata(
+    "tile.ome.zarr", msim, transform_key="registered",
+    target_coordinate_system="registered",
+)
+```
+
+Omitting `transform_key` when writing exports calibration only. On reading,
+omitting `target_coordinate_system` selects the sole registration; multiple
+registrations require explicit selection. Select the intrinsic system by name
+to load the unregistered image. Both `array_backend="zarr"` (default) and
+`array_backend="dask"` keep reads lazy.
+
+Supported registrations are inline identity, scale, translation, rotation,
+affine, and sequences of these, acting on `yx` or `zyx`. Time and channel axes
+must remain unchanged by registration. Intrinsic and target axis names, order,
+and units must match. Unsupported nonlinear, array-backed, indirect,
+axis-mixing, or time/channel-varying registrations raise errors. Parent `scene`
+collections are not traversed; pass an individual image group.
+
+Use `msim_to_ngff_multiscales(msim, transform_key="registered",
+ngff_version="0.6")` to export an existing pyramid through `ngff-zarr`.
+For fused output, pass `zarr_options={"ome_zarr": True, "ngff_version": "0.6"}`
+to `fusion.fuse`. Fusion resamples onto its output grid, so its output records
+that grid's calibration without reapplying the input registration.
+
+OME-Zarr 0.4/0.5 cannot store a general registration affine. The legacy
+scale/translation converter rejects rotations, shear, and varying transforms;
+use 0.6 to retain a full static affine.
 
 
 ## Further file formats

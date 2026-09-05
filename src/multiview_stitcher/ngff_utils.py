@@ -20,12 +20,20 @@ from xarray import DataTree
 
 import ngff_zarr
 
-from multiview_stitcher import _zarr_compat, msi_utils, param_utils, misc_utils
+from multiview_stitcher import (
+    _ngff_v06,
+    _zarr_compat,
+    msi_utils,
+    param_utils,
+    misc_utils,
+)
 from multiview_stitcher import spatial_image_utils as si_utils
 
 # Original axes of an image read from NGFF.  Spatial images deliberately add
 # missing singleton ``t``/``c`` dimensions, but a viewer transform attached to
 # the original OME-Zarr must still have the rank of the array on disk.
+NGFF_AXES_UNITS_ATTR = "_multiview_stitcher_ngff_axes_units"
+
 NGFF_SOURCE_DIMS_ATTR = "_multiview_stitcher_ngff_source_dims"
 
 # Calibration of the NGFF time axis.  Spatial images carry their spatial
@@ -1010,41 +1018,90 @@ def sim_to_ngff_image(sim, transform_key):
     """
 
     sdims = si_utils.get_spatial_dims_from_sim(sim)
-    nsdims = si_utils.get_nonspatial_dims_from_sim(sim)
-
     origin = si_utils.get_origin_from_sim(sim)
     if transform_key is not None:
-        transform = si_utils.get_affine_from_sim(sim, transform_key)
-        for nsdim in nsdims:
-            if nsdim in transform.dims:
-                transform = transform.sel(
-                    {
-                        nsdim: transform.coords[nsdim][0]
-                        for nsdim in transform.dims
-                    }
-                )
-        transform = np.array(transform)
+        transform = _ngff_v06.static_affine(sim, transform_key)
+        if not np.allclose(transform[:-1, :-1], np.eye(len(sdims))):
+            raise ValueError(
+                "Scale/translation export cannot represent this registration; "
+                "use msim_to_ngff_multiscales(..., ngff_version='0.6')."
+            )
         transform_translation = param_utils.translation_from_affine(transform)
         for isdim, sdim in enumerate(sdims):
             origin[sdim] = origin[sdim] + transform_translation[isdim]
 
+    time = get_ngff_time_transform(sim)
+    scale = si_utils.get_spacing_from_sim(sim)
+    if "t" in sim.dims:
+        scale["t"] = time["scale"]
+        origin["t"] = time["translation"]
     return ngff_zarr.to_ngff_image(
         sim.data,
         dims=sim.dims,
-        scale=si_utils.get_spacing_from_sim(sim),
+        scale=scale,
         translation=origin,
+        axes_units=sim.attrs.get(NGFF_AXES_UNITS_ATTR),
     )
 
 
-def msim_to_ngff_multiscales(msim, transform_key):
-    """
-    Convert a multiscale_spatial_image (multiview-stitcher flavor) into a
-    ngff_image in-memory representation compatible with NGFF v0.4.
+def msim_to_ngff_multiscales(
+    msim,
+    transform_key,
+    ngff_version="0.4",
+    target_coordinate_system="registered",
+):
+    """Convert an existing pyramid to NGFF metadata and lazy arrays.
 
-    The translational component of the affine transform associated to
-    the given transform_key will be added to the
-    `translate` coordinateTransformation of the NGFF image(s).
+    The default 0.4 representation folds a static translation into each
+    level's origin. Version 0.6 keeps the full registration affine separate
+    from per-level calibration and names its target coordinate system.
     """
+
+    if ngff_version == "0.6":
+        sims = [
+            msi_utils.get_sim_from_msim(msim, scale=key)
+            for key in msi_utils.get_sorted_scale_keys(msim)
+        ]
+        affines = [_ngff_v06.static_affine(sim, transform_key) for sim in sims]
+        if any(not np.allclose(a, affines[0]) for a in affines[1:]):
+            raise ValueError(
+                "Registration must be identical across pyramid levels."
+            )
+        images = [sim_to_ngff_image(sim, transform_key=None) for sim in sims]
+        datasets = []
+        for level, sim in enumerate(sims):
+            sdims = si_utils.get_spatial_dims_from_sim(sim)
+            coordtfs, axes = calc_ngff_coordinate_transformations_and_axes(
+                {
+                    "spacing": si_utils.get_spacing_from_sim(sim),
+                    "origin": si_utils.get_origin_from_sim(sim),
+                },
+                [{d: 1 for d in sdims}],
+                nsdims=si_utils.get_nonspatial_dims_from_sim(sim),
+                time_transform=get_ngff_time_transform(sim),
+            )
+            for axis in axes:
+                units = sim.attrs.get(NGFF_AXES_UNITS_ATTR, {})
+                if axis["name"] in units:
+                    axis["unit"] = units[axis["name"]]
+            datasets.append(
+                {
+                    "path": f"scale{level}/image",
+                    "coordinateTransformations": coordtfs[0],
+                }
+            )
+        metadata = _ngff_v06.build_metadata(
+            _drop_none_values(axes),
+            datasets,
+            "image",
+            affines[0] if transform_key is not None else None,
+            target_coordinate_system,
+        )
+        return ngff_zarr.Multiscales(
+            images, metadata=metadata, scale_factors=[]
+        )
+    if ngff_version != "0.4":
+        raise ValueError("In-memory export supports versions '0.4' and '0.6'.")
 
     ngff_ims = []
     for scale_key in msi_utils.get_sorted_scale_keys(msim):
@@ -1098,7 +1155,7 @@ def msim_to_ngff_multiscales(msim, transform_key):
     return ngff_multiscales
 
 
-def ngff_image_to_sim(ngff_im, transform_key, data=None):
+def ngff_image_to_sim(ngff_im, transform_key, data=None, affine=None):
     """
     Convert a ngff_image in-memory representation compatible with NGFF v0.4
     into a spatial_image (multiview-stitcher flavor).
@@ -1118,6 +1175,7 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
     # added by get_sim_from_array().  Consumers that address the original
     # OME-Zarr (not a newly generated virtual one) need the former.
     sim.attrs[NGFF_SOURCE_DIMS_ATTR] = list(ngff_im.dims)
+    sim.attrs[NGFF_AXES_UNITS_ATTR] = dict(ngff_im.axes_units or {})
 
     # get_sim_from_array() applies scale and translation to the spatial
     # coordinates only; ``t`` coordinates stay frame indices.  Keep the time
@@ -1131,7 +1189,8 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
     si_utils.set_sim_affine(
         sim,
         param_utils.affine_to_xaffine(
-            np.eye(len(sdims) + 1), t_coords=sim.coords["t"].values
+            np.eye(len(sdims) + 1) if affine is None else affine,
+            t_coords=sim.coords["t"].values,
         ),
         transform_key=transform_key,
     )
@@ -1139,7 +1198,12 @@ def ngff_image_to_sim(ngff_im, transform_key, data=None):
     return sim
 
 
-def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
+def ngff_multiscales_to_msim(
+    ngff_multiscales,
+    transform_key,
+    data_arrays=None,
+    target_coordinate_system=None,
+):
     """
     Convert a list of ngff_image in-memory representations compatible with NGFF v0.4
     into a multiscale_spatial_image (multiview-stitcher flavor).
@@ -1148,6 +1212,9 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
     if data_arrays is None:
         data_arrays = [None] * len(ngff_multiscales.images)
 
+    affine = _registration_from_ngff(
+        ngff_multiscales, target_coordinate_system
+    )
     msim_dict = {}
     for iscale, (ngff_im, data_array) in enumerate(
         zip(ngff_multiscales.images, data_arrays)
@@ -1156,6 +1223,7 @@ def ngff_multiscales_to_msim(ngff_multiscales, transform_key, data_arrays=None):
             ngff_im,
             transform_key=transform_key,
             data=data_array,
+            affine=affine,
         )
         curr_scale_msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
         msim_dict[f"scale{iscale}"] = curr_scale_msim["scale0"]
@@ -1173,16 +1241,50 @@ def _open_ngff_dataset_arrays(zarr_path, ngff_multiscales):
 
 
 def read_ngff_multiscales(zarr_path):
-    """Parse the NGFF multiscales metadata of an OME-Zarr v0.4/v0.5 store.
+    """Parse OME-Zarr v0.4/v0.5/v0.6 metadata without computing pixels.
 
     ``zarr_path`` may be a path/URL or an already-constructed zarr store, which
     is how the browser runtime routes reads through its service worker. Parsing
     reads metadata only - no chunk is fetched until the arrays are used.
     """
-    return ngff_zarr.from_ngff_zarr(zarr_path)
+    root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
+    version = root.attrs.get("ome", {}).get("version", "")
+    if version.startswith("0.6") and version not in ("0.6", "0.6.dev4"):
+        raise ValueError(
+            f"Unsupported OME-Zarr revision {version!r}; "
+            "this adapter targets the ngff-zarr 0.43 '0.6' model."
+        )
+    multiscales = ngff_zarr.from_ngff_zarr(zarr_path)
+    if version in ("0.6", "0.6.dev4"):
+        _ngff_v06.validate_calibration(multiscales.metadata)
+        # ngff-zarr 0.43 derives dims from the first system, which need not be
+        # intrinsic. Do not silently interpret such data in a different basis.
+        intrinsic = multiscales.metadata.intrinsic_coordinate_system
+        if list(multiscales.images[0].dims) != [
+            a.name for a in intrinsic.axes
+        ]:
+            raise NotImplementedError("Coordinate system axis orders differ.")
+    return multiscales
 
 
-def write_multiscales_metadata(group, axes, datasets, ngff_version="0.4"):
+def _registration_from_ngff(multiscales, target_coordinate_system):
+    metadata = multiscales.metadata
+    if hasattr(metadata, "coordinateSystems"):
+        _ngff_v06.validate_calibration(metadata)
+        return _ngff_v06.spatial_affine(metadata, target_coordinate_system)
+    if target_coordinate_system is not None:
+        raise ValueError("This metadata has no named coordinate systems.")
+    return None
+
+
+def write_multiscales_metadata(
+    group,
+    axes,
+    datasets,
+    ngff_version="0.4",
+    affine=None,
+    target_coordinate_system="registered",
+):
     """Write NGFF ``multiscales`` metadata into an open zarr ``group``.
 
     The arrays are written separately - block by block, and in the browser by
@@ -1195,6 +1297,20 @@ def write_multiscales_metadata(group, axes, datasets, ngff_version="0.4"):
     the group attributes; v0.5 nests ``multiscales`` and ``version`` inside an
     ``ome`` attribute.
     """
+    zarr_group_creation_kwargs_for_ngff_version(ngff_version)
+    if ngff_version == "0.6":
+        metadata = _ngff_v06.build_metadata(
+            axes, datasets, group.name, affine, target_coordinate_system
+        )
+        multiscale = _drop_none_values(asdict(metadata))
+        for key in ("extra", "omero"):
+            multiscale.pop(key, None)
+        ome = dict(group.attrs.get("ome", {}))
+        ome.update(version="0.6.dev4", multiscales=[multiscale])
+        group.attrs["ome"] = ome
+        return
+    if affine is not None:
+        raise ValueError("Registration export requires ngff_version='0.6'.")
     metadata = ngff_zarr.Metadata(
         axes=[ngff_zarr.Axis(**dict(axis)) for axis in axes],
         datasets=[
@@ -1237,20 +1353,22 @@ def _ngff_transform(transform):
         return ngff_zarr.Scale(scale=list(transform["scale"]))
     if transform.get("type") == "translation":
         return ngff_zarr.Translation(translation=list(transform["translation"]))
-    return ngff_zarr.Identity()
+    if transform.get("type") == "identity":
+        return ngff_zarr.Identity()
+    raise ValueError(f"Unsupported NGFF transform: {transform.get('type')!r}")
 
 
 def zarr_group_creation_kwargs_for_ngff_version(ngff_version):
     """Keyword arguments for creating the zarr group of an NGFF version.
 
     NGFF v0.4 is a Zarr v2 hierarchy and v0.5 a Zarr v3 one; under zarr-python
-    v2 there is nothing to choose.
+    v2 there is nothing to choose. Version 0.6 also uses Zarr v3.
     """
     if str(ngff_version).startswith("0.4"):
         if zarr.__version__ >= "3":
             return {"zarr_format": 2}
         return {}
-    if str(ngff_version).startswith("0.5"):
+    if ngff_version in ("0.5", "0.6"):
         return {"zarr_format": 3}
     raise ValueError(f"ngff_version {ngff_version} not supported")
 
@@ -1268,7 +1386,7 @@ def update_zarr_array_creation_kwargs_for_ngff_version(
             zarr_array_creation_kwargs.update({
                 "zarr_format": 2,
             })
-    elif ngff_version == "0.5":
+    elif ngff_version in ("0.5", "0.6"):
         if zarr.__version__ < "3":
             raise ValueError("zarr>=3 required for ngff_version 0.5")
         zarr_array_creation_kwargs.update({
@@ -1570,19 +1688,21 @@ def write_sim_to_ome_zarr(
     zarr_array_creation_kwargs: dict = None,
     show_progressbar: bool = True,
     batch_options: dict | None = None,
+    transform_key: str | None = None,
+    target_coordinate_system: str = "registered",
 ):
     """
     Write (and compute) a spatial_image (multiview-stitcher flavor)
-    to a multiscale NGFF zarr file (v0.4 or v0.5).
-    Returns a sim backed by the newly created zarr file.
+    to a multiscale NGFF zarr file (v0.4, v0.5 or v0.6).
+    Returns the input sim.
 
     If overwrite is False, image data will be read from the zarr file
     and missing pyramid levels will be completed. OME-Zarr metadata
     will be overwritten in any case.
 
-    Note that any transform_key will not be stored in the zarr file.
-    However, the returned sim will have the transform_key set as
-    in the input sim.
+    With ngff_version="0.6", transform_key selects a static physical-space
+    affine to store separately from voxel calibration. None writes calibration
+    only (the historical behavior). The input sim is returned.
 
     Parameters
     ----------
@@ -1603,6 +1723,11 @@ def write_sim_to_ome_zarr(
         when creating the zarr arrays, by default None
     show_progressbar : bool, optional
         Whether to show a progress bar (tqdm),
+    transform_key : str or None, optional
+        Static registration to export; requires ngff_version="0.6".
+        None writes only voxel calibration.
+    target_coordinate_system : str, optional
+        Name of the output system for the exported registration ("registered").
     batch_options : dict, optional
         Options for processing chunks in independent batches. Keys:
         - batch_func: Callable, optional
@@ -1615,7 +1740,7 @@ def write_sim_to_ome_zarr(
             (n_batch>1 only compatible with a provided batch_func). By default 1.
         - batch_func_kwargs: dict, optional
             Additional keyword arguments passed to batch_func.
-    
+
     """
 
     if batch_options is None:
@@ -1625,17 +1750,8 @@ def write_sim_to_ome_zarr(
     batch_func = batch_options.get("batch_func", None)
     batch_func_kwargs = batch_options.get("batch_func_kwargs", None)
 
-    # if exists and overwrite, remove existing zarr group
-    if overwrite and os.path.exists(output_zarr_url):
-        print(f"Removing existing {output_zarr_url}...")
-        shutil.rmtree(output_zarr_url)
-
     if zarr_array_creation_kwargs is None:
         zarr_array_creation_kwargs = {}
-
-    # basic handling of OME-Zarr v0.4 and v0.5
-    #  - not fully tested for v0.5
-    #  - TODO: more relevant differences in v0.5 compared to v0.4?
 
     zarr_array_creation_kwargs = \
         update_zarr_array_creation_kwargs_for_ngff_version(
@@ -1675,6 +1791,34 @@ def write_sim_to_ome_zarr(
         time_transform=get_ngff_time_transform(sim),
     )
 
+    affine = None
+    if transform_key is not None:
+        if ngff_version != "0.6":
+            raise ValueError(
+                "Registration export requires ngff_version='0.6'."
+            )
+        affine = _ngff_v06.static_affine(sim, transform_key)
+    for axis in axes:
+        units = sim.attrs.get(NGFF_AXES_UNITS_ATTR, {})
+        if axis["name"] in units:
+            axis["unit"] = units[axis["name"]]
+    axes = _drop_none_values(axes)
+    multiscales_datasets = [
+        {"path": str(level), "coordinateTransformations": coordtfs[level]}
+        for level in range(n_resolutions)
+    ]
+    if ngff_version == "0.6":
+        zarr_array_creation_kwargs["dimension_names"] = list(dims)
+        _ngff_v06.build_metadata(
+            axes,
+            multiscales_datasets,
+            "image",
+            affine,
+            target_coordinate_system,
+        )
+    if overwrite and os.path.exists(output_zarr_url):
+        shutil.rmtree(output_zarr_url)
+
     # parent_res_array = sim.data
     curr_res_array = sim.data  # in case of only one resolution level
     for res_level in range(0, n_resolutions):
@@ -1698,19 +1842,13 @@ def write_sim_to_ome_zarr(
         output_zarr_url, mode="a", **zarr_group_creation_kwargs
     )
 
-    multiscales_datasets = [
-        {
-            "path": f"{res_level}",
-            "coordinateTransformations": coordtfs[res_level],
-        }
-        for res_level in range(n_resolutions)
-    ]
-
     write_multiscales_metadata(
         output_group,
         axes=axes,
         datasets=multiscales_datasets,
         ngff_version=ngff_version,
+        affine=affine,
+        target_coordinate_system=target_coordinate_system,
     )
 
     if "c" in sim.dims:
@@ -1729,7 +1867,7 @@ def write_sim_to_ome_zarr(
             )
         )
 
-        output_group.attrs["omero"] = {
+        omero = {
             "channels": [
                 {
                     "color": "ffffff",
@@ -1745,6 +1883,12 @@ def write_sim_to_ome_zarr(
                 for ich, ch in enumerate(sim.coords["c"].values)
             ],
         }
+        if ngff_version == "0.4":
+            output_group.attrs["omero"] = omero
+        else:
+            ome = dict(output_group.attrs["ome"])
+            ome["omero"] = omero
+            output_group.attrs["ome"] = ome
 
     return sim
 
@@ -1754,13 +1898,16 @@ def read_sim_from_ome_zarr(
     resolution_level=0,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
     array_backend="zarr",
+    target_coordinate_system=None,
 ):
     """
-    Read a multiscale NGFF zarr file (v0.4/v0.5) into a spatial_image
+    Read a multiscale NGFF zarr file (v0.4/v0.5/v0.6) into a spatial_image
     (multiview-stitcher flavor) at a given resolution level.
 
     NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
     an identity transform will be set for the given transform_key.
+    For v0.6, import the unique registration, or select one explicitly with
+    target_coordinate_system. Selecting the intrinsic system skips registration.
 
     Parameters
     ----------
@@ -1777,6 +1924,9 @@ def read_sim_from_ome_zarr(
     Returns
     -------
     spatial_image with transform_key set
+
+    target_coordinate_system selects a named v0.6 registration. None selects
+    the sole registration, or identity when none is present. Ambiguity raises.
     """
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
@@ -1798,26 +1948,101 @@ def read_sim_from_ome_zarr(
         ngff_multiscales.images[resolution_level],
         transform_key=transform_key,
         data=data,
+        affine=_registration_from_ngff(
+            ngff_multiscales, target_coordinate_system
+        ),
     )
 
     # get channel names from omero metadata if available
     root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
 
-    if "omero" in root.attrs:
-        omero = root.attrs["omero"]
+    omero = root.attrs.get("ome", {}).get("omero", root.attrs.get("omero"))
+    if omero is not None and "c" in sim.dims:
         ch_coords = [ch["label"] for ch in omero["channels"]]
         sim = sim.assign_coords(c=ch_coords)
 
     return sim
 
 
-def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
+def _update_v06_registration(root, zarr_path, msim, transform_key, target):
+    """Change only a registration edge, preserving calibration and pixels."""
+    multiscales = read_ngff_multiscales(zarr_path)
+    metadata = multiscales.metadata
+    keys = msi_utils.get_sorted_scale_keys(msim)
+    if len(keys) != len(metadata.datasets):
+        raise ValueError(
+            "Number of resolution levels does not match on-disk data."
+        )
+    intrinsic = metadata.intrinsic_coordinate_system
+    axes = _drop_none_values([asdict(a) for a in intrinsic.axes])
+    dims = [a.name for a in intrinsic.axes]
+    affines = []
+    for key, image in zip(keys, multiscales.images):
+        sim = msi_utils.get_sim_from_msim(msim, scale=key)
+        # Updating registration must not silently change the underlying grid.
+        for dim in si_utils.get_spatial_dims_from_sim(sim):
+            if not np.isclose(
+                si_utils.get_spacing_from_sim(sim)[dim], image.scale[dim]
+            ) or not np.isclose(
+                si_utils.get_origin_from_sim(sim)[dim], image.translation[dim]
+            ):
+                raise ValueError("Calibration differs from the on-disk image.")
+        if any(sim.sizes[d] != image.data.shape[dims.index(d)] for d in dims):
+            raise ValueError("Image shape differs from the on-disk image.")
+        affines.append(_ngff_v06.static_affine(sim, transform_key))
+    if any(not np.allclose(a, affines[0]) for a in affines[1:]):
+        raise ValueError(
+            "Registration must be identical across pyramid levels."
+        )
+    edge = _drop_none_values(
+        asdict(
+            _ngff_v06.registration_transform(
+                axes, affines[0], intrinsic.name, target
+            )
+        )
+    )
+    ome = deepcopy(dict(root.attrs["ome"]))
+    entry = ome["multiscales"][0]
+    systems = entry["coordinateSystems"]
+    existing = [cs for cs in systems if cs["name"] == target]
+    if existing and existing[0]["axes"] != axes:
+        raise ValueError(
+            "Target coordinate system axes differ from intrinsic."
+        )
+    if not existing:
+        systems.append({"name": target, "axes": deepcopy(axes)})
+
+    def is_replaced(tf):
+        endpoints = (tf.get("input", {}), tf.get("output", {}))
+        return not any(e.get("path") for e in endpoints) and {
+            e.get("name") for e in endpoints
+        } == {intrinsic.name, target}
+
+    entry["coordinateTransformations"] = [
+        tf
+        for tf in entry.get("coordinateTransformations", [])
+        if not is_replaced(tf)
+    ] + [edge]
+    root.attrs["ome"] = ome
+
+
+def update_ome_zarr_multiscales_metadata(
+    zarr_path,
+    msim,
+    transform_key,
+    target_coordinate_system="registered",
+):
     """
     Update the multiscales coordinate transformations (scale and translation)
     of an OME-Zarr file on disk using the spacing and origin from the
     resolution levels of an in-memory msim.
 
-    Only the "ome" key (v0.5) or "multiscales" key (v0.4) of the zarr group
+    For v0.6, update only the static intrinsic-to-target registration. Voxel
+    calibration and pixel data are preserved; differing grids are rejected.
+    target_coordinate_system defaults to "registered". None for transform_key
+    writes an identity registration.
+
+    Only the "ome" key (v0.5/v0.6) or "multiscales" key (v0.4) of the zarr group
     attributes is modified; other metadata (e.g. "omero") is preserved.
 
     Parameters
@@ -1835,11 +2060,17 @@ def update_ome_zarr_multiscales_metadata(zarr_path, msim, transform_key):
     Raises
     ------
     ValueError
-        If the on-disk OME-Zarr is not v0.4 or v0.5, or if the number of
+        If the on-disk OME-Zarr version is unsupported, or if the number of
         resolution levels in msim does not match the on-disk zarr.
     """
     root = _zarr_compat.open_zarr_group(zarr_path, mode="a")
     attrs = dict(root.attrs)
+
+    if attrs.get("ome", {}).get("version") in ("0.6", "0.6.dev4"):
+        _update_v06_registration(
+            root, zarr_path, msim, transform_key, target_coordinate_system
+        )
+        return
 
     # Detect OME-Zarr version and retrieve the multiscales list
     if "ome" in attrs:
@@ -1913,13 +2144,16 @@ def read_msim_from_ome_zarr(
     zarr_path,
     transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
     array_backend="zarr",
+    target_coordinate_system=None,
 ):
     """
-    Read a multiscale NGFF zarr file (v0.4/v0.5) into a multiscale_spatial_image
+    Read a multiscale NGFF zarr file (v0.4/v0.5/v0.6) into a multiscale_spatial_image
     (multiview-stitcher flavor).
 
     NGFF zarr files v0.4/v0.5 cannot contain affine transformations, so
     an identity transform will be set for the given transform_key.
+    For v0.6, import the unique registration, or select one explicitly with
+    target_coordinate_system. Selecting the intrinsic system skips registration.
 
     Parameters
     ----------
@@ -1934,6 +2168,9 @@ def read_msim_from_ome_zarr(
     Returns
     -------
     multiscale_spatial_image with transform_key set
+
+    target_coordinate_system selects a named v0.6 registration. None selects
+    the sole registration, or identity when none is present. Ambiguity raises.
     """
     if array_backend not in ("dask", "zarr"):
         raise ValueError("array_backend must be 'dask' or 'zarr'.")
@@ -1948,12 +2185,13 @@ def read_msim_from_ome_zarr(
         ngff_multiscales,
         transform_key=transform_key,
         data_arrays=data_arrays,
+        target_coordinate_system=target_coordinate_system,
     )
 
     # get channel names from omero metadata if available
     root = _zarr_compat.open_zarr_group(zarr_path, mode="r")
-    if "omero" in root.attrs:
-        omero = root.attrs["omero"]
+    omero = root.attrs.get("ome", {}).get("omero", root.attrs.get("omero"))
+    if omero is not None:
         ch_coords = [ch["label"] for ch in omero["channels"]]
         if "c" in msim['scale0']["image"].dims:
             # A closure keeps this working across xarray releases:

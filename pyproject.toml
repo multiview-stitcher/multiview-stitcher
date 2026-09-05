@@ -54,7 +54,7 @@ dependencies = [
     # through (its service worker serves them over HTTP) and any read at all
     # in Pyodide, whose zarrista wheel is missing symbols its own Python layer
     # imports. Kept in step with docs/browser/config.json.
-    "ngff-zarr >=0.12.2,<0.44",
+    "ngff-zarr >=0.43,<0.44",
     "aiohttp"
 ]
 dynamic = [
@@ -99,6 +99,7 @@ dev = [
     "jupyter",
     "pytest <8.0.0",  # https://github.com/pytest-dev/pytest/issues/11779
     "pytest-cov",  # https://pytest-cov.readthedocs.io/en/latest/
+    "jsonschema",  # independent validation of emitted NGFF metadata
     "pytest-benchmark >5",
     "nbmake",  # notebook testing
     "antspyx >=0.6.0",
@@ -129,7 +130,7 @@ browser = [
     # CPython. Note that zarr must come from Pyodide's own package index:
     # its build blocks by suspending the WebAssembly stack, and the PyPI
     # wheel of the same version starts a thread instead.
-    "dask[array] ==2025.2.0",
+    "dask[array] >=2026.1.2",
     "dask-image ==2024.5.3",
     "ngff-zarr",
     # Mosaic CZI reading. Both are pure-Python wheels, so micropip installs
