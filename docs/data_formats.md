@@ -151,7 +151,8 @@ sim = si_utils.get_sim_from_array(
 
 The **Save** tab writes all or selected images as separate OME-Zarr folders,
 including their existing resolution levels and the **Displayed transform**.
-Choose **Save images…** to convert inputs without fusion. Existing output
+Choose **Save images…** to convert inputs. Writing uses single-view fusion
+on each existing grid, reusing the parallel block writer without interpolation. Existing output
 folders are refused. All timepoints and channels are included; the selected
 transform must be static across them.
 

@@ -220,6 +220,15 @@ class WorkerRuntime:
             raise ValueError(
                 "Images changed; prepare the save operation again."
             )
+        executor = None
+        if not options.get("metadata_only", False) and payload.get(
+            "distribute", True
+        ):
+            bridge = self.bridge or get_bridge()
+            if bridge is not None:
+                executor = executors.RemoteFusionExecutor(
+                    session.spec(), bridge=bridge
+                )
         saving.save(
             plans[payload["index"]],
             payload.get("destination"),
@@ -228,6 +237,8 @@ class WorkerRuntime:
             metadata_only=options.get("metadata_only", False),
             fetch=self.fetch,
             write=self.write,
+            executor=executor,
+            copy_view=options["indices"][payload["index"]],
         )
         return {"saved": True}
 

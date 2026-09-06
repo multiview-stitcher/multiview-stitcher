@@ -28,6 +28,7 @@ function setup({ existing = false, selected = false } = {}) {
     crypto: { randomUUID: () => '12345678' }, API_BASE: '/__mvs__',
     fsRequest: async () => ({ mount: 'output' }),
     command: async (name, payload) => { calls.push([name, payload]); },
+    pool: { size: 2 }, withPool: async (action) => action(),
     setBusy() {}, setStatus() {}, log() {}, clearProgress() {},
   });
   vm.runInContext(saving, context);

@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 from dataclasses import asdict
 
-import dask.array as da
 from zarr.errors import GroupNotFoundError
 
 from multiview_stitcher import _zarr_compat, ngff_utils
 from multiview_stitcher.browser import store as browser_store
-
+from multiview_stitcher.browser import fusion as browser_fusion
+from multiview_stitcher.browser.specs import FusionOptions
 
 def prepare(
     msims,
@@ -60,6 +60,8 @@ def save(
     metadata_only=False,
     fetch=None,
     write=None,
+    executor=None,
+    copy_view=0,
 ):
     """Write one validated image using the package's NGFF adapters."""
     msim, source, multiscales = plan
@@ -76,27 +78,36 @@ def save(
             store, msim, transform_key, target_coordinate_system=target
         )
     else:
-        # The browser store cannot list keys, so write known levels directly
-        # without ngff-zarr's metadata consolidation (which requires listing).
         try:
             _zarr_compat.open_zarr_group(store, mode="r")
         except (GroupNotFoundError, FileNotFoundError):
             pass
         else:
             raise ValueError("Output already exists; choose another folder.")
+        options = FusionOptions(
+            output_zarr_url=destination,
+            ngff_version="0.6",
+            copy_view=0,
+        )
+        levels = browser_fusion.create_output_arrays(
+            [msim], options, fetch=fetch, write=write
+        )
+        if executor is not None:
+            # Remote workers reconstruct the full session; address the original
+            # view index there, while local planning needs only this one view.
+            options.copy_view = copy_view
+            executor(options, levels)
+        else:
+            for level in levels:
+                browser_fusion.fuse_blocks(
+                    [msim],
+                    options,
+                    level["level"],
+                    level["block_ids"],
+                    fetch=fetch,
+                    write=write,
+                )
         root = _zarr_compat.open_zarr_group(store, mode="a", zarr_format=3)
-        for image, dataset in zip(
-            multiscales.images, multiscales.metadata.datasets
-        ):
-            data = da.asarray(image.data)
-            array = root.create_array(
-                dataset.path,
-                shape=data.shape,
-                dtype=data.dtype,
-                chunks=data.chunksize,
-                dimension_names=list(image.dims),
-            )
-            da.store(data, array, lock=False, scheduler="synchronous")
         metadata = ngff_utils._drop_none_values(asdict(multiscales.metadata))
         for key in ("extra", "omero"):
             metadata.pop(key, None)

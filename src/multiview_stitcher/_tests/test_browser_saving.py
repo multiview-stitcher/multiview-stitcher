@@ -9,8 +9,19 @@ from multiview_stitcher.browser import saving, store
 from multiview_stitcher._tests.test_ngff_v06 import make_sim
 
 
-def test_save_and_update_through_browser_store(tmp_path):
-    sim, affine = make_sim()
+@pytest.mark.parametrize("ndim", [2, 3])
+def test_save_and_update_through_browser_store(tmp_path, monkeypatch, ndim):
+    from multiview_stitcher import transformation
+
+    def no_interpolation(*args, **kwargs):
+        raise AssertionError("Single-view export must not interpolate pixels")
+
+    monkeypatch.setattr(transformation, "affine_transform", no_interpolation)
+    monkeypatch.setattr(
+        transformation, "dask_image_affine_transform", no_interpolation
+    )
+    sim, affine = make_sim(ndim=ndim)
+    sim.data = sim.data.astype("uint32") + 2**25
     msim = msi_utils.get_msim_from_sim(sim, scale_factors=[2])
     fetch, write = store.directory_fetch(tmp_path), store.directory_write(
         tmp_path
@@ -30,6 +41,11 @@ def test_save_and_update_through_browser_store(tmp_path):
         expected = msi_utils.get_sim_from_msim(msim, scale=key)
         actual = msi_utils.get_sim_from_msim(restored, scale=key)
         np.testing.assert_array_equal(actual.data, expected.data)
+        import zarr
+
+        assert zarr.open_array(
+            path / key / "image", mode="r"
+        ).metadata.dimension_names == tuple(expected.dims)
     before = {
         p.relative_to(path): p.read_bytes()
         for p in path.rglob("*")
@@ -108,3 +124,50 @@ def test_worker_rejects_stale_save_plan():
     runtime.session.bump_generation()
     with pytest.raises(ValueError, match="changed"):
         runtime.handle("save_image", {"index": 0, "destination": "unused"})
+
+
+def test_parallel_save_selects_one_view(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from multiview_stitcher.browser import LocalBridge, Session, WorkerRuntime
+    from multiview_stitcher.browser.executors import RemoteFusionExecutor
+
+    sim, _ = make_sim()
+    source = tmp_path / "source.zarr"
+    ngff_utils.write_sim_to_ome_zarr(
+        sim,
+        source,
+        ngff_version="0.6",
+        transform_key="registered",
+        show_progressbar=False,
+    )
+    decoy = tmp_path / "decoy.zarr"
+    ngff_utils.write_sim_to_ome_zarr(
+        sim.copy(data=sim.data * 0),
+        decoy,
+        ngff_version="0.6",
+        transform_key="registered",
+        show_progressbar=False,
+    )
+    session = Session()
+    # The exported view is not the first view in the workers' session.
+    session.load([str(decoy), str(source)])
+    msim = session.msims[1]
+    key = session.default_transform_key()
+    plan = saving.prepare([msim], [str(source)], key, "registered")[0]
+    runtime = WorkerRuntime()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        bridge = LocalBridge(
+            runner=runtime.run_task,
+            map_func=lambda func, items: list(pool.map(func, items)),
+        )
+        executor = RemoteFusionExecutor(session.spec(), bridge=bridge)
+        saving.save(
+            plan,
+            str(tmp_path / "parallel.zarr"),
+            key,
+            "registered",
+            executor=executor,
+            copy_view=1,
+        )
+    restored = ngff_utils.read_sim_from_ome_zarr(tmp_path / "parallel.zarr")
+    np.testing.assert_array_equal(restored.data, sim.data)
