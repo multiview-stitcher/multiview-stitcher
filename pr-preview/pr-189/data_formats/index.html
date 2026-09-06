@@ -1774,7 +1774,8 @@ it rejects other registration affines rather than discarding their components.</
 <h3 id="saving-from-the-browser-app">Saving from the browser app</h3>
 <p>The <strong>Save</strong> tab writes all or selected images as separate OME-Zarr folders,
 including their existing resolution levels and the <strong>Displayed transform</strong>.
-Choose <strong>Save images…</strong> to convert inputs without fusion. Existing output
+Choose <strong>Save images…</strong> to convert inputs. Writing uses single-view fusion
+on each existing grid, reusing the parallel block writer without interpolation. Existing output
 folders are refused. All timepoints and channels are included; the selected
 transform must be static across them.</p>
 <p><strong>Update transforms</strong> writes only registration metadata in local OME-Zarr

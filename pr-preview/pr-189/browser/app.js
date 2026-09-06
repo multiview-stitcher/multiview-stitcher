@@ -2744,6 +2744,7 @@ async function doSave(metadataOnly) {
       indices: views.map((v) => v.index), transform_key: state.transformKey,
       target, metadata_only: metadataOnly,
     });
+    if (!metadataOnly) await withPool(async () => {});
     let mount;
     const names = views.map((v) => `${v.index + 1}-${(v.name || "image")
       .replace(/\.ome\.zarr$/i, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.ome.zarr`);
@@ -2762,6 +2763,7 @@ async function doSave(metadataOnly) {
     for (let i = 0; i < views.length; i++) {
       setStatus(`${metadataOnly ? "updating transforms" : "saving images"}: ${i + 1}/${views.length}`, true);
       await command("save_image", {
+        distribute: pool.size > 0,
         index: i, destination: metadataOnly ? null : `${API_BASE}/fs/${mount}/${names[i]}`,
       });
       completed++;
