@@ -171,6 +171,7 @@
           <button id="placement-tab" role="tab" aria-selected="true" aria-controls="placement-panel" data-tab="placement">Placement</button>
           <button id="registration-tab" role="tab" aria-selected="false" aria-controls="registration-panel" data-tab="registration">Register</button>
           <button id="fusion-tab" role="tab" aria-selected="false" aria-controls="fusion-panel" data-tab="fusion">Fuse</button>
+          <button id="save-tab" role="tab" aria-selected="false" aria-controls="save-panel" data-tab="save">Save</button>
         </div>
 
         <section id="placement-panel" class="operation-panel" role="tabpanel" aria-labelledby="placement-tab">
@@ -472,6 +473,20 @@
             <button class="primary-button" type="button" data-action="fuse-disk" disabled>Fuse to OME-Zarr</button>
           </div>
           <p class="field-help">Preview chunks are computed lazily as you navigate.</p>
+        </section>
+        <section id="save-panel" class="operation-panel" role="tabpanel" aria-labelledby="save-tab" hidden>
+          <h3>Save OME-Zarr</h3>
+          <p class="field-help">OME-Zarr 0.6 draft (0.6.dev4). Save each image separately, with its placement stored in metadata.</p>
+          <label for="save-scope">Images</label>
+          <select id="save-scope"><option value="all">All images</option><option value="selected">Selected images</option></select>
+          <p class="field-help">Uses the Displayed transform. Includes all timepoints and channels; transforms must be identical across them.</p>
+          <label for="save-target">Output coordinate system</label>
+          <input id="save-target" type="text" placeholder="Displayed transform name" />
+          <p id="save-summary" class="field-help" aria-live="polite"></p>
+          <button class="primary-button" type="button" data-action="save-images" disabled>Save images…</button>
+          <p class="field-help">Choose a destination folder. Existing folders are never overwritten.</p>
+          <button class="secondary-button" type="button" data-action="save-transforms" disabled>Update transforms</button>
+          <p class="field-help">Updates the named coordinate system's transformation in the source OME-Zarr folders. Image data stays unchanged. Requires local, writable OME-Zarr 0.6.dev4 sources; use Save images to convert older formats.</p>
         </section>
       </aside>
     </main>
