@@ -147,3 +147,20 @@ sim = si_utils.get_sim_from_array(
     transform_key="stage_metadata",
 )
 ```
+### Saving from the browser app
+
+The **Save** tab writes all or selected images as separate OME-Zarr folders,
+including their existing resolution levels and the **Displayed transform**.
+Choose **Save images…** to convert inputs without fusion. Existing output
+folders are refused. All timepoints and channels are included; the selected
+transform must be static across them.
+
+**Update transforms** writes only registration metadata in local OME-Zarr
+0.6.dev4 sources, after requesting write access and checking that the image
+grids match. The output coordinate system defaults to the displayed transform
+name; an existing transformation to that system is replaced. Older OME-Zarr
+versions and other input formats can be converted with **Save images…**.
+
+Both actions use the supported **0.6.dev4 draft**. Each completed image is
+saved immediately; a failed batch can leave completed images and a partial
+output folder.

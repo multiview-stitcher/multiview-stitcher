@@ -127,6 +127,7 @@ class WorkerRuntime:
         return self._require_session().remove(payload["index"])
 
     def _cmd_clear(self, payload):
+        self._save_plan = None
         return self._require_session().clear()
 
     def _cmd_describe(self, payload):
@@ -183,9 +184,52 @@ class WorkerRuntime:
                     ),
                 )
 
-        return session.register(
-            options, pairwise_executor=pairwise_executor
+        return session.register(options, pairwise_executor=pairwise_executor)
+
+    def _cmd_prepare_save(self, payload):
+        from multiview_stitcher.browser import saving
+
+        session = self._require_session()
+        indices = payload["indices"]
+        if len(set(indices)) != len(indices) or any(
+            not isinstance(i, int) or not 0 <= i < len(session.msims)
+            for i in indices
+        ):
+            raise ValueError("Invalid image selection.")
+        self._save_plan = None
+        plans = saving.prepare(
+            [session.msims[i] for i in indices],
+            [session.sources[i].url for i in indices],
+            payload["transform_key"],
+            payload["target"],
+            metadata_only=payload.get("metadata_only", False),
+            fetch=self.fetch,
+            write=self.write,
         )
+        self._save_plan = (session.generation, plans, dict(payload))
+        return {"count": len(plans)}
+
+    def _cmd_save_image(self, payload):
+        from multiview_stitcher.browser import saving
+
+        session = self._require_session()
+        if not getattr(self, "_save_plan", None):
+            raise ValueError("Prepare the save operation first.")
+        generation, plans, options = self._save_plan
+        if generation != session.generation:
+            raise ValueError(
+                "Images changed; prepare the save operation again."
+            )
+        saving.save(
+            plans[payload["index"]],
+            payload.get("destination"),
+            options["transform_key"],
+            options["target"],
+            metadata_only=options.get("metadata_only", False),
+            fetch=self.fetch,
+            write=self.write,
+        )
+        return {"saved": True}
 
     def _cmd_fuse_preview(self, payload):
         return self._require_session().fuse_preview(payload.get("options"))

@@ -186,6 +186,7 @@ function noteBootPhase(worker, phase, phases) {
 }
 
 function setBusy(busy) {
+  saveBusy = busy;
   for (const button of document.querySelectorAll("button[data-action]")) {
     // Loading actions stay available while there is no data; the processing
     // ones need views first.
@@ -196,6 +197,7 @@ function setBusy(busy) {
     button.disabled = busy || (button.id === "clear" && !hasViews());
   }
   $("#worker-count").disabled = busy;
+  renderSaveSummary();
 }
 
 /** Promise-based request/response over a Worker's postMessage. */
@@ -1269,6 +1271,7 @@ function renderTransformKeys(keys) {
   }
   select.value = state.transformKey || "";
   select.disabled = keys.length < 2;
+  $("#save-target").placeholder = state.transformKey || "Output coordinate system";
 }
 
 function renderDimensionFields(described) {
@@ -2098,6 +2101,7 @@ function syncManualPlacement() {
 }
 
 function renderViews(described) {
+  renderSaveSummary();
   const list = $("#views");
   list.innerHTML = "";
 
@@ -2296,10 +2300,12 @@ async function collectSources(handle, requireSingleImage) {
     );
   }
 
-  return images.map((image) => ({
+  const sources = images.map((image) => ({
     url: `${API_BASE}/fs/${mount}${image.path ? "/" + image.path : ""}`,
     name: image.name,
   }));
+  for (const source of sources) saveHandles.set(source.url, handle);
+  return sources;
 }
 
 /** Is this a file the CZI reader should be given? */
@@ -2442,6 +2448,7 @@ async function clearSession() {
   // does. Unmounting under a live handle would fail reads rather than free
   // anything.
   await unmountAllFiles();
+  saveHandles.clear();
 
   // Everything derived from the old dataset goes, so that what is loaded next
   // starts from the same state a fresh page would.
@@ -2682,6 +2689,88 @@ async function doFusePreview() {
       .join(" ");
     log(`fused preview ready (${shape}); chunks are computed on demand`);
     setStatus("fused preview added to the viewer");
+  } finally {
+    clearProgress();
+    setBusy(false);
+  }
+}
+
+const saveHandles = new Map();
+let saveBusy = false;
+
+function saveSelection() {
+  return (state.session?.views || []).flatMap((view, index) =>
+    $("#save-scope").value === "all" || state.selectedViewUrls.has(view.url)
+      ? [{ ...view, index }] : []);
+}
+
+function renderSaveSummary() {
+  const views = saveSelection();
+  $("#save-summary").textContent = `${views.length} image(s): ` +
+    views.map((v) => v.name).join(", ");
+  const local = views.every((v) => saveHandles.has(v.url));
+  const imagesButton = $('button[data-action="save-images"]');
+  const transformsButton = $('button[data-action="save-transforms"]');
+  imagesButton.disabled = saveBusy || !views.length;
+  transformsButton.disabled = saveBusy || !views.length || !local;
+  transformsButton.title = local ? "" : "Use Save images to convert non-local sources.";
+  if (!local) $("#save-summary").textContent += " Transform updates require local OME-Zarr folders.";
+}
+
+async function doSave(metadataOnly) {
+  const views = saveSelection();
+  if (!views.length) throw new Error("Select at least one image to save.");
+  const target = $("#save-target").value.trim() || state.transformKey;
+  let handle;
+  // Permission prompts must run directly from the user's click.
+  if (metadataOnly) {
+    const handles = [...new Set(views.map((v) => saveHandles.get(v.url)))];
+    if (handles.some((h) => !h)) {
+      throw new Error("Update transforms requires local OME-Zarr folders. Use Save images instead.");
+    }
+    for (const h of handles) {
+      if (await h.requestPermission({ mode: "readwrite" }) !== "granted") {
+        throw new Error("Write access is required to update transforms.");
+      }
+    }
+  } else {
+    handle = await window.showDirectoryPicker({ mode: "readwrite" });
+  }
+  setBusy(true);
+  let completed = 0;
+  try {
+    setStatus("validating images and transforms", true);
+    await command("prepare_save", {
+      indices: views.map((v) => v.index), transform_key: state.transformKey,
+      target, metadata_only: metadataOnly,
+    });
+    let mount;
+    const names = views.map((v) => `${v.index + 1}-${(v.name || "image")
+      .replace(/\.ome\.zarr$/i, "").replace(/[^a-zA-Z0-9._-]/g, "_")}.ome.zarr`);
+    if (!metadataOnly) {
+      for (const name of names) {
+        try {
+          await handle.getDirectoryHandle(name);
+          throw new Error(`Output '${name}' already exists. Choose another folder.`);
+        } catch (error) {
+          if (error.name !== "NotFoundError") throw error;
+        }
+      }
+      ({ mount } = await fsRequest({ type: "mount", mount: crypto.randomUUID().slice(0, 8), handle }));
+      if (!state.mounts.includes(mount)) state.mounts.push(mount);
+    }
+    for (let i = 0; i < views.length; i++) {
+      setStatus(`${metadataOnly ? "updating transforms" : "saving images"}: ${i + 1}/${views.length}`, true);
+      await command("save_image", {
+        index: i, destination: metadataOnly ? null : `${API_BASE}/fs/${mount}/${names[i]}`,
+      });
+      completed++;
+    }
+    const message = metadataOnly ? `Updated transforms in ${completed} images` : `Saved ${completed} OME-Zarr images`;
+    log(message);
+    setStatus(message);
+  } catch (error) {
+    throw new Error(`${error.message} (${completed}/${views.length} images saved; incomplete output may remain.)`);
   } finally {
     clearProgress();
     setBusy(false);
@@ -3181,18 +3270,24 @@ function wireUi() {
     }
   });
 
+  $("#save-scope").addEventListener("change", renderSaveSummary);
+
   for (const [action, handler] of Object.entries({
     "new-transform": doCreateTransform,
     register: doRegister,
     "fuse-preview": doFusePreview,
     "fuse-disk": doFuseToDisk,
+    "save-images": () => doSave(false),
+    "save-transforms": () => doSave(true),
   })) {
     $(`button[data-action="${action}"]`).addEventListener("click", async () => {
       try {
-        await withPool(handler);
+        if (action.startsWith("save-")) await handler();
+        else await withPool(handler);
       } catch (error) {
+        if (error.name === "AbortError") return;
         log(error.message, "error");
-        setStatus("failed");
+        setStatus(error.message);
         setBusy(false);
       }
     });
