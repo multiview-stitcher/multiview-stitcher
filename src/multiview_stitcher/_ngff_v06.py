@@ -11,6 +11,7 @@ from dataclasses import asdict
 
 import numpy as np
 
+from multiview_stitcher import param_utils
 from multiview_stitcher import spatial_image_utils as si_utils
 
 
@@ -47,7 +48,7 @@ def transform_matrix(transform, ndim):
         if kind == "scale":
             matrix[np.arange(ndim), np.arange(ndim)] = values
         elif kind == "translation":
-            matrix[:-1, -1] = values
+            matrix = param_utils.affine_from_translation(values)
         elif kind == "rotation":
             matrix[:-1, :-1] = values
         else:
@@ -63,11 +64,11 @@ def transform_matrix(transform, ndim):
 
 def static_affine(sim, transform_key):
     """Extract one physical-space affine, rejecting varying t/c transforms."""
-    ndim = len(si_utils.get_spatial_dims_from_sim(sim))
+    ndim = si_utils.get_ndim_from_sim(sim)
     if transform_key is None:
         return np.eye(ndim + 1)
     affine = si_utils.get_affine_from_sim(sim, transform_key)
-    other_dims = [d for d in affine.dims if d not in ("x_in", "x_out")]
+    other_dims = param_utils.get_non_spatial_dims_from_params(affine)
     values = np.asarray(affine.transpose(*other_dims, "x_in", "x_out"))
     matrices = values.reshape((-1, ndim + 1, ndim + 1))
     if not len(matrices) or not np.isfinite(matrices).all():
@@ -81,6 +82,16 @@ def static_affine(sim, transform_key):
     if not np.allclose(matrix[-1], np.eye(ndim + 1)[-1]):
         raise ValueError("Registration must be a homogeneous affine matrix.")
     return matrix
+
+
+def static_multiscale_affine(sims, transform_key):
+    """Extract a static registration shared by all pyramid levels."""
+    affines = [static_affine(sim, transform_key) for sim in sims]
+    if any(not np.allclose(a, affines[0]) for a in affines[1:]):
+        raise ValueError(
+            "Registration must be identical across pyramid levels."
+        )
+    return affines[0]
 
 
 def registration_transform(axes, affine, intrinsic, target):

@@ -1062,28 +1062,11 @@ def msim_to_ngff_multiscales(
             msi_utils.get_sim_from_msim(msim, scale=key)
             for key in msi_utils.get_sorted_scale_keys(msim)
         ]
-        affines = [_ngff_v06.static_affine(sim, transform_key) for sim in sims]
-        if any(not np.allclose(a, affines[0]) for a in affines[1:]):
-            raise ValueError(
-                "Registration must be identical across pyramid levels."
-            )
+        affine = _ngff_v06.static_multiscale_affine(sims, transform_key)
         images = [sim_to_ngff_image(sim, transform_key=None) for sim in sims]
         datasets = []
         for level, sim in enumerate(sims):
-            sdims = si_utils.get_spatial_dims_from_sim(sim)
-            coordtfs, axes = calc_ngff_coordinate_transformations_and_axes(
-                {
-                    "spacing": si_utils.get_spacing_from_sim(sim),
-                    "origin": si_utils.get_origin_from_sim(sim),
-                },
-                [{d: 1 for d in sdims}],
-                nsdims=si_utils.get_nonspatial_dims_from_sim(sim),
-                time_transform=get_ngff_time_transform(sim),
-            )
-            for axis in axes:
-                units = sim.attrs.get(NGFF_AXES_UNITS_ATTR, {})
-                if axis["name"] in units:
-                    axis["unit"] = units[axis["name"]]
+            coordtfs, axes = _sim_ngff_calibration(sim)
             datasets.append(
                 {
                     "path": f"scale{level}/image",
@@ -1091,10 +1074,10 @@ def msim_to_ngff_multiscales(
                 }
             )
         metadata = _ngff_v06.build_metadata(
-            _drop_none_values(axes),
+            axes,
             datasets,
             "image",
-            affines[0] if transform_key is not None else None,
+            affine if transform_key is not None else None,
             target_coordinate_system,
         )
         return ngff_zarr.Multiscales(
@@ -1559,7 +1542,7 @@ def write_downsampled_chunk(
     chunk_shape = {
         sdims[idim]: normalized_chunks[len(nsdims) + idim][b]
             for idim, b in enumerate(spatial_chunk_ind)}
-    
+
     input_slices = tuple(
         slice(
             ns_coord[dim],
@@ -1611,6 +1594,24 @@ def write_downsampled_chunk(
     )] = output_chunk.compute()
 
     return
+
+
+def _sim_ngff_calibration(sim, res_abs_factors=None):
+    """Build dataset coordinate transformations and axes, preserving units."""
+    spacing = si_utils.get_spacing_from_sim(sim)
+    if res_abs_factors is None:
+        res_abs_factors = [{dim: 1 for dim in spacing}]
+    coordtfs, axes = calc_ngff_coordinate_transformations_and_axes(
+        {"spacing": spacing, "origin": si_utils.get_origin_from_sim(sim)},
+        res_abs_factors,
+        nsdims=si_utils.get_nonspatial_dims_from_sim(sim),
+        time_transform=get_ngff_time_transform(sim),
+    )
+    units = sim.attrs.get(NGFF_AXES_UNITS_ATTR, {})
+    for axis in axes:
+        if axis["name"] in units:
+            axis["unit"] = units[axis["name"]]
+    return coordtfs, _drop_none_values(axes)
 
 
 def calc_ngff_coordinate_transformations_and_axes(
@@ -1770,15 +1771,7 @@ def write_sim_to_ome_zarr(
     )
 
     dims = sim.dims
-    nsdims = si_utils.get_nonspatial_dims_from_sim(sim)
-    sdims = si_utils.get_spatial_dims_from_sim(sim)
-    spacing = si_utils.get_spacing_from_sim(sim)
-    origin = si_utils.get_origin_from_sim(sim)
-    spatial_shape = {
-        dim: sim.data.shape[idim]
-        for idim, dim in enumerate(dims)
-        if dim in sdims
-    }
+    spatial_shape = si_utils.get_shape_from_sim(sim)
 
     res_shapes, res_rel_factors, res_abs_factors = \
         msi_utils.calc_resolution_levels(
@@ -1788,16 +1781,7 @@ def write_sim_to_ome_zarr(
 
     n_resolutions = len(res_shapes)
 
-    coordtfs, axes = calc_ngff_coordinate_transformations_and_axes(
-        {
-            'spacing': spacing,
-            'origin': origin,
-            'shape': spatial_shape
-        },
-        res_abs_factors,
-        nsdims=nsdims,
-        time_transform=get_ngff_time_transform(sim),
-    )
+    coordtfs, axes = _sim_ngff_calibration(sim, res_abs_factors)
 
     affine = None
     if transform_key is not None:
@@ -1806,11 +1790,6 @@ def write_sim_to_ome_zarr(
                 "Registration export requires ngff_version='0.6'."
             )
         affine = _ngff_v06.static_affine(sim, transform_key)
-    for axis in axes:
-        units = sim.attrs.get(NGFF_AXES_UNITS_ATTR, {})
-        if axis["name"] in units:
-            axis["unit"] = units[axis["name"]]
-    axes = _drop_none_values(axes)
     multiscales_datasets = [
         {"path": str(level), "coordinateTransformations": coordtfs[level]}
         for level in range(n_resolutions)
@@ -1985,28 +1964,23 @@ def _update_v06_registration(root, zarr_path, msim, transform_key, target):
     intrinsic = metadata.intrinsic_coordinate_system
     axes = _drop_none_values([asdict(a) for a in intrinsic.axes])
     dims = [a.name for a in intrinsic.axes]
-    affines = []
-    for key, image in zip(keys, multiscales.images):
-        sim = msi_utils.get_sim_from_msim(msim, scale=key)
+    sims = [msi_utils.get_sim_from_msim(msim, scale=key) for key in keys]
+    for sim, image in zip(sims, multiscales.images):
+        spacing = si_utils.get_spacing_from_sim(sim)
+        origin = si_utils.get_origin_from_sim(sim)
         # Updating registration must not silently change the underlying grid.
         for dim in si_utils.get_spatial_dims_from_sim(sim):
             if not np.isclose(
-                si_utils.get_spacing_from_sim(sim)[dim], image.scale[dim]
-            ) or not np.isclose(
-                si_utils.get_origin_from_sim(sim)[dim], image.translation[dim]
-            ):
+                spacing[dim], image.scale[dim]
+            ) or not np.isclose(origin[dim], image.translation[dim]):
                 raise ValueError("Calibration differs from the on-disk image.")
         if any(sim.sizes[d] != image.data.shape[dims.index(d)] for d in dims):
             raise ValueError("Image shape differs from the on-disk image.")
-        affines.append(_ngff_v06.static_affine(sim, transform_key))
-    if any(not np.allclose(a, affines[0]) for a in affines[1:]):
-        raise ValueError(
-            "Registration must be identical across pyramid levels."
-        )
+    affine = _ngff_v06.static_multiscale_affine(sims, transform_key)
     edge = _drop_none_values(
         asdict(
             _ngff_v06.registration_transform(
-                axes, affines[0], intrinsic.name, target
+                axes, affine, intrinsic.name, target
             )
         )
     )
