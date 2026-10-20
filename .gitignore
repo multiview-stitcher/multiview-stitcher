@@ -108,3 +108,5 @@ docs/browser/neuroglancer/
 docs/browser/async_computation.bundle.js
 tests/browser/node_modules/
 .ng-build/
+
+visualizations/
