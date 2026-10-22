@@ -188,7 +188,9 @@ def read_mosaic_into_sims_czifile(filename, scene_index=0):
         if dim.lower() in si_utils.SPATIAL_DIMS
     ]
 
-    intervals = czi_utils.get_czi_mosaic_intervals(filename)
+    intervals = czi_utils.get_czi_mosaic_intervals(
+        filename, scene_index=scene_index
+    )
 
     sims = []
     for ixim, xim in enumerate(xims):
