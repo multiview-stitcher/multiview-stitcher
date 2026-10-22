@@ -47,6 +47,8 @@ SCHEME = "mvs-czi:"
 #: How many CZI files' image lists a worker keeps. Opening one image reads the
 #: whole file's metadata, so they are built together and reused; a compute
 #: worker rebuilding a session opens every image of the same file in a row.
+#: Counted in files, not scenes: a session holding every scene of one file
+#: must not evict one scene's images to open the next.
 _CACHE_SIZE = 2
 
 #: Coordinate system `read_multiview_czi_into_sims` writes the view positions
@@ -86,17 +88,37 @@ def parse_czi_url(url):
 
 
 @lru_cache(maxsize=_CACHE_SIZE)
-def _images(path, scene_index):
-    """Every image of one CZI as spatial images (lazy, so this is cheap).
+def _file(path):
+    """What is known of one CZI file: its kind, and the scenes read so far.
 
-    Returns ``(sims, is_multiview)``.
+    Scenes are read on demand into ``scenes``, keyed by scene index.
     """
-    if czi_utils.is_multiview_czi(path):
-        sims = czi_utils.read_multiview_czi_into_sims(path)
-        return tuple(_use_default_transform_key(sim) for sim in sims), True
+    return {"multiview": czi_utils.is_multiview_czi(path), "scenes": {}}
 
-    sims = mvs_io.read_mosaic_into_sims_czifile(path, scene_index=scene_index)
-    return tuple(sims), False
+
+def _images(path, scene_index):
+    """Every image of one CZI scene as spatial images (lazy, so this is cheap).
+
+    Returns ``(sims, is_multiview)``. A multi-view acquisition is read as a
+    whole, whatever the scene index.
+    """
+    entry = _file(path)
+    multiview = entry["multiview"]
+    key = 0 if multiview else scene_index
+
+    if key not in entry["scenes"]:
+        if multiview:
+            sims = czi_utils.read_multiview_czi_into_sims(path)
+            sims = tuple(_use_default_transform_key(sim) for sim in sims)
+        else:
+            sims = tuple(
+                mvs_io.read_mosaic_into_sims_czifile(
+                    path, scene_index=scene_index
+                )
+            )
+        entry["scenes"][key] = sims
+
+    return entry["scenes"][key], multiview
 
 
 def _use_default_transform_key(sim):
@@ -125,27 +147,86 @@ def forget_files():
     Called when a session is cleared: a mount the page has released must not be
     kept alive by a cached handle.
     """
-    _images.cache_clear()
+    _file.cache_clear()
     czi_utils.close_czi_files()
 
 
-def czi_sources(path, scene_index=0, name=None):
-    """Describe every image of a CZI file as a loadable source.
+def _scene_label(scene):
+    return scene["name"] or f"scene {scene['index']}"
+
+
+def czi_scenes(path):
+    """List the scenes of a CZI file, for the page to offer a choice.
+
+    Returns ``{"multiview", "scenes"}``, ``scenes`` holding one
+    ``{"index", "name", "n_images"}`` per scene. A multi-view acquisition is
+    reported as a single scene, as it is read as a whole.
+    """
+    path = str(path)
+
+    if _file(path)["multiview"]:
+        sims, _ = _images(path, 0)
+        return {
+            "multiview": True,
+            "scenes": [{"index": 0, "name": None, "n_images": len(sims)}],
+        }
+
+    return {
+        "multiview": False,
+        "scenes": [
+            {
+                "index": scene["index"],
+                "name": scene["name"],
+                "n_images": scene["n_tiles"],
+            }
+            for scene in czi_utils.get_czi_scenes(path)
+        ],
+    }
+
+
+def czi_sources(path, scene_indices=(0,), name=None):
+    """Describe every image of the given scenes of a CZI file as sources.
 
     Returns one ``{"url", "name"}`` per tile of a mosaic, or per view of a
-    multi-view acquisition, in the order the file's reader returns them.
+    multi-view acquisition, scene by scene in the order given and within a
+    scene in the order the file's reader returns them. When the file holds
+    more than one scene, names carry the scene's, so that tiles of different
+    scenes - possibly loaded at different times - can be told apart.
     """
-    sims, multiview = _images(str(path), int(scene_index))
-    label = name or str(path).rstrip("/").split("/")[-1]
-    kind = "view" if multiview else "tile"
+    path = str(path)
+    label = name or path.rstrip("/").split("/")[-1]
+    described = czi_scenes(path)
+    scenes = {scene["index"]: scene for scene in described["scenes"]}
+    kind = "view" if described["multiview"] else "tile"
 
-    return [
-        {
-            "url": czi_url(path, index, scene_index),
-            "name": f"{label} {kind} {index}",
-        }
-        for index in range(len(sims))
-    ]
+    if described["multiview"]:
+        scene_indices = (0,)
+
+    unknown = [i for i in scene_indices if int(i) not in scenes]
+    if unknown:
+        raise ValueError(
+            f"'{label}' has no scene {unknown[0]}; its scenes are "
+            f"{sorted(scenes)}."
+        )
+
+    sources = []
+    for scene_index in scene_indices:
+        scene_index = int(scene_index)
+        sims, _ = _images(path, scene_index)
+        prefix = (
+            f"{label} {_scene_label(scenes[scene_index])}"
+            if len(scenes) > 1
+            else label
+        )
+        sources.extend(
+            {
+                "url": czi_url(path, index, scene_index),
+                "name": f"{prefix} {kind} {index}",
+            }
+            for index in range(len(sims))
+        )
+
+    return sources
 
 
 def build_sim(url):

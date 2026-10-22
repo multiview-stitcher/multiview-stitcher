@@ -81,8 +81,12 @@ class WorkerRuntime:
 
         return self.session.add(payload["sources"])
 
+    def _cmd_czi_scenes(self, payload):
+        """List the scenes of one CZI, so the page can ask which to load."""
+        return browser_czi.czi_scenes(payload["path"])
+
     def _cmd_load_czi(self, payload):
-        """Load every tile of one mosaic CZI as a view.
+        """Load every tile of the chosen scenes of one CZI as views.
 
         The page knows only the path it mounted the file at; how many tiles
         that file holds is a question only the reader can answer, so the tile
@@ -90,7 +94,9 @@ class WorkerRuntime:
         """
         sources = browser_czi.czi_sources(
             payload["path"],
-            scene_index=payload.get("scene_index", 0),
+            scene_indices=payload.get(
+                "scene_indices", [payload.get("scene_index", 0)]
+            ),
             name=payload.get("name"),
         )
         return self._cmd_load(
