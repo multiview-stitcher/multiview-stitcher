@@ -203,6 +203,8 @@ class FusionOptions:
     output_stack_mode: str = "union"
     output_zarr_url: Optional[str] = None
     ngff_version: str = "0.4"
+    # Export this view on its existing grids, keeping registration in metadata.
+    copy_view: Optional[int] = None
 
     def __post_init__(self):
         _lookup(FUSION_FUNCS, self.fusion_func, "fusion function")

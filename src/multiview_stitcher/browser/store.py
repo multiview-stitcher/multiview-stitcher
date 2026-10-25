@@ -237,6 +237,18 @@ def _make_v3_store_class():
             )
             Store.__init__(self, read_only=not self._writable)
 
+        def with_read_only(self, read_only=False):
+            if not read_only and not self._writable:
+                raise ValueError(
+                    "Cannot make a read-only HTTP store writable."
+                )
+            return type(self)(
+                self.base_url,
+                fetch=self._fetch,
+                write=None if read_only else self._write,
+                writable=not read_only,
+            )
+
         def __eq__(self, other):
             return (
                 isinstance(other, HttpZarrStoreV3)
