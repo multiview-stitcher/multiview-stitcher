@@ -188,6 +188,26 @@ def _get_xarray_zarr_array(xim):
     return None
 
 
+def _zarr_backing_matches_dims(xim):
+    """True when a DataArray wraps its whole backing zarr array axis by axis.
+
+    Matching ``ndim`` is not enough: a lazy ``isel``/``sel`` keeps all axes
+    but only exposes part of the backing array.
+    """
+    zarr_array = _get_xarray_zarr_array(xim)
+    if zarr_array is None or tuple(zarr_array.shape) != tuple(xim.shape):
+        return False
+
+    key_tuple = _get_lazy_indexer_tuple(xim, zarr_array.shape)
+    if key_tuple is None:
+        return True
+
+    return all(
+        isinstance(idx, slice) and range(*idx.indices(size)) == range(size)
+        for idx, size in zip(key_tuple, zarr_array.shape)
+    )
+
+
 def _zarr_array_uses_http_store(zarray):
     if zarray is None:
         return False
@@ -484,8 +504,7 @@ def get_sim_from_array(
     nsdims = ["c", "t"]
     missing_nsdims = [nsdim for nsdim in reversed(nsdims) if nsdim not in xim.dims]
     if missing_nsdims:
-        backing_zarr = _get_xarray_zarr_array(xim)
-        if backing_zarr is not None and backing_zarr.ndim == xim.ndim:
+        if _zarr_backing_matches_dims(xim):
             # Keep missing singleton axes virtual for zarr-backed inputs whose
             # backing array still matches the current dims 1:1 (a prior lazy isel
             # could break that, in which case we fall through to a plain expand).
@@ -651,6 +670,39 @@ def _is_full_slice(indexer):
     return isinstance(indexer, slice) and indexer == slice(None)
 
 
+def _spatial_indexer_as_slice(idx):
+    """Return a lazy spatial indexer entry as an equivalent slice, if any.
+
+    Besides plain slices this accepts integer arrays forming a regular range
+    with a positive step, which xarray produces for outer/vectorized indexing
+    (e.g. a selection after a lazy transpose broadcasts every index to the
+    result shape).
+    """
+    if isinstance(idx, slice):
+        return idx if (idx.step or 1) >= 1 else None
+
+    arr = np.asarray(idx)
+    if not arr.size or not np.issubdtype(arr.dtype, np.integer):
+        return None
+
+    # Collapse broadcast axes along which the index is constant.
+    axis = 0
+    while arr.ndim > 1 and axis < arr.ndim:
+        if np.all(arr == arr.take([0], axis=axis)):
+            arr = arr.take(0, axis=axis)
+        else:
+            axis += 1
+    if arr.ndim > 1:
+        return None
+    arr = arr.reshape(-1)
+
+    step = int(arr[1] - arr[0]) if len(arr) > 1 else 1
+    if step < 1 or not np.all(np.diff(arr) == step):
+        return None
+
+    return slice(int(arr[0]), int(arr[-1]) + 1, step)
+
+
 def _extract_isel_selections(sim, indexed_dims):
     """
     Recover lazy ``isel`` selections from xarray's indexing wrapper.
@@ -675,6 +727,20 @@ def _extract_isel_selections(sim, indexed_dims):
             isel_dropped[dim] = scalar_idx
 
         if dim in SPATIAL_DIMS:
+            # A spatial sub-view (e.g. one tile of a larger array) must be
+            # recorded, otherwise deserialization rebuilds the whole backing
+            # array at the sub-view's origin.
+            if dim not in sim.dims or _is_full_slice(idx):
+                continue
+            idx_slice = _spatial_indexer_as_slice(idx)
+            if idx_slice is None:
+                raise ValueError(
+                    f"Zarr-backed sim is indexed along spatial dim {dim!r} "
+                    f"with {idx!r}; only regular selections with a positive "
+                    "step are supported. Wrap the data in dask "
+                    "(e.g. sim.chunk()) instead."
+                )
+            isel_indexers[dim] = idx_slice
             continue
 
         if dim in sim.dims and not _is_full_slice(idx):
@@ -719,6 +785,19 @@ def serialize_zarr_backed_sim(sim):
     zarr_dims = _get_backing_zarr_dims(sim, zarr_array)
     indexed_dims = _get_indexed_dims(sim, zarr_dims)
     isel_indexers, isel_dropped = _extract_isel_selections(sim, indexed_dims)
+
+    # Guard against selections that could not be recovered from the lazy
+    # indexer: rebuilding would then silently yield different data.
+    for dim in get_spatial_dims_from_sim(sim):
+        backing_size = zarr_array.shape[zarr_dims.index(dim)]
+        if dim in isel_indexers:
+            backing_size = len(range(*isel_indexers[dim].indices(backing_size)))
+        if backing_size != sim.sizes[dim]:
+            raise ValueError(
+                f"Could not recover the selection along {dim!r} of a "
+                "zarr-backed sim from its backing zarr array. Wrap the data "
+                "in dask (e.g. sim.chunk()) instead."
+            )
 
     return {
         "zarr_array": zarr_array,
@@ -841,6 +920,18 @@ def deserialize_zarr_backed_sim(
     base_indexers.update(info["isel_dropped"])
     if base_indexers:
         sim = sim.isel(base_indexers, drop=True)
+
+    # Spatial sub-views (possibly re-wrapped with a new translation) carry
+    # their own origin and spacing, so rebuild the spatial coords from those.
+    sim = sim.assign_coords(
+        {
+            dim: _get_axis_coords(
+                dim, sim.sizes[dim], info["spacing"][dim], info["origin"][dim]
+            )
+            for dim in sim.dims
+            if dim in SPATIAL_DIMS
+        }
+    )
 
     current_nsdim_coords = {}
     for dim in ["t", "c"]:
@@ -1443,10 +1534,7 @@ def _combine_zarr_backed_sims(sims, dim, new_dim):
 def _zarr_backed_combine_applicable(sims):
     """True when every sim wraps a real zarr array matching its dims 1:1."""
     for sim in sims:
-        if not is_xarray_zarr_backed(sim):
-            return False
-        zarr_array = _get_xarray_zarr_array(sim)
-        if zarr_array is None or zarr_array.ndim != sim.ndim:
+        if not is_xarray_zarr_backed(sim) or not _zarr_backing_matches_dims(sim):
             return False
     return True
 

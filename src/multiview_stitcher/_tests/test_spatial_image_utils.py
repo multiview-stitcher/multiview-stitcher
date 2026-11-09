@@ -289,6 +289,132 @@ def test_deserialize_zarr_backed_sim_reconstruct_slice_reads_requested_region():
         assert sim2.coords["x"].values == pytest.approx([23.0, 24.0])
 
 
+@pytest.mark.parametrize("ndim", [2, 3])
+@pytest.mark.parametrize("rewrap", [False, True])
+@pytest.mark.parametrize("step", [1, 2])
+def test_serialize_deserialize_spatially_sliced_zarr_backed_sim(ndim, rewrap, step):
+    """A spatial sub-view of a larger zarr array roundtrips to the same data.
+
+    Regression test: spatial isel selections used to be dropped, so the whole
+    backing array was rebuilt at the sub-view's origin.
+    """
+    sdims = si_utils.SPATIAL_DIMS[-ndim:]
+    data = np.arange(2 * 20**ndim, dtype=np.uint16).reshape((2,) + (20,) * ndim)
+    zarray = zarr.create_array(
+        store={}, shape=data.shape, chunks=(1,) + (8,) * ndim, dtype=data.dtype
+    )
+    zarray[:] = data
+
+    full = si_utils.get_sim_from_array(
+        zarray,
+        dims=["c"] + sdims,
+        scale={dim: 0.5 for dim in sdims},
+        translation={dim: 1.0 for dim in sdims},
+    )
+    starts = dict(zip(sdims, [3, 5, 7][-ndim:]))
+    sim = full.isel({dim: slice(starts[dim], 18, step) for dim in sdims})
+    np_slice = (slice(None),) + tuple(slice(starts[dim], 18, step) for dim in sdims)
+
+    if rewrap:
+        # re-wrapping assigns the sub-view a new translation (and spacing)
+        sim = si_utils.get_sim_from_array(
+            sim,
+            dims=sim.dims,
+            scale={dim: 2.0 for dim in sdims},
+            translation={dim: 100.0 + idim for idim, dim in enumerate(sdims)},
+        )
+
+    assert si_utils.is_xarray_zarr_backed(sim)
+    expected = data[np_slice]
+    np.testing.assert_array_equal(sim.values.squeeze(axis=0), expected)
+
+    info = si_utils.serialize_zarr_backed_sim(sim)
+    sim2 = si_utils.deserialize_zarr_backed_sim(info)
+
+    assert si_utils.is_xarray_zarr_backed(sim2)
+    assert sim2.dims == sim.dims
+    np.testing.assert_array_equal(sim2.values, sim.values)
+    for dim in sim.dims:
+        np.testing.assert_allclose(sim2.coords[dim].values, sim.coords[dim].values)
+
+    # reconstruct_slice: read a sub-region given in the sub-view's physical
+    # coordinates, which must map into backing indices via the sub-view offset
+    spacing = si_utils.get_spacing_from_sim(sim)
+    origin = si_utils.get_origin_from_sim(sim)
+    offset = {dim: 1 + idim for idim, dim in enumerate(sdims)}
+    shape = {dim: 2 for dim in sdims}
+    sim3 = si_utils.deserialize_zarr_backed_sim(
+        info,
+        reconstruct_slice=True,
+        overlap_bb={
+            "origin": {
+                dim: origin[dim] + offset[dim] * spacing[dim] for dim in sdims
+            },
+            "shape": shape,
+            "spacing": spacing,
+        },
+        sim_coord_dict={
+            "t": sim.coords["t"].values[0],
+            "c": sim.coords["c"].values[1],
+        },
+    )
+    expected_region = sim.isel(t=0, c=1).isel(
+        {dim: slice(offset[dim], offset[dim] + shape[dim]) for dim in sdims}
+    )
+    np.testing.assert_array_equal(np.asarray(sim3.data), expected_region.values)
+    for dim in sdims:
+        np.testing.assert_allclose(
+            sim3.coords[dim].values, expected_region.coords[dim].values
+        )
+
+
+def test_serialize_deserialize_spatially_sliced_transposed_zarr_backed_sim():
+    """Selections on a lazily transposed backing array (vectorized indexer)."""
+    data = np.arange(3 * 2 * 12 * 12, dtype=np.uint16).reshape(3, 2, 12, 12)
+    zarray = zarr.create_array(
+        store={}, shape=data.shape, chunks=(1, 1, 4, 4), dtype=data.dtype
+    )
+    zarray[:] = data
+
+    # backing order (c, t, y, x) is lazily transposed to (t, c, y, x)
+    sim = si_utils.get_sim_from_array(
+        zarray, dims=["c", "t", "y", "x"], t_coords=[10.0, 20.0]
+    )
+    sim = sim.sel(t=20.0).isel(y=slice(2, 10, 2), x=slice(3, 9))
+
+    info = si_utils.serialize_zarr_backed_sim(sim)
+    sim2 = si_utils.deserialize_zarr_backed_sim(info)
+
+    np.testing.assert_array_equal(sim.values, data[:, 1, 2:10:2, 3:9])
+    np.testing.assert_array_equal(sim2.values, sim.values)
+    for dim in ["y", "x"]:
+        np.testing.assert_allclose(sim2.coords[dim].values, sim.coords[dim].values)
+
+
+def test_serialize_zarr_backed_sim_rejects_fancy_spatial_indexing():
+    zarray = zarr.create_array(
+        store={}, shape=(10, 10), chunks=(5, 5), dtype=np.uint16
+    )
+    sim = si_utils.get_sim_from_array(zarray, dims=["y", "x"])
+
+    with pytest.raises(ValueError, match="spatial dim 'x'"):
+        si_utils.serialize_zarr_backed_sim(sim.isel(x=[1, 3, 4]))
+
+
+def test_get_sim_from_array_spatially_sliced_zarr_dataarray():
+    """Lazily adding singleton dims must not expose the whole backing array."""
+    data = np.arange(20 * 20, dtype=np.uint16).reshape(20, 20)
+    zarray = zarr.create_array(
+        store={}, shape=data.shape, chunks=(8, 8), dtype=data.dtype
+    )
+    zarray[:] = data
+
+    xim = si_utils._zarr_array_to_dataarray(zarray, dims=("y", "x"))
+    sim = si_utils.get_sim_from_array(xim.isel(y=slice(5, 15)), dims=("y", "x"))
+
+    np.testing.assert_array_equal(sim.values.squeeze(), data[5:15])
+
+
 def _zarr_backed_sim(tmpdir, name, data, dims, chunks, **kwargs):
     zarray = zarr.open_array(
         os.path.join(tmpdir, name),
