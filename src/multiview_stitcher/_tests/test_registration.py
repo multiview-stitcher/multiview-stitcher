@@ -1885,3 +1885,58 @@ def test_an_unsupported_elastix_transform_type_is_named():
             initial_affine=np.eye(3),
             transform_types=["bspline"],
         )
+
+
+def test_register_spatial_subviews_of_one_zarr_array():
+    """
+    Tiles that are spatial sub-views of one zarr array register exactly like
+    their dask-wrapped equivalent.
+    """
+    rng = np.random.default_rng(0)
+    data = ndimage.gaussian_filter(rng.random((1, 180, 180)), sigma=(0, 3, 3))
+    data = rescale_intensity(data, out_range=(0, 1000)).astype(np.uint16)
+
+    tile_size, starts = 100, (0, 80)
+    affines = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.create_array(
+            os.path.join(tmpdir, "well.zarr"),
+            shape=data.shape,
+            chunks=(1, 50, 50),
+            dtype=data.dtype,
+        )
+        zarray[:] = data
+
+        for backend, arr in [("dask", da.from_zarr(zarray)), ("zarr", zarray)]:
+            well = spatial_image_utils.get_sim_from_array(
+                arr, dims=["c", "y", "x"], transform_key="k"
+            )
+            msims = []
+            for oy in starts:
+                for ox in starts:
+                    tile = well.isel(
+                        y=slice(oy, oy + tile_size), x=slice(ox, ox + tile_size)
+                    )
+                    tile = spatial_image_utils.get_sim_from_array(
+                        tile,
+                        dims=tile.dims,
+                        translation={"y": float(oy), "x": float(ox)},
+                        transform_key="k",
+                    )
+                    msims.append(
+                        msi_utils.get_msim_from_sim(tile, scale_factors=[])
+                    )
+
+            affines[backend] = registration.register(
+                msims,
+                transform_key="k",
+                new_transform_key="registered",
+                reg_channel_index=0,
+            )
+
+    for p_zarr, p_dask in zip(affines["zarr"], affines["dask"]):
+        np.testing.assert_allclose(p_zarr.data, p_dask.data)
+        # tiles are placed at their true positions, so registration is a no-op
+        np.testing.assert_allclose(
+            np.asarray(p_zarr.squeeze()), np.eye(3), atol=0.1
+        )

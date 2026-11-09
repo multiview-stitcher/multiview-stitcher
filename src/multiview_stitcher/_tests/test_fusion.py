@@ -13,6 +13,7 @@ import multiview_stitcher.spatial_image_utils as si_utils
 from multiview_stitcher import (
     fusion,
     io,
+    misc_utils,
     msi_utils,
     ngff_utils,
     param_utils,
@@ -1421,3 +1422,82 @@ def test_fuse_msim_concat_c_zarr_backed_multiscale():
 
     assert result[0, 0].max() == 11
     assert result[0, 1].max() == 22
+
+
+def _well_tiles_from_array(arr, tile_size, n_tiles, transform_key):
+    """Split one well-sized array into a grid of tiles via spatial isel."""
+    well = si_utils.get_sim_from_array(
+        arr,
+        dims=["c", "y", "x"],
+        scale={"y": 1.0, "x": 1.0},
+        translation={"y": 0.0, "x": 0.0},
+        transform_key=transform_key,
+    )
+    tiles = []
+    for oy in range(0, n_tiles * tile_size, tile_size):
+        for ox in range(0, n_tiles * tile_size, tile_size):
+            tile = well.isel(
+                y=slice(oy, oy + tile_size), x=slice(ox, ox + tile_size)
+            )
+            tiles.append(
+                si_utils.get_sim_from_array(
+                    tile,
+                    dims=tile.dims,
+                    scale={"y": 1.0, "x": 1.0},
+                    translation={"y": float(oy), "x": float(ox)},
+                    transform_key=transform_key,
+                )
+            )
+    return tiles
+
+
+@pytest.mark.parametrize(
+    "fuse_mode", ["lazy", "output_zarr", "output_zarr_joblib"]
+)
+def test_fuse_spatial_subviews_of_one_zarr_array(fuse_mode):
+    """
+    Tiles that are spatial sub-views of one zarr array fuse to the same result
+    as their dask-wrapped equivalent.
+
+    Regression test: the all-zarr fusion path used to rebuild every tile from
+    its whole backing array, silently producing wrong output.
+    """
+    data = np.random.default_rng(0).integers(
+        1, 1000, size=(1, 200, 200), dtype=np.uint16
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.create_array(
+            os.path.join(tmpdir, "well.zarr"),
+            shape=data.shape,
+            chunks=(1, 50, 50),
+            dtype=data.dtype,
+        )
+        zarray[:] = data
+
+        results = {}
+        for backend, arr in [("dask", da.from_zarr(zarray)), ("zarr", zarray)]:
+            tiles = _well_tiles_from_array(
+                arr, tile_size=100, n_tiles=2, transform_key="k"
+            )
+            assert si_utils.is_xarray_zarr_backed(tiles[0]) == (backend == "zarr")
+
+            fuse_kwargs = {"transform_key": "k", "output_chunksize": 50}
+            if fuse_mode == "lazy":
+                fused = fusion.fuse(tiles, **fuse_kwargs)
+                results[backend] = np.asarray(fused.data).squeeze()
+                continue
+
+            if fuse_mode == "output_zarr_joblib":
+                fuse_kwargs["batch_options"] = {
+                    "batch_func": misc_utils.process_batch_using_joblib,
+                    "n_batch": 4,
+                }
+            output_path = os.path.join(tmpdir, f"fused_{backend}.zarr")
+            fusion.fuse(tiles, output_zarr_url=output_path, **fuse_kwargs)
+            results[backend] = np.asarray(
+                zarr.open_array(output_path, mode="r")[:]
+            ).squeeze()
+
+    np.testing.assert_array_equal(results["zarr"], results["dask"])
+    np.testing.assert_array_equal(results["zarr"], data.squeeze())

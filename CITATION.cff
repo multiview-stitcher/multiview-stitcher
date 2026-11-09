@@ -5,8 +5,8 @@ title: "multiview-stitcher: An interoperable Python toolbox for registering and 
 authors:
   - family-names: Albert
     given-names: Marvin
-  - family-names: Arthur
-    given-names: Michaut
+  - family-names: Michaut
+    given-names: Arthur
   - family-names: Wilhelmi
     given-names: Alexander
   - family-names: de Folter
