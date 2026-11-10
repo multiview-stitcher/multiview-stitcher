@@ -1501,3 +1501,65 @@ def test_fuse_spatial_subviews_of_one_zarr_array(fuse_mode):
 
     np.testing.assert_array_equal(results["zarr"], results["dask"])
     np.testing.assert_array_equal(results["zarr"], data.squeeze())
+
+
+def test_zarr_backed_rotated_views_do_not_depend_on_the_chunk(tmp_path):
+    """Rotated zarr-backed views fuse as in memory at every output chunk.
+
+    For a rotated view an output chunk's input region starts off the voxel
+    grid. The region read rounds the start to a whole voxel; the region has
+    to be placed where the read voxels are, not at the unrounded start, or
+    the view's data moves by up to half a voxel, by an amount that changes
+    with the chunk boundaries.
+    """
+    key = si_utils.DEFAULT_TRANSFORM_KEY
+    sims = sample_data.generate_tiled_dataset(
+        ndim=3,
+        N_c=1,
+        N_t=1,
+        tile_size=48,
+        tiles_x=2,
+        tiles_y=1,
+        tiles_z=1,
+        overlap=12,
+    )
+    rotated, backed = [], []
+    for i, sim in enumerate(sims):
+        sim = sim.astype(np.uint16)
+        theta = np.deg2rad(5 * (i + 1))
+        rotation = np.eye(4)
+        rotation[1:3, 1:3] = [
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+        affine = (
+            np.asarray(si_utils.get_affine_from_sim(sim, key)).squeeze()
+            @ rotation
+        )
+        si_utils.set_sim_affine(
+            sim, param_utils.affine_to_xaffine(affine), transform_key=key
+        )
+        rotated.append(sim)
+        path = str(tmp_path / f"view{i}.ome.zarr")
+        ngff_utils.write_sim_to_ome_zarr(sim, path)
+        read = ngff_utils.read_sim_from_ome_zarr(path)
+        si_utils.set_sim_affine(
+            read, si_utils.get_affine_from_sim(sim, key), transform_key=key
+        )
+        backed.append(read)
+    assert si_utils.is_xarray_zarr_backed(backed[0])
+
+    def fused(images, chunk, name):
+        url = str(tmp_path / name)
+        fusion.fuse(
+            images,
+            transform_key=key,
+            output_chunksize=chunk,
+            output_zarr_url=url,
+        )
+        return np.asarray(zarr.open_array(url, mode="r"), dtype=np.float64)
+
+    reference = fused(rotated, 128, "in_memory.zarr")
+    for chunk in (16, 24):
+        diff = np.abs(fused(backed, chunk, f"backed{chunk}.zarr") - reference)
+        assert diff.max() <= 1, (chunk, diff.max(), (diff > 1).mean())
