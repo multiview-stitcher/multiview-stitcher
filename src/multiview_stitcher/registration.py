@@ -533,8 +533,12 @@ def phase_correlation_registration(
                 )
 
             if np.nanmax(im1t[mask_slices]) <= im1_min:
-                disambiguate_metric_val = -1
-                quality_metric_val = -1
+                # recorded like every other rejected candidate: skipping
+                # the appends below would shift every later candidate's
+                # scores one place, so that np.nanargmax picked the
+                # translation of the candidate before the best one
+                disambiguate_metric_vals.append(-1)
+                quality_metric_vals.append(-1)
                 continue
 
             # structural similarity seems to be better than

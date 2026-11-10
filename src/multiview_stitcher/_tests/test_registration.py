@@ -1940,3 +1940,30 @@ def test_register_spatial_subviews_of_one_zarr_array():
         np.testing.assert_allclose(
             np.asarray(p_zarr.squeeze()), np.eye(3), atol=0.1
         )
+
+
+def test_phase_correlation_scores_stay_aligned_with_candidates():
+    """A candidate rejected for holding no signal keeps its place.
+
+    The moving image is the fixed one shifted by (-6, -1), with its first
+    rows zeroed (like a tile padded with zeros). Some candidate shifts then
+    move only zeros into the overlap and are rejected; if the rejection
+    skips recording the candidate's scores, every later score sits one
+    place early and the winning index points at the wrong candidate.
+    """
+    rng = np.random.default_rng(58)
+    n = 32
+    base = ndimage.gaussian_filter(rng.random((n + 16, n + 16)), 1.5)
+    shift = np.array([-6, -1])
+    fixed = base[8 : 8 + n, 8 : 8 + n].copy()
+    moving = base[
+        8 + shift[0] : 8 + shift[0] + n, 8 + shift[1] : 8 + shift[1] + n
+    ].copy()
+    moving[:10] = 0
+
+    result = registration.phase_correlation_registration(
+        xr.DataArray(fixed), xr.DataArray(moving)
+    )
+    np.testing.assert_allclose(
+        result["affine_matrix"][:2, 2], -shift, atol=0.5
+    )
