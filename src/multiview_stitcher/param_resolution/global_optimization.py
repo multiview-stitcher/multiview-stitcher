@@ -219,8 +219,11 @@ def optimize_bead_subgraph(
     mapping = {n: i for i, n in enumerate(g_beads_subgraph.nodes)}
     inverse_mapping = dict(enumerate(g_beads_subgraph.nodes))
 
-    # relabel nodes
+    # relabel nodes, and the reference with them: it is compared with the
+    # relabelled indices below, so in a component whose views are not
+    # labelled 0..n-1 the old label would fix another view
     nx.relabel_nodes(g_beads_subgraph, mapping, copy=False)
+    ref_node = mapping[ref_node]
     # relabel bead dicts
     for e in g_beads_subgraph.edges:
         g_beads_subgraph.edges[e]["beads"] = {
