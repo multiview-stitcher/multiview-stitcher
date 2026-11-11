@@ -857,6 +857,7 @@ def deserialize_zarr_backed_sim(
 
         # Select the requested overlap slab (spatial dims) and any remaining
         # non-spatial coordinates requested via sim_coord_dict.
+        starts = {}
         indexer = {}
         for dim in selected.dims:
             if dim in sim_coord_dict:
@@ -879,6 +880,10 @@ def deserialize_zarr_backed_sim(
                         / info["spacing"][dim]
                     )
                 )
+                # a box rounded to before the array's first voxel (a
+                # negative start would count from the end)
+                start = max(0, start)
+                starts[dim] = start
                 indexer[dim] = slice(
                     start, start + int(overlap_bb["shape"][dim])
                 )
@@ -895,8 +900,18 @@ def deserialize_zarr_backed_sim(
             data,
             dims=result_dims,
             scale={dim: info["spacing"][dim] for dim in spatial_dims},
+            # where the read voxels are: the selected array's origin plus
+            # the rounded start. For a rotated view the box's own origin is
+            # off the voxel grid, and placing the region there would move
+            # the view's data by up to half a voxel, by an amount that
+            # changes with the output chunk.
             translation={
-                dim: overlap_bb["origin"][dim] for dim in spatial_dims
+                dim: (
+                    info["origin"][dim] + starts[dim] * info["spacing"][dim]
+                    if dim in starts
+                    else overlap_bb["origin"][dim]
+                )
+                for dim in spatial_dims
             },
             c_coords=info["c_coords"] if "c" in result_dims else None,
             t_coords=info["t_coords"] if "t" in result_dims else None,
