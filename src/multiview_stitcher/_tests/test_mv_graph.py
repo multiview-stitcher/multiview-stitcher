@@ -1,5 +1,7 @@
+import networkx as nx
 import numpy as np
 import pytest
+import xarray as xr
 from dask import compute, delayed
 
 from multiview_stitcher import (
@@ -226,3 +228,21 @@ def test_prune_view_adjacency_graph():
         )
 
         assert len(g_reg.nodes) == N
+
+
+def test_get_node_with_maximal_edge_weight_sum_from_graph():
+    rng = np.random.default_rng(0)
+    g = nx.gnm_random_graph(30, 80, seed=0)
+    g.add_node(30)  # isolated node
+    for e in g.edges:
+        g.edges[e]["quality"] = xr.DataArray(rng.random())
+
+    ref_node = mv_graph.get_node_with_maximal_edge_weight_sum_from_graph(
+        g, weight_key="quality"
+    )
+
+    sums = {
+        node: sum(float(g.edges[e]["quality"]) for e in g.edges(node))
+        for node in g.nodes
+    }
+    assert ref_node == max(sums, key=sums.get)
