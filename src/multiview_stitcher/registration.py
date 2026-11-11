@@ -359,6 +359,7 @@ def phase_correlation_registration(
     fixed_data,
     moving_data,
     disambiguate_region_mode=None,
+    mirrored_candidates=False,
     **skimage_phase_corr_kwargs,
 ):
     """
@@ -369,6 +370,12 @@ def phase_correlation_registration(
     ----------
     fixed_data : array-like
     moving_data : array-like
+    mirrored_candidates : bool, optional
+        Also test the mirror image of the correlation peak's shift along
+        each axis (+s besides -s and its periodic aliases), as the function
+        did before. skimage returns the negative of the true shift, so the
+        mirror is never the right translation and can only win wrongly.
+        By default False.
 
     Returns
     -------
@@ -463,11 +470,20 @@ def phase_correlation_registration(
     disambiguate_metric_vals = []
     quality_metric_vals = []
 
+    # skimage returns the negative of the true shift s, for every
+    # normalization and the masked variant, so the translations to test
+    # are -s and its periodic aliases -s +- N. The +s branch (s[d] == 0
+    # below) mirrors the shift along that axis; in low-signal overlaps the
+    # similarity can prefer the mirror.
     t_candidates = []
     for shift_candidate in shift_candidates:
         for s in np.ndindex(
             tuple([1 if shift_candidate[d] == 0 else 4 for d in range(ndim)])
         ):
+            if not mirrored_candidates and any(
+                s[d] == 0 and shift_candidate[d] != 0 for d in range(ndim)
+            ):
+                continue
             t_candidate = []
             for d in range(ndim):
                 if s[d] == 0:
