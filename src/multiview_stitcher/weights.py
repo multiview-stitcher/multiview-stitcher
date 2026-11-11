@@ -499,16 +499,23 @@ def get_blending_weights(
 
     # target_weights = target_weights * ~np.isnan(target_support)
 
-    def cosine_weights(x):
-        mask = x < 1
-        x[mask] = (np.cos((1 - x[mask]) * np.pi) + 1) / 2
-        x = np.clip(x, 0, 1)
-        # x[~mask] = 1
-        return x
-
-    target_weights.data = cosine_weights(target_weights.data)
+    target_weights.data = _apply_cosine_ramp(target_weights.data)
 
     return target_weights.data
+
+
+def _apply_cosine_ramp(x):
+    """Apply the raised-cosine blending ramp to weights below 1.
+
+    Uses the half-angle identity
+    ``(cos((1 - w) * pi) + 1) / 2 == sin(w * pi / 2) ** 2``: the cos form
+    adds 1 to a value close to -1 where w is small (at the tile borders) and
+    loses most significant digits in float32 there; the sin**2 form stays at
+    float32 precision.
+    """
+    mask = x < 1
+    x[mask] = np.sin(x[mask] * (np.pi / 2)) ** 2
+    return np.clip(x, 0, 1)
 
 
 def _clamp_overlap(overlap, output_chunksize):

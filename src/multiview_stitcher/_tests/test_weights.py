@@ -163,3 +163,28 @@ def test_content_based_dct_prefers_sharp_view():
 
     assert fused_arr.shape == sharp.shape
     assert np.mean((fused_arr - sharp) ** 2) < np.mean((blurred - sharp) ** 2)
+
+
+def test_cosine_ramp_fp32_stability():
+    """The blending ramp stays accurate in float32 for weights close to 0,
+    i.e. at tile borders, where the cos form cancels catastrophically."""
+    from multiview_stitcher.weights import _apply_cosine_ramp
+
+    x64 = np.linspace(0, 0.05, 4097, dtype=np.float64)[1:]
+    reference = np.sin(x64 * (np.pi / 2)) ** 2
+    ramp32 = _apply_cosine_ramp(x64.astype(np.float32)).astype(np.float64)
+    assert np.max(np.abs(ramp32 - reference) / reference) < 1e-6
+
+    # the same ramp as before away from the borders
+    x = np.linspace(0.2, 0.999, 1000, dtype=np.float32)
+    np.testing.assert_allclose(
+        _apply_cosine_ramp(x.copy()),
+        np.clip((np.cos((1 - x) * np.float32(np.pi)) + 1) / 2, 0, 1),
+        atol=2e-7,
+    )
+
+    # weights >= 1 lie fully inside the tile and map to exactly 1
+    np.testing.assert_array_equal(
+        _apply_cosine_ramp(np.array([1.0, 1.5], dtype=np.float32)),
+        np.array([1.0, 1.0], dtype=np.float32),
+    )
