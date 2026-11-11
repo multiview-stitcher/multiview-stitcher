@@ -1940,3 +1940,44 @@ def test_register_spatial_subviews_of_one_zarr_array():
         np.testing.assert_allclose(
             np.asarray(p_zarr.squeeze()), np.eye(3), atol=0.1
         )
+
+
+def _noisy_shifted_pair(seed, noise, shift=(6, 9), n=64):
+    rng = np.random.default_rng(seed)
+    big = ndimage.gaussian_filter(rng.random((n + 40, n + 40)), 3.0)
+    big = (big - big.mean()) / big.std()
+    a = big[20 : 20 + n, 20 : 20 + n]
+    b = big[
+        20 + shift[0] : 20 + shift[0] + n, 20 + shift[1] : 20 + shift[1] + n
+    ]
+    a = a + noise * rng.standard_normal(a.shape)
+    b = b + noise * rng.standard_normal(b.shape)
+    coords = {"y": np.arange(n), "x": np.arange(n)}
+    return [
+        xr.DataArray(
+            (x + 10).astype(np.float32), dims=["y", "x"], coords=coords
+        )
+        for x in (a, b)
+    ]
+
+
+def test_phase_correlation_no_mirrored_candidate():
+    """The mirror image of the peak's shift is not a candidate.
+
+    In a low-signal pair the similarity used to disambiguate the candidates
+    can prefer the mirror image (+s) of the true translation (-s).
+    """
+    for noise in (0.0, 3.0):
+        fixed, moving = _noisy_shifted_pair(267, noise)
+        t = registration.phase_correlation_registration(fixed, moving)[
+            "affine_matrix"
+        ][:2, 2]
+        np.testing.assert_allclose(t, [-6, -9], atol=1)
+
+    # with the mirrored candidates the noisy pair takes the mirror image
+    mirrored = registration.phase_correlation_registration(
+        fixed, moving, mirrored_candidates=True
+    )
+    np.testing.assert_allclose(
+        mirrored["affine_matrix"][:2, 2], [6, 9], atol=1
+    )
