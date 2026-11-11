@@ -9,7 +9,7 @@ from scipy.sparse.linalg import lsqr
 from scipy.spatial.transform import Rotation
 
 from multiview_stitcher import mv_graph, param_utils
-from .utils import compute_edge_residuals, get_graph_ndim
+from .utils import get_graph_ndim
 
 logger = logging.getLogger(__name__)
 
@@ -564,21 +564,18 @@ def groupwise_resolution_linear_two_pass(
         used_edges = [(edge["u"], edge["v"]) for edge in edges]
         return params, {"metrics": metrics, "used_edges": used_edges}
 
-    params_pass1 = _build_params_from_components(
-        nodes,
-        t_pass1,
-        r_pass1,
-        s_pass1,
-        transform,
-        ndim,
-        x_in=x_in,
-        x_out=x_out,
+    matrices_pass1 = _build_params_from_components(
+        nodes, t_pass1, r_pass1, s_pass1, transform, ndim, as_numpy=True
     )
 
     # Compute residuals in physical units for pruning/reporting.
-    residuals_by_edge = compute_edge_residuals(
-        g_reg_component_tp, params_pass1, ndim
+    residuals_pass1 = _compute_bead_residuals(
+        g_reg_component_tp, edges, matrices_pass1, ndim
     )
+    residuals_by_edge = {
+        (edge["u"], edge["v"]): residual
+        for edge, residual in zip(edges, residuals_pass1)
+    }
     metrics, residuals = _compute_edge_metrics(edges, residuals_by_edge)
 
     residuals = np.asarray(residuals, dtype=float)
@@ -625,7 +622,11 @@ def groupwise_resolution_linear_two_pass(
         for metric in metrics:
             metric["kept_pass2"] = True
 
-    t_final, r_final, s_final = solve_pass(final_edges)
+    # Nothing pruned: pass 2 would repeat pass 1.
+    if len(final_edges) == len(edges):
+        t_final, r_final, s_final = t_pass1, r_pass1, s_pass1
+    else:
+        t_final, r_final, s_final = solve_pass(final_edges)
 
     params = _build_params_from_components(
         nodes,
