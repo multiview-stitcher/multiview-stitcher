@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -7,7 +9,9 @@ from scipy.sparse.linalg import lsqr
 from scipy.spatial.transform import Rotation
 
 from multiview_stitcher import mv_graph, param_utils
-from .utils import compute_edge_residuals, get_graph_ndim
+from .utils import get_graph_ndim
+
+logger = logging.getLogger(__name__)
 
 
 def _get_edge_weight(edge_data, weight_mode):
@@ -171,6 +175,7 @@ def _build_params_from_components(
     ndim,
     x_in=None,
     x_out=None,
+    as_numpy=False,
 ):
     # Assemble homogeneous transforms from per-node components.
     params = {}
@@ -187,11 +192,31 @@ def _build_params_from_components(
         matrix = np.eye(ndim + 1, dtype=float)
         matrix[:ndim, :ndim] = linear
         matrix[:ndim, ndim] = translations[node]
+        if as_numpy:
+            params[node] = matrix
+            continue
         xparams = param_utils.affine_to_xaffine(matrix)
         if x_in is not None and x_out is not None:
             xparams = xparams.sel(x_in=x_in, x_out=x_out)
         params[node] = xparams
     return params
+
+
+def _compute_bead_residuals(g_reg, edges, matrices, ndim):
+    # compute_edge_residuals on numpy transforms, as an array over edges.
+    corners = np.array(list(np.ndindex(tuple([2] * ndim))), dtype=float)
+    residuals = []
+    for edge in edges:
+        lower, upper = np.asarray(g_reg.edges[edge["u"], edge["v"]]["bbox"])
+        points = np.concatenate(
+            [corners * (upper - lower) + lower, np.ones((len(corners), 1))],
+            axis=1,
+        )
+        diff = (points @ matrices[edge["u"]].T) - (
+            points @ edge["affine"].T @ matrices[edge["v"]].T
+        )
+        residuals.append(np.sqrt(np.mean(np.sum(diff[:, :ndim] ** 2, 1))))
+    return np.asarray(residuals)
 
 
 def _compute_edge_metrics(edges, residuals_by_edge):
@@ -222,11 +247,14 @@ def groupwise_resolution_linear_two_pass(
     keep_mst=True,
     weight_mode="quality_overlap",
     prior_lambda=0.0,
+    robust_rounds=0,
+    robust_scale=None,
+    robust_tolerance=0.01,
     **kwargs,
 ):
     """
     Fast groupwise resolution via a single global linearization and two-pass
-    outlier pruning.
+    outlier pruning, or (robust_rounds > 0) robust reweighting.
 
     We solve for per-tile correction transforms in the common stage frame,
     with either translation-only or rigid (SE(2)/SE(3)) parameterization.
@@ -269,6 +297,18 @@ def groupwise_resolution_linear_two_pass(
     (median + mad_k * MAD) are removed; optionally, a minimum spanning tree
     over residuals is retained to preserve connectivity. Pass 2 re-solves on
     the pruned edge set and returns the final transforms and edge metrics.
+
+    Robust reweighting
+    ------------------
+    With robust_rounds > 0, pruning (residual_threshold, mad_k, keep_mst) is
+    replaced by iteratively reweighted least squares: up to robust_rounds
+    re-solves weight each edge by its weight_mode weight times a Cauchy
+    weight of its last residual, 1 / (1 + (residual / robust_scale)^2), so
+    bad pairs stop pulling the fit while every edge is kept. robust_scale
+    defaults to half the largest voxel diagonal. Stops once the 99th
+    percentile of the residuals' change in a round is within
+    robust_tolerance * robust_scale, and returns the solve with the lowest
+    median residual, as reweighting need not decrease it monotonically.
     """
     if "mode" in kwargs:
         transform = kwargs.pop("mode")
@@ -341,6 +381,7 @@ def groupwise_resolution_linear_two_pass(
                 "trans": dvec,
                 "rot": rot_uv,
                 "scale": scale_uv,
+                "affine": affine,
                 "weight": _get_edge_weight(
                     g_reg_component_tp.edges[edge], weight_mode
                 ),
@@ -462,21 +503,79 @@ def groupwise_resolution_linear_two_pass(
         x_in = None
         x_out = None
 
-    params_pass1 = _build_params_from_components(
-        nodes,
-        t_pass1,
-        r_pass1,
-        s_pass1,
-        transform,
-        ndim,
-        x_in=x_in,
-        x_out=x_out,
+    if robust_rounds:
+        if robust_scale is None:
+            robust_scale = 0.5 * max(
+                np.sqrt(np.sum(np.square(list(spacing.values()))))
+                for spacing in (
+                    g_reg_component_tp.nodes[node]["stack_props"]["spacing"]
+                    for node in nodes
+                )
+            )
+        base_weights = np.array([edge["weight"] for edge in edges])
+        weights = base_weights
+        solution = (t_pass1, r_pass1, s_pass1)
+        best = None
+        for round_idx in range(robust_rounds + 1):
+            if round_idx:
+                solution = solve_pass(
+                    [edge | {"weight": w} for edge, w in zip(edges, weights)]
+                )
+            matrices = _build_params_from_components(
+                nodes, *solution, transform, ndim, as_numpy=True
+            )
+            residuals = _compute_bead_residuals(
+                g_reg_component_tp, edges, matrices, ndim
+            )
+            median = np.nanmedian(residuals)
+            if best is None or median < best[0]:
+                best = (median, solution, weights, residuals)
+            change = (
+                np.nanquantile(np.abs(residuals - last_residuals), 0.99)
+                if round_idx
+                else np.inf
+            )
+            logger.info(
+                "Robust linear resolution: round %d, median residual %.3g, "
+                "change %.3g",
+                round_idx,
+                median,
+                change,
+            )
+            if change <= robust_tolerance * robust_scale:
+                break
+            last_residuals = residuals
+            weights = base_weights * np.nan_to_num(
+                1.0 / (1.0 + (residuals / robust_scale) ** 2)
+            )
+
+        _, solution, weights, residuals = best
+        params = _build_params_from_components(
+            nodes, *solution, transform, ndim, x_in=x_in, x_out=x_out
+        )
+        metrics = pd.DataFrame(
+            {
+                "u": [edge["u"] for edge in edges],
+                "v": [edge["v"] for edge in edges],
+                "weight": weights,
+                "residual": residuals,
+            }
+        )
+        used_edges = [(edge["u"], edge["v"]) for edge in edges]
+        return params, {"metrics": metrics, "used_edges": used_edges}
+
+    matrices_pass1 = _build_params_from_components(
+        nodes, t_pass1, r_pass1, s_pass1, transform, ndim, as_numpy=True
     )
 
     # Compute residuals in physical units for pruning/reporting.
-    residuals_by_edge = compute_edge_residuals(
-        g_reg_component_tp, params_pass1, ndim
+    residuals_pass1 = _compute_bead_residuals(
+        g_reg_component_tp, edges, matrices_pass1, ndim
     )
+    residuals_by_edge = {
+        (edge["u"], edge["v"]): residual
+        for edge, residual in zip(edges, residuals_pass1)
+    }
     metrics, residuals = _compute_edge_metrics(edges, residuals_by_edge)
 
     residuals = np.asarray(residuals, dtype=float)
@@ -523,7 +622,11 @@ def groupwise_resolution_linear_two_pass(
         for metric in metrics:
             metric["kept_pass2"] = True
 
-    t_final, r_final, s_final = solve_pass(final_edges)
+    # Nothing pruned: pass 2 would repeat pass 1.
+    if len(final_edges) == len(edges):
+        t_final, r_final, s_final = t_pass1, r_pass1, s_pass1
+    else:
+        t_final, r_final, s_final = solve_pass(final_edges)
 
     params = _build_params_from_components(
         nodes,
