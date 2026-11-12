@@ -1,6 +1,7 @@
 import logging
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -39,6 +40,32 @@ def _get_groupwise_resolution_method(method):
     if method in _GROUPWISE_RESOLUTION_METHODS:
         return _GROUPWISE_RESOLUTION_METHODS[method]
     raise ValueError(f"Unknown groupwise optimization method: {method}")
+
+
+def _component_kwargs(kwargs, component):
+    """Resolver kwargs for one connected component.
+
+    ``reference_view`` may be a collection of views: each component then
+    takes the one member it contains as its reference (none if it contains
+    none). Registering several independent groups of views in one call,
+    e.g. every tile of an imaging cycle against the same tile of a
+    reference cycle, gives one component per group; a single reference
+    view would fix only one of them, and the others would choose their
+    reference by edge weight.
+    """
+    ref = kwargs.get("reference_view")
+    if ref is None or isinstance(ref, (str, bytes, int, np.integer)):
+        return kwargs
+    try:
+        members = [v for v in ref if v in component]
+    except TypeError:  # a hashable scalar of another kind
+        return kwargs
+    if len(members) > 1:
+        raise ValueError(
+            "reference_view: more than one reference in one connected "
+            f"component: {members}"
+        )
+    return {**kwargs, "reference_view": members[0] if members else None}
 
 
 def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
@@ -90,7 +117,9 @@ def groupwise_resolution(g_reg, method="global_optimization", **kwargs):
                 }
                 cc_info = None
             else:
-                cc_params, cc_info = resolver(g_reg_subgraph, **kwargs)
+                cc_params, cc_info = resolver(
+                    g_reg_subgraph, **_component_kwargs(kwargs, cc)
+                )
             for node in cc:
                 params[node].append(cc_params[node])
 
