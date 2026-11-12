@@ -650,3 +650,92 @@ def test_linear_two_pass_accuracy_grid(transform, grid_size, ndim):
         assert r_err < r_thresh
     if transform == "similarity":
         assert s_err < 0.05
+
+
+def test_global_optimization_fixes_the_reference_view():
+    """The reference view stays fixed whatever the views are labelled.
+
+    The global optimisation relabels a component's views to 0..n-1. With
+    the views labelled 1 and 5 the reference 1 has to become index 0; kept
+    as 1, it fixes view 5 (index 1) and moves the reference instead.
+    """
+    stack_props = {
+        "shape": {"y": 20, "x": 20},
+        "spacing": {"y": 1.0, "x": 1.0},
+        "origin": {"y": 0.0, "x": 0.0},
+    }
+    bbox = xr.DataArray(
+        np.array([[0.0, 0.0], [19.0, 19.0]]), dims=["point_index", "dim"]
+    )
+    shift = np.array([3.0, -2.0])
+    affine = np.eye(3)
+    affine[:2, 2] = shift
+    g_reg = nx.Graph()
+    g_reg.add_node(1, stack_props=stack_props)
+    g_reg.add_node(5, stack_props=stack_props)
+    g_reg.add_edge(
+        1,
+        5,
+        transform=param_utils.affine_to_xaffine(affine),
+        quality=0.9,
+        overlap=1.0,
+        bbox=bbox,
+    )
+    params, _ = param_resolution.groupwise_resolution(
+        g_reg, method="global_optimization", reference_view=1
+    )
+    reference = np.asarray(params[1]).reshape(-1, 3, 3)[0]
+    moved = np.asarray(params[5]).reshape(-1, 3, 3)[0]
+    np.testing.assert_allclose(reference, np.eye(3), atol=1e-6)
+    np.testing.assert_allclose(np.abs(moved[:2, 2]), np.abs(shift), atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "method", ["global_optimization", "shortest_paths", "linear_two_pass"]
+)
+def test_reference_view_collection_fixes_every_component(method):
+    """Many independent pairs in one call: each keeps its own reference fixed.
+
+    Ten pairs (k, k + 10), each its own component, the pair transform a
+    translation of the second view. Both views of a pair have the same
+    edge-weight sum, so without a reference per component the tie decides,
+    and for pairs (6, 16) and (7, 17) it picks the second view. With
+    reference_view {0, ..., 9} every first view stays put and every second
+    view takes the pair's translation.
+    """
+    n = 10
+    g_reg = nx.Graph()
+    shifts = {}
+    stack_props = {
+        "shape": {"y": 20, "x": 20},
+        "spacing": {"y": 1.0, "x": 1.0},
+        "origin": {"y": 0.0, "x": 0.0},
+    }
+    bbox = xr.DataArray(
+        np.array([[0.0, 0.0], [19.0, 19.0]]), dims=["point_index", "dim"]
+    )
+    for k in range(n):
+        g_reg.add_node(k, stack_props=stack_props)
+        g_reg.add_node(k + n, stack_props=stack_props)
+        shift = np.array([3.0 + k, -2.0 * k])
+        shifts[k] = shift
+        affine = np.eye(3)
+        affine[:2, 2] = shift
+        g_reg.add_edge(
+            k,
+            k + n,
+            transform=param_utils.affine_to_xaffine(affine),
+            quality=0.9 if k % 2 else 0.1,
+            overlap=1.0,
+            bbox=bbox,
+        )
+    params, _ = param_resolution.groupwise_resolution(
+        g_reg, method=method, reference_view=set(range(n))
+    )
+    for k in range(n):
+        fixed = np.asarray(params[k]).reshape(-1, 3, 3)[0]
+        moved = np.asarray(params[k + n]).reshape(-1, 3, 3)[0]
+        assert np.allclose(fixed, np.eye(3), atol=1e-6), (method, k, fixed)
+        assert np.allclose(
+            np.abs(moved[:2, 2]), np.abs(shifts[k]), atol=1e-6
+        ), (method, k, moved)

@@ -2324,7 +2324,8 @@ def register(
         Additional keyword arguments passed to the groupwise resolver.
         Parameters are method-specific. Common options include:
         - 'transform': final transform type (see method notes above)
-        - 'reference_view': node index to keep fixed
+        - 'reference_view': node index to keep fixed, or a collection of
+          them with at most one per connected component
         See the resolver docstrings for full details.
     pre_registration_pruning_method : str, optional
         Method used to eliminate registration edges (e.g. diagonals) from the view adjacency
