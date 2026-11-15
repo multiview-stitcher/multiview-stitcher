@@ -1607,6 +1607,36 @@ def fuse_np(
 
     input_dtype = sims[0].dtype
 
+    # A single view on its own grid is a copy. Avoid the float32 working
+    # buffer as well as interpolation, preserving wide integer pixel values.
+    if (
+        len(sims) == 1
+        and fusion_func is max_fusion
+        and backend in (None, "numpy")
+        and np.allclose(
+            params[0], np.eye(sims[0].ndim + 1), rtol=0, atol=1e-12
+        )
+        and not np.any(
+            list(trim_overlap_in_pixels.values())
+            if isinstance(trim_overlap_in_pixels, dict)
+            else trim_overlap_in_pixels
+        )
+    ):
+        properties = si_utils.get_stack_properties_from_sim(sims[0])
+        if spacings is not None:
+            properties["spacing"] = spacings[0]
+        if all(
+            np.allclose(
+                properties[key][dim],
+                output_properties[key][dim],
+                rtol=0,
+                atol=1e-12,
+            )
+            for key in ("shape", "spacing", "origin")
+            for dim in output_properties["shape"]
+        ):
+            return si_utils._get_backend_data(sims[0])
+
     # A chunk can intersect a view in only one pixel along an axis. Coordinate
     # differences cannot retain the spacing for such singleton slices, so use
     # the known spacing of the full view when it is available.

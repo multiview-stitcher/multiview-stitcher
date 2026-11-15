@@ -284,7 +284,7 @@ button { color: inherit; }
 .mvs-layer-highlight { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.42); stroke-width: 1; }
 .mvs-layer-highlight.subtle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
 
-.main-tabs { display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 12px; border-bottom: 1px solid var(--line); }
+.main-tabs { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 12px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 .main-tabs button { padding: 13px 4px 11px; border-bottom: 2px solid transparent; font-size: 10px; }
 .tabs button:hover { color: var(--text); }

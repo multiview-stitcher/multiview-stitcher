@@ -944,7 +944,7 @@ wheels = [
 
 [[package]]
 name = "dask"
-version = "2025.2.0"
+version = "2026.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -956,9 +956,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "toolz" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/30/ba2d373923cad0e069b50bf27115745fba4fb0a4f53cee7002582cb5cec7/dask-2025.2.0.tar.gz", hash = "sha256:89c87125d04d28141eaccc4794164ce9098163fd22d8ad943db48f8d4c815460", size = 10781637, upload-time = "2025-02-13T23:03:52.193Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/a7/6b3c7ac32b642fbbe0821111654e0bd8cfbe88f68560bcf23cc78ab35c71/dask-2026.8.0.tar.gz", hash = "sha256:8a94c37b5de6d869343340dc26c3c3acca7ec48a3abdabe00ea3abb1125884d5", size = 11561752, upload-time = "2026-08-24T19:21:25.906Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/4a/738ec3dac7e767c1ba6fbb6ecb908ceda66a1b2f4ee967bc03800fb07630/dask-2025.2.0-py3-none-any.whl", hash = "sha256:f0fdeef6ceb0a06569d456c9e704f220f7f54e80f3a6ea42ab98cea6bc642b6e", size = 1393839, upload-time = "2025-02-13T23:03:39.423Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/3a/4fc99e788bcfa1b3b3f21abf57da45898d807d007e7f6fd1c7300904eb70/dask-2026.8.0-py3-none-any.whl", hash = "sha256:ccc0c83a189b0398602435189771d28dad7b5773b6089bb8dce14ae732dd782c", size = 1492182, upload-time = "2026-08-24T19:21:23.997Z" },
 ]
 
 [package.optional-dependencies]
@@ -1056,7 +1056,7 @@ wheels = [
 
 [[package]]
 name = "distributed"
-version = "2025.2.0"
+version = "2026.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1072,12 +1072,11 @@ dependencies = [
     { name = "tblib" },
     { name = "toolz" },
     { name = "tornado" },
-    { name = "urllib3" },
     { name = "zict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/92/7ed81ced4d9301d79696c4f25a874371cf4ecd90aac5137f807870c290f1/distributed-2025.2.0.tar.gz", hash = "sha256:84e8e3a9290db805250cd8f0b46416b8e3e32c8088ffa778d8a21ea1e2c1cac3", size = 1111668, upload-time = "2025-02-13T23:03:45.628Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/18/1c98f0a36eccfcce109f054456f38767ac5d4b3fac124dcd5a35b1cd6167/distributed-2026.8.0.tar.gz", hash = "sha256:6f55008ecacf96ba945309fc12e680544764995e27bd63cc5e109afb97d7044d", size = 2465942, upload-time = "2026-08-24T19:36:00.554Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/a8/fec2e908b32a1b7868bd4c6144ac12ce1eb22460e18d6a2f093da2a8283d/distributed-2025.2.0-py3-none-any.whl", hash = "sha256:368462084be47092d0a835f6c64c9b852da64dc88302b76d5f93bd5131228c67", size = 1018389, upload-time = "2025-02-13T23:03:41.883Z" },
+    { url = "https://files.pythonhosted.org/packages/28/d4/017e2d39d797eaa38a52b4459c8bea875d5e0ada335a62aafe98193041a6/distributed-2026.8.0-py3-none-any.whl", hash = "sha256:3bd8882861a2cf497453f28c6b61135fa8ef2bb1d6885ad3b9f27e887e9c0e01", size = 1008640, upload-time = "2026-08-24T19:35:58.622Z" },
 ]
 
 [[package]]
@@ -1872,16 +1871,16 @@ wheels = [
 
 [[package]]
 name = "itkwasm-downsample"
-version = "1.8.1"
+version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "itkwasm" },
     { name = "itkwasm-downsample-emscripten", marker = "sys_platform == 'emscripten'" },
     { name = "itkwasm-downsample-wasi", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9f/51/0d226fc0ce5c51ff5cf99283cc26378240053c38f6ece639e3c612e0a0bf/itkwasm_downsample-1.8.1.tar.gz", hash = "sha256:b4a91cb79fb7f69e6333fbc18f745348cd58659a0b9da8e1f391289f8ff06afb", size = 13695, upload-time = "2025-11-09T16:10:13.018Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/cc/351ccf671800f3162cb4833f0528cf0df6f286da780ef9a4f0911599240c/itkwasm_downsample-2.0.2.tar.gz", hash = "sha256:d97fff5f8f76557995f2ddb0e013bddfa5e38e445304bbcf43eec6f3644ba279", size = 15139, upload-time = "2026-08-12T20:29:35.551Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/c6/906a1c94a9e0d12b6cbc8a36d6fe284d06298d3d3eda14934d21609845ab/itkwasm_downsample-1.8.1-py3-none-any.whl", hash = "sha256:f1315d32a1d80a610c682c3a32ab41aa46b584f91f17a839a7c0b6e3796e60c7", size = 7671, upload-time = "2025-11-09T16:10:13.995Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/f6/b16f524cd61d4347b87882350a00869b99d52c1830618a323bd06eb77d0b/itkwasm_downsample-2.0.2-py3-none-any.whl", hash = "sha256:e4aad62f586d05ac51fdfe644be21174ceb67a5f9dc10332361bb6f89afdfdfb", size = 13073, upload-time = "2026-08-12T20:29:36.405Z" },
 ]
 
 [[package]]
@@ -2954,6 +2953,7 @@ dev = [
     { name = "imagecodecs", version = "2026.6.26", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "itk-elastix" },
     { name = "itkwasm-elastix" },
+    { name = "jsonschema" },
     { name = "jupyter" },
     { name = "nbmake" },
     { name = "pre-commit" },
@@ -3004,7 +3004,7 @@ requires-dist = [
     { name = "czifile", marker = "extra == 'czi'", specifier = "==2019.7.2.3" },
     { name = "czifile", marker = "extra == 'dev'", specifier = "==2019.7.2.3" },
     { name = "dask", specifier = "!=2025.11.0" },
-    { name = "dask", extras = ["array"], marker = "extra == 'browser'", specifier = "==2025.2.0" },
+    { name = "dask", extras = ["array"], marker = "extra == 'browser'", specifier = ">=2026.1.2" },
     { name = "dask-image" },
     { name = "dask-image", marker = "extra == 'browser'", specifier = "==2024.5.3" },
     { name = "dask-jobqueue", marker = "extra == 'distributed'" },
@@ -3022,6 +3022,7 @@ requires-dist = [
     { name = "itkwasm-elastix", marker = "extra == 'dev'", specifier = ">=1.0.2" },
     { name = "itkwasm-elastix", marker = "extra == 'itkwasm-elastix'", specifier = ">=1.0.2" },
     { name = "joblib", marker = "extra == 'playground'" },
+    { name = "jsonschema", marker = "extra == 'dev'" },
     { name = "jupyter", marker = "extra == 'dev'" },
     { name = "lxml", marker = "extra == 'playground'" },
     { name = "matplotlib" },
@@ -3030,7 +3031,7 @@ requires-dist = [
     { name = "napari-stitcher", marker = "extra == 'playground'" },
     { name = "nbmake", marker = "extra == 'dev'" },
     { name = "networkx" },
-    { name = "ngff-zarr", specifier = ">=0.12.2,<0.44" },
+    { name = "ngff-zarr", specifier = ">=0.43,<0.44" },
     { name = "ngff-zarr", marker = "extra == 'browser'" },
     { name = "numpy", specifier = ">=1.18" },
     { name = "ome-types", marker = "extra == 'playground'" },
@@ -3320,7 +3321,7 @@ wheels = [
 
 [[package]]
 name = "ngff-zarr"
-version = "0.37.1"
+version = "0.43.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dask", extra = ["array"] },
@@ -3336,9 +3337,9 @@ dependencies = [
     { name = "zarr", version = "3.1.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "zarr", version = "3.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/da/c19d8880c51539035693f2fcc1f279d5795e4d43e6f2c7827a1173d4dee5/ngff_zarr-0.37.1.tar.gz", hash = "sha256:55ba2a3014270cdb73ac6f3ecdbda408253e040e0b3d0477f9860e381f6a879b", size = 401007, upload-time = "2026-07-03T15:09:17.046Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/ca/f7fdc06040ed2baabc31daaa9d46f5128b23389862a455cef398daf7a45f/ngff_zarr-0.43.0.tar.gz", hash = "sha256:4dd2b4fa0e822e5a9a82b2a894f3306355000c2c57518e267363d2a58ad8cc4c", size = 628405, upload-time = "2026-08-21T15:32:55.127Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/91/fad8a82ccc73bdf7bb06e9e91a4bddd756102bb196519f2a7dcaa475a711/ngff_zarr-0.37.1-py3-none-any.whl", hash = "sha256:b0c60c34e0bc6dc29b6a5e7e95edbe12e7cc6e3d4dede28161088dadcdeddc34", size = 194587, upload-time = "2026-07-03T15:09:15.17Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/7b/4a84c9b9c834913879e2b6ad796160e4dff3ec6e7fc07266869c373d0d36/ngff_zarr-0.43.0-py3-none-any.whl", hash = "sha256:be0505d24cf28b0c0f96a724d7a62d517652ca8ced7be4999687fc1ad9973e59", size = 224010, upload-time = "2026-08-21T15:32:53.285Z" },
 ]
 
 [[package]]

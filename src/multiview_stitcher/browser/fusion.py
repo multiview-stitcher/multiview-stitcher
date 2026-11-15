@@ -23,7 +23,7 @@ from dataclasses import asdict
 
 import numpy as np
 
-from multiview_stitcher import _zarr_compat, msi_utils, ngff_utils
+from multiview_stitcher import _zarr_compat, msi_utils, ngff_utils, param_utils
 from multiview_stitcher import fusion as core_fusion
 from multiview_stitcher import spatial_image_utils as si_utils
 from multiview_stitcher.browser import store as browser_store
@@ -70,6 +70,29 @@ def plan_levels(msims, options):
     that a pyramid written block by block matches one produced in a single
     call.
     """
+    if options.copy_view is not None:
+        msim = msims[options.copy_view]
+        levels = []
+        for key in msi_utils.get_sorted_scale_keys(msim):
+            sim = msi_utils.get_sim_from_msim(msim, scale=key)
+            # Copy in intrinsic coordinates; the exported metadata retains
+            # the selected registration affine separately.
+            si_utils.set_sim_affine(
+                sim,
+                param_utils.identity_transform(
+                    si_utils.get_ndim_from_sim(sim)
+                ),
+                "export",
+            )
+            levels.append(
+                {
+                    "path": f"{key}/image",
+                    "properties": si_utils.get_stack_properties_from_sim(sim),
+                    "sims": [sim],
+                }
+            )
+        return levels, levels[0]["properties"], None
+
     scale0_sims = [
         msi_utils.get_sim_from_msim(msim, scale="scale0") for msim in msims
     ]
@@ -152,11 +175,17 @@ def prepare_level(
         )
     )
 
+    if options.ngff_version == "0.6":
+        zarr_array_creation_kwargs["dimension_names"] = list(level["sims"][0].dims)
+
     fuse_kwargs = {
         "images": level["sims"],
         **options.fuse_kwargs(),
         "output_stack_properties": level["properties"],
     }
+    if options.copy_view is not None:
+        fuse_kwargs["transform_key"] = "export"
+        fuse_kwargs["fusion_func"] = core_fusion.max_fusion
     # The stack properties fully determine the geometry; the other output_*
     # arguments would be redundant and are rejected downstream.
     fuse_kwargs.pop("output_spacing", None)
