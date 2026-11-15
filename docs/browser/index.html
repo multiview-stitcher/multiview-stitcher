@@ -485,6 +485,24 @@
       <div class="dialog-footer"><button id="clear-log" class="secondary-button" type="button">Clear log</button></div>
     </dialog>
 
+    <dialog id="czi-scene-dialog" class="app-dialog scene-dialog" aria-labelledby="czi-scene-file">
+      <form method="dialog">
+        <div class="dialog-header">
+          <div><span class="eyebrow">Choose scenes</span><h2 id="czi-scene-file"></h2></div>
+          <button class="icon-button" type="button" data-close-dialog aria-label="Cancel">&times;</button>
+        </div>
+        <div class="scene-content">
+          <p id="czi-scene-summary" class="scene-summary"></p>
+          <label class="scene-row scene-all"><input id="czi-scene-all" type="checkbox" /><span class="scene-name">All scenes</span></label>
+          <div id="czi-scene-list" class="scene-list"></div>
+        </div>
+        <div class="dialog-footer dialog-actions">
+          <button class="secondary-button" type="button" data-close-dialog>Cancel</button>
+          <button id="czi-scene-load" class="primary-button" type="submit" value="load" autofocus>Load</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="about-dialog" class="app-dialog about-dialog">
       <div class="dialog-header">
         <div><span class="eyebrow">About</span><h2>multiview-stitcher</h2></div>

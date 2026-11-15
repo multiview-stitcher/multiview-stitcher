@@ -2308,12 +2308,15 @@ function isCziFile(handle) {
 }
 
 /**
- * Mount local files into every Python worker and return their directory.
+ * Mount local files into every Python worker.
  *
  * The session worker and the compute workers each mount the same `File`
  * objects: Python opens the file wherever the work happens, and a compute
  * worker rebuilding a session from source URLs alone would otherwise find
  * nothing at the path those URLs name.
+ *
+ * Returns `{ mount, path }`: the mount's id, which `unmountFiles` takes, and
+ * the directory the files appear in.
  */
 async function mountFiles(files) {
   const mount = crypto.randomUUID().slice(0, 8);
@@ -2326,20 +2329,118 @@ async function mountFiles(files) {
   );
 
   state.fileMounts.push({ mount, files });
-  return path;
+  return { mount, path };
+}
+
+/** Drop one mount from every worker. */
+async function unmountFiles(mount) {
+  state.fileMounts = state.fileMounts.filter((entry) => entry.mount !== mount);
+
+  await Promise.all(
+    [sessionWorker, ...pool.workers].map((channel) =>
+      channel.send({ type: "unmount-files", mount }).catch(() => {}),
+    ),
+  );
 }
 
 /** Drop every mounted file from every worker. */
 async function unmountAllFiles() {
-  const mounts = state.fileMounts.splice(0);
+  for (const { mount } of [...state.fileMounts]) await unmountFiles(mount);
+}
 
-  for (const { mount } of mounts) {
-    await Promise.all(
-      [sessionWorker, ...pool.workers].map((channel) =>
-        channel.send({ type: "unmount-files", mount }).catch(() => {}),
-      ),
-    );
+/**
+ * Ask which scenes of a CZI file to load.
+ *
+ * `scenes` is what `czi_scenes` lists: `{ index, name, n_images }` each.
+ * Resolves to the chosen scene indices, or to null when the dialog is
+ * dismissed. A file of a single scene leaves nothing to choose and is not
+ * asked about.
+ *
+ * Only the first scene is ticked to begin with: scenes are usually separate
+ * regions of a slide, each stitched on its own, and "All scenes" is one click.
+ */
+function chooseCziScenes(fileName, scenes) {
+  if (scenes.length <= 1) {
+    return Promise.resolve(scenes.map((scene) => scene.index));
   }
+
+  const dialog = $("#czi-scene-dialog");
+  const list = $("#czi-scene-list");
+  const all = $("#czi-scene-all");
+  const load = $("#czi-scene-load");
+  const tiles = (count) => `${count} tile${count === 1 ? "" : "s"}`;
+
+  $("#czi-scene-file").textContent = fileName;
+  $("#czi-scene-summary").textContent =
+    `This file holds ${scenes.length} scenes. Choose which to load; every ` +
+    "tile of a chosen scene becomes a view, placed where the stage recorded it.";
+
+  list.replaceChildren(
+    ...scenes.map((scene, position) => {
+      const row = document.createElement("label");
+      row.className = "scene-row";
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = String(scene.index);
+      box.dataset.images = String(scene.n_images);
+      box.checked = position === 0;
+
+      const name = document.createElement("span");
+      name.className = "scene-name";
+      name.textContent = scene.name || `Scene ${scene.index}`;
+
+      const meta = document.createElement("span");
+      meta.className = "scene-meta";
+      meta.textContent = scene.name
+        ? `scene ${scene.index} · ${tiles(scene.n_images)}`
+        : tiles(scene.n_images);
+
+      row.append(box, name, meta);
+      return row;
+    }),
+  );
+
+  const boxes = () => Array.from(list.querySelectorAll("input"));
+  const chosen = () => boxes().filter((box) => box.checked);
+  const sync = () => {
+    const picked = chosen();
+    all.checked = picked.length === scenes.length;
+    all.indeterminate = picked.length > 0 && !all.checked;
+    load.disabled = !picked.length;
+    load.textContent = picked.length
+      ? `Load ${tiles(
+          picked.reduce((sum, box) => sum + Number(box.dataset.images), 0),
+        )}`
+      : "Load";
+  };
+
+  // Assigned rather than added, so that reopening the dialog for the next
+  // file replaces the handlers instead of stacking them.
+  list.onchange = sync;
+  all.onchange = () => {
+    for (const box of boxes()) box.checked = all.checked;
+    sync();
+  };
+  sync();
+
+  // `returnValue` outlives the dialog closing; only the Load button sets it,
+  // so anything else - Cancel, Escape, the backdrop - reads as dismissed.
+  dialog.returnValue = "";
+  dialog.showModal();
+
+  return new Promise((resolve) => {
+    dialog.addEventListener(
+      "close",
+      () =>
+        resolve(
+          dialog.returnValue === "load"
+            ? chosen().map((box) => Number(box.value))
+            : null,
+        ),
+      { once: true },
+    );
+  });
 }
 
 /**
@@ -2349,24 +2450,61 @@ async function unmountAllFiles() {
  * multi-view acquisition, whose views are stacks recorded at different angles.
  * Which one it is - and how many images that amounts to - only the reader can
  * tell, so the page mounts the file and lets Python decide and enumerate.
+ *
+ * A mosaic may hold several scenes. Which of them to load is asked for every
+ * file before any is loaded, so the questions come together rather than
+ * between loads.
  */
 async function loadCziFiles(handles) {
   const files = await Promise.all(handles.map((handle) => handle.getFile()));
-  const directory = await mountFiles(files);
+  const { mount, path: directory } = await mountFiles(files);
+
+  setStatus("reading CZI scenes", true);
+
+  const chosen = [];
+  for (const file of files) {
+    const path = `${directory}/${file.name}`;
+    const { scenes } = await command("czi_scenes", { path });
+    const sceneIndices = await chooseCziScenes(file.name, scenes);
+
+    if (sceneIndices === null) {
+      log(`skipped '${file.name}'; no scene was chosen`);
+      continue;
+    }
+    if (scenes.length > 1) {
+      log(
+        `'${file.name}' holds ${scenes.length} scenes; loading ` +
+          (sceneIndices.length === scenes.length
+            ? "all of them"
+            : `scene(s) ${sceneIndices.join(", ")}`),
+      );
+    }
+    chosen.push({ file, path, sceneIndices });
+  }
+
+  if (!chosen.length) {
+    await unmountFiles(mount);
+    setStatus(
+      hasViews() ? `${state.session.n_views} view(s) loaded` : "drop a folder to begin",
+    );
+    setBusy(false);
+    return;
+  }
 
   let append = Boolean(state.session && state.session.n_views);
 
   log(
-    `mounted ${files.length} CZI file(s); reading positions from the metadata` +
+    `mounted ${chosen.length} CZI file(s); reading positions from the metadata` +
       (append ? " and adding to the loaded views" : ""),
   );
   setStatus("opening CZI", true);
 
   let described = null;
-  for (const file of files) {
+  for (const { file, path, sceneIndices } of chosen) {
     described = await command("load_czi", {
-      path: `${directory}/${file.name}`,
+      path,
       name: file.name,
+      scene_indices: sceneIndices,
       replace: !append,
     });
     // Only the first file may replace; the rest extend what it loaded.
