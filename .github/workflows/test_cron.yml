@@ -30,6 +30,10 @@ on:
 # same job as defined in test_and_deploy.yml
 jobs:
   test:
+    # Only in the main repository by default, so forks do not run (and fail) it every night.
+    # A fork opts in with the repository variable RUN_NIGHTLY_TESTS=true
+    # (Settings > Secrets and variables > Actions > Variables).
+    if: github.repository == 'multiview-stitcher/multiview-stitcher' || vars.RUN_NIGHTLY_TESTS == 'true'
     name: ${{ matrix.platform }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.platform }}
     strategy:
