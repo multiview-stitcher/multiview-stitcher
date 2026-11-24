@@ -342,9 +342,13 @@ def get_node_with_maximal_edge_weight_sum_from_graph(g, weight_key):
     """
     g: graph containing edges with weight_key weights
     """
+    # One pass over the edges: scanning them once per node is O(nodes x edges).
+    node_weights = {node: [] for node in g.nodes}
+    for e in g.edges:
+        for node in set(e):
+            node_weights[node].append(g.edges[e][weight_key])
     total_node_weights = {
-        node: np.sum([g.edges[e][weight_key] for e in g.edges if node in e])
-        for node in g.nodes
+        node: np.sum(weights) for node, weights in node_weights.items()
     }
 
     ref_node = max(total_node_weights, key=total_node_weights.get)
