@@ -557,9 +557,10 @@ def test_manual_pair_registration(
     assert len(params) == 6
 
 
+@pytest.mark.parametrize("robust_rounds", [0, 5])
 @pytest.mark.parametrize("transform", ["translation", "rigid"])
 @pytest.mark.parametrize("ndim", [2, 3])
-def test_linear_two_pass_matches_reference(transform, ndim):
+def test_linear_two_pass_matches_reference(transform, ndim, robust_rounds):
     rng = np.random.default_rng(2)
     noise_params = {
         "normal": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
@@ -580,6 +581,8 @@ def test_linear_two_pass_matches_reference(transform, ndim):
         method="linear_two_pass",
         reference_view=0,
         transform=transform,
+        robust_rounds=robust_rounds,
+        robust_scale=0.1,
         # residual_threshold=np.inf,
     )
 
@@ -650,3 +653,42 @@ def test_linear_two_pass_accuracy_grid(transform, grid_size, ndim):
         assert r_err < r_thresh
     if transform == "similarity":
         assert s_err < 0.05
+
+
+def test_linear_two_pass_robust_downweights_bad_edge():
+    """
+    Robust reweighting keeps every edge (the graph stays connected) and
+    gives an obviously bad edge a negligible weight.
+    """
+    rng = np.random.default_rng(4)
+    noise_params = {
+        "normal": {"t_sigma": 0.05, "rot_sigma": 0.0, "scale_sigma": 0.0},
+        "outlier": {"t_sigma": 0.0, "rot_sigma": 0.0, "scale_sigma": 0.0},
+    }
+    g_reg, _ = _build_synthetic_graph(
+        ndim=2,
+        grid_shape=(4, 4),
+        mode="translation",
+        rng=rng,
+        noise_params=noise_params,
+    )
+    bad_edge = (5, 6)
+    bad_transform = g_reg.edges[bad_edge]["transform"].copy()
+    bad_transform.data[:2, -1] += 50.0
+    g_reg.edges[bad_edge]["transform"] = bad_transform
+
+    _, info = param_resolution.groupwise_resolution_linear_two_pass(
+        g_reg,
+        reference_view=0,
+        transform="translation",
+        robust_rounds=10,
+        robust_scale=0.1,
+    )
+
+    assert {tuple(sorted(e)) for e in info["used_edges"]} == {
+        tuple(sorted(e)) for e in g_reg.edges
+    }
+    metrics = info["metrics"].set_index(["u", "v"])
+    assert metrics.loc[bad_edge, "weight"] < 1e-3 * np.median(
+        metrics["weight"]
+    )
