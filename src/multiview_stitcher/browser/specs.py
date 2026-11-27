@@ -38,6 +38,7 @@ FUSION_FUNCS = {
     "weighted_average": fusion.weighted_average_fusion,
     "simple_average": fusion.simple_average_fusion,
     "max": fusion.max_fusion,
+    "first_view": fusion.first_view_fusion,
 }
 
 #: Groupwise parameter resolution methods selectable from the browser.

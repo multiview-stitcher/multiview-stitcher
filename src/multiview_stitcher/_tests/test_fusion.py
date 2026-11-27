@@ -1501,3 +1501,49 @@ def test_fuse_spatial_subviews_of_one_zarr_array(fuse_mode):
 
     np.testing.assert_array_equal(results["zarr"], results["dask"])
     np.testing.assert_array_equal(results["zarr"], data.squeeze())
+
+
+def test_first_view_fusion_picks_first_valid_view():
+    nan = np.nan
+    views = np.array(
+        [
+            [nan, 1.0, nan],  # view 0
+            [2.0, 2.0, nan],  # view 1
+        ]
+    )
+
+    fused = fusion.first_view_fusion(views)
+
+    # pixel 0: only view 1 covers it; pixel 1: view 0 wins; pixel 2: no view
+    np.testing.assert_array_equal(fused, [2.0, 1.0, nan])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_fuse_first_view_fusion_respects_input_order(reverse):
+    # two constant tiles (values 1 and 2) overlapping in x = 6..7
+    sims = [
+        si_utils.get_sim_from_array(
+            da.ones((1, 1, 8, 8), chunks=(1, 1, 4, 4)) * value,
+            dims=["c", "t", "y", "x"],
+            scale={"y": 1.0, "x": 1.0},
+            translation={"y": 0.0, "x": x_origin},
+            transform_key=METADATA_TRANSFORM_KEY,
+        )
+        for value, x_origin in [(1, 0.0), (2, 6.0)]
+    ]
+    if reverse:
+        sims = sims[::-1]
+
+    fused = fusion.fuse(
+        sims,
+        transform_key=METADATA_TRANSFORM_KEY,
+        fusion_func=fusion.first_view_fusion,
+        output_chunksize={"y": 4, "x": 4},
+    )
+    fused_data = np.asarray(fused.data.compute(scheduler="single-threaded"))
+
+    # the overlap is taken entirely from whichever tile comes first
+    overlap_value = 2 if reverse else 1
+    np.testing.assert_array_equal(fused_data[..., :, :6], 1)
+    np.testing.assert_array_equal(fused_data[..., :, 6:8], overlap_value)
+    np.testing.assert_array_equal(fused_data[..., :, 8:], 2)
