@@ -1,0 +1,4 @@
+Neuroglancer bundled by scripts/build_browser_app.py
+package: neuroglancer@2.41.2
+bundler: esbuild@0.25.0
+license: Apache-2.0 (see LICENSE)
