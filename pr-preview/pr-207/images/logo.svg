@@ -1,0 +1,56 @@
+<svg viewBox="16.5 4.851 104.671 98.649" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Monochrome isometric cube with aligned floating quads</title>
+  <desc>
+    Cube outlined with no face fill; six floating diamonds whose edges align exactly with the cube edges.
+  </desc>
+
+  <defs>
+    <style>
+      /* light mode (default) */
+      .cube {
+        fill: none;
+        stroke: #000000;           /* pure black */
+        fill-opacity: 0.75;
+        stroke-width: 3;
+        stroke-linejoin: round;
+      }
+
+      .mono {
+        fill: #000000;             /* pure black */
+        stroke: #000000;
+        stroke-width: 1;
+        stroke-linejoin: round;
+        fill-opacity: 0.75;
+      }
+
+      /* dark mode override */
+      @media (prefers-color-scheme: dark) {
+        .cube {
+          stroke: #ffffff;         /* pure white */
+        }
+        .mono {
+          fill: #ffffff;           /* pure white */
+          stroke: #ffffff;
+        }
+      }
+    </style>
+  </defs>
+
+  <!-- cube outline only -->
+  <g class="cube">
+    <polygon points="60,55 20,35 60,15 80,25 60,35 80,45"/>
+    <polygon points="100,80 60,100 60,55 80,45 80,55 100,45"/>
+    <polygon points="60,55 20,35 20,80 60,100"/>
+    <polygon points="60,55 100,80 60,100 20,80"/>
+  </g>
+
+  <!-- floating aligned quads -->
+  <g class="mono">
+    <polygon points="69.954,35.111 86.006,27.085 102.058,35.111 86.006,43.137"/>
+    <polygon points="99.356,15.547 109.013,10.719 118.671,15.547 109.013,20.376"/>
+    <polygon points="92.589,10.123 98.133,7.351 103.677,10.123 98.133,12.895"/>
+    <polygon points="86.218,21.261 94.928,16.906 103.638,21.261 94.928,25.616"/>
+    <polygon points="98.141,34.969 106.677,30.701 115.214,34.969 106.677,39.237"/>
+    <polygon points="100.386,28.46 106.866,25.22 113.346,28.46 106.866,31.7"/>
+  </g>
+</svg>
