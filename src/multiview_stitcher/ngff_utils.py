@@ -1178,8 +1178,17 @@ def read_ngff_multiscales(zarr_path):
     ``zarr_path`` may be a path/URL or an already-constructed zarr store, which
     is how the browser runtime routes reads through its service worker. Parsing
     reads metadata only - no chunk is fetched until the arrays are used.
+
+    ngff-zarr 0.44 and later read through zarrista and reject zarr-python
+    store objects, so those receive a read-only key-to-bytes view of the store
+    instead. Earlier versions, which Pyodide runs, take the store as it is.
     """
-    return ngff_zarr.from_ngff_zarr(zarr_path)
+    try:
+        return ngff_zarr.from_ngff_zarr(zarr_path)
+    except TypeError:
+        if not isinstance(zarr_path, zarr.abc.store.Store):
+            raise
+        return ngff_zarr.from_ngff_zarr(_zarr_compat.StoreMapping(zarr_path))
 
 
 def write_multiscales_metadata(group, axes, datasets, ngff_version="0.4"):

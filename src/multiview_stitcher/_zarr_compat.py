@@ -17,7 +17,7 @@ The public helpers are used by :mod:`multiview_stitcher.zarr_utils`.
 
 import json
 import os
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 
 import numcodecs
 import numcodecs.registry
@@ -52,6 +52,45 @@ def open_zarr_array(source, path, mode="r", **kwargs):
             os.path.join(str(source), str(path)), mode=mode, **kwargs
         )
     return zarr.open_array(store=source, path=str(path), mode=mode, **kwargs)
+
+
+class StoreMapping(Mapping):
+    """Read-only ``Mapping[str, bytes]`` view of a zarr-python store.
+
+    For libraries that take key-to-bytes mappings but not zarr store objects -
+    notably ngff-zarr from 0.44 on. Each lookup is one synchronous ``get``
+    through zarr's own event loop. Iteration lists the store's keys when it
+    supports listing and is empty otherwise, as for the browser's HTTP store;
+    readers then find documents by key alone.
+    """
+
+    def __init__(self, store):
+        self._store = store
+
+    def __getitem__(self, key):
+        from zarr.core.buffer import default_buffer_prototype
+        from zarr.core.sync import sync
+
+        value = sync(self._store.get(key, prototype=default_buffer_prototype()))
+        if value is None:
+            raise KeyError(key)
+        return value.to_bytes()
+
+    def _keys(self):
+        if not self._store.supports_listing:
+            return []
+        from zarr.core.sync import sync
+
+        async def collect():
+            return [key async for key in self._store.list()]
+
+        return sync(collect())
+
+    def __iter__(self):
+        return iter(self._keys())
+
+    def __len__(self):
+        return len(self._keys())
 
 
 # ---------------------------------------------------------------------------
