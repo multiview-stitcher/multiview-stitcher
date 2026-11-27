@@ -793,6 +793,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#first_view_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      first_view_fusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#multi_view_deconvolution" class="md-nav__link">
     <span class="md-ellipsis">
       multi_view_deconvolution
@@ -1627,6 +1636,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#first_view_fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      first_view_fusion
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#multi_view_deconvolution" class="md-nav__link">
     <span class="md-ellipsis">
       multi_view_deconvolution
@@ -1695,6 +1713,12 @@ Custom fusion and weight functions are described in the Extension API section.</
 <ul>
 <li>Pixel-wise maximum across views.</li>
 <li>Useful for sparse or bright features where max intensity is preferred.</li>
+</ul>
+<h3 id="first_view_fusion"><code>first_view_fusion</code></h3>
+<ul>
+<li>Each pixel takes the value of the first view (in input order) that covers it.</li>
+<li>No blending, so view transitions are hard seams</li>
+<li>Useful e.g. when consecutive views show increasing bleaching effects.</li>
 </ul>
 <h3 id="multi_view_deconvolution"><code>multi_view_deconvolution</code></h3>
 <p>Implements the efficient Bayesian multi-view deconvolution method from:</p>
