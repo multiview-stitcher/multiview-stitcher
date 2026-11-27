@@ -21,6 +21,12 @@ Custom fusion and weight functions are described in the Extension API section.
 - Pixel-wise maximum across views.
 - Useful for sparse or bright features where max intensity is preferred.
 
+### `first_view_fusion`
+
+- Each pixel takes the value of the first view (in input order) that covers it.
+- No blending, so view transitions are hard seams
+- Useful e.g. when consecutive views show increasing bleaching effects.
+
 ### `multi_view_deconvolution`
 
 Implements the efficient Bayesian multi-view deconvolution method from:

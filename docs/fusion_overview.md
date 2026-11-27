@@ -103,6 +103,7 @@ Pass a fusion function via `fusion_func`:
 | `weighted_average_fusion` (default) | Smooth, general-purpose blending across overlaps |
 | `simple_average_fusion` | Baseline averaging without blending weights |
 | `max_fusion` | Sparse or bright features where maximum intensity is desired |
+| `first_view_fusion` | No blending: each pixel comes from the first covering view (input order) |
 | `multi_view_deconvolution` | Multi-view light-sheet data |
 
 See [Built-in fusion methods](built_in_methods_fusion.md) for full parameter reference.

@@ -58,6 +58,41 @@ def max_fusion(
     return np.nanmax(transformed_views, axis=0)
 
 
+def first_view_fusion(
+    transformed_views,
+):
+    """
+    Take each pixel from the first view (in input order) that covers it.
+
+    No blending is performed, so transitions between views are hard seams.
+
+    Parameters
+    ----------
+    transformed_views : list of ndarrays
+        transformed input views, in input order. Pixels not covered by a
+        view are NaN.
+
+    Returns
+    -------
+    ndarray
+        Value of the first covering view at each pixel (NaN where no view
+        covers the pixel)
+    """
+    transformed_views = np.asarray(transformed_views)
+
+    # argmax returns the first True along the view axis, i.e. the index of
+    # the first view with valid data. Where no view is valid it returns 0,
+    # whose value is NaN there anyway.
+    first_valid_view = np.argmax(~np.isnan(transformed_views), axis=0)
+
+    # pick, for every pixel, the value of its first valid view
+    fused = np.take_along_axis(
+        transformed_views, first_valid_view[None], axis=0
+    )[0]
+
+    return fused.astype(transformed_views[0].dtype)
+
+
 def weighted_average_fusion(
     transformed_views,
     blending_weights,

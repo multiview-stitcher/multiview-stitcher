@@ -3,6 +3,7 @@ from multiview_stitcher.fusion._core import (
     calc_fusion_stack_properties,
     calc_stack_properties_from_view_properties_and_params,
     calc_stack_properties_from_volume,
+    first_view_fusion,
     fuse,
     max_fusion,
     prepare_block_fusion,
@@ -28,5 +29,6 @@ __all__ = [
     "simple_average_fusion",
     "weighted_average_fusion",
     "max_fusion",
+    "first_view_fusion",
     "multi_view_deconvolution",
 ]
