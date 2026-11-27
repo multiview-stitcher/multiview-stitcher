@@ -1605,9 +1605,15 @@ def test_fuse_first_view_fusion_respects_input_order(reverse):
     np.testing.assert_array_equal(fused_data[..., :, :6], 1)
     np.testing.assert_array_equal(fused_data[..., :, 6:8], overlap_value)
     np.testing.assert_array_equal(fused_data[..., :, 8:], 2)
-def _make_chunked_fusion_test_sims(transform, tmpdir, input_backend):
-    """Deterministic 2x2 tiles (2 channels, 2 time points) for chunked fusion."""
 
+
+def _make_chunked_fusion_test_sims(transform, tmpdir, input_backend):
+    """
+    Deterministic 2x2 tiles (2 channels, 2 time points) for chunked fusion.
+
+    The tile data is the same for both input backends.
+    """
+    os.makedirs(tmpdir, exist_ok=True)
     rng = np.random.default_rng(0)
     transform_key = "k"
     tile_size, overlap, spacing = 24, 6, 0.5
@@ -1689,9 +1695,9 @@ def test_fuse_to_zarr_matches_chunkwise_lazy_fusion(
     Chunked fusion to zarr is bit-identical to fusing each chunk on its own.
 
     Each chunk of the output must equal the result of a separate (lazy) fusion
-    whose output stack is that chunk. The chunked path shares all setup work
-    between chunks and only reads the tiles overlapping a chunk, which must not
-    change the result.
+    of dask-backed tiles whose output stack is that chunk. The chunked path
+    shares all setup work between chunks and only reads the tiles overlapping
+    a chunk, which must not change the result, whatever the input backend.
     """
     output_chunksize = {"y": 16, "x": 20}
     fuse_kwargs = {"output_chunksize": output_chunksize}
@@ -1707,17 +1713,10 @@ def test_fuse_to_zarr_matches_chunkwise_lazy_fusion(
         sims, transform_key = _make_chunked_fusion_test_sims(
             transform, tmpdir, input_backend
         )
-        # The reference fuses each chunk on its own, from the same kind of
-        # tiles. Zarr-backed tiles are rebuilt from their serialized form, as
-        # workers do, before selecting non-spatial coordinates.
-        reference_sims = sims
-        if input_backend == "zarr":
-            reference_sims = [
-                si_utils.deserialize_zarr_backed_sim(
-                    si_utils.serialize_zarr_backed_sim(sim)
-                )
-                for sim in sims
-            ]
+        # The reference fuses each chunk on its own from dask-backed tiles.
+        reference_sims, _ = _make_chunked_fusion_test_sims(
+            transform, os.path.join(tmpdir, "reference"), "dask"
+        )
         output_path = os.path.join(tmpdir, "fused.zarr")
         fused = fusion.fuse(
             sims,
