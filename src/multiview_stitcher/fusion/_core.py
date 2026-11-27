@@ -302,14 +302,16 @@ def _fuse_block_views(
     output_chunk_bb_with_overlap : dict
         Stack properties of the output chunk including the fusion overlap.
     fuse_planewise : bool
-        Fuse a single z plane as a 2D problem (avoids edge artifacts).
+        Fuse a single z plane as a 2D problem (needed when a view is itself
+        a single plane, whose 3D blending weights are undefined).
 
     Returns
     -------
     np.ndarray
         Fused output chunk.
     """
-    # Fuse plane-by-plane for axis-aligned z chunks (avoids edge artifacts)
+    # Fuse a single-plane chunk as a 2D problem (one of its views is a
+    # single plane; see _build_spatial_fusion_plan)
     if fuse_planewise:
         sims_slices = [sim.isel(z=0) for sim in sims_slices]
         tmp_params = [
@@ -839,9 +841,17 @@ def _build_spatial_fusion_plan(
                 )[0]
             if overlap is not None:
                 chunk_views.append((iview, overlap))
+        # A single-plane chunk is fused as a 2D problem only if one of its
+        # views is a single plane: the 3D blending weights of such a view are
+        # undefined (zero extent in z). Otherwise the 2D weights would ignore
+        # the views' z borders and blend the plane differently than a thicker
+        # chunk does, so the result would depend on the chunk size.
         fuse_planewise = (
             "z" in grid_aligned_translation_dims
             and output_chunk_bb_with_overlap["shape"].get("z", 2) == 1
+            and any(
+                views_bb[iview]["shape"]["z"] == 1 for iview, _ in chunk_views
+            )
         )
         per_chunk_entries.append(
             {
