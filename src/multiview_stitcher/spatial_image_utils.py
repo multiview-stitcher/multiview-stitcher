@@ -895,8 +895,13 @@ def deserialize_zarr_backed_sim(
             data,
             dims=result_dims,
             scale={dim: info["spacing"][dim] for dim in spatial_dims},
+            # Use the position of the first pixel read, not overlap_bb's
+            # origin: the latter needn't lie on the pixel grid (e.g. for
+            # rotated views), and the read starts at the nearest pixel.
             translation={
-                dim: overlap_bb["origin"][dim] for dim in spatial_dims
+                dim: info["origin"][dim]
+                + indexer[dim].start * info["spacing"][dim]
+                for dim in spatial_dims
             },
             c_coords=info["c_coords"] if "c" in result_dims else None,
             t_coords=info["t_coords"] if "t" in result_dims else None,
