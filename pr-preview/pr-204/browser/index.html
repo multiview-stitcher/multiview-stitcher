@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>multiview-stitcher</title>
+    <link rel="icon" type="image/svg+xml" href="logo.svg" />
+    <link
+      rel="stylesheet"
+      href="neuroglancer/neuroglancer.css"
+      id="viewer-stylesheet"
+    />
+    <link rel="stylesheet" href="app.css" id="app-stylesheet" />
+  </head>
+  <body>
+    <!--
+      The logo, defined once and referenced by <use> below. Inline rather than
+      <img src="logo.svg"> so that it paints in currentColor: the file follows
+      the system colour scheme, and on a light desktop it would draw a black
+      logo onto this app's permanently dark header. logo.svg holds the same
+      geometry for the favicon - edit the two together.
+    -->
+    <svg class="logo-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="mvs-logo" viewBox="16.5 4.851 104.671 98.649">
+        <g fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round">
+          <polygon points="60,55 20,35 60,15 80,25 60,35 80,45" />
+          <polygon points="100,80 60,100 60,55 80,45 80,55 100,45" />
+          <polygon points="60,55 20,35 20,80 60,100" />
+          <polygon points="60,55 100,80 60,100 20,80" />
+        </g>
+        <g fill="currentColor" fill-opacity="0.75" stroke="currentColor" stroke-width="1" stroke-linejoin="round">
+          <polygon points="69.954,35.111 86.006,27.085 102.058,35.111 86.006,43.137" />
+          <polygon points="99.356,15.547 109.013,10.719 118.671,15.547 109.013,20.376" />
+          <polygon points="92.589,10.123 98.133,7.351 103.677,10.123 98.133,12.895" />
+          <polygon points="86.218,21.261 94.928,16.906 103.638,21.261 94.928,25.616" />
+          <polygon points="98.141,34.969 106.677,30.701 115.214,34.969 106.677,39.237" />
+          <polygon points="100.386,28.46 106.866,25.22 113.346,28.46 106.866,31.7" />
+        </g>
+      </symbol>
+    </svg>
+
+    <header class="app-header">
+      <div class="brand">
+        <svg class="logo" aria-hidden="true"><use href="#mvs-logo" /></svg>
+        <div>
+          <h1>multiview-stitcher</h1>
+          <p>Registration &amp; Fusion in the browser (OME-Zarr)</p>
+        </div>
+      </div>
+
+      <div class="status-area" aria-live="polite">
+        <div id="progress" hidden>
+          <div class="progress-copy">
+            <span id="progress-label"></span>
+            <span id="progress-percent"></span>
+          </div>
+          <div class="track"><div id="progress-bar"></div></div>
+        </div>
+        <span id="status">starting&hellip;</span>
+        <span id="inactive" hidden>inactive &mdash; another tab took over</span>
+      </div>
+
+      <nav class="header-actions" aria-label="Application information">
+        <button id="log-button" class="quiet-button" type="button">
+          Log <span id="log-count" class="badge" hidden>0</span>
+        </button>
+        <label class="worker-control" for="worker-count">
+          <span>Workers</span>
+          <input id="worker-count" type="number" min="0" max="3" value="3" disabled />
+        </label>
+        <button id="viewer-help-button" class="quiet-button" type="button" aria-label="Viewer controls help"><span class="viewer-help-label">Viewer help</span><span class="viewer-help-short" aria-hidden="true">?</span></button>
+        <a class="quiet-button github-link" href="https://github.com/multiview-stitcher/multiview-stitcher" target="_blank" rel="noopener" aria-label="multiview-stitcher on GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a9.5 9.5 0 0 0-3 18.5c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1 1.6 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.7-1.4-2.3-.3-4.7-1.1-4.7-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.4-1.3.1-2.7 0 0 .9-.3 2.8 1a9.6 9.6 0 0 1 5.1 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.7-4.7 5 .4.3.7 1 .7 1.9v2.8c0 .4.2.6.7.5A9.5 9.5 0 0 0 12 2.5Z" /></svg>
+          <span>GitHub</span>
+        </a>
+        <button id="about-button" class="quiet-button" type="button" aria-label="About multiview-stitcher"><span class="about-label">About</span><span class="about-short" aria-hidden="true">i</span></button>
+      </nav>
+    </header>
+
+    <main class="workspace">
+      <aside id="data-panel" class="side-panel" aria-label="Data and display controls">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Workspace</span>
+            <h2>Data &amp; display</h2>
+          </div>
+        </div>
+
+        <section>
+          <div id="dropzone" class="dropzone disabled" tabindex="0" role="button">
+            <div class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></svg>
+            </div>
+            <strong>Drop OME-Zarr folders or CZI files</strong>
+            <span>or click to choose from this device</span>
+            <div class="drop-buttons">
+              <button id="browse" type="button" data-load>Choose folders</button>
+              <button id="browse-czi" type="button" data-load>Choose CZI files</button>
+            </div>
+          </div>
+
+          <div class="data-actions">
+            <div class="example-picker">
+              <button id="example" class="text-button" type="button" data-load aria-haspopup="menu" aria-expanded="false" disabled>
+                Load example <span aria-hidden="true">▾</span>
+              </button>
+              <div id="example-menu" class="example-menu" role="menu" hidden></div>
+            </div>
+            <button id="clear" class="text-button danger" type="button" data-load disabled>
+              Clear all
+            </button>
+          </div>
+
+          <div class="section-title-row">
+            <h3>Loaded views</h3>
+            <div class="section-title-actions">
+              <button id="toggle-selection" class="text-button" type="button" hidden>Select all</button>
+              <button id="toggle-views" class="text-button" type="button" hidden>Hide all</button>
+              <span id="dataset-summary" class="count-label">None</span>
+            </div>
+          </div>
+          <ul id="views" class="view-list" role="listbox" aria-label="Loaded views"></ul>
+          <p id="empty-views" class="empty-state">Your loaded image views will appear here.</p>
+        </section>
+
+        <section>
+          <h3>Coordinate system</h3>
+          <label for="transform-key">Displayed transform</label>
+          <select id="transform-key" disabled></select>
+          <p class="field-help">Operations use the coordinate system selected here.</p>
+        </section>
+
+        <section id="time-section" hidden>
+          <div class="section-title-row">
+            <h3>Time</h3>
+            <span id="time-value" class="count-label"></span>
+          </div>
+          <input id="time-slider" type="range" min="0" max="0" step="1" value="0" aria-label="Displayed timepoint" />
+          <p class="field-help">The timepoint shown in the viewer.</p>
+        </section>
+
+        <section>
+          <h3>Display options</h3>
+          <label class="option-check" for="positional-colors">
+            <input id="positional-colors" type="checkbox" disabled />
+            <span>Positional colors</span>
+          </label>
+          <div id="channel-controls" class="channel-controls" aria-label="Channel display controls"></div>
+          <p id="empty-channels" class="empty-state">Channels will appear after loading image data.</p>
+        </section>
+      </aside>
+
+      <section id="viewer-shell" aria-label="Image viewer">
+        <div id="viewer" aria-label="Neuroglancer viewer"></div>
+        <div id="viewer-empty" class="viewer-empty">
+          <div class="viewer-empty-icon" aria-hidden="true"></div>
+          <h2>No image data loaded</h2>
+          <p>Drop an OME-Zarr folder in the data panel to begin.</p>
+        </div>
+      </section>
+
+      <aside id="operations-panel" class="side-panel" aria-label="Data operations">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Processing</span>
+            <h2>Operations</h2>
+          </div>
+        </div>
+
+        <div class="tabs main-tabs" role="tablist" aria-label="Operations">
+          <button id="placement-tab" role="tab" aria-selected="true" aria-controls="placement-panel" data-tab="placement">Placement</button>
+          <button id="registration-tab" role="tab" aria-selected="false" aria-controls="registration-panel" data-tab="registration">Register</button>
+          <button id="fusion-tab" role="tab" aria-selected="false" aria-controls="fusion-panel" data-tab="fusion">Fuse</button>
+        </div>
+
+        <section id="placement-panel" class="operation-panel" role="tabpanel" aria-labelledby="placement-tab">
+          <div class="operation-intro">
+            <span class="step-icon">01</span>
+            <div>
+              <h3>Interactive tile placement</h3>
+              <p>Create an editable copy of the displayed coordinate system.</p>
+            </div>
+          </div>
+          <label for="placement-transform-name">New transform name</label>
+          <input id="placement-transform-name" type="text" value="manual" placeholder="manual" />
+          <button class="primary-button" type="button" data-action="new-transform" disabled>
+            Create transform
+          </button>
+          <p class="field-help">The new coordinate system becomes active immediately for interactive placement.</p>
+
+          <fieldset id="manual-placement-section">
+            <legend>Manual placement</legend>
+            <label class="option-check" for="manual-placement">
+              <input id="manual-placement" type="checkbox" disabled />
+              <span>Activate manual placement</span>
+            </label>
+            <dl class="gesture-list">
+              <dt><kbd>Alt</kbd> + drag</dt>
+              <dd>Move a tile within the plane of the view.</dd>
+              <dt><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + drag</dt>
+              <dd>Turn a tile about its centre, in that same plane.</dd>
+            </dl>
+            <p class="field-help">
+              Orthogonal views only. The tile under the pointer is the one that
+              moves; where tiles overlap, the one selected in the views list does.
+              The new placement is saved when you release.
+            </p>
+
+            <div id="placement-scope" class="placement-scope">
+              <div class="scope-block">
+                <span class="scope-label">Apply to channels</span>
+                <div id="placement-channels" class="scope-channels"></div>
+                <p id="placement-channels-empty" class="field-help">
+                  This data has no channel axis.
+                </p>
+              </div>
+
+              <div class="scope-block">
+                <span class="scope-label">
+                  Apply to tiles
+                  <span id="placement-tiles-label" class="scope-value"></span>
+                </span>
+                <p class="field-help">
+                  With nothing selected, a drag moves the topmost tile under the
+                  pointer. Click a tile in the viewer or a view in the list to
+                  select it; Ctrl+click (&#8984; on macOS) either one to select
+                  several: a drag then moves them all together, and a rotation
+                  turns each about its own center.
+                </p>
+              </div>
+
+              <div class="scope-block">
+                <span class="scope-label">
+                  Apply to timepoints
+                  <span id="placement-time-label" class="scope-value"></span>
+                </span>
+                <div id="placement-time-mode" class="scope-modes">
+                  <label>
+                    <input type="radio" name="placement-time-mode" value="range" checked />
+                    <span>Range</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="placement-time-mode" value="current" />
+                    <span>Current timepoint</span>
+                  </label>
+                </div>
+                <div id="placement-time" class="dual-range" aria-label="Timepoints manual placement applies to">
+                  <div class="dual-range-track"></div>
+                  <input id="placement-time-first" class="contrast-min-slider" type="range" min="0" max="0" step="1" value="0" aria-label="First timepoint" />
+                  <input id="placement-time-last" class="contrast-max-slider" type="range" min="0" max="0" step="1" value="0" aria-label="Last timepoint" />
+                </div>
+                <p id="placement-time-empty" class="field-help">
+                  This data has no time axis.
+                </p>
+              </div>
+            </div>
+
+            <p id="manual-placement-target" class="field-help warning" hidden></p>
+          </fieldset>
+        </section>
+
+        <section id="registration-panel" class="operation-panel" role="tabpanel" aria-labelledby="registration-tab" hidden>
+          <div class="operation-intro">
+            <span class="step-icon">02</span>
+            <div>
+              <h3>Registration</h3>
+              <p>Align all loaded views from the displayed coordinate system.</p>
+            </div>
+          </div>
+
+          <div class="tabs sub-tabs" role="tablist" aria-label="Registration options">
+            <button role="tab" aria-selected="true" aria-controls="registration-common" data-subtab="registration-common">Common</button>
+            <button role="tab" aria-selected="false" aria-controls="registration-advanced" data-subtab="registration-advanced">Advanced</button>
+          </div>
+
+          <div id="registration-common" class="subtab-panel">
+            <label for="registration-channel">Registration channel</label>
+            <select id="registration-channel" disabled></select>
+            <label for="registration-transform-name">New transform name</label>
+            <input id="registration-transform-name" type="text" value="registered" />
+            <fieldset class="registration-scope">
+              <legend>Layers to register</legend>
+              <label class="option-check" for="registration-all-layers">
+                <input id="registration-all-layers" type="radio" name="registration-layer-scope" value="all" checked />
+                <span>All layers</span>
+              </label>
+              <label class="option-check" for="registration-selected-layers">
+                <input id="registration-selected-layers" type="radio" name="registration-layer-scope" value="selected" />
+                <span>Only selected layers</span>
+              </label>
+              <p class="field-help">
+                Select a layer by clicking it in the viewer or in the loaded
+                views list. Hold Ctrl (&#8984; on macOS) while clicking to select
+                several layers. Unregistered layers keep their current placement
+                under the new transform.
+              </p>
+            </fieldset>
+          </div>
+
+          <div id="registration-advanced" class="subtab-panel registration-stage-panel" hidden>
+            <div class="tabs sub-tabs nested-tabs" role="tablist" aria-label="Advanced registration options">
+              <button role="tab" aria-selected="true" aria-controls="registration-graph" data-subtab="registration-graph">Graph</button>
+              <button role="tab" aria-selected="false" aria-controls="registration-pairwise" data-subtab="registration-pairwise">Pairwise reg</button>
+              <button role="tab" aria-selected="false" aria-controls="registration-groupwise" data-subtab="registration-groupwise">Groupwise resolution</button>
+            </div>
+
+            <div id="registration-graph" class="subtab-panel">
+              <fieldset class="pair-determination">
+                <legend>Pair determination</legend>
+                <label class="option-check" for="registration-pairs-pruned">
+                  <input id="registration-pairs-pruned" type="radio" name="registration-pair-mode" value="pruned" checked />
+                  <span>Determine pairs from view overlap</span>
+                </label>
+                <div class="indented-option">
+                  <label for="registration-pruning-method">Pruning method</label>
+                  <select id="registration-pruning-method">
+                    <option value="alternating_pattern">Alternating pattern</option>
+                    <option value="shortest_paths_overlap_weighted">Shortest paths, overlap weighted</option>
+                    <option value="otsu_threshold_on_overlap">Otsu threshold on overlap</option>
+                    <option value="keep_axis_aligned">Keep axis aligned</option>
+                    <option value="">No pruning</option>
+                  </select>
+                  <div id="registration-max-angle-field" hidden>
+                    <label for="registration-max-angle">Maximum angle (degrees)</label>
+                    <input id="registration-max-angle" type="number" min="0" max="180" step="1" placeholder="default" />
+                  </div>
+                </div>
+
+                <label class="option-check" for="registration-pairs-manual">
+                  <input id="registration-pairs-manual" type="radio" name="registration-pair-mode" value="manual" />
+                  <span>Indicate pairs manually</span>
+                </label>
+                <div id="registration-manual-pair-editor" class="manual-pair-editor">
+                  <div>
+                    <label for="registration-pair-first">First view</label>
+                    <select id="registration-pair-first" disabled></select>
+                  </div>
+                  <div>
+                    <label for="registration-pair-second">Second view</label>
+                    <select id="registration-pair-second" disabled></select>
+                  </div>
+                  <button id="registration-add-pair" class="secondary-button" type="button" disabled>Add pair</button>
+                </div>
+                <div id="registration-pair-list" class="pair-list" aria-label="Selected registration pairs" aria-live="polite"></div>
+                <p id="registration-pair-list-empty" class="field-help">No manual pairs added.</p>
+              </fieldset>
+            </div>
+
+            <div id="registration-pairwise" class="subtab-panel" hidden>
+              <label for="registration-method">Method</label>
+              <select id="registration-method">
+                <option value="phase_correlation">Phase correlation</option>
+                <option value="itk_elastix">Elastix</option>
+                <option value="stabilization">Stabilization</option>
+              </select>
+              <p class="field-help">
+                Phase correlation finds a translation. Elastix, compiled to
+                WebAssembly, can also recover rotation, scale and shear; its
+                module is around 2.5&nbsp;MB and is downloaded the first time
+                a worker uses it.
+              </p>
+              <p id="registration-stabilization-help" class="field-help" hidden>
+                Stabilization registers each view with itself over time,
+                removing the jitter of a timelapse while keeping the smooth
+                part of its motion. It needs at least eight timepoints, and
+                uses neither the registration graph nor the groupwise
+                resolution.
+              </p>
+
+              <fieldset id="registration-elastix-options" hidden>
+                <legend>Elastix options</legend>
+                <label for="registration-elastix-transform">Transform type</label>
+                <select id="registration-elastix-transform">
+                  <option value="translation">Translation</option>
+                  <option value="rigid" selected>Rigid</option>
+                  <option value="similarity">Similarity</option>
+                  <option value="affine">Affine</option>
+                </select>
+                <p class="field-help">
+                  A translation stage runs first and hands its result to the
+                  chosen transform. Picking one here sets the groupwise
+                  transform type to match.
+                </p>
+
+                <label for="registration-elastix-resolutions">Resolution levels</label>
+                <input id="registration-elastix-resolutions" type="number" min="1" step="1" value="2" />
+                <p class="field-help">More levels start the optimizer at a coarser scale, which tolerates larger displacements.</p>
+
+                <label for="registration-elastix-iterations">Iterations per level</label>
+                <input id="registration-elastix-iterations" type="number" min="1" step="1" placeholder="default" />
+
+                <label for="registration-elastix-metric">Metric</label>
+                <select id="registration-elastix-metric">
+                  <option value="">Mattes mutual information (default)</option>
+                  <option value="AdvancedNormalizedCorrelation">Normalized correlation</option>
+                  <option value="AdvancedMeanSquares">Mean squares</option>
+                  <option value="NormalizedMutualInformation">Normalized mutual information</option>
+                </select>
+              </fieldset>
+
+              <label for="registration-resolution-level">Registration resolution level</label>
+              <input id="registration-resolution-level" type="number" min="0" step="1" placeholder="auto" />
+              <p class="field-help">Leave blank to select a compatible level automatically.</p>
+
+              <fieldset>
+                <legend>Registration binning</legend>
+                <div id="registration-binning" class="dimension-fields"></div>
+                <p class="field-help">Leave blank to choose binning automatically.</p>
+              </fieldset>
+            </div>
+
+            <div id="registration-groupwise" class="subtab-panel" hidden>
+              <fieldset>
+                <legend>Groupwise resolution options</legend>
+                <label for="registration-groupwise-transform">Transform type</label>
+                <select id="registration-groupwise-transform">
+                  <option value="translation">Translation</option>
+                  <option value="rigid">Rigid</option>
+                  <option value="similarity">Similarity</option>
+                  <option value="affine">Affine</option>
+                </select>
+                <label for="registration-reference-view">Reference view</label>
+                <select id="registration-reference-view" disabled>
+                  <option value="">Automatic</option>
+                </select>
+              </fieldset>
+            </div>
+          </div>
+          <button class="primary-button" type="button" data-action="register" disabled>Register views</button>
+        </section>
+
+        <section id="fusion-panel" class="operation-panel" role="tabpanel" aria-labelledby="fusion-tab" hidden>
+          <div class="operation-intro">
+            <span class="step-icon">03</span>
+            <div>
+              <h3>Fusion</h3>
+              <p>Combine the views in the displayed coordinate system.</p>
+            </div>
+          </div>
+
+          <div class="tabs sub-tabs" role="tablist" aria-label="Fusion options">
+            <button role="tab" aria-selected="true" data-subtab="fusion-common">Common</button>
+            <button role="tab" aria-selected="false" data-subtab="fusion-advanced">Advanced</button>
+          </div>
+          <div id="fusion-common" class="subtab-panel">
+            <label for="fusion-method">Fusion method</label>
+            <select id="fusion-method">
+              <option value="weighted_average">Weighted average</option>
+              <option value="simple_average">Simple average</option>
+              <option value="max">Maximum intensity</option>
+            </select>
+          </div>
+          <div id="fusion-advanced" class="subtab-panel" hidden>
+            <fieldset>
+              <legend>Blending widths</legend>
+              <div id="blending-widths" class="dimension-fields"></div>
+              <p class="field-help">Physical width of edge blending per axis.</p>
+            </fieldset>
+            <fieldset>
+              <legend>Output spacing</legend>
+              <div id="output-spacing" class="dimension-fields"></div>
+              <p class="field-help">Leave blank to infer spacing from the inputs.</p>
+            </fieldset>
+            <fieldset>
+              <legend>Output chunk sizes</legend>
+              <div id="output-chunksizes" class="dimension-fields"></div>
+              <p class="field-help">Pixels per output chunk; leave blank to choose automatically.</p>
+            </fieldset>
+          </div>
+          <div class="split-actions">
+            <button class="secondary-button" type="button" data-action="fuse-preview" disabled>Fuse preview</button>
+            <button class="primary-button" type="button" data-action="fuse-disk" disabled>Fuse to OME-Zarr</button>
+          </div>
+          <p class="field-help">Preview chunks are computed lazily as you navigate.</p>
+        </section>
+      </aside>
+    </main>
+
+    <dialog id="log-dialog" class="app-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">Diagnostics</span><h2>Activity log</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close log">&times;</button>
+      </div>
+      <div id="log" class="log"></div>
+      <div class="dialog-footer"><button id="clear-log" class="secondary-button" type="button">Clear log</button></div>
+    </dialog>
+
+    <dialog id="about-dialog" class="app-dialog about-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">About</span><h2>multiview-stitcher</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close about dialog">&times;</button>
+      </div>
+      <div class="about-content">
+        <svg class="logo" role="img" aria-label="multiview-stitcher logo"><use href="#mvs-logo" /></svg>
+        <p>Registration and fusion for tiled, multiview microscopy data&mdash;running locally in your browser.</p>
+        <div class="privacy-note"><strong>Your data stays local.</strong><span>Images are processed on this device and are never uploaded.</span></div>
+        <p class="built-with">Built with <a href="https://neuroglancer-docs.web.app/" target="_blank" rel="noopener">Neuroglancer</a>, <a href="https://ngff.openmicroscopy.org/" target="_blank" rel="noopener">OME-Zarr</a>, and <a href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a>.</p>
+        <p id="runtime-info" class="runtime-info">Runtime information will appear after startup.</p>
+      </div>
+    </dialog>
+
+    <dialog id="viewer-help-dialog" class="app-dialog help-dialog">
+      <div class="dialog-header">
+        <div><span class="eyebrow">Viewer controls</span><h2>Navigate the image</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close viewer help">&times;</button>
+      </div>
+      <div class="help-content">
+        <div><span class="help-icon">+</span><div><strong>Zoom in or out</strong><p>Hold <kbd>Ctrl</kbd> and scroll the mouse wheel, or pinch on a trackpad over the viewer.</p></div></div>
+        <div><span class="help-icon">&#8596;</span><div><strong>Pan across the image</strong><p>Click and drag inside a view to move through the data.</p></div></div>
+        <div><span class="help-icon">&#9633;</span><div><strong>Point at a tile</strong><p>The tile under the pointer is outlined here and highlighted in the views list. Click to select it, <kbd>Ctrl</kbd>+click (&#8984; on macOS) to add or remove it from a selection.</p></div></div>
+      </div>
+    </dialog>
+
+    <script>
+      (async () => {
+        let build = "dev";
+        try {
+          const manifest = await (
+            await fetch("packages/manifest.json", { cache: "no-store" })
+          ).json();
+          build = manifest.build || manifest.sha256 || build;
+          window.__mvsManifest = manifest;
+        } catch (error) {
+          console.error("[multiview-stitcher] cannot read the build manifest", error);
+        }
+
+        document.getElementById("viewer-stylesheet").href =
+          `neuroglancer/neuroglancer.css?v=${build}`;
+        document.getElementById("app-stylesheet").href = `app.css?v=${build}`;
+
+        for (const [src, type] of [["routes.js", ""], ["app.js", "module"]]) {
+          await new Promise((resolve, reject) => {
+            const element = document.createElement("script");
+            if (type) element.type = type;
+            element.src = `${src}?v=${build}`;
+            element.onload = resolve;
+            element.onerror = () => reject(new Error(`cannot load ${src}`));
+            document.body.appendChild(element);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

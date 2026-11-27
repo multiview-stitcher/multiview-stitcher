@@ -1,0 +1,16 @@
+{
+  "wheel": "multiview_stitcher-0.1.64.dev4+g1d6103dc9-py3-none-any.whl",
+  "sha256": "86bde599f3c840a1759a8923bba7e02b28138c2ee510662508c9edd09bef39cc",
+  "build": "ca6e032977b0",
+  "pyodide_lock": "pyodide-lock.json",
+  "size": 2390550,
+  "pyodide_version": "314.0.4",
+  "browser_dependencies": [
+    "dask[array]!=2025.11.0",
+    "dask-image",
+    "ngff-zarr<0.44",
+    "czifile==2019.7.2.3",
+    "tifffile",
+    "itkwasm-elastix"
+  ]
+}
