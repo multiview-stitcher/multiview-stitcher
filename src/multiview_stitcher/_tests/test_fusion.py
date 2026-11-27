@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import os
 import tempfile
 import warnings
@@ -1604,3 +1605,177 @@ def test_fuse_first_view_fusion_respects_input_order(reverse):
     np.testing.assert_array_equal(fused_data[..., :, :6], 1)
     np.testing.assert_array_equal(fused_data[..., :, 6:8], overlap_value)
     np.testing.assert_array_equal(fused_data[..., :, 8:], 2)
+
+
+def _make_chunked_fusion_test_sims(transform, tmpdir, input_backend):
+    """
+    Deterministic 2x2 tiles (2 channels, 2 time points) for chunked fusion.
+
+    The tile data is the same for both input backends.
+    """
+    os.makedirs(tmpdir, exist_ok=True)
+    rng = np.random.default_rng(0)
+    transform_key = "k"
+    tile_size, overlap, spacing = 24, 6, 0.5
+    labels = ["y", "x", "1"]
+    t_coords = np.array([0.0, 1.5])
+
+    sims = []
+    for itile, (iy, ix) in enumerate(np.ndindex(2, 2)):
+        data = rng.integers(
+            1, 1000, size=(2, 2, tile_size, tile_size), dtype=np.uint16
+        )
+        path = os.path.join(tmpdir, f"tile_{itile}.zarr")
+        zarray = zarr.create_array(
+            path, shape=data.shape, chunks=(1, 1, 16, 16), dtype=data.dtype
+        )
+        zarray[:] = data
+
+        sim = si_utils.get_sim_from_array(
+            zarray if input_backend == "zarr" else da.from_zarr(zarray),
+            dims=["t", "c", "y", "x"],
+            scale={"y": spacing, "x": spacing},
+            translation={
+                "y": iy * (tile_size - overlap) * spacing,
+                "x": ix * (tile_size - overlap) * spacing,
+            },
+            transform_key=transform_key,
+            c_coords=["ch0", "ch1"],
+            t_coords=t_coords,
+        )
+
+        if transform == "fractional_time_dependent":
+            # Sub-pixel translations which differ between time points.
+            affines = np.stack(
+                [
+                    param_utils.affine_from_translation(
+                        [0.11 + 0.3 * itile + 0.2 * it] * 2
+                    )
+                    for it in range(len(t_coords))
+                ]
+            )
+            si_utils.set_sim_affine(
+                sim,
+                xr.DataArray(
+                    affines,
+                    dims=["t", "x_in", "x_out"],
+                    coords={"t": t_coords, "x_in": labels, "x_out": labels},
+                ),
+                transform_key=transform_key,
+            )
+        elif transform == "rotation":
+            angle = 0.05 * (itile + 1)
+            affine = np.eye(3)
+            affine[:2, :2] = [
+                [np.cos(angle), -np.sin(angle)],
+                [np.sin(angle), np.cos(angle)],
+            ]
+            affine[:2, 2] = 0.37 * itile
+            si_utils.set_sim_affine(
+                sim,
+                param_utils.affine_to_xaffine(affine),
+                transform_key=transform_key,
+            )
+
+        assert si_utils.is_xarray_zarr_backed(sim) == (input_backend == "zarr")
+        sims.append(sim)
+
+    return sims, transform_key
+
+
+@pytest.mark.parametrize("input_backend", ["dask", "zarr"])
+@pytest.mark.parametrize("batch_mode", ["sequential", "joblib"])
+@pytest.mark.parametrize(
+    "transform", ["translation", "fractional_time_dependent", "rotation"]
+)
+def test_fuse_to_zarr_matches_chunkwise_lazy_fusion(
+    input_backend, batch_mode, transform
+):
+    """
+    Chunked fusion to zarr is bit-identical to fusing each chunk on its own.
+
+    Each chunk of the output must equal the result of a separate (lazy) fusion
+    of dask-backed tiles whose output stack is that chunk. The chunked path
+    shares all setup work between chunks and only reads the tiles overlapping
+    a chunk, which must not change the result, whatever the input backend.
+    """
+    output_chunksize = {"y": 16, "x": 20}
+    fuse_kwargs = {"output_chunksize": output_chunksize}
+    batch_options = None
+    if batch_mode == "joblib":
+        batch_options = {
+            "batch_func": misc_utils.process_batch_using_joblib,
+            "n_batch": 5,
+            "batch_func_kwargs": {"n_jobs": 2},
+        }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sims, transform_key = _make_chunked_fusion_test_sims(
+            transform, tmpdir, input_backend
+        )
+        # The reference fuses each chunk on its own from dask-backed tiles.
+        reference_sims, _ = _make_chunked_fusion_test_sims(
+            transform, os.path.join(tmpdir, "reference"), "dask"
+        )
+        output_path = os.path.join(tmpdir, "fused.zarr")
+        fused = fusion.fuse(
+            sims,
+            transform_key=transform_key,
+            output_zarr_url=output_path,
+            batch_options=batch_options,
+            **fuse_kwargs,
+        )
+        result = np.asarray(zarr.open_array(output_path, mode="r")[:])
+
+        osp = si_utils.get_stack_properties_from_sim(fused)
+        sdims = si_utils.get_spatial_dims_from_sim(fused)
+        nsdims = si_utils.get_nonspatial_dims_from_sim(fused)
+        chunk_offsets = {
+            dim: range(0, osp["shape"][dim], output_chunksize[dim])
+            for dim in sdims
+        }
+        assert all(len(chunk_offsets[dim]) > 1 for dim in sdims)
+
+        expected = np.zeros_like(result)
+        for ns_index in np.ndindex(*[fused.sizes[dim] for dim in nsdims]):
+            ns_sims = [
+                si_utils.sim_sel_coords(
+                    sim,
+                    {
+                        dim: sim.coords[dim][[i]]
+                        for dim, i in zip(nsdims, ns_index)
+                    },
+                )
+                for sim in reference_sims
+            ]
+            for offsets in itertools.product(
+                *[chunk_offsets[dim] for dim in sdims]
+            ):
+                chunk_shape = {
+                    dim: min(output_chunksize[dim], osp["shape"][dim] - offset)
+                    for dim, offset in zip(sdims, offsets)
+                }
+                chunk = fusion.fuse(
+                    ns_sims,
+                    transform_key=transform_key,
+                    output_origin={
+                        dim: offset * osp["spacing"][dim] + osp["origin"][dim]
+                        for dim, offset in zip(sdims, offsets)
+                    },
+                    output_shape=chunk_shape,
+                    output_spacing=osp["spacing"],
+                    **fuse_kwargs,
+                ).data.compute(scheduler="single-threaded")
+                expected[
+                    tuple(slice(i, i + 1) for i in ns_index)
+                    + tuple(
+                        slice(offset, offset + chunk_shape[dim])
+                        for dim, offset in zip(sdims, offsets)
+                    )
+                ] = chunk
+
+    assert result.max() > 0
+    # every time point and channel contains data
+    assert all(result[ns_index].max() > 0 for ns_index in np.ndindex(2, 2))
+    assert len({result[ns_index].tobytes() for ns_index in np.ndindex(2, 2)}) == 4
+    np.testing.assert_array_equal(result, expected)
