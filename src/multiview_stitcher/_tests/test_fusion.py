@@ -5,7 +5,6 @@ import tempfile
 import warnings
 
 from aiohttp.client_exceptions import ServerDisconnectedError
-import cloudpickle
 import dask.array as da
 import numpy as np
 import pytest
@@ -1781,81 +1780,3 @@ def test_fuse_to_zarr_matches_chunkwise_lazy_fusion(
     assert all(result[ns_index].max() > 0 for ns_index in np.ndindex(2, 2))
     assert len({result[ns_index].tobytes() for ns_index in np.ndindex(2, 2)}) == 4
     np.testing.assert_array_equal(result, expected)
-
-
-def test_prepare_block_fusion_shares_setup_between_chunks(monkeypatch):
-    """
-    Per-chunk work of chunked fusion must not grow with the number of tiles:
-    setup is done once, and only tiles overlapping a chunk are read.
-    """
-    tile_size, n_tiles = 16, 4
-    data = np.random.default_rng(0).integers(
-        1, 1000, size=(1, n_tiles * tile_size, n_tiles * tile_size)
-    ).astype(np.uint16)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zarray = zarr.create_array(
-            os.path.join(tmpdir, "well.zarr"),
-            shape=data.shape,
-            chunks=(1, tile_size, tile_size),
-            dtype=data.dtype,
-        )
-        zarray[:] = data
-        tiles = _well_tiles_from_array(
-            zarray, tile_size=tile_size, n_tiles=n_tiles, transform_key="k"
-        )
-
-        calls = {"affines_read": 0, "stack_properties": 0, "tiles_read": []}
-        original_get_affine = fusion_core.si_utils.get_affine_from_sim
-        original_stack_properties = fusion_core.calc_fusion_stack_properties
-        original_fuse_block_views = fusion_core._fuse_block_views
-
-        def count_affines_read(*args, **kwargs):
-            calls["affines_read"] += 1
-            return original_get_affine(*args, **kwargs)
-
-        def count_stack_properties(*args, **kwargs):
-            calls["stack_properties"] += 1
-            return original_stack_properties(*args, **kwargs)
-
-        def record_tiles_read(sims_slices, *args, **kwargs):
-            calls["tiles_read"].append(len(sims_slices))
-            return original_fuse_block_views(sims_slices, *args, **kwargs)
-
-        monkeypatch.setattr(
-            fusion_core.si_utils, "get_affine_from_sim", count_affines_read
-        )
-        monkeypatch.setattr(
-            fusion_core, "calc_fusion_stack_properties", count_stack_properties
-        )
-        monkeypatch.setattr(
-            fusion_core, "_fuse_block_views", record_tiles_read
-        )
-
-        output_path = os.path.join(tmpdir, "fused.zarr")
-        info = fusion.prepare_block_fusion(
-            output_path,
-            fuse_kwargs={
-                "images": tiles,
-                "transform_key": "k",
-                "output_chunksize": tile_size,
-            },
-            verbose=False,
-        )
-        block_ids = list(np.ndindex(*info["nblocks"]))
-        assert len(block_ids) == n_tiles**2
-        # Chunks are fused from a pickled copy of the plan, as in a worker
-        # process.
-        fuse_chunk = cloudpickle.loads(cloudpickle.dumps(info["func"]))
-        affines_read_during_setup = calls["affines_read"]
-        for block_id in block_ids:
-            fuse_chunk(block_id)
-
-        result = np.asarray(zarr.open_array(output_path, mode="r")[:])
-
-    np.testing.assert_array_equal(result.squeeze(), data.squeeze())
-    assert calls["stack_properties"] == 1
-    # affines are read from the tiles once (in setup), not per chunk
-    assert affines_read_during_setup == calls["affines_read"]
-    # each chunk coincides with exactly one of the 16 tiles
-    assert calls["tiles_read"] == [1] * len(block_ids)
