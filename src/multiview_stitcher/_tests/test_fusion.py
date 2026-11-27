@@ -1503,6 +1503,63 @@ def test_fuse_spatial_subviews_of_one_zarr_array(fuse_mode):
     np.testing.assert_array_equal(results["zarr"], data.squeeze())
 
 
+@pytest.mark.parametrize("fuse_mode", ["lazy", "output_zarr"])
+def test_fuse_rotated_zarr_backed_tiles_matches_dask(fuse_mode):
+    """
+    Rotated zarr-backed tiles fuse to the same result as dask-backed ones.
+
+    Regression test: for rotated views the region read from a tile doesn't
+    start on its pixel grid, and zarr-backed tiles were resampled with a
+    sub-pixel offset.
+    """
+    data = np.random.default_rng(0).integers(
+        1, 1000, size=(1, 200, 200), dtype=np.uint16
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zarray = zarr.create_array(
+            os.path.join(tmpdir, "well.zarr"),
+            shape=data.shape,
+            chunks=(1, 50, 50),
+            dtype=data.dtype,
+        )
+        zarray[:] = data
+
+        results = {}
+        for backend, arr in [("dask", da.from_zarr(zarray)), ("zarr", zarray)]:
+            tiles = _well_tiles_from_array(
+                arr, tile_size=100, n_tiles=2, transform_key="k"
+            )
+            for itile, tile in enumerate(tiles):
+                angle = 0.01 * (itile + 1)
+                affine = np.eye(3)
+                affine[:2, :2] = [
+                    [np.cos(angle), -np.sin(angle)],
+                    [np.sin(angle), np.cos(angle)],
+                ]
+                si_utils.set_sim_affine(
+                    tile,
+                    param_utils.affine_to_xaffine(affine),
+                    transform_key="k",
+                )
+            assert si_utils.is_xarray_zarr_backed(tiles[0]) == (backend == "zarr")
+
+            fuse_kwargs = {"transform_key": "k", "output_chunksize": 50}
+            if fuse_mode == "lazy":
+                fused = fusion.fuse(tiles, **fuse_kwargs)
+                results[backend] = np.asarray(fused.data).squeeze()
+                continue
+
+            output_path = os.path.join(tmpdir, f"fused_{backend}.zarr")
+            fusion.fuse(tiles, output_zarr_url=output_path, **fuse_kwargs)
+            results[backend] = np.asarray(
+                zarr.open_array(output_path, mode="r")[:]
+            ).squeeze()
+
+    assert results["dask"].max() > 0
+    np.testing.assert_array_equal(results["zarr"], results["dask"])
+
+
 def test_first_view_fusion_picks_first_valid_view():
     nan = np.nan
     views = np.array(
