@@ -2065,6 +2065,241 @@ def test_worker_loads_a_czi_by_path(czi_path):
     ]
 
 
+def test_the_shipped_mosaic_has_one_scene(czi_path):
+    from multiview_stitcher import czi_utils
+
+    assert czi_utils.get_czi_scenes(czi_path) == [
+        {"index": 0, "name": "TR1", "n_tiles": 2}
+    ]
+    assert browser_czi.czi_scenes(czi_path) == {
+        "multiview": False,
+        "scenes": [{"index": 0, "name": "TR1", "n_images": 2}],
+    }
+
+
+class _Entry:
+    def __init__(self, dimension, start):
+        self.dimension = dimension
+        self.start = start
+
+
+class _Subblock:
+    def __init__(self, **pos):
+        self.dimension_entries = [_Entry(k, v) for k, v in pos.items()]
+
+
+class _SceneCzi:
+    """Just enough of a `czifile.CziFile` for `get_czi_scenes`."""
+
+    def __init__(self, tiles_per_scene, names):
+        self.filtered_subblock_directory = [
+            _Subblock(S=scene, M=tile, C=channel, Y=0, X=0)
+            for scene, n_tiles in enumerate(tiles_per_scene)
+            for tile in range(n_tiles)
+            for channel in range(2)
+        ]
+        scenes = "".join(
+            f'<Scene Index="{index}"'
+            + (f' Name="{name}"' if name else "")
+            + "/>"
+            for index, name in enumerate(names)
+        )
+        self._metadata = (
+            "<ImageDocument><Metadata><Information><Image><Dimensions><S>"
+            f"<Scenes>{scenes}</Scenes>"
+            "</S></Dimensions></Image></Information></Metadata></ImageDocument>"
+        )
+
+    def metadata(self):
+        return self._metadata
+
+
+def test_czi_scenes_are_listed_with_names_and_tile_counts(monkeypatch):
+    from multiview_stitcher import czi_utils
+
+    pytest.importorskip("czifile")
+    fake = _SceneCzi([4, 9], ["TR3", None])
+    monkeypatch.setattr(czi_utils, "open_czi", lambda filepath: fake)
+
+    assert czi_utils.get_czi_scenes("slide.czi") == [
+        {"index": 0, "name": "TR3", "n_tiles": 4},
+        {"index": 1, "name": None, "n_tiles": 9},
+    ]
+
+
+def test_mosaic_tiles_are_placed_by_their_own_scene(monkeypatch):
+    """Tile positions must come from the scene being read, not scene 0.
+
+    They used to: every scene's tiles were placed where scene 0's are.
+    """
+    from multiview_stitcher import czi_utils
+    from multiview_stitcher import io as mvs_io
+
+    asked = []
+
+    def read_czi_into_xims(filename, scene_index=0):
+        return [
+            xr.DataArray(
+                np.zeros((1, 4, 4), dtype=np.uint16),
+                dims=["C", "Y", "X"],
+                coords={"C": ["c0"], "Y": np.arange(4.0), "X": np.arange(4.0)},
+            )
+        ]
+
+    def get_czi_mosaic_intervals(filepath, scene_index=0):
+        asked.append(scene_index)
+        return {0: {"Y": [100.0 * scene_index, 0], "X": [0.0, 0]}}
+
+    monkeypatch.setattr(czi_utils, "read_czi_into_xims", read_czi_into_xims)
+    monkeypatch.setattr(
+        czi_utils, "get_czi_mosaic_intervals", get_czi_mosaic_intervals
+    )
+
+    (sim,) = mvs_io.read_mosaic_into_sims_czifile("slide.czi", scene_index=2)
+
+    assert asked == [2]
+    assert si_utils.get_origin_from_sim(sim)["y"] == 200.0
+
+
+@pytest.fixture
+def fake_scene_czi(monkeypatch, tmp_path):
+    """A mosaic CZI of three named scenes, two tiles each.
+
+    Each scene's tiles are offset in y by 1000 per scene, as on a slide, and
+    filled with ``10 * scene + tile`` so that a tile shows where it came from.
+    Returns ``(path, reads)``; ``reads`` counts reader calls per scene.
+    """
+    from multiview_stitcher import czi_utils
+    from multiview_stitcher import io as mvs_io
+    from multiview_stitcher.browser import czi as czi_module
+
+    czi_file = tmp_path / "slide.czi"
+    czi_file.touch()  # only its path is used; the readers are stubbed below
+    path = str(czi_file)
+    reads = {}
+
+    def read_mosaic(filepath, scene_index=0):
+        reads[scene_index] = reads.get(scene_index, 0) + 1
+        return [
+            si_utils.get_sim_from_array(
+                np.full((1, 1, 64, 64), 10 * scene_index + tile, np.uint16),
+                dims=("t", "c", "y", "x"),
+                scale={"y": 1.0, "x": 1.0},
+                translation={"y": 1000.0 * scene_index, "x": 60.0 * tile},
+                transform_key=si_utils.DEFAULT_TRANSFORM_KEY,
+                c_coords=["c0"],
+            )
+            for tile in range(2)
+        ]
+
+    monkeypatch.setattr(czi_utils, "is_multiview_czi", lambda filepath: False)
+    monkeypatch.setattr(
+        czi_utils,
+        "get_czi_scenes",
+        lambda filepath: [
+            {"index": index, "name": name, "n_tiles": 2}
+            for index, name in enumerate(["TR1", "TR2", None])
+        ],
+    )
+    monkeypatch.setattr(mvs_io, "read_mosaic_into_sims_czifile", read_mosaic)
+    czi_module._file.cache_clear()
+
+    yield path, reads
+
+    czi_module._file.cache_clear()
+
+
+def test_czi_sources_cover_the_chosen_scenes(fake_scene_czi):
+    path, _ = fake_scene_czi
+    sources = browser_czi.czi_sources(path, scene_indices=[2, 0], name="s")
+
+    # A file of several scenes names them, so their tiles can be told apart.
+    assert [source["name"] for source in sources] == [
+        "s scene 2 tile 0",
+        "s scene 2 tile 1",
+        "s TR1 tile 0",
+        "s TR1 tile 1",
+    ]
+    assert [browser_czi.parse_czi_url(s["url"])[1:] for s in sources] == [
+        (2, 0),
+        (2, 1),
+        (0, 0),
+        (0, 1),
+    ]
+
+    tile = msi_utils.get_sim_from_msim(
+        browser_dataset.open_msim(sources[1]["url"])
+    )
+    assert int(np.asarray(tile.data).max()) == 21
+    assert si_utils.get_origin_from_sim(tile)["y"] == 2000.0
+
+
+def test_an_unknown_scene_is_refused(fake_scene_czi):
+    path, _ = fake_scene_czi
+
+    with pytest.raises(ValueError, match="no scene 5"):
+        browser_czi.czi_sources(path, scene_indices=[5])
+
+
+def test_every_scene_of_a_file_stays_cached(fake_scene_czi):
+    """More scenes than the cache holds files must not be read over and over.
+
+    A compute worker rebuilding a session opens every tile in a row; a cache
+    keyed by scene evicted each scene to open the next.
+    """
+    path, reads = fake_scene_czi
+    sources = browser_czi.czi_sources(path, scene_indices=[0, 1, 2])
+
+    for _ in range(2):
+        for source in sources:
+            browser_czi.build_sim(source["url"])
+
+    assert reads == {0: 1, 1: 1, 2: 1}
+
+
+def test_worker_lists_and_loads_chosen_scenes(fake_scene_czi):
+    path, _ = fake_scene_czi
+    runtime = WorkerRuntime()
+
+    listed = runtime.handle("czi_scenes", {"path": path})
+    assert listed["multiview"] is False
+    assert [scene["index"] for scene in listed["scenes"]] == [0, 1, 2]
+
+    described = runtime.handle(
+        "load_czi",
+        {"path": path, "name": "slide.czi", "scene_indices": [0, 1]},
+    )
+    assert described["n_views"] == 4
+    assert [view["name"] for view in described["views"]] == [
+        "slide.czi TR1 tile 0",
+        "slide.czi TR1 tile 1",
+        "slide.czi TR2 tile 0",
+        "slide.czi TR2 tile 1",
+    ]
+
+    # A later load of another scene extends the session.
+    described = runtime.handle(
+        "load_czi",
+        {"path": path, "name": "slide.czi", "scene_indices": [2], "replace": False},
+    )
+    assert described["n_views"] == 6
+
+
+def test_a_multi_scene_session_rebuilds_from_its_spec(fake_scene_czi):
+    path, _ = fake_scene_czi
+    session = Session()
+    session.load(browser_czi.czi_sources(path, scene_indices=[0, 1]))
+
+    spec = json.loads(json.dumps(session.spec().to_dict()))
+    browser_czi.forget_files()
+    rebuilt = Session.from_spec(spec)
+
+    np.testing.assert_array_equal(
+        np.asarray(msi_utils.get_sim_from_msim(rebuilt.msims[3]).data),
+        np.asarray(msi_utils.get_sim_from_msim(session.msims[3]).data),
+    )
+
+
 #: A multi-view CZI is several 3D stacks recorded at different angles. None
 #: ships with the package - they are gigabytes - so the wiring below is tested
 #: against a stand-in until a small, stable file is available.
@@ -2117,7 +2352,7 @@ def fake_multiview_czi(monkeypatch, tmp_path):
         "read_multiview_czi_into_sims",
         lambda filepath, **kwargs: [sim.copy(deep=False) for sim in sims],
     )
-    czi_module._images.cache_clear()
+    czi_module._file.cache_clear()
 
     return path
 

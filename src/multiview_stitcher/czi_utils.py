@@ -227,6 +227,50 @@ def get_czi_mosaic_intervals(filepath, scene_index=0):
     return intervals
 
 
+def get_czi_scenes(filepath):
+    """
+    List the scenes of a CZI file.
+
+    Returns one dict per scene, ordered by index, with keys ``index`` (the
+    value to pass as ``scene_index`` to the readers), ``name`` (from the
+    metadata, or None) and ``n_tiles`` (number of mosaic tiles in the scene).
+
+    A file without an ``S`` dimension is reported as a single scene 0, which
+    is how the readers treat it.
+    """
+
+    _require_czifile()
+
+    from xml.etree import ElementTree as etree
+
+    czifile_file = open_czi(filepath)
+
+    tiles = {}
+    for directory_entry in czifile_file.filtered_subblock_directory:
+        pos = {
+            dim.dimension: dim.start
+            for dim in directory_entry.dimension_entries
+        }
+        tiles.setdefault(pos.get("S", 0), set()).add(pos.get("M", 0))
+
+    metadata = etree.fromstring(czifile_file.metadata())
+    names = {}
+    for scene in metadata.findall(
+        ".//Information/Image/Dimensions/S/Scenes/Scene"
+    ):
+        with contextlib.suppress(TypeError, ValueError):
+            names[int(scene.get("Index"))] = scene.get("Name")
+
+    return [
+        {
+            "index": int(index),
+            "name": names.get(index),
+            "n_tiles": len(tiles[index]),
+        }
+        for index in sorted(tiles)
+    ]
+
+
 def get_czi_channel_names(filepath):
     """
     Get the channel names of a CZI file.

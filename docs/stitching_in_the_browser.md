@@ -31,7 +31,9 @@ Open the browser app
     - a **CZI file**, either a mosaic (tiles laid out in a plane) or a
       multi-view acquisition (stacks recorded at different angles). Which one
       it is is read from the file metadata, and either way one file is a whole
-      dataset.
+      dataset. A mosaic holding several scenes asks which of them to load
+      (one, several, or all); each chosen scene's tiles become views, placed
+      at the stage positions the file recorded.
 
 4. Press **Register**, then **Fuse (preview)**.
 
@@ -101,6 +103,12 @@ views arrive with their rotations already applied from the metadata.
 Which reader applies is decided by `czi_utils.is_multiview_czi`, from the
 `MultiView` element of the metadata. The dimensions cannot decide it: a
 multi-view file carries a mosaic dimension too, pinned at a single tile.
+
+A mosaic may hold several scenes (its `S` dimension). Before loading, the page
+asks Python for them (`czi_utils.get_czi_scenes`, which reads the scene names
+from the metadata and counts each scene's tiles), offers a choice when there is
+more than one, and loads the chosen scenes' tiles side by side. The scene is
+part of each tile's source URL, so a compute worker opens the same tile.
 
 The mount is Emscripten's `WORKERFS`, which answers each read by slicing the
 `File` and reading that slice synchronously. Only the bytes actually needed are
