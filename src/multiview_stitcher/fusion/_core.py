@@ -1,7 +1,6 @@
 import inspect
 import itertools
 import os, shutil
-import uuid
 import warnings
 from collections.abc import Callable, Sequence
 from functools import partial
@@ -501,67 +500,61 @@ def _get_ordered_param_matrices(sparams, sdims):
     return matrices
 
 
-def _prepare_view_geometry(sparams, views_bb, sdims):
+def _prepare_view_geometry(matrices, views_bb, sdims):
     """
     Collect everything the fusion planner needs to know about the views.
 
-    None of this depends on the output chunk, so it is computed once for a
-    given set of affines and then reused for every chunk. Per-view values are
-    stored as arrays so that per-chunk tests are a few vectorized operations
-    instead of Python loops over all views.
+    ``matrices`` are the views' affines as returned by
+    ``_get_ordered_param_matrices``. Per-view values are stored as arrays so
+    that the planner's tests are a few vectorized operations instead of
+    Python loops over all views.
     """
     ndim = len(sdims)
-    matrices = _get_ordered_param_matrices(sparams, sdims)
 
-    # Forward-project view corners through the affines to get the views'
-    # axis-aligned bounding boxes in output (world) space.
-    corners_min = np.empty((len(sparams), ndim), dtype=float)
-    corners_max = np.empty((len(sparams), ndim), dtype=float)
-    for iview, sparam in enumerate(sparams):
-        view_corners_output = transformation.transform_pts(
-            mv_graph.get_vertices_from_stack_props(views_bb[iview]),
-            sparam.data,
-        )
-        corners_min[iview] = np.min(view_corners_output, axis=0)
-        corners_max[iview] = np.max(view_corners_output, axis=0)
+    def views_bb_array(key):
+        return np.array(
+            [[view_bb[key][dim] for dim in sdims] for view_bb in views_bb],
+            dtype=float,
+        ).reshape((len(views_bb), ndim))
+
+    view_origins = views_bb_array("origin")
+    view_spacings = views_bb_array("spacing")
+
+    # Forward-project the view corners (as in
+    # mv_graph.get_vertices_from_stack_props) through the affines to get the
+    # views' axis-aligned bounding boxes in output (world) space.
+    corner_indices = np.array(list(np.ndindex(tuple([2] * ndim))))
+    vertices = (
+        corner_indices[np.newaxis]
+        * (views_bb_array("shape")[:, np.newaxis] - 1)
+        * view_spacings[:, np.newaxis]
+        + view_origins[:, np.newaxis]
+    )
+    vertices_output = np.einsum(
+        "vij,vkj->vki", matrices[:, :ndim, :ndim], vertices
+    ) + matrices[:, np.newaxis, :ndim, ndim]
 
     return {
-        "sparams": sparams,
         "matrices": matrices,
         "translations": matrices[:, :ndim, ndim],
         "axis_aligned_translation_dims": _get_axis_aligned_translation_dims(
             matrices, sdims
         ),
-        "view_origins": np.array(
-            [[view_bb["origin"][dim] for dim in sdims] for view_bb in views_bb],
-            dtype=float,
-        ).reshape((len(views_bb), ndim)),
-        "view_spacings": np.array(
-            [
-                [view_bb["spacing"][dim] for dim in sdims]
-                for view_bb in views_bb
-            ],
-            dtype=float,
-        ).reshape((len(views_bb), ndim)),
-        "corners_min": corners_min,
-        "corners_max": corners_max,
-        # Inverse affines, filled in on demand (see _get_inv_sparam).
-        "inv_sparams": {},
+        "view_origins": view_origins,
+        "view_spacings": view_spacings,
+        "corners_min": vertices_output.min(axis=1),
+        "corners_max": vertices_output.max(axis=1),
     }
 
 
-def _get_inv_sparam(view_geometry, iview):
-    """Return (and cache) the inverse of a view's affine."""
-    inv_sparams = view_geometry["inv_sparams"]
-    if iview not in inv_sparams:
-        sparam = view_geometry["sparams"][iview]
-        inv_sparams[iview] = xr.DataArray(
-            np.linalg.inv(sparam.data),
-            dims=sparam.dims,
-            coords=sparam.coords,
-        )
-
-    return inv_sparams[iview]
+def _get_param_from_matrix(matrix, sdims):
+    """Return an affine as ``xr.DataArray`` (the inverse of the above)."""
+    labels = list(sdims) + ["1"]
+    return xr.DataArray(
+        matrix,
+        dims=["x_in", "x_out"],
+        coords={"x_in": labels, "x_out": labels},
+    )
 
 
 def _get_axis_aligned_translation_dims(matrices, sdims, tol=1e-6):
@@ -714,7 +707,7 @@ def _get_axis_aligned_translation_overlap(
 
 def _build_spatial_fusion_plan(
     *,
-    sparams,
+    view_geometry,
     views_bb,
     output_stack_properties,
     output_chunksize,
@@ -726,11 +719,13 @@ def _build_spatial_fusion_plan(
     trim_overlap,
     interpolation_order,
     sdims,
-    view_geometry=None,
 ):
-    if view_geometry is None:
-        view_geometry = _prepare_view_geometry(sparams, views_bb, sdims)
+    """
+    Determine, for each output chunk, the views overlapping it and the region
+    to read from each of them.
 
+    ``view_geometry`` is the output of ``_prepare_view_geometry``.
+    """
     axis_aligned_translation_dims = view_geometry[
         "axis_aligned_translation_dims"
     ]
@@ -849,7 +844,9 @@ def _build_spatial_fusion_plan(
                 overlap = mv_graph.get_overlap_for_bbs(
                     target_bb=output_chunk_bb_with_overlap,
                     query_bbs=[views_bb[iview]],
-                    param=_get_inv_sparam(view_geometry, iview),
+                    param=_get_param_from_matrix(
+                        np.linalg.inv(view_geometry["matrices"][iview]), sdims
+                    ),
                     additional_extent_in_pixels=additional_extent,
                     param_is_inverse=True,
                 )[0]
@@ -870,7 +867,6 @@ def _build_spatial_fusion_plan(
         )
 
     return {
-        "sparams": sparams,
         "fix_dims": grid_aligned_translation_dims,
         "axis_aligned_translation_dims": axis_aligned_translation_dims,
         "grid_aligned_translation_dims": grid_aligned_translation_dims,
@@ -1498,8 +1494,13 @@ def fuse(
         )
 
         if spatial_plan_key not in spatial_plan_cache:
+            sparams = _select_params_for_coords(params, params_coord_dict)
             spatial_plan_cache[spatial_plan_key] = _build_spatial_fusion_plan(
-                sparams=_select_params_for_coords(params, params_coord_dict),
+                view_geometry=_prepare_view_geometry(
+                    _get_ordered_param_matrices(sparams, sdims),
+                    views_bb,
+                    sdims,
+                ),
                 views_bb=views_bb,
                 output_stack_properties=output_stack_properties,
                 output_chunksize=output_chunksize,
@@ -1511,7 +1512,7 @@ def fuse(
                 trim_overlap=trim_overlap,
                 interpolation_order=interpolation_order,
                 sdims=sdims,
-            )
+            ) | {"sparams": sparams}
         spatial_plan = spatial_plan_cache[spatial_plan_key]
         sparams = spatial_plan["sparams"]
         per_chunk_entries = spatial_plan["per_chunk_entries"]
@@ -2198,53 +2199,6 @@ _FUSE_KWARGS_FOR_ZARR_OUTPUT = frozenset(
     {"output_zarr_url", "zarr_options", "batch_options"}
 )
 
-# View geometry of block fusion plans, cached per process. Keys are
-# (plan id, non-spatial coordinate indices the affines depend on). The cache
-# is small because blocks are processed one non-spatial coordinate after the
-# other.
-_BLOCK_FUSION_VIEW_GEOMETRY_CACHE = {}
-_BLOCK_FUSION_VIEW_GEOMETRY_CACHE_SIZE = 4
-
-
-def _get_block_fusion_view_geometry(plan, ns_index):
-    """
-    Return the (per-process cached) view geometry for a non-spatial index.
-
-    The geometry only depends on the non-spatial coordinates the affines
-    depend on, so in a typical fusion it is computed once per worker process
-    instead of once per chunk.
-    """
-    key = (
-        plan["id"],
-        tuple(ns_index[dim] for dim in plan["param_dependent_nsdims"]),
-    )
-    view_geometry = _BLOCK_FUSION_VIEW_GEOMETRY_CACHE.get(key)
-
-    if view_geometry is None:
-        view_geometry = _prepare_view_geometry(
-            sparams=_select_params_for_coords(
-                plan["params"],
-                {
-                    dim: plan["ns_coords"][dim][ns_index[dim]]
-                    for dim in plan["param_dependent_nsdims"]
-                },
-            ),
-            views_bb=plan["views_bb"],
-            sdims=plan["sdims"],
-        )
-        while (
-            len(_BLOCK_FUSION_VIEW_GEOMETRY_CACHE)
-            >= _BLOCK_FUSION_VIEW_GEOMETRY_CACHE_SIZE
-        ):
-            # Drop the oldest entry (tolerating concurrent threads).
-            _BLOCK_FUSION_VIEW_GEOMETRY_CACHE.pop(
-                next(iter(_BLOCK_FUSION_VIEW_GEOMETRY_CACHE), None), None
-            )
-        _BLOCK_FUSION_VIEW_GEOMETRY_CACHE[key] = view_geometry
-
-    return view_geometry
-
-
 def _fuse_chunk_to_zarr(
     block_id,
     *,
@@ -2286,13 +2240,18 @@ def _fuse_chunk_to_zarr(
         spatial_chunk_ind,
     )
 
+    # Pixel region of the chunk in the output array. Chunks form a regular
+    # grid, of which only the last chunk along each dimension may be smaller.
     chunk_offset = {
-        dim: plan["chunk_offsets"][dim][int(b)]
+        dim: int(b) * plan["output_chunksize"][dim]
         for dim, b in zip(sdims, spatial_chunk_ind)
     }
     chunk_shape = {
-        dim: plan["chunk_shapes"][dim][int(b)]
-        for dim, b in zip(sdims, spatial_chunk_ind)
+        dim: min(
+            plan["output_chunksize"][dim],
+            int(osp["shape"][dim]) - chunk_offset[dim],
+        )
+        for dim in sdims
     }
 
     # The chunk is fused as a small output stack of its own.
@@ -2302,19 +2261,21 @@ def _fuse_chunk_to_zarr(
             for dim in sdims
         },
         "shape": chunk_shape,
-        "spacing": plan["output_spacing"],
+        "spacing": osp["spacing"],
     }
     output_chunk_bb_with_overlap = _add_overlap_to_bb(
         output_chunk_bb, overlap_in_pixels, sdims
     )
 
-    view_geometry = _get_block_fusion_view_geometry(plan, ns_index)
+    view_geometry = plan["view_geometries"][
+        tuple(ns_index[dim] for dim in plan["param_dependent_nsdims"])
+    ]
 
     # Plan the chunk like a (single chunk) output stack: this finds the
     # overlapping views with a cheap bounding box test, and the region to read
     # from each of them.
     spatial_plan = _build_spatial_fusion_plan(
-        sparams=view_geometry["sparams"],
+        view_geometry=view_geometry,
         views_bb=plan["views_bb"],
         output_stack_properties=output_chunk_bb,
         output_chunksize=chunk_shape,
@@ -2332,14 +2293,19 @@ def _fuse_chunk_to_zarr(
         trim_overlap=fuse_block_kwargs["trim_overlap"],
         interpolation_order=fuse_block_kwargs["interpolation_order"],
         sdims=sdims,
-        view_geometry=view_geometry,
     )
+    chunk_entry = spatial_plan["per_chunk_entries"][0]
 
     # Read only the required region of only the overlapping views.
     fused = _fuse_block(
         _get_chunk_params(
-            spatial_plan["per_chunk_entries"][0],
-            sparams=view_geometry["sparams"],
+            chunk_entry,
+            sparams={
+                iview: _get_param_from_matrix(
+                    view_geometry["matrices"][iview], sdims
+                )
+                for iview, _ in chunk_entry["views"]
+            },
             views_bb=plan["views_bb"],
             tile_infos=plan["tile_infos"],
             sims=plan["sims"],
@@ -2539,11 +2505,6 @@ def prepare_block_fusion(
         **func_kwargs,
     )
 
-    params = [
-        si_utils.get_affine_from_sim(sim, transform_key=transform_key)
-        for sim in sims
-    ]
-
     if all(si_utils.is_xarray_zarr_backed(sim) for sim in sims):
         # Keep task payloads compact while still passing live zarr.Array
         # objects for interoperability: workers rebuild the required region
@@ -2573,38 +2534,54 @@ def prepare_block_fusion(
             si_utils.get_stack_properties_from_sim(sim) for sim in sims
         ]
 
-    spatial_chunks = dict(zip(sdims, normalized_chunks[len(nsdims) :]))
+    # The view geometry depends on the chunk only through the affines, which
+    # may depend on non-spatial coordinates (e.g. time). Compute it for each
+    # of these coordinates. The plan is sent along with every chunk, so the
+    # geometry holds the affines as arrays rather than as (much slower to
+    # pickle) xarray objects.
+    params = [
+        si_utils.get_affine_from_sim(sim, transform_key=transform_key)
+        for sim in sims
+    ]
+    param_dependent_nsdims = [
+        dim for dim in nsdims if any(dim in param.dims for param in params)
+    ]
+    view_geometries = {
+        ns_index: _prepare_view_geometry(
+            _get_ordered_param_matrices(
+                _select_params_for_coords(
+                    params,
+                    {
+                        dim: sims[0].coords[dim].values[i]
+                        for dim, i in zip(param_dependent_nsdims, ns_index)
+                    },
+                ),
+                sdims,
+            ),
+            views_bb,
+            sdims,
+        )
+        for ns_index in np.ndindex(
+            *[ns_shape[dim] for dim in param_dependent_nsdims]
+        )
+    }
 
     plan = {
-        # identifies this plan in per-process caches
-        "id": uuid.uuid4().hex,
         "sdims": sdims,
         "nsdims": nsdims,
         "dtype": sims[0].dtype,
         # coordinate values along the non-spatial dimensions
         "ns_coords": {dim: sims[0].coords[dim].values for dim in nsdims},
         "output_stack_properties": output_stack_properties,
-        "output_spacing": {
-            dim: np.float64(output_stack_properties["spacing"][dim])
-            for dim in sdims
-        },
-        # pixel offset and shape of each chunk along the spatial dimensions
-        "chunk_offsets": {
-            dim: [int(o) for o in np.cumsum((0,) + tuple(chunks)[:-1])]
-            for dim, chunks in spatial_chunks.items()
-        },
-        "chunk_shapes": {
-            dim: [int(c) for c in chunks]
-            for dim, chunks in spatial_chunks.items()
-        },
+        "output_chunksize": {dim: int(output_chunksize[dim]) for dim in sdims},
         # input views
         "sims": task_sims,
         "tile_infos": tile_infos,
         "views_bb": views_bb,
-        "params": params,
-        "param_dependent_nsdims": [
-            dim for dim in nsdims if any(dim in param.dims for param in params)
-        ],
+        # view geometry for each index into the coordinates of the
+        # non-spatial dims the affines depend on
+        "view_geometries": view_geometries,
+        "param_dependent_nsdims": param_dependent_nsdims,
         # keyword arguments of _fuse_block
         "fuse_block_kwargs": func_kwargs
         | {

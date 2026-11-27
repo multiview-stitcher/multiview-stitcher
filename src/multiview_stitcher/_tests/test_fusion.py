@@ -5,6 +5,7 @@ import tempfile
 import warnings
 
 from aiohttp.client_exceptions import ServerDisconnectedError
+import cloudpickle
 import dask.array as da
 import numpy as np
 import pytest
@@ -1804,14 +1805,14 @@ def test_prepare_block_fusion_shares_setup_between_chunks(monkeypatch):
             zarray, tile_size=tile_size, n_tiles=n_tiles, transform_key="k"
         )
 
-        calls = {"geometry": 0, "stack_properties": 0, "tiles_read": []}
-        original_prepare_geometry = fusion_core._prepare_view_geometry
+        calls = {"affines_read": 0, "stack_properties": 0, "tiles_read": []}
+        original_get_affine = fusion_core.si_utils.get_affine_from_sim
         original_stack_properties = fusion_core.calc_fusion_stack_properties
         original_fuse_block_views = fusion_core._fuse_block_views
 
-        def count_geometry(*args, **kwargs):
-            calls["geometry"] += 1
-            return original_prepare_geometry(*args, **kwargs)
+        def count_affines_read(*args, **kwargs):
+            calls["affines_read"] += 1
+            return original_get_affine(*args, **kwargs)
 
         def count_stack_properties(*args, **kwargs):
             calls["stack_properties"] += 1
@@ -1822,7 +1823,7 @@ def test_prepare_block_fusion_shares_setup_between_chunks(monkeypatch):
             return original_fuse_block_views(sims_slices, *args, **kwargs)
 
         monkeypatch.setattr(
-            fusion_core, "_prepare_view_geometry", count_geometry
+            fusion_core.si_utils, "get_affine_from_sim", count_affines_read
         )
         monkeypatch.setattr(
             fusion_core, "calc_fusion_stack_properties", count_stack_properties
@@ -1843,13 +1844,18 @@ def test_prepare_block_fusion_shares_setup_between_chunks(monkeypatch):
         )
         block_ids = list(np.ndindex(*info["nblocks"]))
         assert len(block_ids) == n_tiles**2
+        # Chunks are fused from a pickled copy of the plan, as in a worker
+        # process.
+        fuse_chunk = cloudpickle.loads(cloudpickle.dumps(info["func"]))
+        affines_read_during_setup = calls["affines_read"]
         for block_id in block_ids:
-            info["func"](block_id)
+            fuse_chunk(block_id)
 
         result = np.asarray(zarr.open_array(output_path, mode="r")[:])
 
     np.testing.assert_array_equal(result.squeeze(), data.squeeze())
     assert calls["stack_properties"] == 1
-    assert calls["geometry"] == 1
+    # affines are read from the tiles once (in setup), not per chunk
+    assert affines_read_during_setup == calls["affines_read"]
     # each chunk coincides with exactly one of the 16 tiles
     assert calls["tiles_read"] == [1] * len(block_ids)
