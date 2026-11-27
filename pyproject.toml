@@ -49,12 +49,7 @@ dependencies = [
     "tqdm",
     "matplotlib",
     "scikit-image >=0.21.0",
-    # Below 0.44: from there on ngff-zarr reads through zarrista instead of
-    # zarr-python, which drops both the zarr store objects the browser reads
-    # through (its service worker serves them over HTTP) and any read at all
-    # in Pyodide, whose zarrista wheel is missing symbols its own Python layer
-    # imports. Kept in step with docs/browser/config.json.
-    "ngff-zarr >=0.12.2,<0.44",
+    "ngff-zarr >=0.12.2",
     "aiohttp"
 ]
 dynamic = [
@@ -131,7 +126,13 @@ browser = [
     # wheel of the same version starts a thread instead.
     "dask[array] ==2025.2.0",
     "dask-image ==2024.5.3",
-    "ngff-zarr",
+    # Below 0.44: from there on ngff-zarr reads through zarrista instead of
+    # zarr-python, which drops both the zarr store objects the browser reads
+    # through (its service worker serves them over HTTP) and any read at all
+    # in Pyodide, whose zarrista wheel is missing symbols its own Python layer
+    # imports. The browser installs the multiview-stitcher wheel without its
+    # dependencies, so this pin applies there only and not on CPython.
+    "ngff-zarr <0.44",
     # Mosaic CZI reading. Both are pure-Python wheels, so micropip installs
     # them unchanged; czifile reads through tifffile's FileHandle, and
     # multiview_stitcher.io imports tifffile itself.
