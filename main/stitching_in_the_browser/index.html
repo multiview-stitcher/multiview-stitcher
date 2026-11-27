@@ -798,7 +798,9 @@ inside your browser.</p>
 <li>a <strong>CZI file</strong>, either a mosaic (tiles laid out in a plane) or a
   multi-view acquisition (stacks recorded at different angles). Which one
   it is is read from the file metadata, and either way one file is a whole
-  dataset.</li>
+  dataset. A mosaic holding several scenes asks which of them to load
+  (one, several, or all); each chosen scene's tiles become views, placed
+  at the stage positions the file recorded.</li>
 </ul>
 </li>
 <li>
@@ -864,6 +866,11 @@ views arrive with their rotations already applied from the metadata.</p>
 <p>Which reader applies is decided by <code>czi_utils.is_multiview_czi</code>, from the
 <code>MultiView</code> element of the metadata. The dimensions cannot decide it: a
 multi-view file carries a mosaic dimension too, pinned at a single tile.</p>
+<p>A mosaic may hold several scenes (its <code>S</code> dimension). Before loading, the page
+asks Python for them (<code>czi_utils.get_czi_scenes</code>, which reads the scene names
+from the metadata and counts each scene's tiles), offers a choice when there is
+more than one, and loads the chosen scenes' tiles side by side. The scene is
+part of each tile's source URL, so a compute worker opens the same tile.</p>
 <p>The mount is Emscripten's <code>WORKERFS</code>, which answers each read by slicing the
 <code>File</code> and reading that slice synchronously. Only the bytes actually needed are
 ever read, so a multi-gigabyte CZI is seeked through rather than loaded: opening
