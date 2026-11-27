@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import os, shutil
 import warnings
 from collections.abc import Callable, Sequence
@@ -459,18 +458,6 @@ def process_output_stack_properties(
     return output_stack_properties
 
 
-def _coord_cache_value(value):
-    """Return a hashable scalar/tuple for xarray coordinate values."""
-    if hasattr(value, "values"):
-        value = value.values
-
-    value = np.asarray(value)
-    if value.shape == ():
-        return value.item()
-
-    return tuple(value.ravel().tolist())
-
-
 def _get_ordered_param_matrices(sparams, sdims):
     """
     Return the affines as one array of shape (n_views, ndim + 1, ndim + 1).
@@ -873,13 +860,6 @@ def _build_spatial_fusion_plan(
         "per_chunk_entries": per_chunk_entries,
         "uses_axis_aligned_translation": use_axis_aligned_translation,
     }
-
-
-def _get_spatial_plan_cache_key(params_coord_dict, param_dependent_nsdims):
-    return tuple(
-        (dim, _coord_cache_value(params_coord_dict[dim]))
-        for dim in param_dependent_nsdims
-    )
 
 
 def _select_params_for_coords(params, params_coord_dict):
@@ -1476,26 +1456,29 @@ def fuse(
     param_dependent_nsdims = [
         dim for dim in nsdims if any(dim in param.dims for param in params)
     ]
-    spatial_plan_cache = {}
+    # The spatial plan depends on the non-spatial coordinates only through
+    # the affines, so one plan is built per index into the coordinates of the
+    # non-spatial dims the affines depend on (e.g. per time point).
+    spatial_plans = {}
 
     merges = []
-    for ns_coords in itertools.product(
-        *tuple([sims[0].coords[nsdim] for nsdim in nsdims])
-    ):
+    for ns_index in np.ndindex(*[sims[0].sizes[dim] for dim in nsdims]):
+        ns_coords = tuple(
+            sims[0].coords[dim][i] for dim, i in zip(nsdims, ns_index)
+        )
         sim_coord_dict = {
             ndsim: ns_coords[i] for i, ndsim in enumerate(nsdims)
         }
         params_coord_dict = {
             dim: sim_coord_dict[dim] for dim in param_dependent_nsdims
         }
-        spatial_plan_key = _get_spatial_plan_cache_key(
-            params_coord_dict,
-            param_dependent_nsdims,
+        spatial_plan_key = tuple(
+            ns_index[nsdims.index(dim)] for dim in param_dependent_nsdims
         )
 
-        if spatial_plan_key not in spatial_plan_cache:
+        if spatial_plan_key not in spatial_plans:
             sparams = _select_params_for_coords(params, params_coord_dict)
-            spatial_plan_cache[spatial_plan_key] = _build_spatial_fusion_plan(
+            spatial_plans[spatial_plan_key] = _build_spatial_fusion_plan(
                 view_geometry=_prepare_view_geometry(
                     _get_ordered_param_matrices(sparams, sdims),
                     views_bb,
@@ -1513,7 +1496,7 @@ def fuse(
                 interpolation_order=interpolation_order,
                 sdims=sdims,
             ) | {"sparams": sparams}
-        spatial_plan = spatial_plan_cache[spatial_plan_key]
+        spatial_plan = spatial_plans[spatial_plan_key]
         sparams = spatial_plan["sparams"]
         per_chunk_entries = spatial_plan["per_chunk_entries"]
 
