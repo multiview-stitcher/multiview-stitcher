@@ -1779,3 +1779,60 @@ def test_fuse_to_zarr_matches_chunkwise_lazy_fusion(
     assert all(result[ns_index].max() > 0 for ns_index in np.ndindex(2, 2))
     assert len({result[ns_index].tobytes() for ns_index in np.ndindex(2, 2)}) == 4
     np.testing.assert_array_equal(result, expected)
+
+
+@pytest.mark.parametrize("fuse_mode", ["lazy", "output_zarr"])
+@pytest.mark.parametrize("n_planes", [1, 8])
+def test_fusion_of_a_plane_does_not_depend_on_the_z_chunk(
+    fuse_mode, n_planes, tmp_path
+):
+    """
+    A z plane fuses the same in a single-plane chunk as in a thicker one.
+
+    Regression test: single-plane chunks were fused as a 2D problem, whose
+    blending weights ignore the views' z borders, so planes near them were
+    blended differently when they formed a chunk of their own. Single-plane
+    views still need the 2D path (their 3D weights are undefined).
+    """
+    key = "k"
+    rng = np.random.default_rng(0)
+    sims = []
+    for itile in range(2):
+        sim = si_utils.get_sim_from_array(
+            rng.uniform(100, 200, size=(n_planes, 40, 40)).astype(np.float32),
+            dims=("z", "y", "x"),
+            scale={"z": 2.0, "y": 1.0, "x": 1.0},
+            translation={"z": 0.0, "y": 0.0, "x": 30.0 * itile},
+            transform_key=key,
+        )
+        angle = np.deg2rad(10 * itile)
+        affine = np.eye(4)  # rotation in y/x; z stays on the grid
+        affine[1:3, 1:3] = [
+            [np.cos(angle), -np.sin(angle)],
+            [np.sin(angle), np.cos(angle)],
+        ]
+        si_utils.set_sim_affine(
+            sim, param_utils.affine_to_xaffine(affine), transform_key=key
+        )
+        sims.append(sim)
+
+    def fused(chunksize, name):
+        if fuse_mode == "lazy":
+            return np.asarray(
+                fusion.fuse(
+                    sims, transform_key=key, output_chunksize=chunksize
+                ).data
+            ).squeeze()
+        url = str(tmp_path / name)
+        fusion.fuse(
+            sims,
+            transform_key=key,
+            output_chunksize=chunksize,
+            output_zarr_url=url,
+        )
+        return np.asarray(zarr.open_array(url, mode="r")[:]).squeeze()
+
+    reference = fused(64, "thick.zarr")
+    planewise = fused({"z": 1, "y": 64, "x": 64}, "planes.zarr")
+    assert reference.max() > 0
+    np.testing.assert_allclose(planewise, reference, atol=1e-3)
